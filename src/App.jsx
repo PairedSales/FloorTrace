@@ -375,7 +375,7 @@ function App() {
       </header>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200 flex-wrap">
+      <div className="flex items-center justify-between gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200 flex-wrap">
         <input
           ref={fileInputRef}
           type="file"
@@ -384,60 +384,67 @@ function App() {
           className="hidden"
         />
         
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-          disabled={isProcessing}
-        >
-          Load Image
-        </button>
-        
-        <button
-          onClick={handleFindRoom}
-          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-          disabled={!image || isProcessing}
-        >
-          Find Room
-        </button>
-        
-        <button
-          onClick={handleTracePerimeter}
-          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-          disabled={!image || isProcessing}
-        >
-          Trace Perimeter
-        </button>
-        
-        <button
-          onClick={handleManualMode}
-          className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 ${
-            mode === 'manual' 
-              ? 'bg-slate-700 text-white hover:bg-slate-600' 
-              : 'text-slate-700 bg-white hover:bg-slate-700 hover:text-white disabled:hover:bg-white disabled:hover:text-slate-700'
-          }`}
-          disabled={!image || isProcessing}
-        >
-          Manual Mode
-        </button>
-        
-        {/* Interior/Exterior Wall Toggle */}
+        {/* Left Group */}
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-slate-700">Interior Walls</span>
           <button
-            onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-              useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
-            }`}
+            onClick={() => fileInputRef.current?.click()}
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
+            disabled={isProcessing}
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
+            Load Image
+          </button>
+          
+          <button
+            onClick={handleFindRoom}
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
+            disabled={!image || isProcessing}
+          >
+            Find Room
           </button>
         </div>
         
-        <div className="ml-auto flex items-center gap-3">
+        {/* Center Group */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleTracePerimeter}
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
+            disabled={!image || isProcessing}
+          >
+            Trace Perimeter
+          </button>
+          
+          <button
+            onClick={handleManualMode}
+            className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 ${
+              mode === 'manual' 
+                ? 'bg-slate-700 text-white hover:bg-slate-600' 
+                : 'text-slate-700 bg-white hover:bg-slate-700 hover:text-white disabled:hover:bg-white disabled:hover:text-slate-700'
+            }`}
+            disabled={!image || isProcessing}
+          >
+            Manual Mode
+          </button>
+          
+          {/* Interior/Exterior Wall Toggle */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-slate-700">Interior Walls</span>
+            <button
+              onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                  useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+        
+        {/* Right Group */}
+        <div className="flex items-center gap-3">
           <button
             onClick={handleFitToWindow}
             className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
