@@ -103,8 +103,27 @@ If automatic detection doesn't work well:
 
 ## Deployment
 
-This is a static web app that can be deployed to:
-- GitHub Pages
+### GitHub Pages (Automatic)
+
+This project is configured for automatic deployment to GitHub Pages:
+
+1. **Enable GitHub Pages** in your repository:
+   - Go to Settings → Pages
+   - Under "Source", select "GitHub Actions"
+
+2. **Push to master branch**:
+   ```bash
+   git add .
+   git commit -m "Setup GitHub Pages deployment"
+   git push origin master
+   ```
+
+3. The site will automatically build and deploy on every push to `master`
+4. Access your site at: `https://[username].github.io/FloorTrace/`
+
+### Other Hosting Options
+
+This static web app can also be deployed to:
 - Netlify
 - Vercel
 - Any static hosting service
