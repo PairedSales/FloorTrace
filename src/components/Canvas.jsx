@@ -1,14 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
-import { 
-  findAllIntersectionPoints, 
-  findNearestIntersection, 
-  applySecondaryAlignment,
-  snapEdgeToLines,
-  SNAP_TO_LINE_DISTANCE,
-  SNAP_TO_INTERSECTION_DISTANCE,
-  SECONDARY_ALIGNMENT_DISTANCE
-} from '../utils/snappingHelper';
+// Snapping functionality removed - no longer needed
 import { formatLength } from '../utils/unitConverter';
 
 const Canvas = forwardRef(({
@@ -36,8 +28,7 @@ const Canvas = forwardRef(({
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
-  const [wallLines, setWallLines] = useState({ horizontal: [], vertical: [] });
-  const [intersectionPoints, setIntersectionPoints] = useState([]);
+  // Wall lines and intersection points removed - snapping disabled
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
 
@@ -109,68 +100,7 @@ const Canvas = forwardRef(({
     img.src = image;
   }, [image]);
 
-  // Detect wall lines when image changes
-  useEffect(() => {
-    if (!imageObj) {
-      setWallLines({ horizontal: [], vertical: [] });
-      setIntersectionPoints([]);
-      return;
-    }
-
-    // Simplified wall line detection - detect major edges
-    const detectWallLines = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = imageObj.width;
-      canvas.height = imageObj.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(imageObj, 0, 0);
-      
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      
-      // Simple edge detection by looking for dark pixels
-      const horizontalLines = new Set();
-      const verticalLines = new Set();
-      const threshold = 128;
-      
-      // Scan for horizontal lines
-      for (let y = 0; y < canvas.height; y += 5) {
-        let darkPixels = 0;
-        for (let x = 0; x < canvas.width; x += 5) {
-          const idx = (y * canvas.width + x) * 4;
-          const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-          if (brightness < threshold) darkPixels++;
-        }
-        if (darkPixels > canvas.width / 50) {
-          horizontalLines.add(y);
-        }
-      }
-      
-      // Scan for vertical lines
-      for (let x = 0; x < canvas.width; x += 5) {
-        let darkPixels = 0;
-        for (let y = 0; y < canvas.height; y += 5) {
-          const idx = (y * canvas.width + x) * 4;
-          const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-          if (brightness < threshold) darkPixels++;
-        }
-        if (darkPixels > canvas.height / 50) {
-          verticalLines.add(x);
-        }
-      }
-      
-      const hLines = Array.from(horizontalLines);
-      const vLines = Array.from(verticalLines);
-      
-      setWallLines({ horizontal: hLines, vertical: vLines });
-      
-      // Calculate intersection points
-      const intersections = findAllIntersectionPoints(hLines, vLines);
-      setIntersectionPoints(intersections);
-    };
-
-    detectWallLines();
-  }, [imageObj]);
+  // Wall line detection removed - snapping functionality disabled
 
   // Update container dimensions (robust for absolute/flex layouts)
   useEffect(() => {
@@ -245,60 +175,17 @@ const Canvas = forwardRef(({
     setRoomStart(null);
   };
 
-  // Handle room corner dragging with snapping
+  // Handle room corner dragging (no snapping)
   const handleRoomCornerDrag = (corner, e) => {
     if (!roomOverlay) return;
     const pos = e.target.getStage().getPointerPosition();
     const currentScale = scaleRef.current;
-    let newX = pos.x / currentScale;
-    let newY = pos.y / currentScale;
+    const newX = pos.x / currentScale;
+    const newY = pos.y / currentScale;
     
     const newOverlay = { ...roomOverlay };
     
-    // Determine which edges are being moved
-    const movingLeft = corner === 'tl' || corner === 'bl';
-    const movingTop = corner === 'tl' || corner === 'tr';
-    const movingRight = corner === 'tr' || corner === 'br';
-    const movingBottom = corner === 'bl' || corner === 'br';
-    
-    // Apply snapping to edges
-    if (movingLeft || movingRight) {
-      const xSign = movingLeft ? -1 : 1;
-      
-      const snapped = snapEdgeToLines(
-        movingLeft ? newX : newOverlay.x1,
-        movingLeft ? (newOverlay.x2 - newX) : (newX - newOverlay.x1),
-        wallLines.vertical,
-        SNAP_TO_LINE_DISTANCE,
-        xSign
-      );
-      
-      if (movingLeft) {
-        newX = snapped.position;
-      } else {
-        newX = snapped.position + snapped.size;
-      }
-    }
-    
-    if (movingTop || movingBottom) {
-      const ySign = movingTop ? -1 : 1;
-      
-      const snapped = snapEdgeToLines(
-        movingTop ? newY : newOverlay.y1,
-        movingTop ? (newOverlay.y2 - newY) : (newY - newOverlay.y1),
-        wallLines.horizontal,
-        SNAP_TO_LINE_DISTANCE,
-        ySign
-      );
-      
-      if (movingTop) {
-        newY = snapped.position;
-      } else {
-        newY = snapped.position + snapped.size;
-      }
-    }
-    
-    // Update overlay with snapped positions
+    // Update overlay with raw positions (no snapping)
     if (corner === 'tl') {
       newOverlay.x1 = newX;
       newOverlay.y1 = newY;
@@ -316,7 +203,7 @@ const Canvas = forwardRef(({
     onRoomOverlayUpdate(newOverlay);
   };
 
-  // Handle perimeter vertex dragging with snapping
+  // Handle perimeter vertex dragging (no snapping)
   const handleVertexDragStart = (index) => {
     if (!perimeterOverlay) return;
     setDraggingVertex(index);
@@ -328,49 +215,18 @@ const Canvas = forwardRef(({
     const currentScale = scaleRef.current;
     const currentPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
     
-    // Apply snapping to intersection points for visual feedback
-    const snappedPoint = findNearestIntersection(
-      currentPoint,
-      intersectionPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
-    
-    // Use snapped position if available, otherwise use raw position
-    const finalPoint = snappedPoint || currentPoint;
-    
+    // Use raw position (no snapping)
     const newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = finalPoint;
+    newVertices[index] = currentPoint;
     onPerimeterUpdate(newVertices);
   };
 
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
-    
-    // Apply secondary alignment to nearby vertices
-    const vertices = [...perimeterOverlay.vertices];
-    const snappedPoint = vertices[index];
-    
-    // Check if this point was snapped to an intersection
-    const wasSnapped = intersectionPoints.some(
-      intersection => 
-        Math.abs(intersection.x - snappedPoint.x) < 1 &&
-        Math.abs(intersection.y - snappedPoint.y) < 1
-    );
-    
-    if (wasSnapped) {
-      applySecondaryAlignment(
-        vertices,
-        index,
-        snappedPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-      onPerimeterUpdate(vertices);
-    }
-    
     setDraggingVertex(null);
   };
 
-  // Handle double-click on perimeter line or stage to add vertex
+  // Handle double-click on perimeter line or stage to add vertex (no snapping)
   const handlePerimeterDoubleClick = (e) => {
     if (!perimeterOverlay) return;
     
@@ -383,14 +239,8 @@ const Canvas = forwardRef(({
     const currentScale = scaleRef.current;
     const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
     
-    // Apply snapping to intersection points
-    const snappedPoint = findNearestIntersection(
-      clickPoint,
-      intersectionPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
-    
-    const finalPoint = snappedPoint || clickPoint;
+    // Use raw click point (no snapping)
+    const finalPoint = clickPoint;
     
     // Find the closest edge to insert the new vertex
     const vertices = perimeterOverlay.vertices;
@@ -413,16 +263,6 @@ const Canvas = forwardRef(({
     // Insert the new vertex after the closest edge start
     const newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-    
-    // Apply secondary alignment if snapped
-    if (snappedPoint) {
-      applySecondaryAlignment(
-        newVertices,
-        closestEdgeIndex + 1,
-        finalPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-    }
     
     onPerimeterUpdate(newVertices);
   };

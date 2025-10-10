@@ -1,6 +1,7 @@
 import Tesseract from 'tesseract.js';
 import { dataUrlToImage, imageToCanvas } from './imageLoader';
 import { detectLines, findRoomBox } from './lineDetector';
+import { findRoomMorphological, findRoomByLines } from './morphologicalRoomDetector';
 
 /**
  * Parse dimension text and extract width and height in feet
@@ -119,16 +120,28 @@ export const detectRoom = async (imageDataUrl) => {
     
     console.log(`Found dimension: ${firstDimension.width} x ${firstDimension.height} ft`);
     
-    // Use line detection to find the room box
+    // Use morphological room detection (primary method)
     let roomOverlay = null;
-    if (dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
-      console.log('Finding room box using line detection...');
+    if (dimensionBBox) {
+      console.log('Finding room box using morphological detection...');
+      roomOverlay = await findRoomMorphological(imageDataUrl, dimensionBBox);
+    }
+    
+    // Fallback 1: Try line-based detection
+    if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
+      console.log('Morphological detection failed, trying line-based detection...');
+      roomOverlay = await findRoomByLines(imageDataUrl, dimensionBBox, lineData.horizontal, lineData.vertical);
+    }
+    
+    // Fallback 2: Try legacy line detection
+    if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
+      console.log('Line-based detection failed, trying legacy method...');
       roomOverlay = findRoomBox(dimensionBBox, lineData.horizontal, lineData.vertical);
     }
     
-    // Fallback if line detection didn't work
+    // Fallback 3: Create a box around the dimension text
     if (!roomOverlay) {
-      console.log('Line detection failed, using fallback room box');
+      console.log('All detection methods failed, using fallback room box');
       if (dimensionBBox) {
         // Create a box around the dimension text
         const padding = 50;
