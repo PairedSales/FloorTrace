@@ -18,6 +18,7 @@ function App() {
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
+  const [showMobilePopup, setShowMobilePopup] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -346,6 +347,15 @@ function App() {
     setDetectedDimensions([]);
   };
 
+  // Detect mobile device on mount
+  useEffect(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                     (window.innerWidth <= 768);
+    if (isMobile) {
+      setShowMobilePopup(true);
+    }
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -369,6 +379,37 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen bg-white">
+      {/* Mobile Popup */}
+      {showMobilePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 relative">
+            <button
+              onClick={() => setShowMobilePopup(false)}
+              className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="text-center">
+              <div className="mb-4">
+                <svg className="w-16 h-16 mx-auto text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-semibold text-slate-800 mb-2">Mobile Version Coming Soon!</h2>
+              <p className="text-slate-600 mb-6">FloorTrace is currently optimized for desktop use. A mobile version is in development.</p>
+              <button
+                onClick={() => setShowMobilePopup(false)}
+                className="w-full px-6 py-3 bg-slate-700 text-white font-medium rounded-md hover:bg-slate-600 transition-colors duration-200"
+              >
+                Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Title Bar */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
         <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
