@@ -486,7 +486,7 @@ const Canvas = forwardRef(({
     };
 
     const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const scaleBy = 1.05; // Reduced from 1.1 for smoother zooming
+    const scaleBy = 1.1; // Doubled sensitivity from 1.05
     const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
 
     // Clamp scale to reasonable bounds
