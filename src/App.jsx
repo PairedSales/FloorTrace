@@ -394,6 +394,26 @@ function App() {
             Load Image
           </button>
           
+          {/* Interior/Exterior Wall Toggle */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-slate-700">Interior Walls</span>
+            <button
+              onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                  useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+        
+        {/* Center Group */}
+        <div className="flex items-center gap-3">
           <button
             onClick={handleFindRoom}
             className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
@@ -401,10 +421,7 @@ function App() {
           >
             Find Room
           </button>
-        </div>
-        
-        {/* Center Group */}
-        <div className="flex items-center gap-3">
+          
           <button
             onClick={handleTracePerimeter}
             className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
@@ -424,23 +441,6 @@ function App() {
           >
             Manual Mode
           </button>
-          
-          {/* Interior/Exterior Wall Toggle */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700">Interior Walls</span>
-            <button
-              onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                  useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          </div>
         </div>
         
         {/* Right Group */}
