@@ -27,6 +27,7 @@ const Canvas = forwardRef(({
   const containerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
+  const scaleRef = useRef(1); // Track scale imperatively to avoid React reconciliation
   const [imageObj, setImageObj] = useState(null);
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
@@ -47,15 +48,18 @@ const Canvas = forwardRef(({
     const scaleY = containerHeight / imgHeight;
     const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
 
+    scaleRef.current = newScale;
     setScale(newScale);
     
     // Center the stage
     if (stageRef.current) {
       const stage = stageRef.current;
+      stage.scale({ x: newScale, y: newScale });
       stage.position({
         x: (containerWidth - imgWidth * newScale) / 2,
         y: (containerHeight - imgHeight * newScale) / 2
       });
+      stage.batchDraw();
     }
   };
 
@@ -81,14 +85,17 @@ const Canvas = forwardRef(({
           const scaleY = containerHeight / imgHeight;
           const newScale = Math.min(scaleX, scaleY) * 0.9;
 
+          scaleRef.current = newScale;
           setScale(newScale);
           
           if (stageRef.current) {
             const stage = stageRef.current;
+            stage.scale({ x: newScale, y: newScale });
             stage.position({
               x: (containerWidth - imgWidth * newScale) / 2,
               y: (containerHeight - imgHeight * newScale) / 2
             });
+            stage.batchDraw();
           }
         }
       }, 100);
@@ -200,7 +207,8 @@ const Canvas = forwardRef(({
     if (e.target.getClassName() === 'Rect') {
       setDraggingRoom(true);
       const pos = e.target.getStage().getPointerPosition();
-      setRoomStart({ x: pos.x / scale, y: pos.y / scale });
+      const currentScale = scaleRef.current;
+      setRoomStart({ x: pos.x / currentScale, y: pos.y / currentScale });
       e.cancelBubble = true;
     }
   };
@@ -208,8 +216,9 @@ const Canvas = forwardRef(({
   const handleRoomDrag = (e) => {
     if (!draggingRoom || !roomStart) return;
     const pos = e.target.getStage().getPointerPosition();
-    const newX = pos.x / scale;
-    const newY = pos.y / scale;
+    const currentScale = scaleRef.current;
+    const newX = pos.x / currentScale;
+    const newY = pos.y / currentScale;
     
     const deltaX = newX - roomStart.x;
     const deltaY = newY - roomStart.y;
@@ -234,8 +243,9 @@ const Canvas = forwardRef(({
   const handleRoomCornerDrag = (corner, e) => {
     if (!roomOverlay) return;
     const pos = e.target.getStage().getPointerPosition();
-    let newX = pos.x / scale;
-    let newY = pos.y / scale;
+    const currentScale = scaleRef.current;
+    let newX = pos.x / currentScale;
+    let newY = pos.y / currentScale;
     
     const newOverlay = { ...roomOverlay };
     
@@ -309,7 +319,8 @@ const Canvas = forwardRef(({
   const handleVertexDrag = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     const pos = e.target.getStage().getPointerPosition();
-    const currentPoint = { x: pos.x / scale, y: pos.y / scale };
+    const currentScale = scaleRef.current;
+    const currentPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
     
     // Apply snapping to intersection points for visual feedback
     const snappedPoint = findNearestIntersection(
@@ -363,7 +374,8 @@ const Canvas = forwardRef(({
     const pos = stage.getPointerPosition();
     if (!pos) return;
     
-    const clickPoint = { x: pos.x / scale, y: pos.y / scale };
+    const currentScale = scaleRef.current;
+    const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
     
     // Apply snapping to intersection points
     const snappedPoint = findNearestIntersection(
@@ -442,7 +454,7 @@ const Canvas = forwardRef(({
     const stage = stageRef.current;
     if (!stage) return;
 
-    const oldScale = stage.scaleX();
+    const oldScale = scaleRef.current;
     const pointer = stage.getPointerPosition();
     const mousePointTo = {
       x: (pointer.x - stage.x()) / oldScale,
@@ -450,17 +462,24 @@ const Canvas = forwardRef(({
     };
 
     const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const scaleBy = 1.1;
+    const scaleBy = 1.05; // Reduced from 1.1 for smoother zooming
     const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
 
-    setScale(newScale);
+    // Clamp scale to reasonable bounds
+    const clampedScale = Math.max(0.1, Math.min(20, newScale));
     
     const newPos = {
-      x: pointer.x - mousePointTo.x * newScale,
-      y: pointer.y - mousePointTo.y * newScale
+      x: pointer.x - mousePointTo.x * clampedScale,
+      y: pointer.y - mousePointTo.y * clampedScale
     };
     
+    // Update ref immediately for next wheel event
+    scaleRef.current = clampedScale;
+    
+    // Batch updates together for smooth rendering
+    stage.scale({ x: clampedScale, y: clampedScale });
     stage.position(newPos);
+    stage.batchDraw();
   };
 
   return (
@@ -489,8 +508,6 @@ const Canvas = forwardRef(({
           ref={stageRef}
           width={dimensions.width}
           height={dimensions.height}
-          scaleX={scale}
-          scaleY={scale}
           onWheel={handleWheel}
           draggable={!draggingRoom && draggingVertex === null}
           onDblClick={perimeterOverlay ? handlePerimeterDoubleClick : undefined}

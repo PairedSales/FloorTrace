@@ -45,6 +45,11 @@ function App() {
       } catch (error) {
         console.error('Error loading image:', error);
         alert('Failed to load image. Please try again.');
+      } finally {
+        // Reset file input so the same file can be selected again
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
       }
     }
   };
@@ -417,13 +422,6 @@ function App() {
 
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200 flex-wrap">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileUpload}
-          className="hidden"
-        />
         
         {/* Left Group */}
         <div className="flex items-center gap-3">
