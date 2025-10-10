@@ -1,0 +1,528 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import Canvas from './components/Canvas';
+import Sidebar from './components/Sidebar';
+import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
+import { detectRoom } from './utils/roomDetector';
+import { calculateArea } from './utils/areaCalculator';
+
+function App() {
+  const [image, setImage] = useState(null);
+  const [roomOverlay, setRoomOverlay] = useState(null);
+  const [perimeterOverlay, setPerimeterOverlay] = useState(null);
+  const [roomDimensions, setRoomDimensions] = useState({ width: '', height: '' });
+  const [area, setArea] = useState(0);
+  const [mode, setMode] = useState('normal'); // 'normal' or 'manual'
+  const [scale, setScale] = useState(1);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [detectedDimensions, setDetectedDimensions] = useState([]);
+  const [showSideLengths, setShowSideLengths] = useState(false);
+  const [useInteriorWalls, setUseInteriorWalls] = useState(true);
+  const [lineData, setLineData] = useState(null); // Store line detection data
+  const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  // Reset overlays
+  const resetOverlays = useCallback(() => {
+    setRoomOverlay(null);
+    setPerimeterOverlay(null);
+    setRoomDimensions({ width: '', height: '' });
+    setArea(0);
+    setScale(1);
+    setDetectedDimensions([]);
+    setMode('normal');
+    setLineData(null);
+  }, []);
+
+  // Handle file upload
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        const loadedImage = await loadImageFromFile(file);
+        setImage(loadedImage);
+        resetOverlays();
+      } catch (error) {
+        console.error('Error loading image:', error);
+        alert('Failed to load image. Please try again.');
+      }
+    }
+  };
+
+  // Handle clipboard paste
+  const handlePasteImage = useCallback(async () => {
+    try {
+      const loadedImage = await loadImageFromClipboard();
+      if (loadedImage) {
+        setImage(loadedImage);
+        resetOverlays();
+      }
+    } catch (error) {
+      console.error('Error pasting image:', error);
+      alert('Failed to paste image. Make sure an image is copied to your clipboard.');
+    }
+  }, [resetOverlays]);
+
+  // Handle find room
+  const handleFindRoom = async () => {
+    if (!image) {
+      alert('Please load an image first');
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      const result = await detectRoom(image);
+      if (result) {
+        setRoomOverlay(result.overlay);
+        setRoomDimensions(result.dimensions);
+        updateScale(result.dimensions, result.overlay);
+        
+        // Store line data for perimeter detection
+        if (result.lineData) {
+          setLineData(result.lineData);
+          console.log('Line data stored for perimeter detection');
+        }
+      } else {
+        alert('Could not detect room dimensions. Try Manual Mode.');
+      }
+    } catch (error) {
+      console.error('Error detecting room:', error);
+      alert('Error detecting room. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle trace perimeter
+  const handleTracePerimeter = async () => {
+    if (!image) {
+      alert('Please load an image first');
+      return;
+    }
+    if (!roomOverlay || !roomDimensions.width || !roomDimensions.height) {
+      alert('Please detect room dimensions first');
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      // Import the new perimeter detector
+      const { detectPerimeter } = await import('./utils/perimeterDetector');
+      
+      // Use existing line data if available, otherwise detect lines
+      const result = await detectPerimeter(image, useInteriorWalls, lineData);
+      
+      if (result) {
+        setPerimeterOverlay({ vertices: result.vertices });
+        const calculatedArea = calculateArea(result.vertices, scale);
+        setArea(calculatedArea);
+        
+        // Store line data if we didn't have it before
+        if (result.lineData && !lineData) {
+          setLineData(result.lineData);
+        }
+      } else {
+        alert('Could not detect perimeter. Try adjusting the room overlay or use Manual Mode.');
+      }
+    } catch (error) {
+      console.error('Error tracing perimeter:', error);
+      alert('Error during perimeter tracing.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle manual mode
+  const handleManualMode = async () => {
+    if (mode === 'manual') {
+      // Exiting manual mode
+      setMode('normal');
+      setDetectedDimensions([]);
+    } else {
+      // Entering manual mode - check if overlays exist
+      if (roomOverlay || perimeterOverlay) {
+        const confirmed = window.confirm(
+          'Entering Manual Mode will clear existing overlays. Are you sure?'
+        );
+        if (!confirmed) {
+          return;
+        }
+        // Clear overlays
+        setRoomOverlay(null);
+        setPerimeterOverlay(null);
+        setArea(0);
+      }
+      
+      if (!image) {
+        alert('Please load an image first');
+        return;
+      }
+      
+      setIsProcessing(true);
+      setMode('manual');
+      
+      try {
+        const { detectAllDimensions } = await import('./utils/roomDetector');
+        const dimensions = await detectAllDimensions(image);
+        setDetectedDimensions(dimensions);
+        
+        if (dimensions.length === 0) {
+          alert('No room dimensions detected. Try adjusting the image or use normal mode.');
+        }
+      } catch (error) {
+        console.error('Error detecting dimensions:', error);
+        alert('Error detecting dimensions.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  // Handle interior/exterior wall toggle
+  const handleInteriorWallToggle = async (e) => {
+    const newValue = e.target.checked;
+    
+    // If perimeter exists, confirm before changing
+    if (perimeterOverlay) {
+      const confirmed = window.confirm(
+        'Changing wall detection will reposition the perimeter vertices. Are you sure?'
+      );
+      if (!confirmed) {
+        return;
+      }
+      
+      // Redetect perimeter with new setting
+      setIsProcessing(true);
+      try {
+        const { detectPerimeter } = await import('./utils/perimeterDetector');
+        const result = await detectPerimeter(image, newValue, lineData);
+        
+        if (result) {
+          setPerimeterOverlay({ vertices: result.vertices });
+          const calculatedArea = calculateArea(result.vertices, scale);
+          setArea(calculatedArea);
+        }
+      } catch (error) {
+        console.error('Error redetecting perimeter:', error);
+        alert('Error repositioning perimeter.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+    
+    setUseInteriorWalls(newValue);
+  };
+
+  // Handle fit to window
+  const handleFitToWindow = () => {
+    if (canvasRef.current) {
+      canvasRef.current.fitToWindow();
+    }
+  };
+
+  // Handle save image (screenshot entire app)
+  const handleSaveImage = async () => {
+    try {
+      // Use html2canvas to capture the entire app
+      const html2canvas = (await import('html2canvas')).default;
+      
+      // Get the root element
+      const appElement = document.getElementById('root');
+      if (!appElement) {
+        alert('Could not capture screenshot');
+        return;
+      }
+      
+      // Capture the screenshot
+      const canvas = await html2canvas(appElement, {
+        backgroundColor: '#ffffff',
+        scale: 2, // Higher quality
+        logging: false,
+        useCORS: true
+      });
+      
+      // Convert to WebP blob
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          alert('Failed to create image');
+          return;
+        }
+        
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        link.download = `floortrace-${timestamp}.webp`;
+        link.href = url;
+        link.click();
+        
+        // Clean up
+        URL.revokeObjectURL(url);
+      }, 'image/webp', 0.95);
+      
+    } catch (error) {
+      console.error('Error saving screenshot:', error);
+      alert('Error saving screenshot. Please try again.');
+    }
+  };
+
+  // Update scale based on room dimensions and overlay
+  const updateScale = (dimensions, overlay) => {
+    if (!dimensions.width || !dimensions.height || !overlay) return;
+    
+    const dimWidth = parseFloat(dimensions.width);
+    const dimHeight = parseFloat(dimensions.height);
+    const overlayWidth = Math.abs(overlay.x2 - overlay.x1);
+    const overlayHeight = Math.abs(overlay.y2 - overlay.y1);
+    
+    // Match smallest dimension to smallest measurement
+    const minDim = Math.min(dimWidth, dimHeight);
+    const minOverlay = Math.min(overlayWidth, overlayHeight);
+    
+    const newScale = minDim / minOverlay; // feet per pixel
+    setScale(newScale);
+  };
+
+  // Update room overlay position
+  const updateRoomOverlay = (overlay) => {
+    setRoomOverlay(overlay);
+    if (roomDimensions.width && roomDimensions.height) {
+      updateScale(roomDimensions, overlay);
+    }
+  };
+
+  // Update perimeter vertices
+  const updatePerimeterVertices = (vertices) => {
+    setPerimeterOverlay({ ...perimeterOverlay, vertices });
+    const calculatedArea = calculateArea(vertices, scale);
+    setArea(calculatedArea);
+  };
+
+  // Handle dimension selection in manual mode
+  const handleDimensionSelect = (dimension) => {
+    setRoomDimensions({ 
+      width: dimension.width.toString(), 
+      height: dimension.height.toString() 
+    });
+    
+    // Create fixed-size 200x200 room overlay centered on dimension
+    const centerX = dimension.bbox.x + dimension.bbox.width / 2;
+    const centerY = dimension.bbox.y + dimension.bbox.height / 2;
+    const roomOverlay = {
+      x1: centerX - 100,
+      y1: centerY - 100,
+      x2: centerX + 100,
+      y2: centerY + 100
+    };
+    
+    setRoomOverlay(roomOverlay);
+    updateScale({ 
+      width: dimension.width.toString(), 
+      height: dimension.height.toString() 
+    }, roomOverlay);
+    
+    // Create fixed-size 400x400 perimeter overlay centered on dimension
+    const perimeterVertices = [
+      { x: centerX - 200, y: centerY - 200 }, // Top-left
+      { x: centerX + 200, y: centerY - 200 }, // Top-right
+      { x: centerX + 200, y: centerY + 200 }, // Bottom-right
+      { x: centerX - 200, y: centerY + 200 }  // Bottom-left
+    ];
+    
+    setPerimeterOverlay({ vertices: perimeterVertices });
+    
+    // Calculate area with the new perimeter
+    const calculatedArea = calculateArea(perimeterVertices, scale);
+    setArea(calculatedArea);
+    
+    // Exit manual mode after selection
+    setMode('normal');
+    setDetectedDimensions([]);
+  };
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 'v':
+            e.preventDefault();
+            handlePasteImage();
+            break;
+          case 'o':
+            e.preventDefault();
+            fileInputRef.current?.click();
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handlePasteImage]);
+
+  return (
+    <div className="flex flex-col h-screen bg-white">
+      {/* Title Bar */}
+      <header className="bg-white border-b border-gray-100 px-6 py-3">
+        <h1 className="text-xl font-semibold text-gray-900 tracking-tight">FloorTrace</h1>
+      </header>
+
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-6 py-4 bg-white border-b border-gray-100 flex-wrap">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+        
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          disabled={isProcessing}
+        >
+          Load Image
+        </button>
+        
+        <button
+          onClick={handlePasteImage}
+          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          disabled={isProcessing}
+        >
+          Paste Image
+        </button>
+        
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+        
+        <button
+          onClick={handleFindRoom}
+          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          disabled={!image || isProcessing}
+        >
+          Find Room
+        </button>
+        
+        <button
+          onClick={handleTracePerimeter}
+          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          disabled={!image || isProcessing}
+        >
+          Trace Perimeter
+        </button>
+        
+        <button
+          onClick={handleManualMode}
+          className={`px-5 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100 ${
+            mode === 'manual' ? 'text-blue-600' : 'text-gray-700 hover:text-gray-900'
+          }`}
+          disabled={!image || isProcessing}
+        >
+          Manual Mode
+        </button>
+        
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+        
+        {/* Interior/Exterior Wall Toggle */}
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-600">Interior Walls</span>
+          <button
+            onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${
+              useInteriorWalls ? 'bg-gray-900' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+        
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={handleFitToWindow}
+            className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+            disabled={!image}
+          >
+            Fit to Window
+          </button>
+
+          <button
+            onClick={handleSaveImage}
+            className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+            disabled={!image}
+          >
+            Save Image
+          </button>
+
+          {/* Show Side Lengths Toggle */}
+          {perimeterOverlay && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-gray-600">Show Lengths</span>
+              <button
+                onClick={() => setShowSideLengths(!showSideLengths)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${
+                  showSideLengths ? 'bg-gray-900' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                    showSideLengths ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative flex-1 overflow-hidden min-h-0">
+        {/* Canvas fills all available space */}
+        <Canvas
+          ref={canvasRef}
+          image={image}
+          roomOverlay={roomOverlay}
+          perimeterOverlay={perimeterOverlay}
+          mode={mode}
+          onRoomOverlayUpdate={updateRoomOverlay}
+          onPerimeterUpdate={updatePerimeterVertices}
+          isProcessing={isProcessing}
+          detectedDimensions={detectedDimensions}
+          onDimensionSelect={handleDimensionSelect}
+          showSideLengths={showSideLengths}
+          pixelsPerFoot={scale}
+        />
+
+        {/* Sidebar overlay (flush to edges) */}
+        <div className="absolute top-0 left-0 z-10 m-0">
+          <Sidebar
+            roomDimensions={roomDimensions}
+            setRoomDimensions={setRoomDimensions}
+            area={area}
+            onDimensionsChange={(dims) => {
+              setRoomDimensions(dims);
+              if (roomOverlay) {
+                updateScale(dims, roomOverlay);
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+    </div>
+  );
+}
+
+export default App;
