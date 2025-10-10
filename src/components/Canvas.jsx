@@ -468,18 +468,17 @@ const Canvas = forwardRef(({
       {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-gray-500 mb-2">No image loaded</p>
-            <p className="text-sm text-gray-400">Load an image or paste from clipboard to begin</p>
+            <p className="text-xl text-slate-600 font-medium">Paste or Load a Sketch Image to Get Started</p>
           </div>
         </div>
       )}
       
       {isProcessing && (
         <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center z-10">
-          <div className="bg-white rounded-lg p-4">
+          <div className="bg-white rounded-lg p-4 shadow-lg">
             <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-              <span className="text-gray-700">Processing...</span>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-700"></div>
+              <span className="text-slate-700 font-medium">Processing...</span>
             </div>
           </div>
         </div>

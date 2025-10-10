@@ -99,10 +99,6 @@ function App() {
       alert('Please load an image first');
       return;
     }
-    if (!roomOverlay || !roomDimensions.width || !roomDimensions.height) {
-      alert('Please detect room dimensions first');
-      return;
-    }
     
     setIsProcessing(true);
     try {
@@ -114,8 +110,12 @@ function App() {
       
       if (result) {
         setPerimeterOverlay({ vertices: result.vertices });
-        const calculatedArea = calculateArea(result.vertices, scale);
-        setArea(calculatedArea);
+        
+        // Only calculate area if we have scale (room dimensions exist)
+        if (scale > 1 || (roomDimensions.width && roomDimensions.height)) {
+          const calculatedArea = calculateArea(result.vertices, scale);
+          setArea(calculatedArea);
+        }
         
         // Store line data if we didn't have it before
         if (result.lineData && !lineData) {
@@ -281,6 +281,12 @@ function App() {
     
     const newScale = minDim / minOverlay; // feet per pixel
     setScale(newScale);
+    
+    // If perimeter already exists, recalculate area with new scale
+    if (perimeterOverlay && perimeterOverlay.vertices) {
+      const calculatedArea = calculateArea(perimeterOverlay.vertices, newScale);
+      setArea(calculatedArea);
+    }
   };
 
   // Update room overlay position
@@ -364,12 +370,12 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Title Bar */}
-      <header className="bg-white border-b border-gray-100 px-6 py-3">
-        <h1 className="text-xl font-semibold text-gray-900 tracking-tight">FloorTrace</h1>
+      <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
+        <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
       </header>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-6 py-4 bg-white border-b border-gray-100 flex-wrap">
+      <div className="flex items-center gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200 flex-wrap">
         <input
           ref={fileInputRef}
           type="file"
@@ -380,25 +386,15 @@ function App() {
         
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
           disabled={isProcessing}
         >
           Load Image
         </button>
         
         <button
-          onClick={handlePasteImage}
-          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
-          disabled={isProcessing}
-        >
-          Paste Image
-        </button>
-        
-        <div className="w-px h-6 bg-gray-200 mx-1" />
-        
-        <button
           onClick={handleFindRoom}
-          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
           disabled={!image || isProcessing}
         >
           Find Room
@@ -406,7 +402,7 @@ function App() {
         
         <button
           onClick={handleTracePerimeter}
-          className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+          className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
           disabled={!image || isProcessing}
         >
           Trace Perimeter
@@ -414,23 +410,23 @@ function App() {
         
         <button
           onClick={handleManualMode}
-          className={`px-5 py-2.5 text-sm font-medium transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100 ${
-            mode === 'manual' ? 'text-blue-600' : 'text-gray-700 hover:text-gray-900'
+          className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 ${
+            mode === 'manual' 
+              ? 'bg-slate-700 text-white hover:bg-slate-600' 
+              : 'text-slate-700 bg-white hover:bg-slate-700 hover:text-white disabled:hover:bg-white disabled:hover:text-slate-700'
           }`}
           disabled={!image || isProcessing}
         >
           Manual Mode
         </button>
         
-        <div className="w-px h-6 bg-gray-200 mx-1" />
-        
         {/* Interior/Exterior Wall Toggle */}
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-gray-600">Interior Walls</span>
+          <span className="text-sm font-medium text-slate-700">Interior Walls</span>
           <button
             onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${
-              useInteriorWalls ? 'bg-gray-900' : 'bg-gray-300'
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+              useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
             }`}
           >
             <span
@@ -444,7 +440,7 @@ function App() {
         <div className="ml-auto flex items-center gap-3">
           <button
             onClick={handleFitToWindow}
-            className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
             disabled={!image}
           >
             Fit to Window
@@ -452,7 +448,7 @@ function App() {
 
           <button
             onClick={handleSaveImage}
-            className="px-5 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
             disabled={!image}
           >
             Save Image
@@ -461,11 +457,11 @@ function App() {
           {/* Show Side Lengths Toggle */}
           {perimeterOverlay && (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-gray-600">Show Lengths</span>
+              <span className="text-sm font-medium text-slate-700">Show Lengths</span>
               <button
                 onClick={() => setShowSideLengths(!showSideLengths)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${
-                  showSideLengths ? 'bg-gray-900' : 'bg-gray-300'
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                  showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
                 }`}
               >
                 <span
