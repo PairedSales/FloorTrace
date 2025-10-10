@@ -10,6 +10,7 @@ import { detectLines, findRoomBox } from './lineDetector';
  * - 5.2 ft x 6.3 ft
  * - 21.3 feet x 11.1 feet
  * - 12 x 10 (assumed feet)
+ * Returns format type: 'inches' for feet-inches format, 'decimal' for decimal feet
  */
 const parseDimensions = (text) => {
   // Pattern 1: Feet and inches (e.g., 5' 10" x 6' 3" or 3' - 7" x 12' - 0")
@@ -18,7 +19,7 @@ const parseDimensions = (text) => {
   if (feetInchesMatch) {
     const width = parseInt(feetInchesMatch[1]) + parseInt(feetInchesMatch[2]) / 12;
     const height = parseInt(feetInchesMatch[3]) + parseInt(feetInchesMatch[4]) / 12;
-    return { width, height, match: feetInchesMatch[0] };
+    return { width, height, match: feetInchesMatch[0], format: 'inches' };
   }
   
   // Pattern 2: Decimal feet with "ft" or "feet" (e.g., 5.2 ft x 6.3 ft)
@@ -27,16 +28,19 @@ const parseDimensions = (text) => {
   if (decimalFeetMatch) {
     const width = parseFloat(decimalFeetMatch[1]);
     const height = parseFloat(decimalFeetMatch[2]);
-    return { width, height, match: decimalFeetMatch[0] };
+    return { width, height, match: decimalFeetMatch[0], format: 'decimal' };
   }
   
   // Pattern 3: Simple numbers with x (e.g., 12 x 10, assumed feet)
+  // Check if it has decimal points to determine format
   const simplePattern = /(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i;
   const simpleMatch = text.match(simplePattern);
   if (simpleMatch) {
     const width = parseFloat(simpleMatch[1]);
     const height = parseFloat(simpleMatch[2]);
-    return { width, height, match: simpleMatch[0] };
+    // If either number has a decimal point, assume decimal format
+    const hasDecimal = simpleMatch[1].includes('.') || simpleMatch[2].includes('.');
+    return { width, height, match: simpleMatch[0], format: hasDecimal ? 'decimal' : 'decimal' };
   }
   
   return null;
@@ -60,7 +64,10 @@ export const detectRoom = async (imageDataUrl) => {
       canvas,
       'eng',
       {
-        logger: (m) => console.log('OCR Progress:', m)
+        logger: (m) => console.log('OCR Progress:', m),
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.1/tesseract-core.wasm.js'
       }
     );
     
@@ -148,7 +155,8 @@ export const detectRoom = async (imageDataUrl) => {
         height: firstDimension.height.toString() 
       },
       overlay: roomOverlay,
-      lineData // Return line data for use by other functions
+      lineData, // Return line data for use by other functions
+      detectedFormat: firstDimension.format // Return the detected format ('inches' or 'decimal')
     };
   } catch (error) {
     console.error('Error in room detection:', error);
@@ -167,7 +175,10 @@ export const detectAllDimensions = async (imageDataUrl) => {
       canvas,
       'eng',
       {
-        logger: (m) => console.log('OCR Progress:', m)
+        logger: (m) => console.log('OCR Progress:', m),
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.1/tesseract-core.wasm.js'
       }
     );
     
@@ -176,10 +187,16 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const textLines = text.split('\n');
     
     const dimensions = [];
+    let detectedFormat = null; // Track the first detected format
     
     for (const line of textLines) {
       const parsed = parseDimensions(line);
       if (parsed) {
+        // Store the first detected format
+        if (!detectedFormat) {
+          detectedFormat = parsed.format;
+        }
+        
         // Find the bounding box for this dimension
         let bbox = null;
         for (const word of result.data.words) {
@@ -211,14 +228,15 @@ export const detectAllDimensions = async (imageDataUrl) => {
             width: parsed.width,
             height: parsed.height,
             text: parsed.match,
-            bbox
+            bbox,
+            format: parsed.format
           });
         }
       }
     }
     
     console.log(`Found ${dimensions.length} dimensions for manual mode`);
-    return dimensions;
+    return { dimensions, detectedFormat };
   } catch (error) {
     console.error('Error detecting all dimensions:', error);
     return [];

@@ -19,6 +19,9 @@ function App() {
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
   const [showMobilePopup, setShowMobilePopup] = useState(false);
+  const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
+  const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
+  const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -32,6 +35,8 @@ function App() {
     setDetectedDimensions([]);
     setMode('normal');
     setLineData(null);
+    setManualEntryMode(false);
+    setOcrFailed(false);
   }, []);
 
   // Handle file upload
@@ -87,6 +92,15 @@ function App() {
         if (result.lineData) {
           setLineData(result.lineData);
           console.log('Line data stored for perimeter detection');
+        }
+        
+        // Auto-switch unit based on detected format
+        if (result.detectedFormat) {
+          // If current unit doesn't match detected format, switch it
+          if (unit !== result.detectedFormat) {
+            console.log(`Auto-switching unit from ${unit} to ${result.detectedFormat}`);
+            setUnit(result.detectedFormat);
+          }
         }
       } else {
         alert('Could not detect room dimensions. Try Manual Mode.');
@@ -144,6 +158,8 @@ function App() {
       // Exiting manual mode
       setMode('normal');
       setDetectedDimensions([]);
+      setManualEntryMode(false);
+      setOcrFailed(false);
     } else {
       // Entering manual mode - check if overlays exist
       if (roomOverlay || perimeterOverlay) {
@@ -166,22 +182,43 @@ function App() {
       
       setIsProcessing(true);
       setMode('manual');
+      setManualEntryMode(false);
+      setOcrFailed(false);
       
       try {
         const { detectAllDimensions } = await import('./utils/roomDetector');
-        const dimensions = await detectAllDimensions(image);
+        const result = await detectAllDimensions(image);
+        
+        // Handle new return format (object with dimensions and detectedFormat)
+        const dimensions = result.dimensions || result || [];
+        const detectedFormat = result.detectedFormat;
+        
         setDetectedDimensions(dimensions);
         
         if (dimensions.length === 0) {
-          alert('No room dimensions detected. Try adjusting the image or use normal mode.');
+          // OCR failed - enter manual entry mode
+          setOcrFailed(true);
+        } else {
+          // Auto-switch unit based on detected format
+          if (detectedFormat && unit !== detectedFormat) {
+            console.log(`Auto-switching unit from ${unit} to ${detectedFormat}`);
+            setUnit(detectedFormat);
+          }
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
-        alert('Error detecting dimensions.');
+        // OCR failed - enter manual entry mode
+        setOcrFailed(true);
       } finally {
         setIsProcessing(false);
       }
     }
+  };
+
+  // Handle manual dimension entry button click
+  const handleEnterManually = () => {
+    setManualEntryMode(true);
+    setDetectedDimensions([]); // Clear detected dimensions
   };
 
   // Handle interior/exterior wall toggle
@@ -350,6 +387,49 @@ function App() {
     // Exit manual mode after selection
     setMode('normal');
     setDetectedDimensions([]);
+    setManualEntryMode(false);
+  };
+
+  // Handle canvas click for manual overlay placement
+  const handleCanvasClick = (clickPoint) => {
+    if (!manualEntryMode || !roomDimensions.width || !roomDimensions.height) return;
+    
+    // Validate dimensions
+    const width = parseFloat(roomDimensions.width);
+    const height = parseFloat(roomDimensions.height);
+    if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+      alert('Please enter valid room dimensions first');
+      return;
+    }
+    
+    // Create fixed-size 200x200 room overlay centered on click
+    const roomOverlay = {
+      x1: clickPoint.x - 100,
+      y1: clickPoint.y - 100,
+      x2: clickPoint.x + 100,
+      y2: clickPoint.y + 100
+    };
+    
+    setRoomOverlay(roomOverlay);
+    updateScale(roomDimensions, roomOverlay);
+    
+    // Create fixed-size 400x400 perimeter overlay centered on click
+    const perimeterVertices = [
+      { x: clickPoint.x - 200, y: clickPoint.y - 200 }, // Top-left
+      { x: clickPoint.x + 200, y: clickPoint.y - 200 }, // Top-right
+      { x: clickPoint.x + 200, y: clickPoint.y + 200 }, // Bottom-right
+      { x: clickPoint.x - 200, y: clickPoint.y + 200 }  // Bottom-left
+    ];
+    
+    setPerimeterOverlay({ vertices: perimeterVertices });
+    
+    // Calculate area with the new perimeter
+    const calculatedArea = calculateArea(perimeterVertices, scale);
+    setArea(calculatedArea);
+    
+    // Exit manual entry mode
+    setManualEntryMode(false);
+    setMode('normal');
   };
 
   // Detect mobile device on mount
@@ -537,6 +617,9 @@ function App() {
           onDimensionSelect={handleDimensionSelect}
           showSideLengths={showSideLengths}
           pixelsPerFoot={scale}
+          manualEntryMode={manualEntryMode}
+          onCanvasClick={handleCanvasClick}
+          unit={unit}
         />
 
         {/* Sidebar overlay (flush to edges) */}
@@ -551,6 +634,13 @@ function App() {
                 updateScale(dims, roomOverlay);
               }
             }}
+            mode={mode}
+            ocrFailed={ocrFailed}
+            manualEntryMode={manualEntryMode}
+            detectedDimensions={detectedDimensions}
+            onEnterManually={handleEnterManually}
+            unit={unit}
+            onUnitChange={setUnit}
           />
         </div>
       </div>

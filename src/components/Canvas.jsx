@@ -9,6 +9,7 @@ import {
   SNAP_TO_INTERSECTION_DISTANCE,
   SECONDARY_ALIGNMENT_DISTANCE
 } from '../utils/snappingHelper';
+import { formatLength } from '../utils/unitConverter';
 
 const Canvas = forwardRef(({
   image,
@@ -21,7 +22,10 @@ const Canvas = forwardRef(({
   detectedDimensions,
   onDimensionSelect,
   showSideLengths,
-  pixelsPerFoot
+  pixelsPerFoot,
+  manualEntryMode,
+  onCanvasClick,
+  unit
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -450,6 +454,22 @@ const Canvas = forwardRef(({
     return Math.sqrt(dpx * dpx + dpy * dpy);
   };
 
+  // Handle stage click for manual entry mode
+  const handleStageClick = (e) => {
+    if (!manualEntryMode || !onCanvasClick) return;
+    
+    const stage = e.target.getStage();
+    if (!stage) return;
+    
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    
+    const currentScale = scaleRef.current;
+    const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+    
+    onCanvasClick(clickPoint);
+  };
+
   // Handle zoom
   const handleWheel = (e) => {
     e.evt.preventDefault();
@@ -542,9 +562,11 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && draggingVertex === null && !isZoomingRef.current}
-          onDblClick={perimeterOverlay ? handlePerimeterDoubleClick : undefined}
-          onDblTap={perimeterOverlay ? handlePerimeterDoubleClick : undefined}
+          draggable={!draggingRoom && draggingVertex === null && !isZoomingRef.current && !manualEntryMode}
+          onClick={manualEntryMode ? handleStageClick : undefined}
+          onTap={manualEntryMode ? handleStageClick : undefined}
+          onDblClick={perimeterOverlay && !manualEntryMode ? handlePerimeterDoubleClick : undefined}
+          onDblTap={perimeterOverlay && !manualEntryMode ? handlePerimeterDoubleClick : undefined}
         >
           <Layer
             onDblClick={perimeterOverlay ? handlePerimeterDoubleClick : undefined}
@@ -670,6 +692,9 @@ const Canvas = forwardRef(({
                   // Convert to feet
                   const lengthInFeet = lengthInPixels * pixelsPerFoot;
                   
+                  // Format based on unit preference
+                  const formattedLength = formatLength(lengthInFeet, unit);
+                  
                   // Calculate midpoint for label placement
                   const midX = (vertex.x + nextVertex.x) / 2;
                   const midY = (vertex.y + nextVertex.y) / 2;
@@ -680,13 +705,16 @@ const Canvas = forwardRef(({
                   const offsetX = Math.sin(angle) * offsetDistance;
                   const offsetY = -Math.cos(angle) * offsetDistance;
                   
+                  // Dynamic width based on text length
+                  const labelWidth = Math.max(56, formattedLength.length * 6.5) / scale;
+                  
                   return (
                     <React.Fragment key={`label-${i}`}>
                       {/* Modern minimalist background */}
                       <Rect
-                        x={midX + offsetX - 28 / scale}
+                        x={midX + offsetX - labelWidth / 2}
                         y={midY + offsetY - 11 / scale}
-                        width={56 / scale}
+                        width={labelWidth}
                         height={22 / scale}
                         fill="rgba(17, 24, 39, 0.95)"
                         strokeWidth={0}
@@ -696,14 +724,14 @@ const Canvas = forwardRef(({
                       <Text
                         x={midX + offsetX}
                         y={midY + offsetY}
-                        text={`${lengthInFeet.toFixed(1)} ft`}
+                        text={formattedLength}
                         fontSize={11 / scale}
                         fill="#ffffff"
                         fontFamily="Inter, system-ui, sans-serif"
                         fontStyle="500"
                         align="center"
                         verticalAlign="middle"
-                        offsetX={28 / scale}
+                        offsetX={labelWidth / 2}
                         offsetY={5.5 / scale}
                       />
                     </React.Fragment>
@@ -760,14 +788,27 @@ const Canvas = forwardRef(({
               </>
             )}
             
-            {/* Manual Mode Active but no dimensions detected */}
-            {mode === 'manual' && (!detectedDimensions || detectedDimensions.length === 0) && (
+            {/* Manual Entry Mode - Click to place overlays */}
+            {manualEntryMode && (
               <Text
                 x={10}
                 y={10}
-                text="Manual Mode: No dimensions detected"
+                text="Click on the canvas to place overlays"
+                fontSize={16 / scale}
+                fill="#3b82f6"
+                fontStyle="bold"
+              />
+            )}
+            
+            {/* Manual Mode Active but no dimensions detected */}
+            {mode === 'manual' && (!detectedDimensions || detectedDimensions.length === 0) && !manualEntryMode && (
+              <Text
+                x={10}
+                y={10}
+                text="Enter dimensions in sidebar and click on canvas"
                 fontSize={16 / scale}
                 fill="orange"
+                fontStyle="bold"
               />
             )}
           </Layer>
