@@ -34,6 +34,8 @@ const Canvas = forwardRef(({
   const [roomStart, setRoomStart] = useState(null);
   const [wallLines, setWallLines] = useState({ horizontal: [], vertical: [] });
   const [intersectionPoints, setIntersectionPoints] = useState([]);
+  const isZoomingRef = useRef(false);
+  const zoomTimeoutRef = useRef(null);
 
   // Fit to window function
   const fitToWindow = () => {
@@ -451,14 +453,36 @@ const Canvas = forwardRef(({
   // Handle zoom
   const handleWheel = (e) => {
     e.evt.preventDefault();
+    e.evt.stopPropagation();
+    
     const stage = stageRef.current;
     if (!stage) return;
 
+    // Mark that we're zooming to prevent drag conflicts
+    isZoomingRef.current = true;
+    
+    // Clear any existing timeout
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current);
+    }
+    
+    // Reset zooming flag after a short delay
+    zoomTimeoutRef.current = setTimeout(() => {
+      isZoomingRef.current = false;
+    }, 50);
+
     const oldScale = scaleRef.current;
     const pointer = stage.getPointerPosition();
+    
+    if (!pointer) return;
+    
+    // Get the current stage position
+    const stagePos = stage.position();
+    
+    // Calculate the point in the image that the mouse is over
     const mousePointTo = {
-      x: (pointer.x - stage.x()) / oldScale,
-      y: (pointer.y - stage.y()) / oldScale
+      x: (pointer.x - stagePos.x) / oldScale,
+      y: (pointer.y - stagePos.y) / oldScale
     };
 
     const direction = e.evt.deltaY > 0 ? -1 : 1;
@@ -468,6 +492,7 @@ const Canvas = forwardRef(({
     // Clamp scale to reasonable bounds
     const clampedScale = Math.max(0.1, Math.min(20, newScale));
     
+    // Calculate new position to keep the mouse point fixed
     const newPos = {
       x: pointer.x - mousePointTo.x * clampedScale,
       y: pointer.y - mousePointTo.y * clampedScale
@@ -476,10 +501,18 @@ const Canvas = forwardRef(({
     // Update ref immediately for next wheel event
     scaleRef.current = clampedScale;
     
-    // Batch updates together for smooth rendering
-    stage.scale({ x: clampedScale, y: clampedScale });
-    stage.position(newPos);
-    stage.batchDraw();
+    // Use requestAnimationFrame for smoother updates
+    requestAnimationFrame(() => {
+      // Apply all transformations in one batch
+      stage.setAttrs({
+        scaleX: clampedScale,
+        scaleY: clampedScale,
+        x: newPos.x,
+        y: newPos.y
+      });
+      
+      stage.batchDraw();
+    });
   };
 
   return (
@@ -509,7 +542,7 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && draggingVertex === null}
+          draggable={!draggingRoom && draggingVertex === null && !isZoomingRef.current}
           onDblClick={perimeterOverlay ? handlePerimeterDoubleClick : undefined}
           onDblTap={perimeterOverlay ? handlePerimeterDoubleClick : undefined}
         >
