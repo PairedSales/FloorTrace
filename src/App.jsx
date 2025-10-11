@@ -5,6 +5,7 @@ import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectRoom } from './utils/roomDetector';
 import { calculateArea } from './utils/areaCalculator';
+import FloorTraceLogo from '../Assets/SVG.svg';
 
 function App() {
   const [image, setImage] = useState(null);
@@ -602,14 +603,7 @@ function App() {
           onClick={handleRestart}
           title="Restart FloorTrace"
         >
-          <svg className="w-8 h-8" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="256" cy="160" r="50" stroke="white" strokeWidth="8" fill="none"/>
-            <circle cx="256" cy="160" r="20" fill="white"/>
-            <line x1="256" y1="110" x2="256" y2="60" stroke="white" strokeWidth="8" strokeLinecap="round"/>
-            <line x1="256" y1="210" x2="150" y2="450" stroke="white" strokeWidth="12" strokeLinecap="round"/>
-            <line x1="256" y1="210" x2="362" y2="450" stroke="white" strokeWidth="12" strokeLinecap="round"/>
-            <line x1="206" y1="290" x2="306" y2="290" stroke="white" strokeWidth="6" strokeLinecap="round"/>
-          </svg>
+          <img src={FloorTraceLogo} alt="FloorTrace Logo" className="w-8 h-8" />
           <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
         </div>
       </header>
