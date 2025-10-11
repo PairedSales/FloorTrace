@@ -32,6 +32,7 @@ const Canvas = forwardRef(({
   const [scale, setScale] = useState(1);
   const scaleRef = useRef(1); // Track scale imperatively to avoid React reconciliation
   const [imageObj, setImageObj] = useState(null);
+  const [isImageReady, setIsImageReady] = useState(false);
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
@@ -81,14 +82,16 @@ const Canvas = forwardRef(({
   useEffect(() => {
     if (!image) {
       setImageObj(null);
+      setIsImageReady(false);
       return;
     }
 
+    setIsImageReady(false); // Hide image while loading
     const img = new window.Image();
     img.onload = () => {
       setImageObj(img);
-      // Delay fitToWindow to ensure image is loaded
-      setTimeout(() => {
+      // Fit to window before displaying
+      requestAnimationFrame(() => {
         if (containerRef.current && img) {
           const containerWidth = containerRef.current.offsetWidth;
           const containerHeight = containerRef.current.offsetHeight;
@@ -111,8 +114,11 @@ const Canvas = forwardRef(({
             });
             stage.batchDraw();
           }
+          
+          // Now show the image after it's fitted
+          setIsImageReady(true);
         }
-      }, 100);
+      });
     };
     img.src = image;
   }, [image]);
@@ -709,12 +715,14 @@ const Canvas = forwardRef(({
           style={{ cursor: 'default' }}
         >
           <Layer>
-            {/* Main Image */}
-            <KonvaImage
-              image={imageObj}
-              x={0}
-              y={0}
-            />
+            {/* Main Image - only show when ready */}
+            {isImageReady && (
+              <KonvaImage
+                image={imageObj}
+                x={0}
+                y={0}
+              />
+            )}
             
             {/* Perimeter Overlay - Line only (lowest z-index for overlays) */}
             {perimeterOverlay && perimeterOverlay.vertices && (
