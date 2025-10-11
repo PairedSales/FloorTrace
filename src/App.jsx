@@ -333,6 +333,31 @@ function App() {
     }
   };
 
+  // Handle OCR test
+  const handleOCRTest = async () => {
+    if (!image) {
+      alert('Please load an image first');
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      const { testOCR } = await import('./utils/ocrTest');
+      const result = await testOCR(image);
+      
+      if (result.success) {
+        alert(`OCR Test Complete!\n\nFound ${result.matchCount} dimension matches in ${result.lines} lines.\n\nCheck browser console for detailed results.`);
+      } else {
+        alert(`OCR Test Failed: ${result.error}\n\nCheck browser console for details.`);
+      }
+    } catch (error) {
+      console.error('Error running OCR test:', error);
+      alert('Error running OCR test. Check browser console for details.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Update scale based on room dimensions and overlay
   const updateScale = (dimensions, overlay) => {
     if (!dimensions.width || !dimensions.height || !overlay) return;
@@ -596,6 +621,14 @@ function App() {
             disabled={!image}
           >
             Save Image
+          </button>
+
+          <button
+            onClick={handleOCRTest}
+            className="px-5 py-2.5 text-sm font-medium text-orange-700 bg-orange-50 hover:bg-orange-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-orange-50 disabled:hover:text-orange-700"
+            disabled={!image || isProcessing}
+          >
+            Test OCR
           </button>
         </div>
         
