@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { parseLength, formatDimensionInput } from '../utils/unitConverter';
+import { formatDimensionInput } from '../utils/unitConverter';
 
 const Sidebar = ({ 
   roomDimensions, 
@@ -14,55 +14,113 @@ const Sidebar = ({
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
+  const [editingField, setEditingField] = useState(null); // Track which field is being edited
+  const [originalValues, setOriginalValues] = useState({ width: '', height: '' }); // Store original values for cancel
 
   // Update local dimensions when roomDimensions prop changes
   useEffect(() => {
     setLocalDimensions(roomDimensions);
-    // Format display values based on current unit
-    setDisplayValues({
-      width: formatDimensionInput(roomDimensions.width, unit),
-      height: formatDimensionInput(roomDimensions.height, unit)
-    });
-  }, [roomDimensions, unit]);
+    // Only update display if not currently editing
+    if (!editingField) {
+      const formattedWidth = formatDimensionInput(roomDimensions.width, unit);
+      const formattedHeight = formatDimensionInput(roomDimensions.height, unit);
+      
+      // Add "ft" suffix in decimal mode
+      setDisplayValues({
+        width: unit === 'decimal' && formattedWidth ? `${formattedWidth} ft` : formattedWidth,
+        height: unit === 'decimal' && formattedHeight ? `${formattedHeight} ft` : formattedHeight
+      });
+    }
+  }, [roomDimensions, unit, editingField]);
 
   const handleDimensionChange = (field, value) => {
-    // For decimal mode, limit input to 1 decimal place
+    // Allow free-form typing with minimal validation
     if (unit === 'decimal') {
-      // Allow numbers, decimal point, and basic formatting
-      const decimalPattern = /^(\d*\.?\d{0,1})$/;
-      if (!decimalPattern.test(value) && value !== '') {
-        // If input doesn't match pattern, don't update
+      // Allow numbers and one decimal point
+      const decimalPattern = /^[\d.]*$/;
+      if (!decimalPattern.test(value)) {
+        return;
+      }
+    } else {
+      // For inches mode, allow numbers and space
+      const inchesPattern = /^[\d\s]*$/;
+      if (!inchesPattern.test(value)) {
         return;
       }
     }
     
     // Update display value immediately (for typing feedback)
     setDisplayValues(prev => ({ ...prev, [field]: value }));
-    
-    // Parse the input to get decimal feet value
-    const parsedValue = parseLength(value);
-    
-    // Update the stored dimension (always in decimal feet)
-    const newDimensions = { 
-      ...localDimensions, 
-      [field]: parsedValue !== null ? parsedValue.toString() : value 
-    };
-    setLocalDimensions(newDimensions);
-    
-    if (onDimensionsChange) {
-      onDimensionsChange(newDimensions);
-    }
+  };
+
+  const handleFocus = (field) => {
+    setEditingField(field);
+    // Store original value for potential cancel
+    setOriginalValues(prev => ({ ...prev, [field]: displayValues[field] }));
+    // Clear the field for quick entry
+    setDisplayValues(prev => ({ ...prev, [field]: '' }));
   };
 
   const handleBlur = (field) => {
-    // On blur, format the display value properly
-    const parsedValue = parseLength(displayValues[field]);
-    if (parsedValue !== null) {
-      setDisplayValues(prev => ({
-        ...prev,
-        [field]: formatDimensionInput(parsedValue, unit)
-      }));
+    const value = displayValues[field].trim();
+    
+    // If field is empty, restore original value (user cancelled)
+    if (!value) {
+      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
+      setEditingField(null);
+      return;
     }
+    
+    // Parse the input
+    let parsedValue = null;
+    
+    if (unit === 'decimal') {
+      // Parse decimal input, round to 1 decimal place
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        parsedValue = Math.round(numValue * 10) / 10; // Round to 1 decimal
+      }
+    } else {
+      // Parse inches mode: "12 5" means 12 feet 5 inches
+      const parts = value.trim().split(/\s+/);
+      if (parts.length === 1) {
+        // Just feet
+        const feet = parseInt(parts[0]);
+        if (!isNaN(feet)) {
+          parsedValue = feet;
+        }
+      } else if (parts.length >= 2) {
+        // Feet and inches
+        const feet = parseInt(parts[0]) || 0;
+        let inches = parseInt(parts[1]) || 0;
+        // Clamp inches to 0-11
+        inches = Math.max(0, Math.min(11, inches));
+        parsedValue = feet + inches / 12;
+      }
+    }
+    
+    // If we got a valid value, update the dimension
+    if (parsedValue !== null && parsedValue > 0) {
+      const newDimensions = { 
+        ...localDimensions, 
+        [field]: parsedValue.toString() 
+      };
+      setLocalDimensions(newDimensions);
+      
+      if (onDimensionsChange) {
+        onDimensionsChange(newDimensions);
+      }
+      
+      // Format and display the value
+      const formatted = formatDimensionInput(parsedValue, unit);
+      const finalValue = unit === 'decimal' ? `${formatted} ft` : formatted;
+      setDisplayValues(prev => ({ ...prev, [field]: finalValue }));
+    } else {
+      // Invalid input, restore original value
+      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
+    }
+    
+    setEditingField(null);
   };
 
   // Always show manual entry option in manual mode when not already in manual entry mode
@@ -100,26 +158,28 @@ const Sidebar = ({
           </div>
         </div>
         <div className="flex gap-3">
-          <div className="flex-1">
+          <div>
             <label className="block text-xs text-slate-600 mb-1">Width</label>
             <input
               type="text"
               value={displayValues.width}
               onChange={(e) => handleDimensionChange('width', e.target.value)}
+              onFocus={() => handleFocus('width')}
               onBlur={() => handleBlur('width')}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white"
-              placeholder={unit === 'decimal' ? '0.0' : "0' 0\""}
+              className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
+              placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
             />
           </div>
-          <div className="flex-1">
+          <div>
             <label className="block text-xs text-slate-600 mb-1">Height</label>
             <input
               type="text"
               value={displayValues.height}
               onChange={(e) => handleDimensionChange('height', e.target.value)}
+              onFocus={() => handleFocus('height')}
               onBlur={() => handleBlur('height')}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white"
-              placeholder={unit === 'decimal' ? '0.0' : "0' 0\""}
+              className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
+              placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
             />
           </div>
         </div>

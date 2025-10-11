@@ -1,6 +1,7 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState, useEffect } from 'react';
 import Canvas from './Canvas';
 import FloorTraceLogo from '../assets/logo.svg';
+import { formatDimensionInput } from '../utils/unitConverter';
 
 const MobileUI = forwardRef(({
   image,
@@ -43,6 +44,87 @@ const MobileUI = forwardRef(({
   handleEnterManually,
   handleRestart
 }, ref) => {
+  const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
+  const [editingField, setEditingField] = useState(null);
+  const [originalValues, setOriginalValues] = useState({ width: '', height: '' });
+
+  // Update display values when roomDimensions or unit changes
+  useEffect(() => {
+    // Only update display if not currently editing
+    if (!editingField) {
+      const formattedWidth = formatDimensionInput(roomDimensions.width, unit);
+      const formattedHeight = formatDimensionInput(roomDimensions.height, unit);
+      
+      setDisplayValues({
+        width: unit === 'decimal' && formattedWidth ? `${formattedWidth} ft` : formattedWidth,
+        height: unit === 'decimal' && formattedHeight ? `${formattedHeight} ft` : formattedHeight
+      });
+    }
+  }, [roomDimensions, unit, editingField]);
+
+  const handleDimensionChange = (field, value) => {
+    // Allow free-form typing with minimal validation
+    if (unit === 'decimal') {
+      const decimalPattern = /^[\d.]*$/;
+      if (!decimalPattern.test(value)) return;
+    } else {
+      const inchesPattern = /^[\d\s]*$/;
+      if (!inchesPattern.test(value)) return;
+    }
+    
+    setDisplayValues(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleFocus = (field) => {
+    setEditingField(field);
+    setOriginalValues(prev => ({ ...prev, [field]: displayValues[field] }));
+    setDisplayValues(prev => ({ ...prev, [field]: '' }));
+  };
+
+  const handleBlur = (field) => {
+    const value = displayValues[field].trim();
+    
+    if (!value) {
+      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
+      setEditingField(null);
+      return;
+    }
+    
+    let parsedValue = null;
+    
+    if (unit === 'decimal') {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        parsedValue = Math.round(numValue * 10) / 10;
+      }
+    } else {
+      const parts = value.trim().split(/\s+/);
+      if (parts.length === 1) {
+        const feet = parseInt(parts[0]);
+        if (!isNaN(feet)) {
+          parsedValue = feet;
+        }
+      } else if (parts.length >= 2) {
+        const feet = parseInt(parts[0]) || 0;
+        let inches = parseInt(parts[1]) || 0;
+        inches = Math.max(0, Math.min(11, inches));
+        parsedValue = feet + inches / 12;
+      }
+    }
+    
+    if (parsedValue !== null && parsedValue > 0) {
+      setRoomDimensions({ ...roomDimensions, [field]: parsedValue.toString() });
+      
+      const formatted = formatDimensionInput(parsedValue, unit);
+      const finalValue = unit === 'decimal' ? `${formatted} ft` : formatted;
+      setDisplayValues(prev => ({ ...prev, [field]: finalValue }));
+    } else {
+      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
+    }
+    
+    setEditingField(null);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Mobile Header */}
@@ -150,25 +232,29 @@ const MobileUI = forwardRef(({
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex gap-3">
               <div>
                 <label className="block text-xs text-slate-600 mb-1">Width</label>
                 <input
                   type="text"
-                  value={roomDimensions.width}
-                  onChange={(e) => setRoomDimensions({ ...roomDimensions, width: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-base"
-                  placeholder={unit === 'decimal' ? '0.0' : "0' 0\""}
+                  value={displayValues.width}
+                  onChange={(e) => handleDimensionChange('width', e.target.value)}
+                  onFocus={() => handleFocus('width')}
+                  onBlur={() => handleBlur('width')}
+                  className="w-28 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-base"
+                  placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
                 />
               </div>
               <div>
                 <label className="block text-xs text-slate-600 mb-1">Height</label>
                 <input
                   type="text"
-                  value={roomDimensions.height}
-                  onChange={(e) => setRoomDimensions({ ...roomDimensions, height: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-base"
-                  placeholder={unit === 'decimal' ? '0.0' : "0' 0\""}
+                  value={displayValues.height}
+                  onChange={(e) => handleDimensionChange('height', e.target.value)}
+                  onFocus={() => handleFocus('height')}
+                  onBlur={() => handleBlur('height')}
+                  className="w-28 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-base"
+                  placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
                 />
               </div>
             </div>

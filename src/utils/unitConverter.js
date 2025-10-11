@@ -83,19 +83,14 @@ export const parseLength = (input) => {
 
 /**
  * Format dimension value for display in input field
- * @param {string|number} value - Current value (could be user's partial input or stored value)
+ * @param {string|number} value - Current value (stored value in decimal feet)
  * @param {string} unit - 'decimal' or 'inches'
  * @returns {string} - Formatted value for input field
  */
 export const formatDimensionInput = (value, unit = 'decimal') => {
   if (!value) return '';
   
-  // If it's already a string (user typing), return as-is
-  if (typeof value === 'string') {
-    return value;
-  }
-  
-  // If it's a number, format based on unit
+  // Parse the value to a number (stored dimensions are always in decimal feet)
   const numValue = parseFloat(value);
   if (isNaN(numValue)) return '';
   
