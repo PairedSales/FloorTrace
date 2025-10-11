@@ -735,7 +735,19 @@ function App() {
             <div>
               <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
               <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-                <div className="text-2xl font-bold text-slate-800">
+                <div 
+                  className="font-bold text-slate-800 whitespace-nowrap"
+                  style={{
+                    fontSize: (() => {
+                      const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
+                      const length = areaText.length;
+                      if (length <= 7) return '1.5rem'; // text-2xl (24px)
+                      if (length <= 9) return '1.25rem'; // text-xl (20px)
+                      if (length <= 11) return '1.125rem'; // text-lg (18px)
+                      return '1rem'; // text-base (16px)
+                    })()
+                  }}
+                >
                   {area > 0 ? Math.round(area).toLocaleString() : '0'} ft²
                 </div>
               </div>
@@ -743,92 +755,96 @@ function App() {
           </div>
         </div>
 
-        {/* Measurement Options Panel - positioned to the right of area box, only visible when scale is known */}
-        {scale > 1 && (
+        {/* Options Panel - positioned to the right of area box, only visible when perimeter exists */}
+        {perimeterOverlay && (
           <div className="absolute top-0 left-[28rem] z-10 m-0">
             <div 
-              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-56 flex flex-col gap-4 self-start"
+              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-4 self-start"
               style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
             >
               <div>
-                <h2 className="text-sm font-semibold text-slate-700 mb-3">Measurement Options</h2>
-                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-4">
+                <h2 className="text-sm font-semibold text-slate-700 mb-3">Options</h2>
+                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-2.5">
                   
-                  {/* Line Tool Toggle */}
+                  {/* Show Side Lengths Toggle */}
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-700">Line Tool</span>
+                    <span className="text-xs font-medium text-slate-700">Show Lengths</span>
                     <button
-                      onClick={handleLineToolToggle}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                        lineToolActive ? 'bg-slate-700' : 'bg-slate-300'
+                      onClick={() => setShowSideLengths(!showSideLengths)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                        showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
                       }`}
                     >
                       <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                          lineToolActive ? 'translate-x-6' : 'translate-x-1'
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
+                          showSideLengths ? 'translate-x-5' : 'translate-x-0.5'
                         }`}
                       />
                     </button>
                   </div>
 
-                  {/* Draw Area Tool Toggle */}
+                  {/* Exterior Walls Toggle */}
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-700">Draw Area</span>
+                    <span className="text-xs font-medium text-slate-700">Exterior Walls</span>
                     <button
-                      onClick={handleDrawAreaToggle}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                        drawAreaActive ? 'bg-slate-700' : 'bg-slate-300'
+                      onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                        !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
                       }`}
                     >
                       <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                          drawAreaActive ? 'translate-x-6' : 'translate-x-1'
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
+                          !useInteriorWalls ? 'translate-x-5' : 'translate-x-0.5'
                         }`}
                       />
                     </button>
                   </div>
-
-                  {/* Show Side Lengths Toggle - only when perimeter exists */}
-                  {perimeterOverlay && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-700">Show Lengths</span>
-                      <button
-                        onClick={() => setShowSideLengths(!showSideLengths)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                          showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                            showSideLengths ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Exterior Walls Toggle - only when perimeter exists */}
-                  {perimeterOverlay && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-700">Exterior Walls</span>
-                      <button
-                        onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                          !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                            !useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  )}
 
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Measurement Tool Buttons - positioned to the right of options panel, only visible when area is calculated */}
+        {area > 0 && (
+          <div className="absolute top-4 left-[41rem] z-10 m-0 flex flex-col gap-2">
+            {/* Line Tool Button */}
+            <button
+              onClick={handleLineToolToggle}
+              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
+                lineToolActive 
+                  ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-md shadow-cyan-500/40 scale-105' 
+                  : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
+              }`}
+              title="Measure distances"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="6" y1="26" x2="26" y2="6" />
+                <circle cx="6" cy="26" r="3" fill="currentColor" stroke="none" />
+                <circle cx="26" cy="6" r="3" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+
+            {/* Draw Area Tool Button */}
+            <button
+              onClick={handleDrawAreaToggle}
+              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
+                drawAreaActive 
+                  ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white shadow-md shadow-pink-500/40 scale-105' 
+                  : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
+              }`}
+              title="Draw custom area"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 4 L28 11 L24 26 L8 26 L4 11 Z" />
+                <circle cx="16" cy="4" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="28" cy="11" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="24" cy="26" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="8" cy="26" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="4" cy="11" r="2.5" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
           </div>
         )}
       </div>

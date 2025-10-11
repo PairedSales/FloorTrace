@@ -728,10 +728,10 @@ const Canvas = forwardRef(({
             {perimeterOverlay && perimeterOverlay.vertices && (
               <Line
                 points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
-                stroke="#ff00ff"
+                stroke="#6366f1"
                 strokeWidth={2 / scale}
                 closed={true}
-                fill="rgba(255, 0, 255, 0.1)"
+                fill="rgba(99, 102, 241, 0.15)"
                 onDblClick={handleStageDoubleClick}
                 onDblTap={handleStageDoubleClick}
                 onMouseEnter={(e) => {
@@ -753,9 +753,9 @@ const Canvas = forwardRef(({
                   y={Math.min(roomOverlay.y1, roomOverlay.y2)}
                   width={Math.abs(roomOverlay.x2 - roomOverlay.x1)}
                   height={Math.abs(roomOverlay.y2 - roomOverlay.y1)}
-                  stroke="#00ff00"
+                  stroke="#10b981"
                   strokeWidth={2 / scale}
-                  fill="rgba(0, 255, 0, 0.1)"
+                  fill="rgba(16, 185, 129, 0.15)"
                   onMouseDown={handleRoomMouseDown}
                   onTouchStart={isMobile ? handleRoomMouseDown : undefined}
                   onMouseEnter={(e) => {
@@ -789,7 +789,7 @@ const Canvas = forwardRef(({
                       x={handle.x}
                       y={handle.y}
                       radius={isMobile ? 12 / scale : 6 / scale}
-                      fill="#00ff00"
+                      fill="#10b981"
                       stroke="#fff"
                       strokeWidth={2 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
@@ -819,7 +819,7 @@ const Canvas = forwardRef(({
                       x={vertex.x}
                       y={vertex.y}
                       radius={isMobile ? 12 / scale : 6 / scale}
-                      fill="#ff00ff"
+                      fill="#6366f1"
                       stroke="#fff"
                       strokeWidth={2 / scale}
                       draggable={!lineToolActive && !drawAreaActive}
@@ -940,9 +940,9 @@ const Canvas = forwardRef(({
                       y={dim.bbox.y}
                       width={dim.bbox.width}
                       height={dim.bbox.height}
-                      stroke="#ff9800"
+                      stroke="#f59e0b"
                       strokeWidth={2 / scale}
-                      fill="rgba(255, 152, 0, 0.2)"
+                      fill="rgba(245, 158, 11, 0.15)"
                       onClick={() => onDimensionSelect && onDimensionSelect(dim)}
                       onTap={() => onDimensionSelect && onDimensionSelect(dim)}
                       onMouseEnter={(e) => {
@@ -1012,7 +1012,7 @@ const Canvas = forwardRef(({
                     measurementLine.end.x,
                     measurementLine.end.y
                   ]}
-                  stroke="#3b82f6"
+                  stroke="#0ea5e9"
                   strokeWidth={3 / scale}
                   lineCap="round"
                   lineJoin="round"
@@ -1023,7 +1023,7 @@ const Canvas = forwardRef(({
                   x={measurementLine.start.x}
                   y={measurementLine.start.y}
                   radius={6 / scale}
-                  fill="#3b82f6"
+                  fill="#0ea5e9"
                   stroke="#fff"
                   strokeWidth={2 / scale}
                 />
@@ -1033,7 +1033,7 @@ const Canvas = forwardRef(({
                   x={measurementLine.end.x}
                   y={measurementLine.end.y}
                   radius={6 / scale}
-                  fill="#3b82f6"
+                  fill="#0ea5e9"
                   stroke="#fff"
                   strokeWidth={2 / scale}
                 />
@@ -1108,7 +1108,7 @@ const Canvas = forwardRef(({
                       currentMousePos.x,
                       currentMousePos.y
                     ]}
-                    stroke="#f59e0b"
+                    stroke="#ec4899"
                     strokeWidth={2 / scale}
                     dash={[10 / scale, 5 / scale]}
                     lineCap="round"
@@ -1118,10 +1118,10 @@ const Canvas = forwardRef(({
                 {/* The custom shape */}
                 <Line
                   points={customShape.vertices.flatMap(v => [v.x, v.y])}
-                  stroke="#f59e0b"
+                  stroke="#ec4899"
                   strokeWidth={3 / scale}
                   closed={customShape.closed}
-                  fill={customShape.closed ? "rgba(245, 158, 11, 0.2)" : undefined}
+                  fill={customShape.closed ? "rgba(236, 72, 153, 0.15)" : undefined}
                   lineCap="round"
                   lineJoin="round"
                 />
@@ -1133,7 +1133,7 @@ const Canvas = forwardRef(({
                     x={vertex.x}
                     y={vertex.y}
                     radius={6 / scale}
-                    fill="#f59e0b"
+                    fill="#ec4899"
                     stroke="#fff"
                     strokeWidth={2 / scale}
                     draggable={customShape.closed}
