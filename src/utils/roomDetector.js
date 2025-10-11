@@ -201,9 +201,17 @@ export const detectAllDimensions = async (imageDataUrl) => {
     console.log('detectAllDimensions: OCR complete');
     console.log('detectAllDimensions: Raw text:', result.data.text);
     console.log('detectAllDimensions: Available keys:', Object.keys(result.data));
+    console.log('detectAllDimensions: Full result structure:', result);
     console.log('detectAllDimensions: Words array exists:', !!result.data.words);
     if (result.data.words) {
       console.log('detectAllDimensions: Number of words:', result.data.words.length);
+    }
+    // Check for lines with word data
+    if (result.data.lines) {
+      console.log('detectAllDimensions: Lines array exists with', result.data.lines.length, 'lines');
+      if (result.data.lines[0] && result.data.lines[0].words) {
+        console.log('detectAllDimensions: Words nested in lines');
+      }
     }
     
     // Find all dimension patterns (left-to-right reading order)
