@@ -224,8 +224,22 @@ export const detectAllDimensions = async (imageDataUrl) => {
     let detectedFormat = null; // Track the first detected format
     
     // Get words array for bounding box lookup
-    const words = result.data.words || [];
+    // In Tesseract.js v6, words might be nested in lines
+    let words = result.data.words || [];
+    if (words.length === 0 && result.data.lines) {
+      // Extract words from lines
+      words = result.data.lines.flatMap(line => line.words || []);
+      console.log('detectAllDimensions: Extracted words from lines');
+    }
     console.log('detectAllDimensions: Words available:', words.length);
+    
+    // Log first few words for debugging
+    if (words.length > 0) {
+      console.log('detectAllDimensions: Sample words:', words.slice(0, 5).map(w => ({
+        text: w.text,
+        bbox: w.bbox
+      })));
+    }
     
     for (const line of textLines) {
       const trimmedLine = line.trim();
@@ -245,9 +259,25 @@ export const detectAllDimensions = async (imageDataUrl) => {
         // Find the bounding box for this dimension in the OCR result
         let dimensionBBox = null;
         
-        // Search for words that match the dimension text
+        // Extract key tokens from the dimension text to match against OCR words
+        // For "13' 5\" x 12' 11\"", we want to match words like "13'", "5\"", "x", "12'", "11\""
+        const dimensionTokens = parsed.match.split(/\s+/).filter(t => t.length > 0);
+        
+        // Search for words that match any token in the dimension text
         for (const word of words) {
-          if (word.text && parsed.match.toLowerCase().includes(word.text.toLowerCase().replace(/\s/g, ''))) {
+          if (!word.text || !word.bbox) continue;
+          
+          const wordText = word.text.trim().toLowerCase();
+          if (wordText.length === 0) continue;
+          
+          // Check if this word matches any token in the dimension
+          const matches = dimensionTokens.some(token => {
+            const tokenLower = token.toLowerCase();
+            // Match if word contains token or token contains word (handles OCR variations)
+            return wordText.includes(tokenLower) || tokenLower.includes(wordText);
+          });
+          
+          if (matches) {
             if (!dimensionBBox) {
               dimensionBBox = {
                 x: word.bbox.x0,
@@ -273,7 +303,10 @@ export const detectAllDimensions = async (imageDataUrl) => {
         
         // If we couldn't find a bbox, create a fallback synthetic one
         if (!dimensionBBox) {
-          console.log(`detectAllDimensions: ⚠ No bbox found for "${parsed.match}", creating synthetic bbox`);
+          console.log(`detectAllDimensions: ⚠ No bbox found for "${parsed.match}"`);
+          console.log(`detectAllDimensions: Tokens to match:`, dimensionTokens);
+          console.log(`detectAllDimensions: Available word texts:`, words.slice(0, 10).map(w => w.text));
+          console.log(`detectAllDimensions: Creating synthetic bbox`);
           const imageWidth = img.width;
           const imageHeight = img.height;
           const dimensionIndex = dimensions.length;
@@ -285,7 +318,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
             height: 50
           };
         } else {
-          console.log(`detectAllDimensions: ✓ Found bbox at (${dimensionBBox.x}, ${dimensionBBox.y})`);
+          console.log(`detectAllDimensions: ✓ Found bbox at (${dimensionBBox.x}, ${dimensionBBox.y}), size: ${dimensionBBox.width}x${dimensionBBox.height}`);
         }
         
         dimensions.push({
