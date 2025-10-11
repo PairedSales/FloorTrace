@@ -186,6 +186,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const canvas = imageToCanvas(img);
     
     // Run OCR on the image
+    console.log('detectAllDimensions: Starting OCR...');
     const result = await Tesseract.recognize(
       canvas,
       'eng',
@@ -197,16 +198,33 @@ export const detectAllDimensions = async (imageDataUrl) => {
       }
     );
     
+    console.log('detectAllDimensions: OCR complete');
+    console.log('detectAllDimensions: Raw text:', result.data.text);
+    console.log('detectAllDimensions: Available keys:', Object.keys(result.data));
+    console.log('detectAllDimensions: Words array exists:', !!result.data.words);
+    if (result.data.words) {
+      console.log('detectAllDimensions: Number of words:', result.data.words.length);
+    }
+    
     // Find all dimension patterns (left-to-right reading order)
     const text = result.data.text;
     const textLines = text.split('\n');
+    
+    console.log('detectAllDimensions: Total lines:', textLines.length);
     
     const dimensions = [];
     let detectedFormat = null; // Track the first detected format
     
     for (const line of textLines) {
-      const parsed = parseDimensions(line);
+      const trimmedLine = line.trim();
+      if (!trimmedLine) continue;
+      
+      console.log(`detectAllDimensions: Testing line: "${trimmedLine}"`);
+      const parsed = parseDimensions(trimmedLine);
+      
       if (parsed) {
+        console.log(`detectAllDimensions: ✓ Found dimension: ${parsed.width} x ${parsed.height} (${parsed.format})`);
+        
         // Store the first detected format
         if (!detectedFormat) {
           detectedFormat = parsed.format;
@@ -216,6 +234,8 @@ export const detectAllDimensions = async (imageDataUrl) => {
         // In Tesseract.js v6, words array is nested in result.data
         let bbox = null;
         const words = result.data.words || [];
+        console.log(`detectAllDimensions: Searching ${words.length} words for bbox`);
+        
         for (const word of words) {
           if (word.text && parsed.match.includes(word.text.replace(/\s/g, ''))) {
             if (!bbox) {
@@ -241,6 +261,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
         }
         
         if (bbox) {
+          console.log(`detectAllDimensions: ✓ Found bbox for dimension`);
           dimensions.push({
             width: parsed.width,
             height: parsed.height,
@@ -248,11 +269,15 @@ export const detectAllDimensions = async (imageDataUrl) => {
             bbox,
             format: parsed.format
           });
+        } else {
+          console.log(`detectAllDimensions: ✗ No bbox found, skipping dimension`);
         }
+      } else {
+        console.log(`detectAllDimensions: ✗ No dimension pattern matched`);
       }
     }
     
-    console.log(`Found ${dimensions.length} dimensions for manual mode`);
+    console.log(`detectAllDimensions: Found ${dimensions.length} dimensions for manual mode`);
     return { dimensions, detectedFormat };
   } catch (error) {
     console.error('Error detecting all dimensions:', error);
