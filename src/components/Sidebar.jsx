@@ -9,7 +9,8 @@ const Sidebar = ({
   detectedDimensions,
   onEnterManually,
   unit,
-  onUnitChange
+  onUnitChange,
+  isProcessing
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -132,7 +133,7 @@ const Sidebar = ({
           </div>
         )}
         
-        {mode === 'manual' && !manualEntryMode && (!detectedDimensions || detectedDimensions.length === 0) && (
+        {mode === 'manual' && !manualEntryMode && !isProcessing && (!detectedDimensions || detectedDimensions.length === 0) && (
           <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
             <p className="text-xs text-blue-800 font-medium">
               No dimensions detected. Enter dimensions above and use the button below.

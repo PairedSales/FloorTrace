@@ -957,8 +957,8 @@ const Canvas = forwardRef(({
                     {/* Label with dimension text */}
                     <Text
                       x={dim.bbox.x}
-                      y={dim.bbox.y - 20 / scale}
-                      text={dim.text}
+                      y={dim.bbox.y + dim.bbox.height + 5 / scale}
+                      text={`${formatLength(dim.width, unit)} x ${formatLength(dim.height, unit)}`}
                       fontSize={14 / scale}
                       fill="#ff9800"
                       fontStyle="bold"

@@ -59,10 +59,16 @@ export const detectRoom = async (imageDataUrl) => {
     const lineData = detectLines(img);
     console.log(`Found ${lineData.horizontal.length} horizontal and ${lineData.vertical.length} vertical lines`);
     
-    // Run OCR on the image using v6 worker API
-    console.log('Running OCR with v6 worker API...');
+    // Run OCR on the image using v6 worker API with optimizations
+    console.log('Running OCR with v6 worker API (optimized)...');
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: (m) => console.log('OCR Progress:', m)
+    });
+    
+    // Set parameters for faster OCR - only recognize numbers and dimension characters
+    await worker.setParameters({
+      tessedit_char_whitelist: "0123456789'\"ftx .-",
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO
     });
     
     // In Tesseract.js v6, blocks output must be explicitly enabled
@@ -197,10 +203,16 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const img = await dataUrlToImage(imageDataUrl);
     const canvas = imageToCanvas(img);
     
-    // Run OCR on the image using v6 worker API
-    console.log('detectAllDimensions: Starting OCR with v6 worker API...');
+    // Run OCR on the image using v6 worker API with optimizations
+    console.log('detectAllDimensions: Starting OCR with v6 worker API (optimized)...');
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: (m) => console.log('OCR Progress:', m)
+    });
+    
+    // Set parameters for faster OCR - only recognize numbers and dimension characters
+    await worker.setParameters({
+      tessedit_char_whitelist: "0123456789'\"ftx .-",
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO
     });
     
     // In Tesseract.js v6, blocks output must be explicitly enabled
@@ -268,6 +280,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
       console.warn('detectAllDimensions: No words found! Check if blocks output is enabled.');
     }
     
+    // Track which words have been used across all dimensions
+    const globalUsedWordIndices = new Set();
+    
     for (const line of textLines) {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
@@ -286,27 +301,30 @@ export const detectAllDimensions = async (imageDataUrl) => {
         // Find the bounding box for this dimension in the OCR result
         let dimensionBBox = null;
         
-        // Extract key tokens from the dimension text to match against OCR words
-        // For "13' 5\" x 12' 11\"", we want to match words like "13'", "5\"", "x", "12'", "11\""
-        const dimensionTokens = parsed.match.split(/\s+/).filter(t => t.length > 0);
+        // Extract numeric tokens from the dimension text for precise matching
+        // For "13' 5\" x 12' 11\"", extract the numbers: 13, 5, 12, 11
+        const numericTokens = parsed.match.match(/\d+/g) || [];
+        console.log(`detectAllDimensions: Looking for numeric tokens:`, numericTokens);
         
-        // First pass: find all matching words
+        // First pass: find words that contain these specific numbers
         const matchingWords = [];
-        for (const word of words) {
+        
+        for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
+          const word = words[wordIndex];
           if (!word.text || !word.bbox) continue;
           
-          const wordText = word.text.trim().toLowerCase();
+          // Skip words that have already been used by previous dimensions
+          if (globalUsedWordIndices.has(wordIndex)) continue;
+          
+          const wordText = word.text.trim();
           if (wordText.length === 0) continue;
           
-          // Check if this word matches any token in the dimension
-          const matches = dimensionTokens.some(token => {
-            const tokenLower = token.toLowerCase();
-            // Match if word contains token or token contains word (handles OCR variations)
-            return wordText.includes(tokenLower) || tokenLower.includes(wordText);
-          });
+          // Check if this word contains any of our numeric tokens
+          const containsNumber = numericTokens.some(num => wordText.includes(num));
           
-          if (matches) {
-            matchingWords.push(word);
+          if (containsNumber) {
+            matchingWords.push({ word, index: wordIndex });
+            console.log(`detectAllDimensions: Matched word "${wordText}" at (${Math.round(word.bbox.x0)}, ${Math.round(word.bbox.y0)})`);
           }
         }
         
@@ -321,13 +339,14 @@ export const detectAllDimensions = async (imageDataUrl) => {
           const maxHorizontalDistance = 300;
           
           for (let i = 1; i < matchingWords.length; i++) {
-            const word = matchingWords[i];
+            const { word } = matchingWords[i];
             const wordCenterX = (word.bbox.x0 + word.bbox.x1) / 2;
             const wordCenterY = (word.bbox.y0 + word.bbox.y1) / 2;
             
             // Check if this word is close to any word in the cluster
             let isClose = false;
-            for (const clusterWord of clusterWords) {
+            for (const clusterItem of clusterWords) {
+              const clusterWord = clusterItem.word;
               const clusterCenterX = (clusterWord.bbox.x0 + clusterWord.bbox.x1) / 2;
               const clusterCenterY = (clusterWord.bbox.y0 + clusterWord.bbox.y1) / 2;
               
@@ -341,12 +360,15 @@ export const detectAllDimensions = async (imageDataUrl) => {
             }
             
             if (isClose) {
-              clusterWords.push(word);
+              clusterWords.push(matchingWords[i]);
             }
           }
           
-          // Build bbox from clustered words only
-          for (const word of clusterWords) {
+          // Build bbox from clustered words only and mark them as used
+          for (const { word, index } of clusterWords) {
+            // Mark this word as used globally
+            globalUsedWordIndices.add(index);
+            
             if (!dimensionBBox) {
               dimensionBBox = {
                 x: word.bbox.x0,
@@ -373,7 +395,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
         // If we couldn't find a bbox, create a fallback synthetic one
         if (!dimensionBBox) {
           console.log(`detectAllDimensions: ⚠ No bbox found for "${parsed.match}"`);
-          console.log(`detectAllDimensions: Tokens to match:`, dimensionTokens);
+          console.log(`detectAllDimensions: Numeric tokens to match:`, numericTokens);
           console.log(`detectAllDimensions: Matching words found:`, matchingWords.length);
           console.log(`detectAllDimensions: Available word texts:`, words.slice(0, 10).map(w => w.text));
           console.log(`detectAllDimensions: Creating synthetic bbox`);

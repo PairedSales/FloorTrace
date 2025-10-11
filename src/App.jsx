@@ -722,6 +722,7 @@ function App() {
             onEnterManually={handleEnterManually}
             unit={unit}
             onUnitChange={setUnit}
+            isProcessing={isProcessing}
           />
         </div>
 
