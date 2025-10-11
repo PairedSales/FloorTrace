@@ -334,9 +334,10 @@ export const detectAllDimensions = async (imageDataUrl) => {
     }
     
     console.log(`detectAllDimensions: Found ${dimensions.length} dimensions for manual mode`);
+    console.log(`detectAllDimensions: Detected format: ${detectedFormat}`);
     return { dimensions, detectedFormat };
   } catch (error) {
     console.error('Error detecting all dimensions:', error);
-    return [];
+    return { dimensions: [], detectedFormat: null };
   }
 };

@@ -108,11 +108,16 @@ function App() {
         
         // Auto-switch unit based on detected format
         if (result.detectedFormat) {
+          console.log('Find Room - Detected format:', result.detectedFormat, 'Current unit:', unit);
           // If current unit doesn't match detected format, switch it
           if (unit !== result.detectedFormat) {
-            console.log(`Auto-switching unit from ${unit} to ${result.detectedFormat}`);
+            console.log(`Find Room - Auto-switching unit from ${unit} to ${result.detectedFormat}`);
             setUnit(result.detectedFormat);
+          } else {
+            console.log('Find Room - Unit already matches, no switch needed');
           }
+        } else {
+          console.log('Find Room - No format detected');
         }
       } else {
         alert('Could not detect room dimensions. Try Manual Mode.');
@@ -205,6 +210,8 @@ function App() {
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
         
+        console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
+        
         setDetectedDimensions(dimensions);
         
         if (dimensions.length === 0) {
@@ -213,8 +220,10 @@ function App() {
         } else {
           // Auto-switch unit based on detected format
           if (detectedFormat && unit !== detectedFormat) {
-            console.log(`Auto-switching unit from ${unit} to ${detectedFormat}`);
+            console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
+          } else {
+            console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
           }
         }
       } catch (error) {

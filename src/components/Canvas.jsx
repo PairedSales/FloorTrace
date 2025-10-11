@@ -143,6 +143,20 @@ const Canvas = forwardRef(({
     fitToWindow: () => fitToWindow()
   }));
 
+  // Helper function to convert screen coordinates to canvas coordinates
+  const getCanvasCoordinates = (stage) => {
+    const pos = stage.getPointerPosition();
+    if (!pos) return null;
+    
+    const stagePos = stage.position();
+    const currentScale = scaleRef.current;
+    
+    return {
+      x: (pos.x - stagePos.x) / currentScale,
+      y: (pos.y - stagePos.y) / currentScale
+    };
+  };
+
   // Handle room overlay dragging (move entire overlay)
   const handleRoomDragStart = (e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
@@ -150,22 +164,21 @@ const Canvas = forwardRef(({
     // Only start dragging if clicking on the rectangle itself, not the corners
     if (e.target.getClassName() === 'Rect') {
       setDraggingRoom(true);
-      const pos = e.target.getStage().getPointerPosition();
-      const currentScale = scaleRef.current;
-      setRoomStart({ x: pos.x / currentScale, y: pos.y / currentScale });
+      const canvasPos = getCanvasCoordinates(e.target.getStage());
+      if (canvasPos) {
+        setRoomStart(canvasPos);
+      }
       e.cancelBubble = true;
     }
   };
 
   const handleRoomDrag = (e) => {
     if (!draggingRoom || !roomStart) return;
-    const pos = e.target.getStage().getPointerPosition();
-    const currentScale = scaleRef.current;
-    const newX = pos.x / currentScale;
-    const newY = pos.y / currentScale;
+    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (!canvasPos) return;
     
-    const deltaX = newX - roomStart.x;
-    const deltaY = newY - roomStart.y;
+    const deltaX = canvasPos.x - roomStart.x;
+    const deltaY = canvasPos.y - roomStart.y;
     
     const newOverlay = {
       x1: roomOverlay.x1 + deltaX,
@@ -175,7 +188,7 @@ const Canvas = forwardRef(({
     };
     
     onRoomOverlayUpdate(newOverlay);
-    setRoomStart({ x: newX, y: newY });
+    setRoomStart(canvasPos);
   };
 
   const handleRoomDragEnd = () => {
@@ -186,26 +199,24 @@ const Canvas = forwardRef(({
   // Handle room corner dragging (no snapping)
   const handleRoomCornerDrag = (corner, e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
-    const pos = e.target.getStage().getPointerPosition();
-    const currentScale = scaleRef.current;
-    const newX = pos.x / currentScale;
-    const newY = pos.y / currentScale;
+    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (!canvasPos) return;
     
     const newOverlay = { ...roomOverlay };
     
     // Update overlay with raw positions (no snapping)
     if (corner === 'tl') {
-      newOverlay.x1 = newX;
-      newOverlay.y1 = newY;
+      newOverlay.x1 = canvasPos.x;
+      newOverlay.y1 = canvasPos.y;
     } else if (corner === 'tr') {
-      newOverlay.x2 = newX;
-      newOverlay.y1 = newY;
+      newOverlay.x2 = canvasPos.x;
+      newOverlay.y1 = canvasPos.y;
     } else if (corner === 'bl') {
-      newOverlay.x1 = newX;
-      newOverlay.y2 = newY;
+      newOverlay.x1 = canvasPos.x;
+      newOverlay.y2 = canvasPos.y;
     } else if (corner === 'br') {
-      newOverlay.x2 = newX;
-      newOverlay.y2 = newY;
+      newOverlay.x2 = canvasPos.x;
+      newOverlay.y2 = canvasPos.y;
     }
     
     onRoomOverlayUpdate(newOverlay);
@@ -219,13 +230,12 @@ const Canvas = forwardRef(({
 
   const handleVertexDrag = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index || lineToolActive || drawAreaActive) return;
-    const pos = e.target.getStage().getPointerPosition();
-    const currentScale = scaleRef.current;
-    const currentPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (!canvasPos) return;
     
     // Use raw position (no snapping)
     const newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = currentPoint;
+    newVertices[index] = canvasPos;
     onPerimeterUpdate(newVertices);
   };
 
@@ -256,12 +266,11 @@ const Canvas = forwardRef(({
 
   const handleCustomVertexDrag = (index, e) => {
     if (!customShape || draggingCustomVertex !== index) return;
-    const pos = e.target.getStage().getPointerPosition();
-    const currentScale = scaleRef.current;
-    const currentPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (!canvasPos) return;
     
     const newVertices = [...customShape.vertices];
-    newVertices[index] = currentPoint;
+    newVertices[index] = canvasPos;
     onCustomShapeUpdate({ vertices: newVertices, closed: true });
   };
 
@@ -291,11 +300,8 @@ const Canvas = forwardRef(({
     const stage = e.target.getStage();
     if (!stage) return;
     
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-    
-    const currentScale = scaleRef.current;
-    const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+    const clickPoint = getCanvasCoordinates(stage);
+    if (!clickPoint) return;
     
     // Use raw click point (no snapping)
     const finalPoint = clickPoint;
@@ -359,11 +365,8 @@ const Canvas = forwardRef(({
       const stage = e.target.getStage();
       if (!stage) return;
       
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
-      
-      const currentScale = scaleRef.current;
-      const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+      const clickPoint = getCanvasCoordinates(stage);
+      if (!clickPoint) return;
       
       onCanvasClick(clickPoint);
       return;
@@ -374,11 +377,8 @@ const Canvas = forwardRef(({
       const stage = e.target.getStage();
       if (!stage) return;
       
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
-      
-      const currentScale = scaleRef.current;
-      const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+      const clickPoint = getCanvasCoordinates(stage);
+      if (!clickPoint) return;
       
       // If no start point, set it
       if (!measurementLine || !measurementLine.start) {
@@ -394,11 +394,8 @@ const Canvas = forwardRef(({
       const stage = e.target.getStage();
       if (!stage) return;
       
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
-      
-      const currentScale = scaleRef.current;
-      const clickPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+      const clickPoint = getCanvasCoordinates(stage);
+      if (!clickPoint) return;
       
       // Add vertex to the shape
       if (!customShape || !customShape.vertices) {
@@ -448,11 +445,8 @@ const Canvas = forwardRef(({
     const stage = e.target.getStage();
     if (!stage) return;
     
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-    
-    const currentScale = scaleRef.current;
-    const mousePoint = { x: pos.x / currentScale, y: pos.y / currentScale };
+    const mousePoint = getCanvasCoordinates(stage);
+    if (!mousePoint) return;
     
     setCurrentMousePos(mousePoint);
     
