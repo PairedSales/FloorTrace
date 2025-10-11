@@ -56,6 +56,12 @@ function App() {
     setCustomShape(null);
   }, []);
 
+  // Reset entire application
+  const handleRestart = () => {
+    setImage(null);
+    resetOverlays();
+  };
+
   // Handle file upload
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -582,6 +588,7 @@ function App() {
         setShowSideLengths={setShowSideLengths}
         useInteriorWalls={useInteriorWalls}
         handleInteriorWallToggle={handleInteriorWallToggle}
+        handleRestart={handleRestart}
       />
     );
   }
@@ -591,7 +598,14 @@ function App() {
     <div className="flex flex-col h-screen bg-white">
       {/* Title Bar */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
-        <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
+        <div 
+          className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity w-fit"
+          onClick={handleRestart}
+          title="Restart FloorTrace"
+        >
+          <img src="/Assets/favicon-32x32.png" alt="FloorTrace" className="w-8 h-8" />
+          <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
+        </div>
       </header>
 
       {/* Toolbar */}

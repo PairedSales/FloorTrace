@@ -40,13 +40,17 @@ const MobileUI = forwardRef(({
   setShowSideLengths,
   useInteriorWalls,
   handleInteriorWallToggle,
-  handleEnterManually
+  handleEnterManually,
+  handleRestart
 }, ref) => {
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Mobile Header */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-4 py-3 shadow-sm flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-white tracking-tight">FloorTrace</h1>
+        <div className="flex items-center gap-2">
+          <img src="/Assets/favicon-32x32.png" alt="FloorTrace" className="w-7 h-7" />
+          <h1 className="text-lg font-semibold text-white tracking-tight">FloorTrace</h1>
+        </div>
         <button
           onClick={() => setMobileSheetOpen(!mobileSheetOpen)}
           className="p-2 text-white hover:bg-slate-700 rounded-md transition-colors"
@@ -117,13 +121,22 @@ const MobileUI = forwardRef(({
           <div className="p-4 space-y-3">
             <h2 className="text-sm font-semibold text-slate-700 mb-3">Quick Actions</h2>
             
-            <button
-              onClick={() => { fileInputRef.current?.click(); setMobileSheetOpen(false); }}
-              className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
-              disabled={isProcessing}
-            >
-              📁 Load Image
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => { fileInputRef.current?.click(); setMobileSheetOpen(false); }}
+                className="px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                disabled={isProcessing}
+              >
+                📁 Load Image
+              </button>
+              
+              <button
+                onClick={() => { handleRestart(); setMobileSheetOpen(false); }}
+                className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shadow-sm"
+              >
+                🗑️ Clear All
+              </button>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <button
