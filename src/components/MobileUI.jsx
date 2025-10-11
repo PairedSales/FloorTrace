@@ -47,7 +47,11 @@ const MobileUI = forwardRef(({
     <div className="flex flex-col h-screen bg-white">
       {/* Mobile Header */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-4 py-3 shadow-sm flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div 
+          className="flex items-center gap-2 cursor-pointer active:opacity-70 transition-opacity"
+          onClick={handleRestart}
+          title="Restart FloorTrace"
+        >
           <img src="/Assets/favicon-32x32.png" alt="FloorTrace" className="w-7 h-7" />
           <h1 className="text-lg font-semibold text-white tracking-tight">FloorTrace</h1>
         </div>
@@ -117,74 +121,67 @@ const MobileUI = forwardRef(({
 
         {/* Sheet Content */}
         <div className="overflow-y-auto" style={{ maxHeight: 'calc(85vh - 3.5rem)' }}>
-          {/* Quick Actions */}
+          {/* Action Buttons */}
           <div className="p-4 space-y-3">
-            <h2 className="text-sm font-semibold text-slate-700 mb-3">Quick Actions</h2>
-            
-            <div className="grid grid-cols-2 gap-3">
+            {/* Show Load Image button only when no image is loaded */}
+            {!image && (
               <button
                 onClick={() => { fileInputRef.current?.click(); setMobileSheetOpen(false); }}
-                className="px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
                 disabled={isProcessing}
               >
                 📁 Load Image
               </button>
-              
-              <button
-                onClick={() => { handleRestart(); setMobileSheetOpen(false); }}
-                className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shadow-sm"
-              >
-                🗑️ Clear All
-              </button>
-            </div>
+            )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => { handleFindRoom(); setMobileSheetOpen(false); }}
-                className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-                disabled={!image || isProcessing}
-              >
-                🔍 Find Room
-              </button>
-              
-              <button
-                onClick={() => { handleTracePerimeter(); setMobileSheetOpen(false); }}
-                className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-                disabled={!image || isProcessing}
-              >
-                ✏️ Trace
-              </button>
-            </div>
+            {/* Show main actions prominently when image is loaded */}
+            {image && (
+              <>
+                <button
+                  onClick={() => { handleFindRoom(); setMobileSheetOpen(false); }}
+                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                  disabled={isProcessing}
+                >
+                  🔍 Find Room
+                </button>
+                
+                <button
+                  onClick={() => { handleTracePerimeter(); setMobileSheetOpen(false); }}
+                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                  disabled={isProcessing}
+                >
+                  ✏️ Trace Perimeter
+                </button>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => { handleManualMode(); setMobileSheetOpen(false); }}
-                className={`px-4 py-3 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 ${
-                  mode === 'manual' 
-                    ? 'bg-slate-700 text-white' 
-                    : 'text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50'
-                }`}
-                disabled={!image || isProcessing}
-              >
-                ✋ Manual
-              </button>
-              
-              <button
-                onClick={() => { handleFitToWindow(); setMobileSheetOpen(false); }}
-                className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-                disabled={!image}
-              >
-                🖼️ Fit
-              </button>
-            </div>
+                <button
+                  onClick={() => { handleManualMode(); setMobileSheetOpen(false); }}
+                  className={`w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors shadow-sm disabled:opacity-40 ${
+                    mode === 'manual' 
+                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                      : 'text-white bg-slate-700 hover:bg-slate-600 disabled:bg-slate-300'
+                  }`}
+                  disabled={isProcessing}
+                >
+                  ✋ Manual Mode
+                </button>
 
-            <button
-              onClick={() => { handleSaveImage(); }}
-              className="w-full px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-              disabled={!image}
-            >
-              💾 Save Image
-            </button>
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <button
+                    onClick={() => { handleFitToWindow(); setMobileSheetOpen(false); }}
+                    className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
+                  >
+                    🖼️ Fit
+                  </button>
+                  
+                  <button
+                    onClick={() => { handleSaveImage(); }}
+                    className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
+                  >
+                    💾 Save
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Room Dimensions */}

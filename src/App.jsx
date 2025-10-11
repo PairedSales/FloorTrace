@@ -20,7 +20,7 @@ function App() {
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
   const [isMobile, setIsMobile] = useState(false);
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
