@@ -238,48 +238,35 @@ export const detectAllDimensions = async (imageDataUrl) => {
           detectedFormat = parsed.format;
         }
         
-        // Find the bounding box for this dimension
-        // In Tesseract.js v6, words array is nested in result.data
-        let bbox = null;
-        const words = result.data.words || [];
-        console.log(`detectAllDimensions: Searching ${words.length} words for bbox`);
+        // Create a synthetic bounding box based on image center
+        // Since we can't get word positions from Tesseract v6, we'll create
+        // evenly distributed positions for manual mode selection
+        const imageWidth = img.width;
+        const imageHeight = img.height;
+        const dimensionIndex = dimensions.length;
         
-        for (const word of words) {
-          if (word.text && parsed.match.includes(word.text.replace(/\s/g, ''))) {
-            if (!bbox) {
-              bbox = {
-                x: word.bbox.x0,
-                y: word.bbox.y0,
-                width: word.bbox.x1 - word.bbox.x0,
-                height: word.bbox.y1 - word.bbox.y0
-              };
-            } else {
-              const minX = Math.min(bbox.x, word.bbox.x0);
-              const minY = Math.min(bbox.y, word.bbox.y0);
-              const maxX = Math.max(bbox.x + bbox.width, word.bbox.x1);
-              const maxY = Math.max(bbox.y + bbox.height, word.bbox.y1);
-              bbox = {
-                x: minX,
-                y: minY,
-                width: maxX - minX,
-                height: maxY - minY
-              };
-            }
-          }
-        }
+        // Create bbox in center area, stacked vertically
+        const bboxWidth = 200;
+        const bboxHeight = 50;
+        const centerX = imageWidth / 2;
+        const startY = imageHeight * 0.3; // Start at 30% down
+        const spacing = 80; // Space between dimensions
         
-        if (bbox) {
-          console.log(`detectAllDimensions: ✓ Found bbox for dimension`);
-          dimensions.push({
-            width: parsed.width,
-            height: parsed.height,
-            text: parsed.match,
-            bbox,
-            format: parsed.format
-          });
-        } else {
-          console.log(`detectAllDimensions: ✗ No bbox found, skipping dimension`);
-        }
+        const bbox = {
+          x: centerX - bboxWidth / 2,
+          y: startY + (dimensionIndex * spacing),
+          width: bboxWidth,
+          height: bboxHeight
+        };
+        
+        console.log(`detectAllDimensions: ✓ Created synthetic bbox for dimension at y=${bbox.y}`);
+        dimensions.push({
+          width: parsed.width,
+          height: parsed.height,
+          text: parsed.match,
+          bbox,
+          format: parsed.format
+        });
       } else {
         console.log(`detectAllDimensions: ✗ No dimension pattern matched`);
       }
