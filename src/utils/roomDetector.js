@@ -59,19 +59,17 @@ export const detectRoom = async (imageDataUrl) => {
     const lineData = detectLines(img);
     console.log(`Found ${lineData.horizontal.length} horizontal and ${lineData.vertical.length} vertical lines`);
     
-    // Run OCR on the image
-    console.log('Running OCR...');
-    const result = await Tesseract.recognize(
-      canvas,
-      'eng',
-      {
-        logger: (m) => console.log('OCR Progress:', m),
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
-      },
-      { blocks: true } // Enable blocks output for word-level bounding boxes in v6
-    );
+    // Run OCR on the image using v6 worker API
+    console.log('Running OCR with v6 worker API...');
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: (m) => console.log('OCR Progress:', m),
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
+    });
+    
+    const result = await worker.recognize(canvas, {}, { blocks: true });
+    await worker.terminate();
     
     // Parse text for room dimensions (scan left-to-right, top-to-bottom)
     const text = result.data.text;
@@ -201,19 +199,17 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const img = await dataUrlToImage(imageDataUrl);
     const canvas = imageToCanvas(img);
     
-    // Run OCR on the image
-    console.log('detectAllDimensions: Starting OCR...');
-    const result = await Tesseract.recognize(
-      canvas,
-      'eng',
-      {
-        logger: (m) => console.log('OCR Progress:', m),
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
-      },
-      { blocks: true } // Enable blocks output for word-level bounding boxes in v6
-    );
+    // Run OCR on the image using v6 worker API
+    console.log('detectAllDimensions: Starting OCR with v6 worker API...');
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: (m) => console.log('OCR Progress:', m),
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
+    });
+    
+    const result = await worker.recognize(canvas, {}, { blocks: true });
+    await worker.terminate();
     
     console.log('detectAllDimensions: OCR complete');
     console.log('detectAllDimensions: Raw text:', result.data.text);
