@@ -38,6 +38,17 @@ export const testOCR = async (imageDataUrl) => {
     console.log(result.data.text);
     console.log('=== END RAW TEXT ===');
     
+    console.log('\n=== OCR DATA STRUCTURE ===');
+    console.log('Available keys:', Object.keys(result.data));
+    console.log('Words available:', Array.isArray(result.data.words));
+    if (result.data.words) {
+      console.log('Number of words:', result.data.words.length);
+      if (result.data.words.length > 0) {
+        console.log('First word sample:', result.data.words[0]);
+      }
+    }
+    console.log('=== END STRUCTURE ===');
+    
     // Test regex patterns
     console.log('\n=== TESTING REGEX PATTERNS ===');
     

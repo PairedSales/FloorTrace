@@ -86,7 +86,9 @@ export const detectRoom = async (imageDataUrl) => {
         firstDimension = parsed;
         
         // Find the bounding box for this dimension in the OCR result
-        for (const word of result.data.words) {
+        // In Tesseract.js v6, words array is nested in result.data
+        const words = result.data.words || [];
+        for (const word of words) {
           if (word.text && parsed.match.includes(word.text.replace(/\s/g, ''))) {
             if (!dimensionBBox) {
               dimensionBBox = {
@@ -211,8 +213,10 @@ export const detectAllDimensions = async (imageDataUrl) => {
         }
         
         // Find the bounding box for this dimension
+        // In Tesseract.js v6, words array is nested in result.data
         let bbox = null;
-        for (const word of result.data.words) {
+        const words = result.data.words || [];
+        for (const word of words) {
           if (word.text && parsed.match.includes(word.text.replace(/\s/g, ''))) {
             if (!bbox) {
               bbox = {
