@@ -578,7 +578,6 @@ function App() {
         handleTracePerimeter={handleTracePerimeter}
         handleManualMode={handleManualMode}
         handleFitToWindow={handleFitToWindow}
-        handleSaveImage={handleSaveImage}
         roomDimensions={roomDimensions}
         setRoomDimensions={setRoomDimensions}
         setUnit={setUnit}
@@ -698,6 +697,7 @@ function App() {
           drawAreaActive={drawAreaActive}
           customShape={customShape}
           onCustomShapeUpdate={setCustomShape}
+          isMobile={false}
         />
 
         {/* Sidebar overlay (flush to edges) */}

@@ -31,7 +31,6 @@ const MobileUI = forwardRef(({
   handleTracePerimeter,
   handleManualMode,
   handleFitToWindow,
-  handleSaveImage,
   roomDimensions,
   setRoomDimensions,
   setUnit,
@@ -89,6 +88,7 @@ const MobileUI = forwardRef(({
           drawAreaActive={drawAreaActive}
           customShape={customShape}
           onCustomShapeUpdate={setCustomShape}
+          isMobile={true}
         />
 
         {/* Mobile Area Display - Floating Top Right */}
@@ -121,71 +121,8 @@ const MobileUI = forwardRef(({
 
         {/* Sheet Content */}
         <div className="overflow-y-auto" style={{ maxHeight: 'calc(85vh - 3.5rem)' }}>
-          {/* Action Buttons */}
-          <div className="p-4 space-y-3">
-            {/* Show Load Image button only when no image is loaded */}
-            {!image && (
-              <button
-                onClick={() => { fileInputRef.current?.click(); setMobileSheetOpen(false); }}
-                className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
-                disabled={isProcessing}
-              >
-                📁 Load Image
-              </button>
-            )}
-
-            {/* Show main actions prominently when image is loaded */}
-            {image && (
-              <>
-                <button
-                  onClick={() => { handleFindRoom(); setMobileSheetOpen(false); }}
-                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
-                  disabled={isProcessing}
-                >
-                  🔍 Find Room
-                </button>
-                
-                <button
-                  onClick={() => { handleTracePerimeter(); setMobileSheetOpen(false); }}
-                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
-                  disabled={isProcessing}
-                >
-                  ✏️ Trace Perimeter
-                </button>
-
-                <button
-                  onClick={() => { handleManualMode(); setMobileSheetOpen(false); }}
-                  className={`w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors shadow-sm disabled:opacity-40 ${
-                    mode === 'manual' 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                      : 'text-white bg-slate-700 hover:bg-slate-600 disabled:bg-slate-300'
-                  }`}
-                  disabled={isProcessing}
-                >
-                  ✋ Manual Mode
-                </button>
-
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <button
-                    onClick={() => { handleFitToWindow(); setMobileSheetOpen(false); }}
-                    className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-                  >
-                    🖼️ Fit
-                  </button>
-                  
-                  <button
-                    onClick={() => { handleSaveImage(); }}
-                    className="px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50"
-                  >
-                    💾 Save
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Room Dimensions */}
-          <div className="p-4 border-t border-slate-200">
+          {/* Room Dimensions - Always at the top */}
+          <div className="p-4 border-b border-slate-200 bg-slate-50">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-slate-700">Room Dimensions</h2>
               <div className="flex gap-1">
@@ -267,6 +204,60 @@ const MobileUI = forwardRef(({
               >
                 Place Overlays on Canvas
               </button>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="p-4 space-y-3">
+            {/* Show Load Image button only when no image is loaded */}
+            {!image && (
+              <button
+                onClick={() => { fileInputRef.current?.click(); setMobileSheetOpen(false); }}
+                className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                disabled={isProcessing}
+              >
+                📁 Load Image
+              </button>
+            )}
+
+            {/* Show main actions prominently when image is loaded */}
+            {image && (
+              <>
+                <button
+                  onClick={() => { handleFindRoom(); setMobileSheetOpen(false); }}
+                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                  disabled={isProcessing}
+                >
+                  🔍 Find Room
+                </button>
+                
+                <button
+                  onClick={() => { handleTracePerimeter(); setMobileSheetOpen(false); }}
+                  className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
+                  disabled={isProcessing}
+                >
+                  ✏️ Trace Perimeter
+                </button>
+
+                <button
+                  onClick={() => { handleManualMode(); setMobileSheetOpen(false); }}
+                  className={`w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors shadow-sm disabled:opacity-40 ${
+                    mode === 'manual' 
+                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                      : 'text-white bg-slate-700 hover:bg-slate-600 disabled:bg-slate-300'
+                  }`}
+                  disabled={isProcessing}
+                >
+                  ✋ Manual Mode
+                </button>
+
+                <button
+                  onClick={() => { handleFitToWindow(); setMobileSheetOpen(false); }}
+                  className="w-full px-4 py-3 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:bg-slate-50 mt-4"
+                >
+                  🖼️ Fit to Window
+                </button>
+              </>
             )}
           </div>
 

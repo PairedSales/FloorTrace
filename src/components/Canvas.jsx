@@ -23,7 +23,8 @@ const Canvas = forwardRef(({
   onMeasurementLineUpdate,
   drawAreaActive,
   customShape,
-  onCustomShapeUpdate
+  onCustomShapeUpdate,
+  isMobile
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -540,7 +541,9 @@ const Canvas = forwardRef(({
       {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-xl text-slate-600 font-medium">Paste or Load a Sketch Image to Get Started</p>
+            <p className="text-xl text-slate-600 font-medium">
+              {isMobile ? 'Load a Sketch Image to Get Started' : 'Paste or Load a Sketch Image to Get Started'}
+            </p>
           </div>
         </div>
       )}
