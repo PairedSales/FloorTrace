@@ -30,7 +30,7 @@ export const testOCR = async (imageDataUrl) => {
         },
         workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.1/tesseract-core.wasm.js'
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.0'
       }
     );
     
