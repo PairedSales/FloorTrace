@@ -28,9 +28,9 @@ export const testOCR = async (imageDataUrl) => {
             console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
           }
         },
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js',
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.0'
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js'
       }
     );
     

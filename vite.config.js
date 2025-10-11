@@ -11,7 +11,13 @@ export default defineConfig({
         // Add hash to filenames for cache busting
         entryFileNames: `assets/[name].[hash].js`,
         chunkFileNames: `assets/[name].[hash].js`,
-        assetFileNames: `assets/[name].[hash].[ext]`
+        assetFileNames: (assetInfo) => {
+          // Don't hash the webmanifest file
+          if (assetInfo.name === 'site.webmanifest') {
+            return 'assets/[name].[ext]';
+          }
+          return 'assets/[name].[hash].[ext]';
+        }
       }
     }
   }
