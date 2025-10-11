@@ -76,7 +76,7 @@ const Sidebar = ({
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center justify-center flex-1">
-            <h2 className="text-sm font-semibold text-slate-700">Room Dimensions</h2>
+            <h2 className="text-sm font-semibold text-slate-700 text-center">Room Dimensions</h2>
           </div>
           <div className="flex items-center justify-center flex-1 gap-1">
             <button
