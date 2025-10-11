@@ -62,10 +62,7 @@ export const detectRoom = async (imageDataUrl) => {
     // Run OCR on the image using v6 worker API
     console.log('Running OCR with v6 worker API...');
     const worker = await Tesseract.createWorker('eng', 1, {
-      logger: (m) => console.log('OCR Progress:', m),
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
+      logger: (m) => console.log('OCR Progress:', m)
     });
     
     // In Tesseract.js v6, blocks output must be explicitly enabled
@@ -203,10 +200,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
     // Run OCR on the image using v6 worker API
     console.log('detectAllDimensions: Starting OCR with v6 worker API...');
     const worker = await Tesseract.createWorker('eng', 1, {
-      logger: (m) => console.log('OCR Progress:', m),
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
+      logger: (m) => console.log('OCR Progress:', m)
     });
     
     // In Tesseract.js v6, blocks output must be explicitly enabled

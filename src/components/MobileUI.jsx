@@ -1,5 +1,6 @@
 import { forwardRef } from 'react';
 import Canvas from './Canvas';
+import faviconImg from '../../Assets/favicon-32x32.png';
 
 const MobileUI = forwardRef(({
   image,
@@ -51,7 +52,7 @@ const MobileUI = forwardRef(({
           onClick={handleRestart}
           title="Restart FloorTrace"
         >
-          <img src="/Assets/favicon-32x32.png" alt="FloorTrace" className="w-7 h-7" />
+          <img src={faviconImg} alt="FloorTrace" className="w-7 h-7" />
           <h1 className="text-lg font-semibold text-white tracking-tight">FloorTrace</h1>
         </div>
         <button

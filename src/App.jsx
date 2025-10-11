@@ -5,6 +5,7 @@ import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectRoom } from './utils/roomDetector';
 import { calculateArea } from './utils/areaCalculator';
+import faviconImg from '../Assets/favicon-32x32.png';
 
 function App() {
   const [image, setImage] = useState(null);
@@ -602,7 +603,7 @@ function App() {
           onClick={handleRestart}
           title="Restart FloorTrace"
         >
-          <img src="/Assets/favicon-32x32.png" alt="FloorTrace" className="w-8 h-8" />
+          <img src={faviconImg} alt="FloorTrace" className="w-8 h-8" />
           <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
         </div>
       </header>
