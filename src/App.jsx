@@ -5,7 +5,7 @@ import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectRoom } from './utils/roomDetector';
 import { calculateArea } from './utils/areaCalculator';
-import FloorTraceLogo from '/logo.svg';
+import FloorTraceLogo from './assets/logo.svg';
 
 function App() {
   const [image, setImage] = useState(null);

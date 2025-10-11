@@ -1,6 +1,6 @@
 import { forwardRef } from 'react';
 import Canvas from './Canvas';
-import FloorTraceLogo from '/logo.svg';
+import FloorTraceLogo from '../assets/logo.svg';
 
 const MobileUI = forwardRef(({
   image,
