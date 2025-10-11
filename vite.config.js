@@ -13,7 +13,7 @@ export default defineConfig({
         chunkFileNames: `assets/[name].[hash].js`,
         assetFileNames: (assetInfo) => {
           // Don't hash the webmanifest file
-          if (assetInfo.name === 'site.webmanifest') {
+          if (assetInfo.name && assetInfo.name.endsWith('.webmanifest')) {
             return 'assets/[name].[ext]';
           }
           return 'assets/[name].[hash].[ext]';
