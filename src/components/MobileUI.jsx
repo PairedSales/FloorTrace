@@ -51,7 +51,14 @@ const MobileUI = forwardRef(({
           onClick={handleRestart}
           title="Restart FloorTrace"
         >
-          <img src={`${import.meta.env.BASE_URL}favicon-32x32.png`} alt="FloorTrace" className="w-7 h-7" />
+          <svg className="w-7 h-7" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="256" cy="160" r="50" stroke="white" strokeWidth="8" fill="none"/>
+            <circle cx="256" cy="160" r="20" fill="white"/>
+            <line x1="256" y1="110" x2="256" y2="60" stroke="white" strokeWidth="8" strokeLinecap="round"/>
+            <line x1="256" y1="210" x2="150" y2="450" stroke="white" strokeWidth="12" strokeLinecap="round"/>
+            <line x1="256" y1="210" x2="362" y2="450" stroke="white" strokeWidth="12" strokeLinecap="round"/>
+            <line x1="206" y1="290" x2="306" y2="290" stroke="white" strokeWidth="6" strokeLinecap="round"/>
+          </svg>
           <h1 className="text-lg font-semibold text-white tracking-tight">FloorTrace</h1>
         </div>
         <button
