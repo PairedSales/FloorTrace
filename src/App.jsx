@@ -22,8 +22,10 @@ function App() {
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
+  const [sidebarHeight, setSidebarHeight] = useState(0);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
+  const sidebarRef = useRef(null);
 
   // Reset overlays
   const resetOverlays = useCallback(() => {
@@ -462,6 +464,44 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handlePasteImage]);
 
+  // Disable right-click context menu unless text is selected
+  useEffect(() => {
+    const handleContextMenu = (e) => {
+      const selection = window.getSelection();
+      const hasTextSelected = selection && selection.toString().length > 0;
+      
+      if (!hasTextSelected) {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('contextmenu', handleContextMenu);
+    return () => window.removeEventListener('contextmenu', handleContextMenu);
+  }, []);
+
+  // Match Area box height to Sidebar height
+  useEffect(() => {
+    const updateHeight = () => {
+      if (sidebarRef.current) {
+        setSidebarHeight(sidebarRef.current.offsetHeight);
+      }
+    };
+
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    
+    // Use MutationObserver to detect content changes in sidebar
+    const observer = new MutationObserver(updateHeight);
+    if (sidebarRef.current) {
+      observer.observe(sidebarRef.current, { childList: true, subtree: true });
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateHeight);
+      observer.disconnect();
+    };
+  }, [mode, ocrFailed, manualEntryMode, perimeterOverlay]);
+
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Mobile Popup */}
@@ -606,7 +646,7 @@ function App() {
         />
 
         {/* Sidebar overlay (flush to edges) */}
-        <div className="absolute top-0 left-0 z-10 m-0">
+        <div ref={sidebarRef} className="absolute top-0 left-0 z-10 m-0">
           <Sidebar
             roomDimensions={roomDimensions}
             setRoomDimensions={setRoomDimensions}
@@ -632,11 +672,16 @@ function App() {
 
         {/* Area Display Box - positioned to the right of sidebar */}
         <div className="absolute top-0 left-64 z-10 m-0">
-          <div className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48">
-            <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
-            <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-              <div className="text-2xl font-bold text-slate-800">
-                {area > 0 ? Math.round(area).toLocaleString() : '0'} ft²
+          <div 
+            className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-6 self-start"
+            style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
+          >
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
+              <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+                <div className="text-2xl font-bold text-slate-800">
+                  {area > 0 ? Math.round(area).toLocaleString() : '0'} ft²
+                </div>
               </div>
             </div>
           </div>

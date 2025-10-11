@@ -100,8 +100,8 @@ const Sidebar = ({
             </button>
           </div>
         </div>
-        <div className="flex flex-col gap-3">
-          <div>
+        <div className="flex gap-3">
+          <div className="flex-1">
             <label className="block text-xs text-slate-600 mb-1">Width</label>
             <input
               type="text"
@@ -112,7 +112,7 @@ const Sidebar = ({
               placeholder={unit === 'decimal' ? '0.0' : "0' 0\""}
             />
           </div>
-          <div>
+          <div className="flex-1">
             <label className="block text-xs text-slate-600 mb-1">Height</label>
             <input
               type="text"
