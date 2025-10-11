@@ -145,27 +145,17 @@ const Sidebar = ({
         )}
       </div>
 
-      {/* Area Display */}
-      <div>
-        <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
-        <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-          <div className="text-2xl font-bold text-slate-800">
-            {area > 0 ? Math.round(area) : '0'} ft²
-          </div>
-        </div>
+      {/* Enter Dimensions Manually Button */}
+      {showManualEntryButton && (
+        <button
+          onClick={onEnterManually}
+          className="w-full px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm border border-slate-300"
+        >
+          Enter Dimensions Manually
+        </button>
+      )}
 
-        {/* Enter Dimensions Manually Button */}
-        {showManualEntryButton && (
-          <button
-            onClick={onEnterManually}
-            className="mt-3 w-full px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm border border-slate-300"
-          >
-            Enter Dimensions Manually
-          </button>
-        )}
-      </div>
-
-      {/* Exterior Wall Toggle - appears after perimeter is placed */}
+      {/* Exterior Wall Toggle - appears after perimeter is placed */
       {perimeterOverlay && (
         <div>
           <h2 className="text-sm font-semibold text-slate-700 mb-3">Perimeter Options</h2>
