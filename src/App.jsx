@@ -632,11 +632,11 @@ function App() {
 
         {/* Area Display Box - positioned to the right of sidebar */}
         <div className="absolute top-0 left-64 z-10 m-0">
-          <div className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm">
+          <div className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48">
             <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
             <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
               <div className="text-2xl font-bold text-slate-800">
-                {area > 0 ? Math.round(area) : '0'} ft²
+                {area > 0 ? Math.round(area).toLocaleString() : '0'} ft²
               </div>
             </div>
           </div>
