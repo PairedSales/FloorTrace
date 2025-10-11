@@ -145,7 +145,7 @@ const Canvas = forwardRef(({
 
   // Handle room overlay dragging (move entire overlay)
   const handleRoomDragStart = (e) => {
-    if (mode === 'manual' || !roomOverlay) return;
+    if (!roomOverlay || lineToolActive || drawAreaActive) return;
     
     // Only start dragging if clicking on the rectangle itself, not the corners
     if (e.target.getClassName() === 'Rect') {
@@ -185,7 +185,7 @@ const Canvas = forwardRef(({
 
   // Handle room corner dragging (no snapping)
   const handleRoomCornerDrag = (corner, e) => {
-    if (!roomOverlay) return;
+    if (!roomOverlay || lineToolActive || drawAreaActive) return;
     const pos = e.target.getStage().getPointerPosition();
     const currentScale = scaleRef.current;
     const newX = pos.x / currentScale;
@@ -213,12 +213,12 @@ const Canvas = forwardRef(({
 
   // Handle perimeter vertex dragging (no snapping)
   const handleVertexDragStart = (index) => {
-    if (!perimeterOverlay) return;
+    if (!perimeterOverlay || lineToolActive || drawAreaActive) return;
     setDraggingVertex(index);
   };
 
   const handleVertexDrag = (index, e) => {
-    if (!perimeterOverlay || draggingVertex !== index) return;
+    if (!perimeterOverlay || draggingVertex !== index || lineToolActive || drawAreaActive) return;
     const pos = e.target.getStage().getPointerPosition();
     const currentScale = scaleRef.current;
     const currentPoint = { x: pos.x / currentScale, y: pos.y / currentScale };
@@ -232,6 +232,20 @@ const Canvas = forwardRef(({
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     setDraggingVertex(null);
+  };
+
+  // Handle perimeter vertex right-click to delete
+  const handleVertexContextMenu = (index, e) => {
+    e.evt.preventDefault();
+    if (!perimeterOverlay || lineToolActive || drawAreaActive) return;
+    
+    // Don't allow deleting if we only have 3 vertices (minimum for a polygon)
+    if (perimeterOverlay.vertices.length <= 3) {
+      return;
+    }
+    
+    const newVertices = perimeterOverlay.vertices.filter((_, i) => i !== index);
+    onPerimeterUpdate(newVertices);
   };
 
   // Handle custom shape vertex dragging
@@ -267,8 +281,12 @@ const Canvas = forwardRef(({
       return;
     }
     
-    // Perimeter tool - add vertex
+    // Perimeter tool - add vertex (only when no tools are active)
     if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive) return;
+    
+    // Don't add vertex if clicking on an existing element
+    const targetType = e.target.getType();
+    if (targetType !== 'Stage' && targetType !== 'Image' && targetType !== 'Line') return;
     
     const stage = e.target.getStage();
     if (!stage) return;
@@ -398,6 +416,12 @@ const Canvas = forwardRef(({
   
   // Handle right click for line tool or draw area tool
   const handleStageContextMenu = (e) => {
+    // Don't prevent default if clicking on a vertex (handled by vertex context menu)
+    const targetType = e.target.getType();
+    if (targetType === 'Circle') {
+      return; // Let the vertex handle its own context menu
+    }
+    
     e.evt.preventDefault();
     
     if (lineToolActive && onMeasurementLineUpdate) {
@@ -536,7 +560,7 @@ const Canvas = forwardRef(({
           draggable={!draggingRoom && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive}
           onClick={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
           onTap={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
-          onContextMenu={(lineToolActive || drawAreaActive) ? handleStageContextMenu : undefined}
+          onContextMenu={handleStageContextMenu}
           onMouseMove={(lineToolActive || drawAreaActive) ? handleStageMouseMove : undefined}
           onDblClick={handleStageDoubleClick}
           onDblTap={handleStageDoubleClick}
@@ -589,11 +613,11 @@ const Canvas = forwardRef(({
                     fill="#00ff00"
                     stroke="#fff"
                     strokeWidth={2 / scale}
-                    draggable
+                    draggable={!lineToolActive && !drawAreaActive}
                     onDragMove={(e) => handleRoomCornerDrag(handle.corner, e)}
                     onMouseEnter={(e) => {
                       const container = e.target.getStage().container();
-                      container.style.cursor = 'move';
+                      container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
                     }}
                     onMouseLeave={(e) => {
                       const container = e.target.getStage().container();
@@ -635,13 +659,14 @@ const Canvas = forwardRef(({
                     fill="#ff00ff"
                     stroke="#fff"
                     strokeWidth={2 / scale}
-                    draggable
+                    draggable={!lineToolActive && !drawAreaActive}
                     onDragStart={() => handleVertexDragStart(i)}
                     onDragMove={(e) => handleVertexDrag(i, e)}
                     onDragEnd={() => handleVertexDragEnd(i)}
+                    onContextMenu={(e) => handleVertexContextMenu(i, e)}
                     onMouseEnter={(e) => {
                       const container = e.target.getStage().container();
-                      container.style.cursor = 'move';
+                      container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
                     }}
                     onMouseLeave={(e) => {
                       const container = e.target.getStage().container();

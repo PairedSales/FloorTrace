@@ -26,6 +26,16 @@ const Sidebar = ({
   }, [roomDimensions, unit]);
 
   const handleDimensionChange = (field, value) => {
+    // For decimal mode, limit input to 1 decimal place
+    if (unit === 'decimal') {
+      // Allow numbers, decimal point, and basic formatting
+      const decimalPattern = /^(\d*\.?\d{0,1})$/;
+      if (!decimalPattern.test(value) && value !== '') {
+        // If input doesn't match pattern, don't update
+        return;
+      }
+    }
+    
     // Update display value immediately (for typing feedback)
     setDisplayValues(prev => ({ ...prev, [field]: value }));
     
