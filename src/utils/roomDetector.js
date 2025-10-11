@@ -290,7 +290,8 @@ export const detectAllDimensions = async (imageDataUrl) => {
         // For "13' 5\" x 12' 11\"", we want to match words like "13'", "5\"", "x", "12'", "11\""
         const dimensionTokens = parsed.match.split(/\s+/).filter(t => t.length > 0);
         
-        // Search for words that match any token in the dimension text
+        // First pass: find all matching words
+        const matchingWords = [];
         for (const word of words) {
           if (!word.text || !word.bbox) continue;
           
@@ -305,6 +306,47 @@ export const detectAllDimensions = async (imageDataUrl) => {
           });
           
           if (matches) {
+            matchingWords.push(word);
+          }
+        }
+        
+        // Second pass: find the cluster of words that are close together
+        // This prevents matching words from different parts of the image
+        if (matchingWords.length > 0) {
+          // Start with the first matching word
+          let clusterWords = [matchingWords[0]];
+          
+          // Add words that are spatially close (within 100 pixels vertically, 300 pixels horizontally)
+          const maxVerticalDistance = 100;
+          const maxHorizontalDistance = 300;
+          
+          for (let i = 1; i < matchingWords.length; i++) {
+            const word = matchingWords[i];
+            const wordCenterX = (word.bbox.x0 + word.bbox.x1) / 2;
+            const wordCenterY = (word.bbox.y0 + word.bbox.y1) / 2;
+            
+            // Check if this word is close to any word in the cluster
+            let isClose = false;
+            for (const clusterWord of clusterWords) {
+              const clusterCenterX = (clusterWord.bbox.x0 + clusterWord.bbox.x1) / 2;
+              const clusterCenterY = (clusterWord.bbox.y0 + clusterWord.bbox.y1) / 2;
+              
+              const verticalDist = Math.abs(wordCenterY - clusterCenterY);
+              const horizontalDist = Math.abs(wordCenterX - clusterCenterX);
+              
+              if (verticalDist <= maxVerticalDistance && horizontalDist <= maxHorizontalDistance) {
+                isClose = true;
+                break;
+              }
+            }
+            
+            if (isClose) {
+              clusterWords.push(word);
+            }
+          }
+          
+          // Build bbox from clustered words only
+          for (const word of clusterWords) {
             if (!dimensionBBox) {
               dimensionBBox = {
                 x: word.bbox.x0,
@@ -332,6 +374,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
         if (!dimensionBBox) {
           console.log(`detectAllDimensions: ⚠ No bbox found for "${parsed.match}"`);
           console.log(`detectAllDimensions: Tokens to match:`, dimensionTokens);
+          console.log(`detectAllDimensions: Matching words found:`, matchingWords.length);
           console.log(`detectAllDimensions: Available word texts:`, words.slice(0, 10).map(w => w.text));
           console.log(`detectAllDimensions: Creating synthetic bbox`);
           const imageWidth = img.width;
@@ -345,7 +388,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
             height: 50
           };
         } else {
-          console.log(`detectAllDimensions: ✓ Found bbox at (${dimensionBBox.x}, ${dimensionBBox.y}), size: ${dimensionBBox.width}x${dimensionBBox.height}`);
+          console.log(`detectAllDimensions: ✓ Found bbox at (${Math.round(dimensionBBox.x)}, ${Math.round(dimensionBBox.y)}), size: ${Math.round(dimensionBBox.width)}x${Math.round(dimensionBBox.height)}`);
         }
         
         dimensions.push({
