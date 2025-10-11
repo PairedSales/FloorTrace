@@ -41,6 +41,13 @@ const Canvas = forwardRef(({
   // Wall lines and intersection points removed - snapping disabled
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
+  
+  // Mobile touch gesture state
+  const [longPressTimer, setLongPressTimer] = useState(null);
+  const [touchStartPos, setTouchStartPos] = useState(null);
+  const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
+  const touchMoveThreshold = 10; // pixels to distinguish tap from drag
+  const longPressDelay = 500; // milliseconds for long press
 
   // Fit to window function
   const fitToWindow = () => {
@@ -217,6 +224,14 @@ const Canvas = forwardRef(({
     
     const newVertices = perimeterOverlay.vertices.filter((_, i) => i !== index);
     onPerimeterUpdate(newVertices);
+  };
+  
+  // Delete perimeter vertex (for mobile)
+  const deletePerimeterVertex = (index) => {
+    if (!perimeterOverlay || perimeterOverlay.vertices.length <= 3) return;
+    const newVertices = perimeterOverlay.vertices.filter((_, i) => i !== index);
+    onPerimeterUpdate(newVertices);
+    setShowDeleteOption(null);
   };
 
   // Handle custom shape vertex dragging
@@ -471,6 +486,121 @@ const Canvas = forwardRef(({
   };
   
 
+  // Mobile touch handlers
+  const handleTouchStart = (e) => {
+    if (!isMobile) return;
+    
+    const stage = e.target.getStage();
+    if (!stage) return;
+    
+    const canvasPos = getCanvasCoordinates(stage);
+    
+    setTouchStartPos(canvasPos);
+    
+    // Check if touching a vertex (for long press delete)
+    const targetType = e.target.getType();
+    
+    // Dismiss delete option if tapping elsewhere (not on delete button or vertex)
+    if (showDeleteOption !== null && targetType !== 'Circle' && targetType !== 'Text') {
+      setShowDeleteOption(null);
+      return;
+    }
+    
+    if (targetType === 'Circle' && perimeterOverlay) {
+      // Find which vertex was touched
+      const vertices = perimeterOverlay.vertices;
+      for (let i = 0; i < vertices.length; i++) {
+        const vertex = vertices[i];
+        const dx = canvasPos.x - vertex.x;
+        const dy = canvasPos.y - vertex.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < 15 / scaleRef.current) {
+          // Start long press timer for delete
+          const timer = setTimeout(() => {
+            setShowDeleteOption(i);
+          }, longPressDelay);
+          setLongPressTimer(timer);
+          return;
+        }
+      }
+    }
+    
+    // Check if touching canvas/image for long press to add vertex
+    if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
+        perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
+      const timer = setTimeout(() => {
+        // Add vertex at touch position
+        const vertices = perimeterOverlay.vertices;
+        let closestEdgeIndex = 0;
+        let minDistance = Infinity;
+        
+        for (let i = 0; i < vertices.length; i++) {
+          const v1 = vertices[i];
+          const v2 = vertices[(i + 1) % vertices.length];
+          const distance = pointToLineDistance(canvasPos, v1, v2);
+          
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestEdgeIndex = i;
+          }
+        }
+        
+        const newVertices = [...vertices];
+        newVertices.splice(closestEdgeIndex + 1, 0, canvasPos);
+        onPerimeterUpdate(newVertices);
+        
+        // Provide haptic feedback if available
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+      }, longPressDelay);
+      setLongPressTimer(timer);
+    }
+  };
+  
+  const handleTouchMove = (e) => {
+    if (!isMobile) return;
+    
+    const stage = e.target.getStage();
+    if (!stage) return;
+    
+    const canvasPos = getCanvasCoordinates(stage);
+    
+    // Cancel long press if moved too much
+    if (longPressTimer && touchStartPos) {
+      const dx = canvasPos.x - touchStartPos.x;
+      const dy = canvasPos.y - touchStartPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > touchMoveThreshold / scaleRef.current) {
+        clearTimeout(longPressTimer);
+        setLongPressTimer(null);
+      }
+    }
+  };
+  
+  const handleTouchEnd = () => {
+    if (!isMobile) return;
+    
+    // Clear long press timer
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+    
+    setTouchStartPos(null);
+  };
+  
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+      }
+    };
+  }, [longPressTimer]);
+
   // Handle zoom
   const handleWheel = (e) => {
     e.evt.preventDefault();
@@ -573,6 +703,9 @@ const Canvas = forwardRef(({
           onMouseUp={handleStageMouseUp}
           onDblClick={handleStageDoubleClick}
           onDblTap={handleStageDoubleClick}
+          onTouchStart={isMobile ? handleTouchStart : undefined}
+          onTouchMove={isMobile ? handleTouchMove : undefined}
+          onTouchEnd={isMobile ? handleTouchEnd : undefined}
           style={{ cursor: 'default' }}
         >
           <Layer>
@@ -616,6 +749,7 @@ const Canvas = forwardRef(({
                   strokeWidth={2 / scale}
                   fill="rgba(0, 255, 0, 0.1)"
                   onMouseDown={handleRoomMouseDown}
+                  onTouchStart={isMobile ? handleRoomMouseDown : undefined}
                   onMouseEnter={(e) => {
                     if (!lineToolActive && !drawAreaActive) {
                       const container = e.target.getStage().container();
@@ -646,11 +780,12 @@ const Canvas = forwardRef(({
                       key={i}
                       x={handle.x}
                       y={handle.y}
-                      radius={6 / scale}
+                      radius={isMobile ? 12 / scale : 6 / scale}
                       fill="#00ff00"
                       stroke="#fff"
                       strokeWidth={2 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
+                      onTouchStart={isMobile ? (e) => handleRoomCornerMouseDown(handle.corner, e) : undefined}
                       onMouseEnter={(e) => {
                         if (!lineToolActive && !drawAreaActive) {
                           const container = e.target.getStage().container();
@@ -671,28 +806,59 @@ const Canvas = forwardRef(({
             {perimeterOverlay && perimeterOverlay.vertices && (
               <>
                 {perimeterOverlay.vertices.map((vertex, i) => (
-                  <Circle
-                    key={i}
-                    x={vertex.x}
-                    y={vertex.y}
-                    radius={6 / scale}
-                    fill="#ff00ff"
-                    stroke="#fff"
-                    strokeWidth={2 / scale}
-                    draggable={!lineToolActive && !drawAreaActive}
-                    onDragStart={() => handleVertexDragStart(i)}
-                    onDragMove={(e) => handleVertexDrag(i, e)}
-                    onDragEnd={() => handleVertexDragEnd(i)}
-                    onContextMenu={(e) => handleVertexContextMenu(i, e)}
-                    onMouseEnter={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
-                    }}
-                    onMouseLeave={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = 'default';
-                    }}
-                  />
+                  <React.Fragment key={i}>
+                    <Circle
+                      x={vertex.x}
+                      y={vertex.y}
+                      radius={isMobile ? 12 / scale : 6 / scale}
+                      fill="#ff00ff"
+                      stroke="#fff"
+                      strokeWidth={2 / scale}
+                      draggable={!lineToolActive && !drawAreaActive}
+                      onDragStart={() => handleVertexDragStart(i)}
+                      onDragMove={(e) => handleVertexDrag(i, e)}
+                      onDragEnd={() => handleVertexDragEnd(i)}
+                      onContextMenu={(e) => handleVertexContextMenu(i, e)}
+                      onMouseEnter={(e) => {
+                        const container = e.target.getStage().container();
+                        container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
+                      }}
+                      onMouseLeave={(e) => {
+                        const container = e.target.getStage().container();
+                        container.style.cursor = 'default';
+                      }}
+                    />
+                    
+                    {/* Delete button for mobile long press */}
+                    {isMobile && showDeleteOption === i && (
+                      <>
+                        <Circle
+                          x={vertex.x}
+                          y={vertex.y - 30 / scale}
+                          radius={15 / scale}
+                          fill="#ef4444"
+                          stroke="#fff"
+                          strokeWidth={2 / scale}
+                          onClick={() => deletePerimeterVertex(i)}
+                          onTap={() => deletePerimeterVertex(i)}
+                        />
+                        <Text
+                          x={vertex.x}
+                          y={vertex.y - 30 / scale}
+                          text="×"
+                          fontSize={20 / scale}
+                          fill="#fff"
+                          fontStyle="bold"
+                          align="center"
+                          verticalAlign="middle"
+                          offsetX={6 / scale}
+                          offsetY={10 / scale}
+                          onClick={() => deletePerimeterVertex(i)}
+                          onTap={() => deletePerimeterVertex(i)}
+                        />
+                      </>
+                    )}
+                  </React.Fragment>
                 ))}
 
                 {/* Side Length Labels */}
