@@ -225,12 +225,15 @@ function App() {
         
         console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
         
+        console.log('Manual Mode - Dimensions received:', dimensions.length);
         setDetectedDimensions(dimensions);
         
         if (dimensions.length === 0) {
           // OCR failed - enter manual entry mode
           setOcrFailed(true);
         } else {
+          // OCR succeeded - clear the failed flag
+          setOcrFailed(false);
           // Auto-switch unit based on detected format
           if (detectedFormat && unit !== detectedFormat) {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);

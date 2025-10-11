@@ -389,6 +389,8 @@ export const detectAllDimensions = async (imageDataUrl) => {
           };
         } else {
           console.log(`detectAllDimensions: ✓ Found bbox at (${Math.round(dimensionBBox.x)}, ${Math.round(dimensionBBox.y)}), size: ${Math.round(dimensionBBox.width)}x${Math.round(dimensionBBox.height)}`);
+          console.log(`detectAllDimensions: Image dimensions: ${img.width}x${img.height}`);
+          console.log(`detectAllDimensions: Bbox relative position: ${(dimensionBBox.x / img.width * 100).toFixed(1)}% x, ${(dimensionBBox.y / img.height * 100).toFixed(1)}% y`);
         }
         
         dimensions.push({
