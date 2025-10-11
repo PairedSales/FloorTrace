@@ -75,8 +75,10 @@ const Sidebar = ({
       {/* Room Dimensions Section */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-700">Room Dimensions</h2>
-          <div className="flex gap-1">
+          <div className="flex items-center justify-center flex-1">
+            <h2 className="text-sm font-semibold text-slate-700">Room Dimensions</h2>
+          </div>
+          <div className="flex items-center justify-center flex-1 gap-1">
             <button
               onClick={() => onUnitChange('decimal')}
               className={`px-2 py-1 text-xs font-medium rounded transition-colors duration-200 ${

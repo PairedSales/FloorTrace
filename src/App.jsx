@@ -512,6 +512,14 @@ function App() {
           >
             Load Image
           </button>
+
+          <button
+            onClick={handleSaveImage}
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
+            disabled={!image}
+          >
+            Save Image
+          </button>
         </div>
         
         {/* Center Group */}
@@ -553,14 +561,6 @@ function App() {
             disabled={!image}
           >
             Fit to Window
-          </button>
-
-          <button
-            onClick={handleSaveImage}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={!image}
-          >
-            Save Image
           </button>
 
           {/* Show Side Lengths Toggle */}
