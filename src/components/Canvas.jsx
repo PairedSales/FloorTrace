@@ -34,6 +34,7 @@ const Canvas = forwardRef(({
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
+  const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
   const [draggingCustomVertex, setDraggingCustomVertex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
   // Wall lines and intersection points removed - snapping disabled
@@ -158,68 +159,27 @@ const Canvas = forwardRef(({
   };
 
   // Handle room overlay dragging (move entire overlay)
-  const handleRoomDragStart = (e) => {
+  const handleRoomMouseDown = (e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
     
-    // Only start dragging if clicking on the rectangle itself, not the corners
-    if (e.target.getClassName() === 'Rect') {
-      setDraggingRoom(true);
-      const canvasPos = getCanvasCoordinates(e.target.getStage());
-      if (canvasPos) {
-        setRoomStart(canvasPos);
-      }
-      e.cancelBubble = true;
-    }
-  };
-
-  const handleRoomDrag = (e) => {
-    if (!draggingRoom || !roomStart) return;
+    e.cancelBubble = true;
+    e.evt.preventDefault();
+    
+    setDraggingRoom(true);
     const canvasPos = getCanvasCoordinates(e.target.getStage());
-    if (!canvasPos) return;
-    
-    const deltaX = canvasPos.x - roomStart.x;
-    const deltaY = canvasPos.y - roomStart.y;
-    
-    const newOverlay = {
-      x1: roomOverlay.x1 + deltaX,
-      y1: roomOverlay.y1 + deltaY,
-      x2: roomOverlay.x2 + deltaX,
-      y2: roomOverlay.y2 + deltaY
-    };
-    
-    onRoomOverlayUpdate(newOverlay);
-    setRoomStart(canvasPos);
-  };
-
-  const handleRoomDragEnd = () => {
-    setDraggingRoom(false);
-    setRoomStart(null);
+    if (canvasPos) {
+      setRoomStart(canvasPos);
+    }
   };
 
   // Handle room corner dragging (no snapping)
-  const handleRoomCornerDrag = (corner, e) => {
+  const handleRoomCornerMouseDown = (corner, e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
-    const canvasPos = getCanvasCoordinates(e.target.getStage());
-    if (!canvasPos) return;
     
-    const newOverlay = { ...roomOverlay };
+    e.cancelBubble = true;
+    e.evt.preventDefault();
     
-    // Update overlay with raw positions (no snapping)
-    if (corner === 'tl') {
-      newOverlay.x1 = canvasPos.x;
-      newOverlay.y1 = canvasPos.y;
-    } else if (corner === 'tr') {
-      newOverlay.x2 = canvasPos.x;
-      newOverlay.y1 = canvasPos.y;
-    } else if (corner === 'bl') {
-      newOverlay.x1 = canvasPos.x;
-      newOverlay.y2 = canvasPos.y;
-    } else if (corner === 'br') {
-      newOverlay.x2 = canvasPos.x;
-      newOverlay.y2 = canvasPos.y;
-    }
-    
-    onRoomOverlayUpdate(newOverlay);
+    setDraggingRoomCorner(corner);
   };
 
   // Handle perimeter vertex dragging (no snapping)
@@ -358,6 +318,75 @@ const Canvas = forwardRef(({
     return Math.sqrt(dpx * dpx + dpy * dpy);
   };
 
+  // Handle global mouse move for dragging
+  const handleStageMouseMove = (e) => {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    
+    const mousePoint = getCanvasCoordinates(stage);
+    if (!mousePoint) return;
+    
+    setCurrentMousePos(mousePoint);
+    
+    // Handle room overlay dragging
+    if (draggingRoom && roomStart) {
+      const deltaX = mousePoint.x - roomStart.x;
+      const deltaY = mousePoint.y - roomStart.y;
+      
+      const newOverlay = {
+        x1: roomOverlay.x1 + deltaX,
+        y1: roomOverlay.y1 + deltaY,
+        x2: roomOverlay.x2 + deltaX,
+        y2: roomOverlay.y2 + deltaY
+      };
+      
+      onRoomOverlayUpdate(newOverlay);
+      setRoomStart(mousePoint);
+      return;
+    }
+    
+    // Handle room corner dragging
+    if (draggingRoomCorner && roomOverlay) {
+      const newOverlay = { ...roomOverlay };
+      
+      if (draggingRoomCorner === 'tl') {
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
+      } else if (draggingRoomCorner === 'tr') {
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
+      } else if (draggingRoomCorner === 'bl') {
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
+      } else if (draggingRoomCorner === 'br') {
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
+      }
+      
+      onRoomOverlayUpdate(newOverlay);
+      return;
+    }
+    
+    // Line tool preview
+    if (lineToolActive && measurementLine && measurementLine.start && onMeasurementLineUpdate) {
+      onMeasurementLineUpdate({
+        start: measurementLine.start,
+        end: mousePoint
+      });
+    }
+  };
+  
+  // Handle global mouse up
+  const handleStageMouseUp = () => {
+    if (draggingRoom) {
+      setDraggingRoom(false);
+      setRoomStart(null);
+    }
+    if (draggingRoomCorner) {
+      setDraggingRoomCorner(null);
+    }
+  };
+
   // Handle stage click for manual entry mode, line tool, or draw area tool
   const handleStageClick = (e) => {
     // Manual entry mode takes priority
@@ -440,24 +469,6 @@ const Canvas = forwardRef(({
     }
   };
   
-  // Handle mouse move for line tool or draw area tool preview
-  const handleStageMouseMove = (e) => {
-    const stage = e.target.getStage();
-    if (!stage) return;
-    
-    const mousePoint = getCanvasCoordinates(stage);
-    if (!mousePoint) return;
-    
-    setCurrentMousePos(mousePoint);
-    
-    // Line tool
-    if (lineToolActive && measurementLine && measurementLine.start && onMeasurementLineUpdate) {
-      onMeasurementLineUpdate({
-        start: measurementLine.start,
-        end: mousePoint
-      });
-    }
-  };
 
   // Handle zoom
   const handleWheel = (e) => {
@@ -525,7 +536,7 @@ const Canvas = forwardRef(({
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-white">
+    <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
@@ -551,13 +562,15 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive}
+          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive}
           onClick={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
           onTap={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
           onContextMenu={handleStageContextMenu}
-          onMouseMove={(lineToolActive || drawAreaActive) ? handleStageMouseMove : undefined}
+          onMouseMove={handleStageMouseMove}
+          onMouseUp={handleStageMouseUp}
           onDblClick={handleStageDoubleClick}
           onDblTap={handleStageDoubleClick}
+          style={{ cursor: 'default' }}
         >
           <Layer>
             {/* Main Image */}
@@ -567,7 +580,28 @@ const Canvas = forwardRef(({
               y={0}
             />
             
-            {/* Room Overlay */}
+            {/* Perimeter Overlay - Line only (lowest z-index for overlays) */}
+            {perimeterOverlay && perimeterOverlay.vertices && (
+              <Line
+                points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
+                stroke="#ff00ff"
+                strokeWidth={2 / scale}
+                closed={true}
+                fill="rgba(255, 0, 255, 0.1)"
+                onDblClick={handleStageDoubleClick}
+                onDblTap={handleStageDoubleClick}
+                onMouseEnter={(e) => {
+                  const container = e.target.getStage().container();
+                  container.style.cursor = 'crosshair';
+                }}
+                onMouseLeave={(e) => {
+                  const container = e.target.getStage().container();
+                  container.style.cursor = 'default';
+                }}
+              />
+            )}
+            
+            {/* Room Overlay - Render above perimeter line but below perimeter vertices */}
             {roomOverlay && (
               <>
                 <Rect
@@ -578,13 +612,12 @@ const Canvas = forwardRef(({
                   stroke="#00ff00"
                   strokeWidth={2 / scale}
                   fill="rgba(0, 255, 0, 0.1)"
-                  draggable
-                  onDragStart={handleRoomDragStart}
-                  onDragMove={handleRoomDrag}
-                  onDragEnd={handleRoomDragEnd}
+                  onMouseDown={handleRoomMouseDown}
                   onMouseEnter={(e) => {
-                    const container = e.target.getStage().container();
-                    container.style.cursor = 'move';
+                    if (!lineToolActive && !drawAreaActive) {
+                      const container = e.target.getStage().container();
+                      container.style.cursor = 'move';
+                    }
                   }}
                   onMouseLeave={(e) => {
                     const container = e.target.getStage().container();
@@ -598,52 +631,42 @@ const Canvas = forwardRef(({
                   { x: roomOverlay.x2, y: roomOverlay.y1, corner: 'tr' },
                   { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
                   { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
-                ].map((handle, i) => (
-                  <Circle
-                    key={i}
-                    x={handle.x}
-                    y={handle.y}
-                    radius={6 / scale}
-                    fill="#00ff00"
-                    stroke="#fff"
-                    strokeWidth={2 / scale}
-                    draggable={!lineToolActive && !drawAreaActive}
-                    onDragMove={(e) => handleRoomCornerDrag(handle.corner, e)}
-                    onMouseEnter={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
-                    }}
-                    onMouseLeave={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = 'default';
-                    }}
-                  />
-                ))}
+                ].map((handle, i) => {
+                  // Determine cursor based on corner position
+                  let resizeCursor = 'nwse-resize';
+                  if (handle.corner === 'tr' || handle.corner === 'bl') {
+                    resizeCursor = 'nesw-resize';
+                  }
+                  
+                  return (
+                    <Circle
+                      key={i}
+                      x={handle.x}
+                      y={handle.y}
+                      radius={6 / scale}
+                      fill="#00ff00"
+                      stroke="#fff"
+                      strokeWidth={2 / scale}
+                      onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
+                      onMouseEnter={(e) => {
+                        if (!lineToolActive && !drawAreaActive) {
+                          const container = e.target.getStage().container();
+                          container.style.cursor = resizeCursor;
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        const container = e.target.getStage().container();
+                        container.style.cursor = 'default';
+                      }}
+                    />
+                  );
+                })}
               </>
             )}
             
-            {/* Perimeter Overlay */}
+            {/* Perimeter Vertices - Render last (highest z-index for interaction priority) */}
             {perimeterOverlay && perimeterOverlay.vertices && (
               <>
-                <Line
-                  points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
-                  stroke="#ff00ff"
-                  strokeWidth={2 / scale}
-                  closed={true}
-                  fill="rgba(255, 0, 255, 0.1)"
-                  onDblClick={handleStageDoubleClick}
-                  onDblTap={handleStageDoubleClick}
-                  onMouseEnter={(e) => {
-                    const container = e.target.getStage().container();
-                    container.style.cursor = 'crosshair';
-                  }}
-                  onMouseLeave={(e) => {
-                    const container = e.target.getStage().container();
-                    container.style.cursor = 'default';
-                  }}
-                />
-                
-                {/* Perimeter Vertices */}
                 {perimeterOverlay.vertices.map((vertex, i) => (
                   <Circle
                     key={i}
