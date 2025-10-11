@@ -5,7 +5,6 @@ const Sidebar = ({
   roomDimensions, 
   onDimensionsChange, 
   mode, 
-  ocrFailed, 
   manualEntryMode,
   detectedDimensions,
   onEnterManually,
@@ -65,16 +64,8 @@ const Sidebar = ({
     }
   };
 
-  // Show "Enter Dimensions Manually" button when:
-  // - In manual mode AND
-  // - OCR succeeded (detected dimensions exist) AND
-  // - Not already in manual entry mode AND
-  // - No overlays placed yet
-  const showManualEntryButton = mode === 'manual' && 
-                                 !ocrFailed && 
-                                 detectedDimensions && 
-                                 detectedDimensions.length > 0 && 
-                                 !manualEntryMode;
+  // Always show manual entry option in manual mode when not already in manual entry mode
+  const showManualEntryButton = mode === 'manual' && !manualEntryMode;
 
   return (
     <div className="w-64 bg-slate-50 border border-t-0 border-slate-200 p-4 flex flex-col gap-6 self-start shadow-sm">
@@ -132,32 +123,40 @@ const Sidebar = ({
           </div>
         </div>
 
-        {/* Instructions when OCR failed */}
-        {ocrFailed && !manualEntryMode && (
-          <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-md">
-            <p className="text-xs text-orange-800 font-medium">
-              No dimensions detected. Enter dimensions above and click on the room to place overlays.
+        {/* Instructions for manual mode */}
+        {mode === 'manual' && !manualEntryMode && detectedDimensions && detectedDimensions.length > 0 && (
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-xs text-blue-800 font-medium">
+              Click on a detected dimension or use the button below to enter manually.
+            </p>
+          </div>
+        )}
+        
+        {mode === 'manual' && !manualEntryMode && (!detectedDimensions || detectedDimensions.length === 0) && (
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-xs text-blue-800 font-medium">
+              No dimensions detected. Enter dimensions above and use the button below.
             </p>
           </div>
         )}
 
         {/* Instructions when in manual entry mode */}
         {manualEntryMode && (
-          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-xs text-blue-800 font-medium">
+          <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+            <p className="text-xs text-green-800 font-medium">
               Click on the canvas to place overlays.
             </p>
           </div>
         )}
       </div>
 
-      {/* Enter Dimensions Manually Button */}
+      {/* Enter Dimensions Manually Button - Always available in manual mode */}
       {showManualEntryButton && (
         <button
           onClick={onEnterManually}
-          className="w-full px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm border border-slate-300"
+          className="w-full px-4 py-2 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-md transition-colors duration-200 shadow-sm"
         >
-          Enter Dimensions Manually
+          Place Overlays on Canvas
         </button>
       )}
     </div>

@@ -35,12 +35,12 @@ const MobileUI = forwardRef(({
   roomDimensions,
   setRoomDimensions,
   setUnit,
-  ocrFailed,
   handleLineToolToggle,
   handleDrawAreaToggle,
   setShowSideLengths,
   useInteriorWalls,
-  handleInteriorWallToggle
+  handleInteriorWallToggle,
+  handleEnterManually
 }, ref) => {
   return (
     <div className="flex flex-col h-screen bg-white">
@@ -225,20 +225,38 @@ const MobileUI = forwardRef(({
               </div>
             </div>
 
-            {ocrFailed && !manualEntryMode && (
-              <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                <p className="text-xs text-orange-800 font-medium">
-                  No dimensions detected. Enter dimensions above and tap on the room to place overlays.
+            {mode === 'manual' && !manualEntryMode && detectedDimensions && detectedDimensions.length > 0 && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-800 font-medium">
+                  Tap on a detected dimension or use the button below to enter manually.
+                </p>
+              </div>
+            )}
+            
+            {mode === 'manual' && !manualEntryMode && (!detectedDimensions || detectedDimensions.length === 0) && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-800 font-medium">
+                  No dimensions detected. Enter dimensions above and use the button below.
                 </p>
               </div>
             )}
 
             {manualEntryMode && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-800 font-medium">
+              <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-xs text-green-800 font-medium">
                   Tap on the canvas to place overlays.
                 </p>
               </div>
+            )}
+            
+            {/* Place Overlays Button - Always available in manual mode */}
+            {mode === 'manual' && !manualEntryMode && (
+              <button
+                onClick={handleEnterManually}
+                className="w-full mt-3 px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm"
+              >
+                Place Overlays on Canvas
+              </button>
             )}
           </div>
 

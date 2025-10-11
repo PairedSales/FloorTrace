@@ -576,7 +576,7 @@ function App() {
         roomDimensions={roomDimensions}
         setRoomDimensions={setRoomDimensions}
         setUnit={setUnit}
-        ocrFailed={ocrFailed}
+        handleEnterManually={handleEnterManually}
         handleLineToolToggle={handleLineToolToggle}
         handleDrawAreaToggle={handleDrawAreaToggle}
         setShowSideLengths={setShowSideLengths}
@@ -699,7 +699,6 @@ function App() {
               }
             }}
             mode={mode}
-            ocrFailed={ocrFailed}
             manualEntryMode={manualEntryMode}
             detectedDimensions={detectedDimensions}
             onEnterManually={handleEnterManually}
