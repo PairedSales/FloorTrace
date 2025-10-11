@@ -68,7 +68,7 @@ export const detectRoom = async (imageDataUrl) => {
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
     });
     
-    const result = await worker.recognize(canvas, {}, { blocks: true });
+    const result = await worker.recognize(canvas);
     await worker.terminate();
     
     // Parse text for room dimensions (scan left-to-right, top-to-bottom)
@@ -208,7 +208,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
     });
     
-    const result = await worker.recognize(canvas, {}, { blocks: true });
+    const result = await worker.recognize(canvas);
     await worker.terminate();
     
     console.log('detectAllDimensions: OCR complete');
