@@ -24,6 +24,11 @@ function App() {
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
+  
+  // Debug: Log unit changes
+  useEffect(() => {
+    console.log('Unit state changed to:', unit);
+  }, [unit]);
   const [sidebarHeight, setSidebarHeight] = useState(0);
   const [lineToolActive, setLineToolActive] = useState(false);
   const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
@@ -113,6 +118,7 @@ function App() {
           if (unit !== result.detectedFormat) {
             console.log(`Find Room - Auto-switching unit from ${unit} to ${result.detectedFormat}`);
             setUnit(result.detectedFormat);
+            console.log('Find Room - setUnit called with:', result.detectedFormat);
           } else {
             console.log('Find Room - Unit already matches, no switch needed');
           }
@@ -222,6 +228,7 @@ function App() {
           if (detectedFormat && unit !== detectedFormat) {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
+            console.log('Manual Mode - setUnit called with:', detectedFormat);
           } else {
             console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
           }

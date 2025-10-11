@@ -218,16 +218,14 @@ export const detectAllDimensions = async (imageDataUrl) => {
     console.log('detectAllDimensions: OCR complete');
     console.log('detectAllDimensions: Raw text:', result.data.text);
     console.log('detectAllDimensions: Available keys:', Object.keys(result.data));
-    console.log('detectAllDimensions: Full result structure:', result);
-    console.log('detectAllDimensions: Words array exists:', !!result.data.words);
-    if (result.data.words) {
-      console.log('detectAllDimensions: Number of words:', result.data.words.length);
-    }
-    // Check for lines with word data
-    if (result.data.lines) {
-      console.log('detectAllDimensions: Lines array exists with', result.data.lines.length, 'lines');
-      if (result.data.lines[0] && result.data.lines[0].words) {
-        console.log('detectAllDimensions: Words nested in lines');
+    console.log('detectAllDimensions: Blocks exists:', !!result.data.blocks);
+    if (result.data.blocks) {
+      console.log('detectAllDimensions: Number of blocks:', result.data.blocks.length);
+      if (result.data.blocks[0]) {
+        console.log('detectAllDimensions: First block structure:', {
+          hasParagraphs: !!result.data.blocks[0].paragraphs,
+          paragraphCount: result.data.blocks[0].paragraphs?.length
+        });
       }
     }
     
@@ -245,12 +243,17 @@ export const detectAllDimensions = async (imageDataUrl) => {
     let words = [];
     if (result.data.blocks) {
       console.log('detectAllDimensions: Extracting words from blocks structure');
+      let blockCount = 0, paragraphCount = 0, lineCount = 0;
       for (const block of result.data.blocks) {
+        blockCount++;
         if (block.paragraphs) {
           for (const paragraph of block.paragraphs) {
+            paragraphCount++;
             if (paragraph.lines) {
               for (const line of paragraph.lines) {
+                lineCount++;
                 if (line.words) {
+                  console.log(`detectAllDimensions: Line ${lineCount} has ${line.words.length} words`);
                   words.push(...line.words);
                 }
               }
@@ -258,6 +261,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
           }
         }
       }
+      console.log(`detectAllDimensions: Traversed ${blockCount} blocks, ${paragraphCount} paragraphs, ${lineCount} lines`);
+    } else {
+      console.error('detectAllDimensions: result.data.blocks is undefined! Blocks output not enabled.');
     }
     console.log('detectAllDimensions: Words extracted:', words.length);
     
