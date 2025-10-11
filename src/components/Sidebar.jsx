@@ -11,7 +11,10 @@ const Sidebar = ({
   detectedDimensions,
   onEnterManually,
   unit,
-  onUnitChange
+  onUnitChange,
+  perimeterOverlay,
+  useInteriorWalls,
+  onInteriorWallToggle
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -159,6 +162,30 @@ const Sidebar = ({
           </button>
         )}
       </div>
+
+      {/* Exterior Wall Toggle - appears after perimeter is placed */}
+      {perimeterOverlay && (
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">Perimeter Options</h2>
+          <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Exterior Walls</span>
+              <button
+                onClick={() => onInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                  !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                    !useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sidebar ends after Area section */}
     </div>
