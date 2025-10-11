@@ -23,6 +23,10 @@ function App() {
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
   const [sidebarHeight, setSidebarHeight] = useState(0);
+  const [lineToolActive, setLineToolActive] = useState(false);
+  const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
+  const [drawAreaActive, setDrawAreaActive] = useState(false);
+  const [customShape, setCustomShape] = useState(null); // { vertices: [{x, y}], closed: boolean }
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -39,6 +43,10 @@ function App() {
     setLineData(null);
     setManualEntryMode(false);
     setOcrFailed(false);
+    setLineToolActive(false);
+    setMeasurementLine(null);
+    setDrawAreaActive(false);
+    setCustomShape(null);
   }, []);
 
   // Handle file upload
@@ -263,6 +271,18 @@ function App() {
     if (canvasRef.current) {
       canvasRef.current.fitToWindow();
     }
+  };
+
+  // Handle line tool toggle
+  const handleLineToolToggle = () => {
+    setLineToolActive(!lineToolActive);
+    setMeasurementLine(null); // Clear any existing line
+  };
+
+  // Handle draw area tool toggle
+  const handleDrawAreaToggle = () => {
+    setDrawAreaActive(!drawAreaActive);
+    setCustomShape(null); // Clear any existing shape
   };
 
   // Handle save image (screenshot entire app)
@@ -602,25 +622,6 @@ function App() {
           >
             Fit to Window
           </button>
-
-          {/* Show Side Lengths Toggle */}
-          {perimeterOverlay && (
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-700">Show Lengths</span>
-              <button
-                onClick={() => setShowSideLengths(!showSideLengths)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
-                  showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                    showSideLengths ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -643,6 +644,12 @@ function App() {
           manualEntryMode={manualEntryMode}
           onCanvasClick={handleCanvasClick}
           unit={unit}
+          lineToolActive={lineToolActive}
+          measurementLine={measurementLine}
+          onMeasurementLineUpdate={setMeasurementLine}
+          drawAreaActive={drawAreaActive}
+          customShape={customShape}
+          onCustomShapeUpdate={setCustomShape}
         />
 
         {/* Sidebar overlay (flush to edges) */}
@@ -664,9 +671,6 @@ function App() {
             onEnterManually={handleEnterManually}
             unit={unit}
             onUnitChange={setUnit}
-            perimeterOverlay={perimeterOverlay}
-            useInteriorWalls={useInteriorWalls}
-            onInteriorWallToggle={handleInteriorWallToggle}
           />
         </div>
 
@@ -686,6 +690,95 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* Measurement Options Panel - positioned to the right of area box, only visible when scale is known */}
+        {scale > 1 && (
+          <div className="absolute top-0 left-[28rem] z-10 m-0">
+            <div 
+              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-56 flex flex-col gap-4 self-start"
+              style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
+            >
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700 mb-3">Measurement Options</h2>
+                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-4">
+                  
+                  {/* Line Tool Toggle */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-700">Line Tool</span>
+                    <button
+                      onClick={handleLineToolToggle}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                        lineToolActive ? 'bg-slate-700' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          lineToolActive ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Draw Area Tool Toggle */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-700">Draw Area</span>
+                    <button
+                      onClick={handleDrawAreaToggle}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                        drawAreaActive ? 'bg-slate-700' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          drawAreaActive ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Show Side Lengths Toggle - only when perimeter exists */}
+                  {perimeterOverlay && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">Show Lengths</span>
+                      <button
+                        onClick={() => setShowSideLengths(!showSideLengths)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                          showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                            showSideLengths ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Exterior Walls Toggle - only when perimeter exists */}
+                  {perimeterOverlay && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">Exterior Walls</span>
+                      <button
+                        onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                          !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                            !useInteriorWalls ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Hidden file input */}
