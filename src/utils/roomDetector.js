@@ -69,7 +69,8 @@ export const detectRoom = async (imageDataUrl) => {
         workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
         corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
-      }
+      },
+      { blocks: true } // Enable blocks output for word-level bounding boxes in v6
     );
     
     // Parse text for room dimensions (scan left-to-right, top-to-bottom)
@@ -86,8 +87,23 @@ export const detectRoom = async (imageDataUrl) => {
         firstDimension = parsed;
         
         // Find the bounding box for this dimension in the OCR result
-        // In Tesseract.js v6, words array is nested in result.data
-        const words = result.data.words || [];
+        // In Tesseract.js v6, extract words from blocks structure
+        let words = [];
+        if (result.data.blocks) {
+          for (const block of result.data.blocks) {
+            if (block.paragraphs) {
+              for (const paragraph of block.paragraphs) {
+                if (paragraph.lines) {
+                  for (const line of paragraph.lines) {
+                    if (line.words) {
+                      words.push(...line.words);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
         for (const word of words) {
           if (word.text && parsed.match.includes(word.text.replace(/\s/g, ''))) {
             if (!dimensionBBox) {
@@ -195,7 +211,8 @@ export const detectAllDimensions = async (imageDataUrl) => {
         workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/worker.min.js',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
         corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core.wasm.js'
-      }
+      },
+      { blocks: true } // Enable blocks output for word-level bounding boxes in v6
     );
     
     console.log('detectAllDimensions: OCR complete');
@@ -224,14 +241,25 @@ export const detectAllDimensions = async (imageDataUrl) => {
     let detectedFormat = null; // Track the first detected format
     
     // Get words array for bounding box lookup
-    // In Tesseract.js v6, words might be nested in lines
-    let words = result.data.words || [];
-    if (words.length === 0 && result.data.lines) {
-      // Extract words from lines
-      words = result.data.lines.flatMap(line => line.words || []);
-      console.log('detectAllDimensions: Extracted words from lines');
+    // In Tesseract.js v6, words are nested: blocks → paragraphs → lines → words
+    let words = [];
+    if (result.data.blocks) {
+      console.log('detectAllDimensions: Extracting words from blocks structure');
+      for (const block of result.data.blocks) {
+        if (block.paragraphs) {
+          for (const paragraph of block.paragraphs) {
+            if (paragraph.lines) {
+              for (const line of paragraph.lines) {
+                if (line.words) {
+                  words.push(...line.words);
+                }
+              }
+            }
+          }
+        }
+      }
     }
-    console.log('detectAllDimensions: Words available:', words.length);
+    console.log('detectAllDimensions: Words extracted:', words.length);
     
     // Log first few words for debugging
     if (words.length > 0) {
@@ -239,6 +267,8 @@ export const detectAllDimensions = async (imageDataUrl) => {
         text: w.text,
         bbox: w.bbox
       })));
+    } else {
+      console.warn('detectAllDimensions: No words found! Check if blocks output is enabled.');
     }
     
     for (const line of textLines) {
