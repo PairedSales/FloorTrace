@@ -218,15 +218,14 @@ export const detectAllDimensions = async (imageDataUrl) => {
     console.log('detectAllDimensions: OCR complete');
     console.log('detectAllDimensions: Raw text:', result.data.text);
     console.log('detectAllDimensions: Available keys:', Object.keys(result.data));
-    console.log('detectAllDimensions: Blocks exists:', !!result.data.blocks);
+    console.log('detectAllDimensions: result.data.blocks type:', typeof result.data.blocks);
+    console.log('detectAllDimensions: result.data.blocks value:', result.data.blocks);
+    console.log('detectAllDimensions: Blocks is array:', Array.isArray(result.data.blocks));
     if (result.data.blocks) {
-      console.log('detectAllDimensions: Number of blocks:', result.data.blocks.length);
-      if (result.data.blocks[0]) {
-        console.log('detectAllDimensions: First block structure:', {
-          hasParagraphs: !!result.data.blocks[0].paragraphs,
-          paragraphCount: result.data.blocks[0].paragraphs?.length
-        });
-      }
+      console.log('detectAllDimensions: Blocks length:', result.data.blocks.length);
+      console.log('detectAllDimensions: First block:', result.data.blocks[0]);
+    } else {
+      console.error('detectAllDimensions: BLOCKS IS FALSY!');
     }
     
     // Find all dimension patterns (left-to-right reading order)
