@@ -659,6 +659,8 @@ const simplifyVertices = (vertices) => {
 
 /**
  * Find room boundaries using interior walls
+ * Strategy: Find the LARGEST rectangular room that encloses the OCR text
+ * This avoids selecting closet walls or other interior features
  * @param {Object} wallData - Result from detectWalls
  * @param {Object} dimensionBBox - Bounding box of room dimension text
  * @returns {Object} Room box {x1, y1, x2, y2}
@@ -668,48 +670,129 @@ export const findRoomFromWalls = (wallData, dimensionBBox) => {
   const centerX = dimensionBBox.x + dimensionBBox.width / 2;
   const centerY = dimensionBBox.y + dimensionBBox.height / 2;
 
+  console.log('findRoomFromWalls: Finding room for OCR at', { centerX, centerY });
+  console.log('findRoomFromWalls: Available walls:', { 
+    horizontal: horizontal.length, 
+    vertical: vertical.length 
+  });
+
   // Find walls that could enclose the dimension text
   const wallsAbove = horizontal.filter(w => w.centerY < centerY);
   const wallsBelow = horizontal.filter(w => w.centerY > centerY);
   const wallsLeft = vertical.filter(w => w.centerX < centerX);
   const wallsRight = vertical.filter(w => w.centerX > centerX);
 
-  // Get closest wall on each side
-  const topWall = wallsAbove.length > 0
-    ? wallsAbove.reduce((closest, w) => 
-        Math.abs(w.centerY - centerY) < Math.abs(closest.centerY - centerY) ? w : closest
-      )
-    : null;
+  console.log('findRoomFromWalls: Candidate walls:', {
+    above: wallsAbove.length,
+    below: wallsBelow.length,
+    left: wallsLeft.length,
+    right: wallsRight.length
+  });
 
-  const bottomWall = wallsBelow.length > 0
-    ? wallsBelow.reduce((closest, w) => 
-        Math.abs(w.centerY - centerY) < Math.abs(closest.centerY - centerY) ? w : closest
-      )
-    : null;
-
-  const leftWall = wallsLeft.length > 0
-    ? wallsLeft.reduce((closest, w) => 
-        Math.abs(w.centerX - centerX) < Math.abs(closest.centerX - centerX) ? w : closest
-      )
-    : null;
-
-  const rightWall = wallsRight.length > 0
-    ? wallsRight.reduce((closest, w) => 
-        Math.abs(w.centerX - centerX) < Math.abs(closest.centerX - centerX) ? w : closest
-      )
-    : null;
-
-  if (!topWall || !bottomWall || !leftWall || !rightWall) {
+  if (wallsAbove.length === 0 || wallsBelow.length === 0 || 
+      wallsLeft.length === 0 || wallsRight.length === 0) {
+    console.log('findRoomFromWalls: Not enough walls on all sides');
     return null;
   }
 
-  // Create room box using inner edges of walls
-  return {
-    x1: leftWall.boundingBox.x2,
-    y1: topWall.boundingBox.y2,
-    x2: rightWall.boundingBox.x1,
-    y2: bottomWall.boundingBox.y1
-  };
+  // Strategy: Find the combination of walls that creates the LARGEST rectangle
+  // that still contains the OCR text. This avoids selecting closet walls.
+  
+  // Sort walls by distance from OCR (closest first)
+  wallsAbove.sort((a, b) => (centerY - a.centerY) - (centerY - b.centerY));
+  wallsBelow.sort((a, b) => (b.centerY - centerY) - (a.centerY - centerY));
+  wallsLeft.sort((a, b) => (centerX - a.centerX) - (centerX - b.centerX));
+  wallsRight.sort((a, b) => (b.centerX - centerX) - (a.centerX - centerX));
+
+  // Try to find the best rectangular room by maximizing area
+  // We'll test combinations and pick the one with the largest area that makes sense
+  let bestRoom = null;
+  let bestArea = 0;
+  const minRoomSize = 100; // Minimum room dimension in pixels
+
+  // Test different wall combinations
+  // For efficiency, we'll test the first few walls on each side
+  const maxWallsToTest = Math.min(3, 
+    Math.min(wallsAbove.length, wallsBelow.length, wallsLeft.length, wallsRight.length)
+  );
+
+  for (let topIdx = 0; topIdx < Math.min(maxWallsToTest, wallsAbove.length); topIdx++) {
+    for (let bottomIdx = 0; bottomIdx < Math.min(maxWallsToTest, wallsBelow.length); bottomIdx++) {
+      for (let leftIdx = 0; leftIdx < Math.min(maxWallsToTest, wallsLeft.length); leftIdx++) {
+        for (let rightIdx = 0; rightIdx < Math.min(maxWallsToTest, wallsRight.length); rightIdx++) {
+          const topWall = wallsAbove[topIdx];
+          const bottomWall = wallsBelow[bottomIdx];
+          const leftWall = wallsLeft[leftIdx];
+          const rightWall = wallsRight[rightIdx];
+
+          // Calculate room boundaries using inner edges
+          const roomBox = {
+            x1: leftWall.boundingBox.x2,
+            y1: topWall.boundingBox.y2,
+            x2: rightWall.boundingBox.x1,
+            y2: bottomWall.boundingBox.y1
+          };
+
+          const width = roomBox.x2 - roomBox.x1;
+          const height = roomBox.y2 - roomBox.y1;
+
+          // Validate the room
+          if (width < minRoomSize || height < minRoomSize) {
+            continue; // Room too small
+          }
+
+          // Check that OCR is fully contained
+          if (dimensionBBox.x < roomBox.x1 || 
+              dimensionBBox.x + dimensionBBox.width > roomBox.x2 ||
+              dimensionBBox.y < roomBox.y1 || 
+              dimensionBBox.y + dimensionBBox.height > roomBox.y2) {
+            continue; // OCR not fully contained
+          }
+
+          // Calculate area
+          const area = width * height;
+
+          // Check aspect ratio (rooms shouldn't be too elongated)
+          const aspectRatio = Math.max(width, height) / Math.min(width, height);
+          if (aspectRatio > 5) {
+            continue; // Too elongated
+          }
+
+          // Update best if this is larger
+          if (area > bestArea) {
+            bestArea = area;
+            bestRoom = {
+              ...roomBox,
+              walls: { topWall, bottomWall, leftWall, rightWall }
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (bestRoom) {
+    console.log('findRoomFromWalls: Found best room with area', bestArea, 'pixels²');
+    console.log('findRoomFromWalls: Room box:', {
+      x1: bestRoom.x1,
+      y1: bestRoom.y1,
+      x2: bestRoom.x2,
+      y2: bestRoom.y2,
+      width: bestRoom.x2 - bestRoom.x1,
+      height: bestRoom.y2 - bestRoom.y1
+    });
+    
+    // Return room box without walls metadata
+    return {
+      x1: bestRoom.x1,
+      y1: bestRoom.y1,
+      x2: bestRoom.x2,
+      y2: bestRoom.y2
+    };
+  }
+
+  console.log('findRoomFromWalls: Could not find valid room');
+  return null;
 };
 
 /**
