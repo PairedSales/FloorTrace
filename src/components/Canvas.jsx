@@ -702,11 +702,11 @@ const Canvas = forwardRef(({
 
   return (
     <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
-      {!image && !isProcessing && (
+      {!image && !isProcessing && !isMobile && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <p className="text-xl text-slate-600 font-medium">
-              {isMobile ? 'Load a Sketch Image to Get Started' : 'Paste or Load a Sketch Image to Get Started'}
+              Paste or Load a Sketch Image to Get Started
             </p>
           </div>
         </div>
