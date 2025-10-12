@@ -271,6 +271,12 @@ const Canvas = forwardRef(({
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     
+    // Build the previous state with the original position
+    const previousVertices = lastDragStartPosRef.current ? 
+      perimeterOverlay.vertices.map((v, i) => 
+        i === index ? lastDragStartPosRef.current : v
+      ) : null;
+    
     // Apply snapping and secondary alignment on drag end
     const currentVertex = perimeterOverlay.vertices[index];
     const snappedPoint = findNearestIntersection(
@@ -293,32 +299,52 @@ const Canvas = forwardRef(({
         SECONDARY_ALIGNMENT_DISTANCE
       );
       
-      onPerimeterUpdate(newVertices, true); // Save action for undo
+      onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
     } else {
       // Even without snapping, save action if position changed
       const currentPos = perimeterOverlay.vertices[index];
       if (lastDragStartPosRef.current && 
           (currentPos.x !== lastDragStartPosRef.current.x || 
            currentPos.y !== lastDragStartPosRef.current.y)) {
-        onPerimeterUpdate(perimeterOverlay.vertices, true); // Save action for undo
+        onPerimeterUpdate(perimeterOverlay.vertices, true, previousVertices); // Save action for undo
       }
     }
     
     setDraggingVertex(null);
   };
 
-  // Handle perimeter vertex right-click to delete
+  // Handle perimeter vertex right-click - ONLY for undo/redo
   const handleVertexContextMenu = (index, e) => {
     e.evt.preventDefault();
-    if (!perimeterOverlay || lineToolActive || drawAreaActive) return;
     
-    // Don't allow deleting if we only have 3 vertices (minimum for a polygon)
-    if (perimeterOverlay.vertices.length <= 3) {
+    // Increment right-click count
+    rightClickCountRef.current += 1;
+    
+    // Clear any existing timeout
+    if (rightClickTimeoutRef.current) {
+      clearTimeout(rightClickTimeoutRef.current);
+    }
+    
+    // Set a timeout to reset right-click count
+    rightClickTimeoutRef.current = setTimeout(() => {
+      rightClickCountRef.current = 0;
+    }, 300);
+    
+    // If this is a double right-click, do nothing
+    if (rightClickCountRef.current === 2) {
+      rightClickCountRef.current = 0;
       return;
     }
     
-    const newVertices = perimeterOverlay.vertices.filter((_, i) => i !== index);
-    onPerimeterUpdate(newVertices);
+    // Wait a bit to see if a second right-click comes
+    setTimeout(() => {
+      if (rightClickCountRef.current !== 1) return; // Double right-click happened, skip
+      
+      // Single right-click - perform undo/redo
+      if (onUndoRedo) {
+        onUndoRedo();
+      }
+    }, 50);
   };
   
   // Delete perimeter vertex (for mobile)
@@ -352,6 +378,10 @@ const Canvas = forwardRef(({
 
   // Handle double-click to close custom shape or add perimeter vertex
   const handleStageDoubleClick = (e) => {
+    // IMPORTANT: Only respond to LEFT double-click (button 0)
+    // Right double-click should do nothing
+    if (e.evt && e.evt.button !== 0) return;
+    
     // Draw area tool - close the shape
     if (drawAreaActive && customShape && !customShape.closed && customShape.vertices.length >= 3) {
       onCustomShapeUpdate({
@@ -558,7 +588,8 @@ const Canvas = forwardRef(({
         
         if (changed) {
           // Trigger a final update with saveAction=true to record the change
-          onRoomOverlayUpdate(roomOverlay, true);
+          // Pass the previous state explicitly
+          onRoomOverlayUpdate(roomOverlay, true, lastRoomDragStartRef.current);
         }
       }
       setDraggingRoom(false);
@@ -576,7 +607,8 @@ const Canvas = forwardRef(({
         
         if (changed) {
           // Trigger a final update with saveAction=true to record the change
-          onRoomOverlayUpdate(roomOverlay, true);
+          // Pass the previous state explicitly
+          onRoomOverlayUpdate(roomOverlay, true, lastRoomDragStartRef.current);
         }
       }
       setDraggingRoomCorner(null);
@@ -702,7 +734,7 @@ const Canvas = forwardRef(({
     }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
   
-  // Handle right click for undo/redo functionality
+  // Handle right click for undo/redo functionality - ONLY undo/redo, nothing else
   const handleStageContextMenu = (e) => {
     // Don't prevent default if clicking on a vertex (handled by vertex context menu)
     const targetType = e.target.getType();
@@ -735,34 +767,7 @@ const Canvas = forwardRef(({
     setTimeout(() => {
       if (rightClickCountRef.current !== 1) return; // A double right-click happened, skip
       
-      // Single right-click - perform undo/redo
-      // First check for perimeter vertex placement mode (legacy behavior)
-      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onRemovePerimeterVertex && perimeterVertices && perimeterVertices.length > 0) {
-        onRemovePerimeterVertex();
-        return;
-      }
-      
-      // Then check for tool-specific undo (line tool and draw area tool)
-      if (lineToolActive && onMeasurementLineUpdate) {
-        onMeasurementLineUpdate(null);
-        return;
-      }
-      
-      if (drawAreaActive && onCustomShapeUpdate && customShape && !customShape.closed) {
-        // Remove last vertex
-        if (customShape.vertices.length > 1) {
-          onCustomShapeUpdate({
-            vertices: customShape.vertices.slice(0, -1),
-            closed: false
-          });
-        } else {
-          // Clear shape if only one vertex
-          onCustomShapeUpdate(null);
-        }
-        return;
-      }
-      
-      // Finally, try global undo/redo
+      // Single right-click - ONLY perform undo/redo
       if (onUndoRedo) {
         onUndoRedo();
       }

@@ -408,11 +408,11 @@ function App() {
   };
 
   // Update room overlay position
-  const updateRoomOverlay = (overlay, saveAction = true) => {
+  const updateRoomOverlay = (overlay, saveAction = true, previousState = null) => {
     if (saveAction && roomOverlay) {
       setLastAction({
         type: 'updateRoom',
-        previousState: roomOverlay,
+        previousState: previousState || roomOverlay,
         currentState: overlay,
         isUndone: false
       });
@@ -424,11 +424,11 @@ function App() {
   };
 
   // Update perimeter vertices
-  const updatePerimeterVertices = (vertices, saveAction = true) => {
+  const updatePerimeterVertices = (vertices, saveAction = true, previousState = null) => {
     if (saveAction && perimeterOverlay && perimeterOverlay.vertices) {
       setLastAction({
         type: 'updatePerimeter',
-        previousState: [...perimeterOverlay.vertices],
+        previousState: previousState ? [...previousState] : [...perimeterOverlay.vertices],
         currentState: [...vertices],
         isUndone: false
       });
@@ -499,17 +499,12 @@ function App() {
           setPerimeterVertices(lastAction.previousState);
           break;
         case 'updatePerimeter':
-          setPerimeterOverlay({ ...perimeterOverlay, vertices: lastAction.previousState });
-          if (roomOverlay) {
-            const calculatedArea = calculateArea(lastAction.previousState, scale);
-            setArea(calculatedArea);
-          }
+          // Use the update function with saveAction=false to avoid creating new action
+          updatePerimeterVertices(lastAction.previousState, false);
           break;
         case 'updateRoom':
-          setRoomOverlay(lastAction.previousState);
-          if (roomDimensions.width && roomDimensions.height) {
-            updateScale(roomDimensions, lastAction.previousState);
-          }
+          // Use the update function with saveAction=false to avoid creating new action
+          updateRoomOverlay(lastAction.previousState, false);
           break;
         case 'updateCustomShape':
           setCustomShape(lastAction.previousState);
@@ -524,17 +519,12 @@ function App() {
           setPerimeterVertices(lastAction.currentState);
           break;
         case 'updatePerimeter':
-          setPerimeterOverlay({ ...perimeterOverlay, vertices: lastAction.currentState });
-          if (roomOverlay) {
-            const calculatedArea = calculateArea(lastAction.currentState, scale);
-            setArea(calculatedArea);
-          }
+          // Use the update function with saveAction=false to avoid creating new action
+          updatePerimeterVertices(lastAction.currentState, false);
           break;
         case 'updateRoom':
-          setRoomOverlay(lastAction.currentState);
-          if (roomDimensions.width && roomDimensions.height) {
-            updateScale(roomDimensions, lastAction.currentState);
-          }
+          // Use the update function with saveAction=false to avoid creating new action
+          updateRoomOverlay(lastAction.currentState, false);
           break;
         case 'updateCustomShape':
           setCustomShape(lastAction.currentState);
