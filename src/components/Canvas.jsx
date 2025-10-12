@@ -1,7 +1,11 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
-// Snapping functionality removed - no longer needed
 import { formatLength } from '../utils/unitConverter';
+import { 
+  extractIntersectionsFromLineData, 
+  snapVertexToIntersection, 
+  alignNearbyVertices 
+} from '../utils/snappingHelper';
 
 const Canvas = forwardRef(({
   image,
@@ -24,7 +28,8 @@ const Canvas = forwardRef(({
   drawAreaActive,
   customShape,
   onCustomShapeUpdate,
-  isMobile
+  isMobile,
+  lineData
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -39,7 +44,7 @@ const Canvas = forwardRef(({
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
   const [draggingCustomVertex, setDraggingCustomVertex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
-  // Wall lines and intersection points removed - snapping disabled
+  const [intersectionPoints, setIntersectionPoints] = useState([]);
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
   
@@ -123,7 +128,16 @@ const Canvas = forwardRef(({
     img.src = image;
   }, [image]);
 
-  // Wall line detection removed - snapping functionality disabled
+  // Extract intersection points from line data
+  useEffect(() => {
+    if (lineData) {
+      const intersections = extractIntersectionsFromLineData(lineData);
+      setIntersectionPoints(intersections);
+      console.log('Extracted intersection points:', intersections.length);
+    } else {
+      setIntersectionPoints([]);
+    }
+  }, [lineData]);
 
   // Update container dimensions (robust for absolute/flex layouts)
   useEffect(() => {
@@ -207,9 +221,17 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Use raw position (no snapping)
-    const newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = canvasPos;
+    // Apply snapping to intersection points
+    const snappedResult = snapVertexToIntersection(canvasPos, intersectionPoints);
+    
+    let newVertices = [...perimeterOverlay.vertices];
+    newVertices[index] = { x: snappedResult.x, y: snappedResult.y };
+    
+    // If snapped, align nearby vertices
+    if (snappedResult.snapped) {
+      newVertices = alignNearbyVertices(newVertices, index, snappedResult);
+    }
+    
     onPerimeterUpdate(newVertices);
   };
 
@@ -285,8 +307,9 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Use raw click point (no snapping)
-    const finalPoint = clickPoint;
+    // Apply snapping to intersection points
+    const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
+    const finalPoint = { x: snappedResult.x, y: snappedResult.y };
     
     // Find the closest edge to insert the new vertex
     const vertices = perimeterOverlay.vertices;
@@ -307,8 +330,13 @@ const Canvas = forwardRef(({
     }
     
     // Insert the new vertex after the closest edge start
-    const newVertices = [...vertices];
+    let newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
+    
+    // If snapped, align nearby vertices
+    if (snappedResult.snapped) {
+      newVertices = alignNearbyVertices(newVertices, closestEdgeIndex + 1, snappedResult);
+    }
     
     onPerimeterUpdate(newVertices);
   };

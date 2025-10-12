@@ -1,7 +1,7 @@
 // Constants for snapping behavior
 export const SNAP_TO_LINE_DISTANCE = 5; // pixels
-export const SNAP_TO_INTERSECTION_DISTANCE = 15; // pixels
-export const SECONDARY_ALIGNMENT_DISTANCE = 10; // pixels
+export const SNAP_TO_INTERSECTION_DISTANCE = 20; // pixels - search radius for intersections
+export const SECONDARY_ALIGNMENT_DISTANCE = 15; // pixels - alignment distance for nearby vertices
 
 /**
  * Finds all intersection points from crossing horizontal and vertical wall lines.
@@ -163,4 +163,97 @@ export const snapEdgeToLines = (position, size, lines, threshold, direction) => 
   }
 
   return { position: snappedPosition, size: snappedSize };
+};
+
+/**
+ * Extracts intersection points from line detection data (DetectedLine objects)
+ * @param {Object} lineData - Line detection data with horizontal and vertical lines
+ * @returns {Array<{x: number, y: number}>} Array of intersection points
+ */
+export const extractIntersectionsFromLineData = (lineData) => {
+  if (!lineData || !lineData.intersections) {
+    return [];
+  }
+  
+  // Extract intersection points from LineIntersection objects
+  return lineData.intersections.map(intersection => ({
+    x: intersection.x,
+    y: intersection.y
+  }));
+};
+
+/**
+ * Snaps a vertex position to the nearest line intersection point
+ * @param {{x: number, y: number}} position - The position to snap
+ * @param {Array<{x: number, y: number}>} intersections - Available intersection points
+ * @param {number} snapDistance - Maximum distance for snapping (default: SNAP_TO_INTERSECTION_DISTANCE)
+ * @returns {{x: number, y: number, snapped: boolean}} The final position and whether it was snapped
+ */
+export const snapVertexToIntersection = (position, intersections, snapDistance = SNAP_TO_INTERSECTION_DISTANCE) => {
+  const nearestIntersection = findNearestIntersection(position, intersections, snapDistance);
+  
+  if (nearestIntersection) {
+    return {
+      x: nearestIntersection.x,
+      y: nearestIntersection.y,
+      snapped: true
+    };
+  }
+  
+  // No snapping occurred
+  return {
+    x: position.x,
+    y: position.y,
+    snapped: false
+  };
+};
+
+/**
+ * Aligns nearby vertices to the snapped vertex's x or y coordinates
+ * @param {Array<{x: number, y: number}>} vertices - All perimeter vertices
+ * @param {number} snappedIndex - Index of the vertex that was snapped
+ * @param {{x: number, y: number}} snappedPosition - The snapped position
+ * @param {number} alignDistance - Maximum distance for alignment (default: SECONDARY_ALIGNMENT_DISTANCE)
+ * @returns {Array<{x: number, y: number}>} Updated vertices array
+ */
+export const alignNearbyVertices = (vertices, snappedIndex, snappedPosition, alignDistance = SECONDARY_ALIGNMENT_DISTANCE) => {
+  if (!vertices || snappedIndex < 0 || snappedIndex >= vertices.length) {
+    return vertices;
+  }
+  
+  const updatedVertices = [...vertices];
+  
+  // Check all other vertices for alignment opportunities
+  for (let i = 0; i < updatedVertices.length; i++) {
+    // Skip the snapped vertex itself
+    if (i === snappedIndex) {
+      continue;
+    }
+    
+    const vertex = updatedVertices[i];
+    let newX = vertex.x;
+    let newY = vertex.y;
+    let modified = false;
+    
+    // Check horizontal alignment (same Y coordinate)
+    const verticalDistance = Math.abs(vertex.y - snappedPosition.y);
+    if (verticalDistance <= alignDistance && verticalDistance > 0) {
+      newY = snappedPosition.y;
+      modified = true;
+    }
+    
+    // Check vertical alignment (same X coordinate)
+    const horizontalDistance = Math.abs(vertex.x - snappedPosition.x);
+    if (horizontalDistance <= alignDistance && horizontalDistance > 0) {
+      newX = snappedPosition.x;
+      modified = true;
+    }
+    
+    // Update the vertex if it was aligned
+    if (modified) {
+      updatedVertices[i] = { x: newX, y: newY };
+    }
+  }
+  
+  return updatedVertices;
 };

@@ -590,6 +590,7 @@ function App() {
         customShape={customShape}
         setCustomShape={setCustomShape}
         area={area}
+        lineData={lineData}
         mobileSheetOpen={mobileSheetOpen}
         setMobileSheetOpen={setMobileSheetOpen}
         fileInputRef={fileInputRef}
@@ -718,6 +719,7 @@ function App() {
           customShape={customShape}
           onCustomShapeUpdate={setCustomShape}
           isMobile={false}
+          lineData={lineData}
         />
 
         {/* Sidebar overlay (flush to edges) */}

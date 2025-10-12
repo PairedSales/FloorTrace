@@ -25,6 +25,7 @@ const MobileUI = forwardRef(({
   customShape,
   setCustomShape,
   area,
+  lineData,
   mobileSheetOpen,
   setMobileSheetOpen,
   fileInputRef,
@@ -172,6 +173,7 @@ const MobileUI = forwardRef(({
           customShape={customShape}
           onCustomShapeUpdate={setCustomShape}
           isMobile={true}
+          lineData={lineData}
         />
 
         {/* Mobile Area Display - Floating Top Right */}
