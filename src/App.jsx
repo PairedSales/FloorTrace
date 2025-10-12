@@ -35,6 +35,7 @@ function App() {
   const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
   const [drawAreaActive, setDrawAreaActive] = useState(false);
   const [customShape, setCustomShape] = useState(null); // { vertices: [{x, y}], closed: boolean }
+  const [perimeterVertices, setPerimeterVertices] = useState([]); // Vertices being placed in manual mode
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -55,6 +56,7 @@ function App() {
     setMeasurementLine(null);
     setDrawAreaActive(false);
     setCustomShape(null);
+    setPerimeterVertices([]);
   }, []);
 
   // Reset entire application
@@ -414,6 +416,27 @@ function App() {
     setArea(calculatedArea);
   };
 
+  // Handle adding perimeter vertex in manual mode
+  const handleAddPerimeterVertex = (vertex) => {
+    const newVertices = [...perimeterVertices, vertex];
+    setPerimeterVertices(newVertices);
+    
+    // If we have 3 vertices, create the perimeter overlay
+    if (newVertices.length === 3) {
+      setPerimeterOverlay({ vertices: newVertices });
+      const calculatedArea = calculateArea(newVertices, scale);
+      setArea(calculatedArea);
+      setPerimeterVertices([]); // Clear the temporary vertices
+    }
+  };
+
+  // Handle removing last perimeter vertex in manual mode
+  const handleRemovePerimeterVertex = () => {
+    if (perimeterVertices.length > 0) {
+      setPerimeterVertices(perimeterVertices.slice(0, -1));
+    }
+  };
+
   // Handle dimension selection in manual mode
   const handleDimensionSelect = (dimension) => {
     setRoomDimensions({ 
@@ -437,21 +460,10 @@ function App() {
       height: dimension.height.toString() 
     }, roomOverlay);
     
-    // Create fixed-size 400x400 perimeter overlay centered on dimension
-    const perimeterVertices = [
-      { x: centerX - 200, y: centerY - 200 }, // Top-left
-      { x: centerX + 200, y: centerY - 200 }, // Top-right
-      { x: centerX + 200, y: centerY + 200 }, // Bottom-right
-      { x: centerX - 200, y: centerY + 200 }  // Bottom-left
-    ];
+    // Don't create perimeter overlay - user will click to add vertices
+    setPerimeterVertices([]);
     
-    setPerimeterOverlay({ vertices: perimeterVertices });
-    
-    // Calculate area with the new perimeter
-    const calculatedArea = calculateArea(perimeterVertices, scale);
-    setArea(calculatedArea);
-    
-    // Exit manual mode after selection
+    // Exit manual mode after selection but stay in vertex placement mode
     setMode('normal');
     setDetectedDimensions([]);
     setManualEntryMode(false);
@@ -480,19 +492,8 @@ function App() {
     setRoomOverlay(roomOverlay);
     updateScale(roomDimensions, roomOverlay);
     
-    // Create fixed-size 400x400 perimeter overlay centered on click
-    const perimeterVertices = [
-      { x: clickPoint.x - 200, y: clickPoint.y - 200 }, // Top-left
-      { x: clickPoint.x + 200, y: clickPoint.y - 200 }, // Top-right
-      { x: clickPoint.x + 200, y: clickPoint.y + 200 }, // Bottom-right
-      { x: clickPoint.x - 200, y: clickPoint.y + 200 }  // Bottom-left
-    ];
-    
-    setPerimeterOverlay({ vertices: perimeterVertices });
-    
-    // Calculate area with the new perimeter
-    const calculatedArea = calculateArea(perimeterVertices, scale);
-    setArea(calculatedArea);
+    // Don't create perimeter overlay - user will click to add vertices
+    setPerimeterVertices([]);
     
     // Exit manual entry mode
     setManualEntryMode(false);
@@ -609,6 +610,9 @@ function App() {
         useInteriorWalls={useInteriorWalls}
         handleInteriorWallToggle={handleInteriorWallToggle}
         handleRestart={handleRestart}
+        perimeterVertices={perimeterVertices}
+        onAddPerimeterVertex={handleAddPerimeterVertex}
+        onRemovePerimeterVertex={handleRemovePerimeterVertex}
       />
     );
   }
@@ -720,6 +724,9 @@ function App() {
           onCustomShapeUpdate={setCustomShape}
           isMobile={false}
           lineData={lineData}
+          perimeterVertices={perimeterVertices}
+          onAddPerimeterVertex={handleAddPerimeterVertex}
+          onRemovePerimeterVertex={handleRemovePerimeterVertex}
         />
 
         {/* Sidebar overlay (flush to edges) */}

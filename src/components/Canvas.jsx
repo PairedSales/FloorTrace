@@ -29,7 +29,10 @@ const Canvas = forwardRef(({
   customShape,
   onCustomShapeUpdate,
   isMobile,
-  lineData
+  lineData,
+  perimeterVertices,
+  onAddPerimeterVertex,
+  onRemovePerimeterVertex
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -437,7 +440,7 @@ const Canvas = forwardRef(({
     }
   };
 
-  // Handle stage click for manual entry mode, line tool, or draw area tool
+  // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
     // Manual entry mode takes priority
     if (manualEntryMode && onCanvasClick) {
@@ -448,6 +451,22 @@ const Canvas = forwardRef(({
       if (!clickPoint) return;
       
       onCanvasClick(clickPoint);
+      return;
+    }
+    
+    // Perimeter vertex placement mode (room overlay exists, no perimeter overlay, no tools active)
+    if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) {
+      const stage = e.target.getStage();
+      if (!stage) return;
+      
+      const clickPoint = getCanvasCoordinates(stage);
+      if (!clickPoint) return;
+      
+      // Apply snapping to intersection points
+      const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
+      const finalPoint = { x: snappedResult.x, y: snappedResult.y };
+      
+      onAddPerimeterVertex(finalPoint);
       return;
     }
     
@@ -490,7 +509,7 @@ const Canvas = forwardRef(({
     }
   };
   
-  // Handle right click for line tool or draw area tool
+  // Handle right click for line tool, draw area tool, or perimeter vertex placement
   const handleStageContextMenu = (e) => {
     // Don't prevent default if clicking on a vertex (handled by vertex context menu)
     const targetType = e.target.getType();
@@ -499,6 +518,12 @@ const Canvas = forwardRef(({
     }
     
     e.evt.preventDefault();
+    
+    // Perimeter vertex placement mode - remove last vertex
+    if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onRemovePerimeterVertex && perimeterVertices && perimeterVertices.length > 0) {
+      onRemovePerimeterVertex();
+      return;
+    }
     
     if (lineToolActive && onMeasurementLineUpdate) {
       onMeasurementLineUpdate(null);
@@ -729,9 +754,9 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive}
-          onClick={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
-          onTap={(manualEntryMode || lineToolActive || drawAreaActive) ? handleStageClick : undefined}
+          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
+          onClick={(manualEntryMode || lineToolActive || drawAreaActive || (roomOverlay && !perimeterOverlay)) ? handleStageClick : undefined}
+          onTap={(manualEntryMode || lineToolActive || drawAreaActive || (roomOverlay && !perimeterOverlay)) ? handleStageClick : undefined}
           onContextMenu={handleStageContextMenu}
           onMouseMove={handleStageMouseMove}
           onMouseUp={handleStageMouseUp}
@@ -967,6 +992,65 @@ const Canvas = forwardRef(({
               />
             )}
             
+            {/* Perimeter Vertex Placement Mode - Instructions and temporary vertices */}
+            {roomOverlay && !perimeterOverlay && perimeterVertices && perimeterVertices.length < 3 && !lineToolActive && !drawAreaActive && !manualEntryMode && (
+              <>
+                {/* Instructions */}
+                <Text
+                  x={10}
+                  y={10}
+                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click to undo`}
+                  fontSize={16 / scale}
+                  fill="#f59e0b"
+                  fontStyle="bold"
+                />
+                
+                {/* Temporary vertices */}
+                {perimeterVertices.map((vertex, i) => (
+                  <React.Fragment key={`temp-vertex-${i}`}>
+                    <Circle
+                      x={vertex.x}
+                      y={vertex.y}
+                      radius={isMobile ? 12 / scale : 6 / scale}
+                      fill="#f59e0b"
+                      stroke="#fff"
+                      strokeWidth={2 / scale}
+                    />
+                    
+                    {/* Preview line from previous vertex */}
+                    {i > 0 && (
+                      <Line
+                        points={[
+                          perimeterVertices[i - 1].x,
+                          perimeterVertices[i - 1].y,
+                          vertex.x,
+                          vertex.y
+                        ]}
+                        stroke="#f59e0b"
+                        strokeWidth={2 / scale}
+                        dash={[10 / scale, 5 / scale]}
+                      />
+                    )}
+                  </React.Fragment>
+                ))}
+                
+                {/* Preview line from last vertex to mouse */}
+                {perimeterVertices.length > 0 && currentMousePos && (
+                  <Line
+                    points={[
+                      perimeterVertices[perimeterVertices.length - 1].x,
+                      perimeterVertices[perimeterVertices.length - 1].y,
+                      currentMousePos.x,
+                      currentMousePos.y
+                    ]}
+                    stroke="#f59e0b"
+                    strokeWidth={2 / scale}
+                    dash={[10 / scale, 5 / scale]}
+                    opacity={0.5}
+                  />
+                )}
+              </>
+            )}
             
             {/* Measurement Line Tool */}
             {lineToolActive && measurementLine && measurementLine.start && measurementLine.end && (

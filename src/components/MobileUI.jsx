@@ -43,7 +43,10 @@ const MobileUI = forwardRef(({
   useInteriorWalls,
   handleInteriorWallToggle,
   handleEnterManually,
-  handleRestart
+  handleRestart,
+  perimeterVertices,
+  onAddPerimeterVertex,
+  onRemovePerimeterVertex
 }, ref) => {
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
@@ -192,6 +195,9 @@ const MobileUI = forwardRef(({
           onCustomShapeUpdate={setCustomShape}
           isMobile={true}
           lineData={lineData}
+          perimeterVertices={perimeterVertices}
+          onAddPerimeterVertex={onAddPerimeterVertex}
+          onRemovePerimeterVertex={onRemovePerimeterVertex}
         />
 
         {/* Mobile Area Display - Floating Top Right */}
