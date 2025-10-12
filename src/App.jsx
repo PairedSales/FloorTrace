@@ -582,6 +582,34 @@ function App() {
     };
   }, [mode, ocrFailed, manualEntryMode, perimeterOverlay]);
 
+  // Auto-load ExampleFloorplan.png on startup for testing
+  useEffect(() => {
+    const loadExampleImage = async () => {
+      try {
+        console.log('Loading example floorplan for testing...');
+        const response = await fetch('./ExampleFloorplan.png');
+        if (!response.ok) {
+          throw new Error('Failed to load example image');
+        }
+        
+        const blob = await response.blob();
+        const file = new File([blob], 'ExampleFloorplan.png', { type: 'image/png' });
+        
+        // Use the same loading logic as handleFileUpload
+        const loadedImage = await loadImageFromFile(file);
+        setImage(loadedImage);
+        resetOverlays();
+        
+        console.log('Example floorplan loaded successfully');
+      } catch (error) {
+        console.error('Error loading example image:', error);
+        // Don't show alert - just log the error for testing
+      }
+    };
+    
+    loadExampleImage();
+  }, [resetOverlays]); // Include resetOverlays since it's used in the effect
+
   // Render mobile UI if on mobile device
   if (isMobile) {
     return (
