@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perimeter Tracing Test - Inner/Outer Wall Debugging</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    .header h1 { font-size: 32px; margin-bottom: 10px; }
+    .header p { font-size: 16px; opacity: 0.9; }
+    .controls {
+      padding: 30px;
+      background: #f8f9fa;
+      border-bottom: 2px solid #e9ecef;
+    }
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    .control-group label {
+      font-weight: 600;
+      color: #495057;
+      min-width: 150px;
+    }
+    .control-group input, .control-group select {
+      padding: 8px 12px;
+      border: 2px solid #dee2e6;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .hint { color: #6c757d; font-size: 12px; }
+    .button-group { display: flex; gap: 10px; margin-top: 20px; }
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    button:hover:not(:disabled) { transform: translateY(-2px); }
+    button:disabled { background: #adb5bd; cursor: not-allowed; }
+    .results { padding: 30px; }
+    .status-banner {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+    .status-banner.success { background: #d4edda; color: #155724; }
+    .status-banner.error { background: #f8d7da; color: #721c24; }
+    .status-banner.info { background: #d1ecf1; color: #0c5460; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin: 25px 0;
+    }
+    .stat-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      border-radius: 10px;
+      color: white;
+    }
+    .stat-label { font-size: 12px; text-transform: uppercase; opacity: 0.9; }
+    .stat-value { font-size: 32px; font-weight: bold; margin-top: 5px; }
+    .section-title {
+      font-size: 24px;
+      color: #495057;
+      margin: 30px 0 20px 0;
+      padding-bottom: 10px;
+      border-bottom: 3px solid #667eea;
+    }
+    .viz-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+      gap: 25px;
+      margin: 25px 0;
+    }
+    .viz-card {
+      border: 2px solid #e9ecef;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .viz-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px;
+      font-weight: 600;
+    }
+    .viz-content { padding: 15px; background: white; text-align: center; }
+    .viz-content img { max-width: 100%; height: auto; border-radius: 6px; }
+    .quality-card {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      margin: 15px 0;
+      border-left: 4px solid #667eea;
+    }
+    .quality-score {
+      font-size: 48px;
+      font-weight: bold;
+      color: #667eea;
+      text-align: center;
+    }
+    .loading { text-align: center; padding: 60px 20px; }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .recommendation {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      margin: 25px 0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔍 Perimeter Tracing Test System</h1>
+      <p>Advanced debugging tool for inner/outer wall edge detection</p>
+    </div>
+
+    <div class="controls">
+      <h3 style="margin-bottom: 15px; color: #495057;">⚙️ Detection Settings</h3>
+      <div class="control-group">
+        <label for="minWallLength">Min Wall Length:</label>
+        <input type="number" id="minWallLength" value="100" min="10" max="500" step="10">
+        <span class="hint">Minimum pixels for wall detection</span>
+      </div>
+      <div class="control-group">
+        <label for="edgeStrategy">Edge Strategy:</label>
+        <select id="edgeStrategy">
+          <option value="all">Test All Strategies</option>
+          <option value="inner">Inner Edges (Current)</option>
+          <option value="outer">Outer Edges</option>
+          <option value="center">Center Lines</option>
+          <option value="mixed">Mixed/Adaptive</option>
+        </select>
+        <span class="hint">Which edge of walls to use for perimeter</span>
+      </div>
+      <div class="button-group">
+        <button id="runTest">▶️ Run Test</button>
+        <button id="exportReport">💾 Export Report</button>
+      </div>
+    </div>
+
+    <div id="results" class="results"></div>
+  </div>
+
+  <script type="module">
+    import { testPerimeterWithEdges, exportPerimeterTestReport, EDGE_STRATEGIES } from './src/utils/perimeterTestHelper.js';
+
+    let currentResults = null;
+
+    // Load ExampleFloorplan.png automatically
+    async function loadDefaultImage() {
+      const response = await fetch('./ExampleFloorplan.png');
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    // Display results
+    function displayResults(results) {
+      const resultsDiv = document.getElementById('results');
+      let html = '';
+
+      // Status banner
+      html += `<div class="status-banner success">
+        ✓ Test completed successfully
+      </div>`;
+
+      // Wall statistics
+      html += '<h2 class="section-title">Wall Detection Statistics</h2>';
+      html += '<div class="stats-grid">';
+      html += `<div class="stat-card">
+        <div class="stat-label">Total Walls</div>
+        <div class="stat-value">${results.wallData.allWalls.length}</div>
+      </div>`;
+      html += `<div class="stat-card">
+        <div class="stat-label">Exterior Walls</div>
+        <div class="stat-value">${results.wallData.exterior.length}</div>
+      </div>`;
+      html += `<div class="stat-card">
+        <div class="stat-label">Interior Walls</div>
+        <div class="stat-value">${results.wallData.interior.length}</div>
+      </div>`;
+      html += `<div class="stat-card">
+        <div class="stat-label">H / V Walls</div>
+        <div class="stat-value">${results.wallData.horizontal.length} / ${results.wallData.vertical.length}</div>
+      </div>`;
+      html += '</div>';
+
+      // Recommendation
+      if (results.recommendation) {
+        html += `<div class="recommendation">
+          <div>🎯 Recommended Edge Strategy</div>
+          <strong>${results.recommendation.strategy.toUpperCase()}</strong>
+          <div style="font-size: 14px; margin-top: 10px;">Quality Score: ${results.recommendation.score}/100</div>
+        </div>`;
+      }
+
+      // Quality comparison
+      html += '<h2 class="section-title">Edge Strategy Quality Comparison</h2>';
+      html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">';
+      
+      for (const [strategy, result] of Object.entries(results.perimeterResults)) {
+        const quality = result.quality;
+        html += `<div class="quality-card">
+          <h3 style="color: #495057; margin-bottom: 10px; text-transform: uppercase;">${strategy}</h3>
+          <div class="quality-score">${quality.score}</div>
+          <div style="text-align: center; color: #6c757d; margin-bottom: 15px;">Quality Score</div>
+          <div style="font-size: 13px; color: #495057;">
+            <div>✓ Vertices: ${quality.vertexCount}</div>
+            <div>✓ Closed: ${quality.isClosed ? 'Yes' : 'No'}</div>
+            <div>✓ Area: ${Math.round(quality.area)} px²</div>
+            ${quality.issues.length > 0 ? `<div style="color: #dc3545; margin-top: 8px;">⚠ ${quality.issues.join(', ')}</div>` : ''}
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+
+      // Wall bounding boxes visualization
+      if (results.visualizations.wallBoundingBoxes) {
+        html += '<h2 class="section-title">Wall Bounding Boxes & Edge Indicators</h2>';
+        html += `<div class="viz-card">
+          <div class="viz-header">Wall Edges Analysis</div>
+          <div class="viz-content">
+            <img src="${results.visualizations.wallBoundingBoxes}" alt="Wall Bounding Boxes">
+            <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">
+              Green = Outer edge, Cyan = Inner edge, Red dot = Center
+            </p>
+          </div>
+        </div>`;
+      }
+
+      // Edge comparison
+      if (results.visualizations.edgeComparison) {
+        html += '<h2 class="section-title">Edge Strategy Overlay Comparison</h2>';
+        html += `<div class="viz-card">
+          <div class="viz-header">All Strategies Overlaid</div>
+          <div class="viz-content">
+            <img src="${results.visualizations.edgeComparison}" alt="Edge Comparison">
+          </div>
+        </div>`;
+      }
+
+      // Individual strategy visualizations
+      html += '<h2 class="section-title">Individual Edge Strategy Results</h2>';
+      html += '<div class="viz-grid">';
+      for (const [strategy, vizUrl] of Object.entries(results.visualizations.perimeters)) {
+        html += `<div class="viz-card">
+          <div class="viz-header">${strategy.toUpperCase()} Strategy</div>
+          <div class="viz-content">
+            <img src="${vizUrl}" alt="${strategy}">
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+
+      resultsDiv.innerHTML = html;
+    }
+
+    // Run test
+    document.getElementById('runTest').addEventListener('click', async () => {
+      const button = document.getElementById('runTest');
+      const resultsDiv = document.getElementById('results');
+
+      try {
+        button.disabled = true;
+        resultsDiv.innerHTML = `
+          <div class="loading">
+            <div class="spinner"></div>
+            <div class="loading-text">Running perimeter tracing test...</div>
+            <p style="margin-top: 10px; color: #6c757d;">Analyzing edge strategies and generating visualizations</p>
+          </div>
+        `;
+
+        const imageDataUrl = await loadDefaultImage();
+        const minWallLength = parseInt(document.getElementById('minWallLength').value);
+        const edgeStrategy = document.getElementById('edgeStrategy').value;
+
+        currentResults = await testPerimeterWithEdges(imageDataUrl, {
+          minWallLength,
+          edgeStrategy: edgeStrategy === 'all' ? EDGE_STRATEGIES.INNER : edgeStrategy,
+          showDebugOverlay: true
+        });
+
+        displayResults(currentResults);
+      } catch (error) {
+        resultsDiv.innerHTML = `
+          <div class="status-banner error">
+            ⚠️ Error: ${error.message}
+            <pre style="margin-top: 10px; font-size: 12px;">${error.stack}</pre>
+          </div>
+        `;
+        console.error('Test error:', error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    // Export report
+    document.getElementById('exportReport').addEventListener('click', () => {
+      if (currentResults) {
+        exportPerimeterTestReport(currentResults);
+      } else {
+        alert('No results to export. Run a test first.');
+      }
+    });
+
+    // Auto-run on load
+    window.addEventListener('load', () => {
+      console.log('Auto-running perimeter tracing test with ExampleFloorplan.png');
+      setTimeout(() => {
+        document.getElementById('runTest').click();
+      }, 500);
+    });
+  </script>
+</body>
+</html>
