@@ -1,6 +1,13 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
+import {
+  findAllIntersectionPoints,
+  findNearestIntersection,
+  applySecondaryAlignment,
+  SNAP_TO_INTERSECTION_DISTANCE,
+  SECONDARY_ALIGNMENT_DISTANCE
+} from '../utils/snappingHelper';
 
 const Canvas = forwardRef(({
   image,
@@ -24,6 +31,7 @@ const Canvas = forwardRef(({
   customShape,
   onCustomShapeUpdate,
   isMobile,
+  lineData,
   perimeterVertices,
   onAddPerimeterVertex,
   onRemovePerimeterVertex
@@ -52,6 +60,24 @@ const Canvas = forwardRef(({
   const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
   const touchMoveThreshold = 10; // pixels to distinguish tap from drag
   const longPressDelay = 500; // milliseconds for long press
+
+  // Extract wall lines and create intersection points for snapping
+  const { horizontalLines, verticalLines, intersectionPoints } = useMemo(() => {
+    if (!lineData || !lineData.horizontal || !lineData.vertical) {
+      return { horizontalLines: [], verticalLines: [], intersectionPoints: [] };
+    }
+
+    // Extract center positions from detected lines
+    const hLines = lineData.horizontal.map(line => line.center);
+    const vLines = lineData.vertical.map(line => line.center);
+    const intersections = findAllIntersectionPoints(hLines, vLines);
+
+    return {
+      horizontalLines: hLines,
+      verticalLines: vLines,
+      intersectionPoints: intersections
+    };
+  }, [lineData]);
 
   // Fit to window function
   const fitToWindow = () => {
@@ -188,7 +214,7 @@ const Canvas = forwardRef(({
     }
   };
 
-  // Handle room corner dragging (no snapping)
+  // Handle room corner dragging (with snapping)
   const handleRoomCornerMouseDown = (corner, e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
     
@@ -209,14 +235,50 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
+    // Apply snapping to intersection points for visual feedback
+    const snappedPoint = findNearestIntersection(
+      canvasPos,
+      intersectionPoints,
+      SNAP_TO_INTERSECTION_DISTANCE
+    );
+    
+    // Use snapped position if available, otherwise use raw position
+    const visualPoint = snappedPoint || canvasPos;
+    
     let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = { x: canvasPos.x, y: canvasPos.y };
+    newVertices[index] = { x: visualPoint.x, y: visualPoint.y };
     
     onPerimeterUpdate(newVertices);
   };
 
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
+    
+    // Apply snapping and secondary alignment on drag end
+    const currentVertex = perimeterOverlay.vertices[index];
+    const snappedPoint = findNearestIntersection(
+      currentVertex,
+      intersectionPoints,
+      SNAP_TO_INTERSECTION_DISTANCE
+    );
+    
+    // If snapped, apply secondary alignment to nearby vertices
+    if (snappedPoint) {
+      const finalPoint = snappedPoint;
+      let newVertices = [...perimeterOverlay.vertices];
+      newVertices[index] = finalPoint;
+      
+      // Apply secondary alignment
+      newVertices = applySecondaryAlignment(
+        newVertices,
+        index,
+        finalPoint,
+        SECONDARY_ALIGNMENT_DISTANCE
+      );
+      
+      onPerimeterUpdate(newVertices);
+    }
+    
     setDraggingVertex(null);
   };
 
@@ -287,6 +349,16 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
+    // Apply snapping to intersection points
+    const snappedPoint = findNearestIntersection(
+      clickPoint,
+      intersectionPoints,
+      SNAP_TO_INTERSECTION_DISTANCE
+    );
+    
+    // Use snapped position if available, otherwise use raw position
+    const finalPoint = snappedPoint || clickPoint;
+    
     // Find the closest edge to insert the new vertex
     const vertices = perimeterOverlay.vertices;
     let closestEdgeIndex = 0;
@@ -306,10 +378,40 @@ const Canvas = forwardRef(({
     }
     
     // Insert the new vertex after the closest edge start
-    const newVertices = [...vertices];
-    newVertices.splice(closestEdgeIndex + 1, 0, clickPoint);
+    let newVertices = [...vertices];
+    newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
+    
+    // Apply secondary alignment if snapped
+    if (snappedPoint) {
+      newVertices = applySecondaryAlignment(
+        newVertices,
+        closestEdgeIndex + 1,
+        finalPoint,
+        SECONDARY_ALIGNMENT_DISTANCE
+      );
+    }
     
     onPerimeterUpdate(newVertices);
+  };
+
+  // Helper function to snap a value to the nearest line within threshold
+  const snapToNearestLine = (value, lines, threshold) => {
+    if (!lines || lines.length === 0) {
+      return null;
+    }
+    
+    let nearestLine = null;
+    let minDistance = Number.MAX_VALUE;
+    
+    for (const line of lines) {
+      const distance = Math.abs(line - value);
+      if (distance < minDistance && distance <= threshold) {
+        minDistance = distance;
+        nearestLine = line;
+      }
+    }
+    
+    return nearestLine;
   };
 
   // Helper function to calculate distance from point to line segment
@@ -366,22 +468,43 @@ const Canvas = forwardRef(({
       return;
     }
     
-    // Handle room corner dragging
+    // Handle room corner dragging with snapping
     if (draggingRoomCorner && roomOverlay) {
+      const snapThreshold = 5.0; // pixels, matching .NET implementation
       const newOverlay = { ...roomOverlay };
       
       if (draggingRoomCorner === 'tl') {
-        newOverlay.x1 = mousePoint.x;
-        newOverlay.y1 = mousePoint.y;
+        // Snap left edge to vertical lines
+        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
+        
+        // Snap top edge to horizontal lines
+        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        newOverlay.x2 = mousePoint.x;
-        newOverlay.y1 = mousePoint.y;
+        // Snap right edge to vertical lines
+        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
+        
+        // Snap top edge to horizontal lines
+        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        newOverlay.x1 = mousePoint.x;
-        newOverlay.y2 = mousePoint.y;
+        // Snap left edge to vertical lines
+        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
+        
+        // Snap bottom edge to horizontal lines
+        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        newOverlay.x2 = mousePoint.x;
-        newOverlay.y2 = mousePoint.y;
+        // Snap right edge to vertical lines
+        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
+        
+        // Snap bottom edge to horizontal lines
+        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
       
       onRoomOverlayUpdate(newOverlay);
@@ -472,7 +595,17 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        onAddPerimeterVertex(clickPoint);
+        // Apply snapping to intersection points
+        const snappedPoint = findNearestIntersection(
+          clickPoint,
+          intersectionPoints,
+          SNAP_TO_INTERSECTION_DISTANCE
+        );
+        
+        // Use snapped position if available, otherwise use raw position
+        const finalPoint = snappedPoint || clickPoint;
+        
+        onAddPerimeterVertex(finalPoint);
         return;
       }
       
@@ -596,6 +729,16 @@ const Canvas = forwardRef(({
     if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
         perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
       const timer = setTimeout(() => {
+        // Apply snapping to intersection points
+        const snappedPoint = findNearestIntersection(
+          canvasPos,
+          intersectionPoints,
+          SNAP_TO_INTERSECTION_DISTANCE
+        );
+        
+        // Use snapped position if available, otherwise use raw position
+        const finalPoint = snappedPoint || canvasPos;
+        
         // Add vertex at touch position
         const vertices = perimeterOverlay.vertices;
         let closestEdgeIndex = 0;
@@ -612,8 +755,19 @@ const Canvas = forwardRef(({
           }
         }
         
-        const newVertices = [...vertices];
-        newVertices.splice(closestEdgeIndex + 1, 0, canvasPos);
+        let newVertices = [...vertices];
+        newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
+        
+        // Apply secondary alignment if snapped
+        if (snappedPoint) {
+          newVertices = applySecondaryAlignment(
+            newVertices,
+            closestEdgeIndex + 1,
+            finalPoint,
+            SECONDARY_ALIGNMENT_DISTANCE
+          );
+        }
+        
         onPerimeterUpdate(newVertices);
         
         // Provide haptic feedback if available
