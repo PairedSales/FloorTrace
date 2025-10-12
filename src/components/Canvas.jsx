@@ -48,6 +48,7 @@ const Canvas = forwardRef(({
   const [draggingCustomVertex, setDraggingCustomVertex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
   const [intersectionPoints, setIntersectionPoints] = useState([]);
+  const [roomCornerSnapTarget, setRoomCornerSnapTarget] = useState(null); // Visual feedback for room corner snapping
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
   
@@ -398,22 +399,33 @@ const Canvas = forwardRef(({
       return;
     }
     
-    // Handle room corner dragging
+    // Handle room corner dragging with snapping
     if (draggingRoomCorner && roomOverlay) {
+      // Apply snapping to intersection points
+      const snappedResult = snapVertexToIntersection(mousePoint, intersectionPoints);
+      const finalPoint = { x: snappedResult.x, y: snappedResult.y };
+      
+      // Update snap target visual feedback
+      if (snappedResult.snapped) {
+        setRoomCornerSnapTarget(finalPoint);
+      } else {
+        setRoomCornerSnapTarget(null);
+      }
+      
       const newOverlay = { ...roomOverlay };
       
       if (draggingRoomCorner === 'tl') {
-        newOverlay.x1 = mousePoint.x;
-        newOverlay.y1 = mousePoint.y;
+        newOverlay.x1 = finalPoint.x;
+        newOverlay.y1 = finalPoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        newOverlay.x2 = mousePoint.x;
-        newOverlay.y1 = mousePoint.y;
+        newOverlay.x2 = finalPoint.x;
+        newOverlay.y1 = finalPoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        newOverlay.x1 = mousePoint.x;
-        newOverlay.y2 = mousePoint.y;
+        newOverlay.x1 = finalPoint.x;
+        newOverlay.y2 = finalPoint.y;
       } else if (draggingRoomCorner === 'br') {
-        newOverlay.x2 = mousePoint.x;
-        newOverlay.y2 = mousePoint.y;
+        newOverlay.x2 = finalPoint.x;
+        newOverlay.y2 = finalPoint.y;
       }
       
       onRoomOverlayUpdate(newOverlay);
@@ -437,6 +449,7 @@ const Canvas = forwardRef(({
     }
     if (draggingRoomCorner) {
       setDraggingRoomCorner(null);
+      setRoomCornerSnapTarget(null); // Clear snap target visual feedback
     }
   };
 
@@ -1251,6 +1264,54 @@ const Canvas = forwardRef(({
                     </React.Fragment>
                   );
                 })()}
+              </>
+            )}
+            
+            {/* Room Corner Snap Target Visual Feedback */}
+            {roomCornerSnapTarget && draggingRoomCorner && (
+              <>
+                {/* Pulsing outer ring */}
+                <Circle
+                  x={roomCornerSnapTarget.x}
+                  y={roomCornerSnapTarget.y}
+                  radius={15 / scale}
+                  stroke="#10b981"
+                  strokeWidth={2 / scale}
+                  opacity={0.4}
+                />
+                {/* Inner snap indicator */}
+                <Circle
+                  x={roomCornerSnapTarget.x}
+                  y={roomCornerSnapTarget.y}
+                  radius={8 / scale}
+                  fill="#10b981"
+                  stroke="#fff"
+                  strokeWidth={2 / scale}
+                  opacity={0.8}
+                />
+                {/* Crosshair lines */}
+                <Line
+                  points={[
+                    roomCornerSnapTarget.x - 12 / scale,
+                    roomCornerSnapTarget.y,
+                    roomCornerSnapTarget.x + 12 / scale,
+                    roomCornerSnapTarget.y
+                  ]}
+                  stroke="#10b981"
+                  strokeWidth={1.5 / scale}
+                  opacity={0.6}
+                />
+                <Line
+                  points={[
+                    roomCornerSnapTarget.x,
+                    roomCornerSnapTarget.y - 12 / scale,
+                    roomCornerSnapTarget.x,
+                    roomCornerSnapTarget.y + 12 / scale
+                  ]}
+                  stroke="#10b981"
+                  strokeWidth={1.5 / scale}
+                  opacity={0.6}
+                />
               </>
             )}
           </Layer>
