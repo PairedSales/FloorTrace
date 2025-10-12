@@ -387,8 +387,9 @@ const buildPerimeterVertices = (topWall, bottomWall, leftWall, rightWall, hWalls
     .filter(w => w.centerX < (leftWall.centerX + rightWall.centerX) / 2)
     .sort((a, b) => b.boundingBox.y2 - a.boundingBox.y2);
 
-  // Trace top edge (left to right)
-  const topY = topWall.centerY;
+  // Use INNER edges of walls for interior perimeter
+  // Top wall: use bottom edge (y2)
+  const topY = topWall.boundingBox.y2;
   if (topSideWalls.length > 0) {
     for (const wall of topSideWalls) {
       vertices.push({ x: wall.boundingBox.x1, y: topY });
@@ -397,7 +398,8 @@ const buildPerimeterVertices = (topWall, bottomWall, leftWall, rightWall, hWalls
   }
 
   // Top-right corner
-  const rightX = rightWall.centerX;
+  // Right wall: use left edge (x1)
+  const rightX = rightWall.boundingBox.x1;
   vertices.push({ x: rightX, y: topY });
 
   // Trace right edge (top to bottom)
@@ -409,7 +411,8 @@ const buildPerimeterVertices = (topWall, bottomWall, leftWall, rightWall, hWalls
   }
 
   // Bottom-right corner
-  const bottomY = bottomWall.centerY;
+  // Bottom wall: use top edge (y1)
+  const bottomY = bottomWall.boundingBox.y1;
   vertices.push({ x: rightX, y: bottomY });
 
   // Trace bottom edge (right to left)
@@ -421,7 +424,8 @@ const buildPerimeterVertices = (topWall, bottomWall, leftWall, rightWall, hWalls
   }
 
   // Bottom-left corner
-  const leftX = leftWall.centerX;
+  // Left wall: use right edge (x2)
+  const leftX = leftWall.boundingBox.x2;
   vertices.push({ x: leftX, y: bottomY });
 
   // Trace left edge (bottom to top)

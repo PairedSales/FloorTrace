@@ -12,9 +12,7 @@ A modern web-based floor plan area calculator that runs entirely client-side. Up
   - Simple format: `12 x 10` (assumed feet)
 - **Intelligent Perimeter Tracing**: Uses detected wall lines and intersection points for precise perimeter detection
 - **Interior/Exterior Wall Toggle**: Choose between interior or exterior wall detection for perimeter placement
-- **Interactive Overlays**: Drag and adjust room boundaries and perimeter vertices
-- **Smart Snapping**: Room overlays snap to detected wall lines, perimeter vertices snap to intersection points
-- **Secondary Alignment**: When a vertex snaps, nearby vertices automatically align horizontally or vertically
+- **Interactive Overlays**: Drag and adjust room boundaries and perimeter vertices with precise control
 - **Side Length Labels**: Toggle display of perimeter side lengths in decimal feet (e.g., "12.5 ft")
 - **Manual Mode**: Highlight all detected dimensions and manually select with fixed-size overlays
 - **Area Calculation**: Automatic area calculation using detected scale

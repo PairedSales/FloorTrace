@@ -1,11 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-import { 
-  extractIntersectionsFromLineData, 
-  snapVertexToIntersection, 
-  alignNearbyVertices 
-} from '../utils/snappingHelper';
 
 const Canvas = forwardRef(({
   image,
@@ -47,8 +42,6 @@ const Canvas = forwardRef(({
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
   const [draggingCustomVertex, setDraggingCustomVertex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
-  const [intersectionPoints, setIntersectionPoints] = useState([]);
-  const [roomCornerSnapTarget, setRoomCornerSnapTarget] = useState(null); // Visual feedback for room corner snapping
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
   const clickTimeoutRef = useRef(null);
@@ -134,16 +127,6 @@ const Canvas = forwardRef(({
     img.src = image;
   }, [image]);
 
-  // Extract intersection points from line data
-  useEffect(() => {
-    if (lineData) {
-      const intersections = extractIntersectionsFromLineData(lineData);
-      setIntersectionPoints(intersections);
-      console.log('Extracted intersection points:', intersections.length);
-    } else {
-      setIntersectionPoints([]);
-    }
-  }, [lineData]);
 
   // Update container dimensions (robust for absolute/flex layouts)
   useEffect(() => {
@@ -227,16 +210,8 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Apply snapping to intersection points
-    const snappedResult = snapVertexToIntersection(canvasPos, intersectionPoints);
-    
     let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = { x: snappedResult.x, y: snappedResult.y };
-    
-    // If snapped, align nearby vertices
-    if (snappedResult.snapped) {
-      newVertices = alignNearbyVertices(newVertices, index, snappedResult);
-    }
+    newVertices[index] = { x: canvasPos.x, y: canvasPos.y };
     
     onPerimeterUpdate(newVertices);
   };
@@ -313,10 +288,6 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Apply snapping to intersection points
-    const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
-    const finalPoint = { x: snappedResult.x, y: snappedResult.y };
-    
     // Find the closest edge to insert the new vertex
     const vertices = perimeterOverlay.vertices;
     let closestEdgeIndex = 0;
@@ -327,7 +298,7 @@ const Canvas = forwardRef(({
       const v2 = vertices[(i + 1) % vertices.length];
       
       // Calculate distance from point to line segment
-      const distance = pointToLineDistance(finalPoint, v1, v2);
+      const distance = pointToLineDistance(clickPoint, v1, v2);
       
       if (distance < minDistance) {
         minDistance = distance;
@@ -336,13 +307,8 @@ const Canvas = forwardRef(({
     }
     
     // Insert the new vertex after the closest edge start
-    let newVertices = [...vertices];
-    newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-    
-    // If snapped, align nearby vertices
-    if (snappedResult.snapped) {
-      newVertices = alignNearbyVertices(newVertices, closestEdgeIndex + 1, snappedResult);
-    }
+    const newVertices = [...vertices];
+    newVertices.splice(closestEdgeIndex + 1, 0, clickPoint);
     
     onPerimeterUpdate(newVertices);
   };
@@ -401,33 +367,22 @@ const Canvas = forwardRef(({
       return;
     }
     
-    // Handle room corner dragging with snapping
+    // Handle room corner dragging
     if (draggingRoomCorner && roomOverlay) {
-      // Apply snapping to intersection points
-      const snappedResult = snapVertexToIntersection(mousePoint, intersectionPoints);
-      const finalPoint = { x: snappedResult.x, y: snappedResult.y };
-      
-      // Update snap target visual feedback
-      if (snappedResult.snapped) {
-        setRoomCornerSnapTarget(finalPoint);
-      } else {
-        setRoomCornerSnapTarget(null);
-      }
-      
       const newOverlay = { ...roomOverlay };
       
       if (draggingRoomCorner === 'tl') {
-        newOverlay.x1 = finalPoint.x;
-        newOverlay.y1 = finalPoint.y;
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        newOverlay.x2 = finalPoint.x;
-        newOverlay.y1 = finalPoint.y;
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        newOverlay.x1 = finalPoint.x;
-        newOverlay.y2 = finalPoint.y;
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        newOverlay.x2 = finalPoint.x;
-        newOverlay.y2 = finalPoint.y;
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
       }
       
       onRoomOverlayUpdate(newOverlay);
@@ -451,12 +406,24 @@ const Canvas = forwardRef(({
     }
     if (draggingRoomCorner) {
       setDraggingRoomCorner(null);
-      setRoomCornerSnapTarget(null); // Clear snap target visual feedback
     }
   };
 
   // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
+    // Check if we're in a mode that needs single-click handling
+    const needsSingleClickHandling = 
+      (manualEntryMode && onCanvasClick) ||
+      (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) ||
+      (lineToolActive && onMeasurementLineUpdate) ||
+      (drawAreaActive && onCustomShapeUpdate);
+    
+    // If we don't need single-click handling, just return immediately
+    // This allows double-click to work without interference
+    if (!needsSingleClickHandling) {
+      return;
+    }
+    
     // Increment click count
     clickCountRef.current += 1;
     
@@ -500,11 +467,7 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        // Apply snapping to intersection points
-        const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
-        const finalPoint = { x: snappedResult.x, y: snappedResult.y };
-        
-        onAddPerimeterVertex(finalPoint);
+        onAddPerimeterVertex(clickPoint);
         return;
       }
       
@@ -1298,60 +1261,11 @@ const Canvas = forwardRef(({
                 })()}
               </>
             )}
-            
-            {/* Room Corner Snap Target Visual Feedback */}
-            {roomCornerSnapTarget && draggingRoomCorner && (
-              <>
-                {/* Pulsing outer ring */}
-                <Circle
-                  x={roomCornerSnapTarget.x}
-                  y={roomCornerSnapTarget.y}
-                  radius={15 / scale}
-                  stroke="#10b981"
-                  strokeWidth={2 / scale}
-                  opacity={0.4}
-                />
-                {/* Inner snap indicator */}
-                <Circle
-                  x={roomCornerSnapTarget.x}
-                  y={roomCornerSnapTarget.y}
-                  radius={8 / scale}
-                  fill="#10b981"
-                  stroke="#fff"
-                  strokeWidth={2 / scale}
-                  opacity={0.8}
-                />
-                {/* Crosshair lines */}
-                <Line
-                  points={[
-                    roomCornerSnapTarget.x - 12 / scale,
-                    roomCornerSnapTarget.y,
-                    roomCornerSnapTarget.x + 12 / scale,
-                    roomCornerSnapTarget.y
-                  ]}
-                  stroke="#10b981"
-                  strokeWidth={1.5 / scale}
-                  opacity={0.6}
-                />
-                <Line
-                  points={[
-                    roomCornerSnapTarget.x,
-                    roomCornerSnapTarget.y - 12 / scale,
-                    roomCornerSnapTarget.x,
-                    roomCornerSnapTarget.y + 12 / scale
-                  ]}
-                  stroke="#10b981"
-                  strokeWidth={1.5 / scale}
-                  opacity={0.6}
-                />
-              </>
-            )}
           </Layer>
         </Stage>
       )}
     </div>
   );
-});
 
 Canvas.displayName = 'Canvas';
 
