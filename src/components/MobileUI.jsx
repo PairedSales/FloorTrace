@@ -46,7 +46,8 @@ const MobileUI = forwardRef(({
   handleRestart,
   perimeterVertices,
   onAddPerimeterVertex,
-  onRemovePerimeterVertex
+  onRemovePerimeterVertex,
+  onUndoRedo
 }, ref) => {
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
@@ -198,6 +199,7 @@ const MobileUI = forwardRef(({
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={onAddPerimeterVertex}
           onRemovePerimeterVertex={onRemovePerimeterVertex}
+          onUndoRedo={onUndoRedo}
         />
 
         {/* Mobile Area Display - Floating Top Right */}

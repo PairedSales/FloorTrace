@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
 import MobileUI from './components/MobileUI';
@@ -20,22 +20,20 @@ function App() {
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
-  const [isMobile, setIsMobile] = useState(false);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
   
-  // Debug: Log unit changes
-  useEffect(() => {
-    console.log('Unit state changed to:', unit);
-  }, [unit]);
+  // Detect mobile device on mount (Android/iPhone only)
+  const isMobile = useMemo(() => /Android|iPhone/i.test(navigator.userAgent), []);
   const [sidebarHeight, setSidebarHeight] = useState(0);
   const [lineToolActive, setLineToolActive] = useState(false);
   const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
   const [drawAreaActive, setDrawAreaActive] = useState(false);
   const [customShape, setCustomShape] = useState(null); // { vertices: [{x, y}], closed: boolean }
   const [perimeterVertices, setPerimeterVertices] = useState([]); // Vertices being placed in manual mode
+  const [lastAction, setLastAction] = useState(null); // Track last action for undo/redo
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -57,6 +55,7 @@ function App() {
     setDrawAreaActive(false);
     setCustomShape(null);
     setPerimeterVertices([]);
+    setLastAction(null);
   }, []);
 
   // Reset entire application
@@ -409,7 +408,15 @@ function App() {
   };
 
   // Update room overlay position
-  const updateRoomOverlay = (overlay) => {
+  const updateRoomOverlay = (overlay, saveAction = true) => {
+    if (saveAction && roomOverlay) {
+      setLastAction({
+        type: 'updateRoom',
+        previousState: roomOverlay,
+        currentState: overlay,
+        isUndone: false
+      });
+    }
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
       updateScale(roomDimensions, overlay);
@@ -417,7 +424,15 @@ function App() {
   };
 
   // Update perimeter vertices
-  const updatePerimeterVertices = (vertices) => {
+  const updatePerimeterVertices = (vertices, saveAction = true) => {
+    if (saveAction && perimeterOverlay && perimeterOverlay.vertices) {
+      setLastAction({
+        type: 'updatePerimeter',
+        previousState: [...perimeterOverlay.vertices],
+        currentState: [...vertices],
+        isUndone: false
+      });
+    }
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
     // Only calculate area if room overlay exists
     if (roomOverlay) {
@@ -431,6 +446,15 @@ function App() {
   // Handle adding perimeter vertex in manual mode
   const handleAddPerimeterVertex = (vertex) => {
     const newVertices = [...perimeterVertices, vertex];
+    
+    // Save action for undo
+    setLastAction({
+      type: 'addVertex',
+      previousState: [...perimeterVertices],
+      currentState: newVertices,
+      isUndone: false
+    });
+    
     setPerimeterVertices(newVertices);
     
     // If we have 3 vertices, create the perimeter overlay
@@ -447,11 +471,79 @@ function App() {
     }
   };
 
-  // Handle removing last perimeter vertex in manual mode
+  // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = () => {
     if (perimeterVertices.length > 0) {
-      setPerimeterVertices(perimeterVertices.slice(0, -1));
+      const newVertices = perimeterVertices.slice(0, -1);
+      setLastAction({
+        type: 'removeVertex',
+        previousState: [...perimeterVertices],
+        currentState: newVertices,
+        isUndone: false
+      });
+      setPerimeterVertices(newVertices);
     }
+  };
+  
+  // Handle undo/redo with right-click
+  const handleUndoRedo = () => {
+    if (!lastAction) return false;
+    
+    const isCurrentlyUndone = lastAction.isUndone;
+    
+    if (!isCurrentlyUndone) {
+      // Perform undo - revert to previous state
+      switch (lastAction.type) {
+        case 'addVertex':
+        case 'removeVertex':
+          setPerimeterVertices(lastAction.previousState);
+          break;
+        case 'updatePerimeter':
+          setPerimeterOverlay({ ...perimeterOverlay, vertices: lastAction.previousState });
+          if (roomOverlay) {
+            const calculatedArea = calculateArea(lastAction.previousState, scale);
+            setArea(calculatedArea);
+          }
+          break;
+        case 'updateRoom':
+          setRoomOverlay(lastAction.previousState);
+          if (roomDimensions.width && roomDimensions.height) {
+            updateScale(roomDimensions, lastAction.previousState);
+          }
+          break;
+        case 'updateCustomShape':
+          setCustomShape(lastAction.previousState);
+          break;
+      }
+      setLastAction({ ...lastAction, isUndone: true });
+    } else {
+      // Perform redo - apply current state
+      switch (lastAction.type) {
+        case 'addVertex':
+        case 'removeVertex':
+          setPerimeterVertices(lastAction.currentState);
+          break;
+        case 'updatePerimeter':
+          setPerimeterOverlay({ ...perimeterOverlay, vertices: lastAction.currentState });
+          if (roomOverlay) {
+            const calculatedArea = calculateArea(lastAction.currentState, scale);
+            setArea(calculatedArea);
+          }
+          break;
+        case 'updateRoom':
+          setRoomOverlay(lastAction.currentState);
+          if (roomDimensions.width && roomDimensions.height) {
+            updateScale(roomDimensions, lastAction.currentState);
+          }
+          break;
+        case 'updateCustomShape':
+          setCustomShape(lastAction.currentState);
+          break;
+      }
+      setLastAction({ ...lastAction, isUndone: false });
+    }
+    
+    return true;
   };
 
   // Handle dimension selection in manual mode
@@ -517,10 +609,28 @@ function App() {
     setMode('normal');
   };
 
-  // Detect mobile device on mount (Android/iPhone only)
+  // Auto-load example floorplan for testing (temporary)
   useEffect(() => {
-    const isMobileDevice = /Android|iPhone/i.test(navigator.userAgent);
-    setIsMobile(isMobileDevice);
+    const loadExampleImage = async () => {
+      try {
+        console.log('Loading ExampleFloorplan.png for testing...');
+        const response = await fetch('./ExampleFloorplan.png');
+        const blob = await response.blob();
+
+        // Create file object
+        const file = new File([blob], 'ExampleFloorplan.png', { type: 'image/png' });
+
+        // Use the existing file upload logic
+        const loadedImage = await loadImageFromFile(file);
+        setImage(loadedImage);
+        console.log('ExampleFloorplan.png loaded successfully');
+      } catch (error) {
+        console.error('Failed to load example image:', error);
+        // Don't show error to user for now - it's temporary testing code
+      }
+    };
+
+    loadExampleImage();
   }, []);
 
   // Handle keyboard shortcuts
@@ -582,34 +692,6 @@ function App() {
     };
   }, [mode, ocrFailed, manualEntryMode, perimeterOverlay]);
 
-  // Auto-load ExampleFloorplan.png on startup for testing
-  useEffect(() => {
-    const loadExampleImage = async () => {
-      try {
-        console.log('Loading example floorplan for testing...');
-        const response = await fetch('./ExampleFloorplan.png');
-        if (!response.ok) {
-          throw new Error('Failed to load example image');
-        }
-        
-        const blob = await response.blob();
-        const file = new File([blob], 'ExampleFloorplan.png', { type: 'image/png' });
-        
-        // Use the same loading logic as handleFileUpload
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        resetOverlays();
-        
-        console.log('Example floorplan loaded successfully');
-      } catch (error) {
-        console.error('Error loading example image:', error);
-        // Don't show alert - just log the error for testing
-      }
-    };
-    
-    loadExampleImage();
-  }, [resetOverlays]); // Include resetOverlays since it's used in the effect
-
   // Render mobile UI if on mobile device
   if (isMobile) {
     return (
@@ -658,6 +740,7 @@ function App() {
         perimeterVertices={perimeterVertices}
         onAddPerimeterVertex={handleAddPerimeterVertex}
         onRemovePerimeterVertex={handleRemovePerimeterVertex}
+        onUndoRedo={handleUndoRedo}
       />
     );
   }
@@ -772,6 +855,7 @@ function App() {
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
+          onUndoRedo={handleUndoRedo}
         />
 
         {/* Sidebar overlay (flush to edges) */}

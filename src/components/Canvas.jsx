@@ -34,7 +34,8 @@ const Canvas = forwardRef(({
   lineData,
   perimeterVertices,
   onAddPerimeterVertex,
-  onRemovePerimeterVertex
+  onRemovePerimeterVertex,
+  onUndoRedo
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -53,6 +54,11 @@ const Canvas = forwardRef(({
   const zoomTimeoutRef = useRef(null);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
+  const rightClickTimeoutRef = useRef(null);
+  const rightClickCountRef = useRef(0);
+  const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
+  const lastDragStartPosRef = useRef(null); // Track starting position before drag
+  const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
@@ -207,6 +213,9 @@ const Canvas = forwardRef(({
     e.cancelBubble = true;
     e.evt.preventDefault();
     
+    // Save initial state for undo
+    lastRoomDragStartRef.current = { ...roomOverlay };
+    
     setDraggingRoom(true);
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (canvasPos) {
@@ -221,12 +230,20 @@ const Canvas = forwardRef(({
     e.cancelBubble = true;
     e.evt.preventDefault();
     
+    // Save initial state for undo
+    lastRoomDragStartRef.current = { ...roomOverlay };
+    
     setDraggingRoomCorner(corner);
   };
 
   // Handle perimeter vertex dragging (no snapping)
   const handleVertexDragStart = (index) => {
     if (!perimeterOverlay || lineToolActive || drawAreaActive) return;
+    
+    // Save initial position for undo
+    lastDraggedVertexRef.current = index;
+    lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
+    
     setDraggingVertex(index);
   };
 
@@ -248,7 +265,7 @@ const Canvas = forwardRef(({
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = { x: visualPoint.x, y: visualPoint.y };
     
-    onPerimeterUpdate(newVertices);
+    onPerimeterUpdate(newVertices, false); // Don't save action during drag
   };
 
   const handleVertexDragEnd = (index) => {
@@ -276,7 +293,15 @@ const Canvas = forwardRef(({
         SECONDARY_ALIGNMENT_DISTANCE
       );
       
-      onPerimeterUpdate(newVertices);
+      onPerimeterUpdate(newVertices, true); // Save action for undo
+    } else {
+      // Even without snapping, save action if position changed
+      const currentPos = perimeterOverlay.vertices[index];
+      if (lastDragStartPosRef.current && 
+          (currentPos.x !== lastDragStartPosRef.current.x || 
+           currentPos.y !== lastDragStartPosRef.current.y)) {
+        onPerimeterUpdate(perimeterOverlay.vertices, true); // Save action for undo
+      }
     }
     
     setDraggingVertex(null);
@@ -391,7 +416,7 @@ const Canvas = forwardRef(({
       );
     }
     
-    onPerimeterUpdate(newVertices);
+    onPerimeterUpdate(newVertices, true); // Save action for undo
   };
 
   // Helper function to snap a value to the nearest line within threshold
@@ -463,7 +488,7 @@ const Canvas = forwardRef(({
         y2: roomOverlay.y2 + deltaY
       };
       
-      onRoomOverlayUpdate(newOverlay);
+      onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
       setRoomStart(mousePoint);
       return;
     }
@@ -507,7 +532,7 @@ const Canvas = forwardRef(({
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
       
-      onRoomOverlayUpdate(newOverlay);
+      onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
       return;
     }
     
@@ -523,11 +548,39 @@ const Canvas = forwardRef(({
   // Handle global mouse up
   const handleStageMouseUp = () => {
     if (draggingRoom) {
+      // Check if room position changed and save for undo
+      if (lastRoomDragStartRef.current && roomOverlay) {
+        const changed = 
+          lastRoomDragStartRef.current.x1 !== roomOverlay.x1 ||
+          lastRoomDragStartRef.current.y1 !== roomOverlay.y1 ||
+          lastRoomDragStartRef.current.x2 !== roomOverlay.x2 ||
+          lastRoomDragStartRef.current.y2 !== roomOverlay.y2;
+        
+        if (changed) {
+          // Trigger a final update with saveAction=true to record the change
+          onRoomOverlayUpdate(roomOverlay, true);
+        }
+      }
       setDraggingRoom(false);
       setRoomStart(null);
+      lastRoomDragStartRef.current = null;
     }
     if (draggingRoomCorner) {
+      // Check if room size changed and save for undo
+      if (lastRoomDragStartRef.current && roomOverlay) {
+        const changed = 
+          lastRoomDragStartRef.current.x1 !== roomOverlay.x1 ||
+          lastRoomDragStartRef.current.y1 !== roomOverlay.y1 ||
+          lastRoomDragStartRef.current.x2 !== roomOverlay.x2 ||
+          lastRoomDragStartRef.current.y2 !== roomOverlay.y2;
+        
+        if (changed) {
+          // Trigger a final update with saveAction=true to record the change
+          onRoomOverlayUpdate(roomOverlay, true);
+        }
+      }
       setDraggingRoomCorner(null);
+      lastRoomDragStartRef.current = null;
     }
   };
 
@@ -649,7 +702,7 @@ const Canvas = forwardRef(({
     }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
   
-  // Handle right click for line tool, draw area tool, or perimeter vertex placement
+  // Handle right click for undo/redo functionality
   const handleStageContextMenu = (e) => {
     // Don't prevent default if clicking on a vertex (handled by vertex context menu)
     const targetType = e.target.getType();
@@ -659,29 +712,61 @@ const Canvas = forwardRef(({
     
     e.evt.preventDefault();
     
-    // Perimeter vertex placement mode - remove last vertex
-    if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onRemovePerimeterVertex && perimeterVertices && perimeterVertices.length > 0) {
-      onRemovePerimeterVertex();
+    // Increment right-click count
+    rightClickCountRef.current += 1;
+    
+    // Clear any existing timeout
+    if (rightClickTimeoutRef.current) {
+      clearTimeout(rightClickTimeoutRef.current);
+    }
+    
+    // Set a timeout to reset right-click count
+    rightClickTimeoutRef.current = setTimeout(() => {
+      rightClickCountRef.current = 0;
+    }, 300); // 300ms window for double right-click detection
+    
+    // If this is a double right-click, do nothing
+    if (rightClickCountRef.current === 2) {
+      rightClickCountRef.current = 0;
       return;
     }
     
-    if (lineToolActive && onMeasurementLineUpdate) {
-      onMeasurementLineUpdate(null);
-      return;
-    }
-    
-    if (drawAreaActive && onCustomShapeUpdate && customShape && !customShape.closed) {
-      // Remove last vertex
-      if (customShape.vertices.length > 1) {
-        onCustomShapeUpdate({
-          vertices: customShape.vertices.slice(0, -1),
-          closed: false
-        });
-      } else {
-        // Clear shape if only one vertex
-        onCustomShapeUpdate(null);
+    // Wait a bit to see if a second right-click comes
+    setTimeout(() => {
+      if (rightClickCountRef.current !== 1) return; // A double right-click happened, skip
+      
+      // Single right-click - perform undo/redo
+      // First check for perimeter vertex placement mode (legacy behavior)
+      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onRemovePerimeterVertex && perimeterVertices && perimeterVertices.length > 0) {
+        onRemovePerimeterVertex();
+        return;
       }
-    }
+      
+      // Then check for tool-specific undo (line tool and draw area tool)
+      if (lineToolActive && onMeasurementLineUpdate) {
+        onMeasurementLineUpdate(null);
+        return;
+      }
+      
+      if (drawAreaActive && onCustomShapeUpdate && customShape && !customShape.closed) {
+        // Remove last vertex
+        if (customShape.vertices.length > 1) {
+          onCustomShapeUpdate({
+            vertices: customShape.vertices.slice(0, -1),
+            closed: false
+          });
+        } else {
+          // Clear shape if only one vertex
+          onCustomShapeUpdate(null);
+        }
+        return;
+      }
+      
+      // Finally, try global undo/redo
+      if (onUndoRedo) {
+        onUndoRedo();
+      }
+    }, 50); // Wait 50ms to distinguish single from double right-click
   };
   
 
@@ -823,6 +908,9 @@ const Canvas = forwardRef(({
       }
       if (zoomTimeoutRef.current) {
         clearTimeout(zoomTimeoutRef.current);
+      }
+      if (rightClickTimeoutRef.current) {
+        clearTimeout(rightClickTimeoutRef.current);
       }
     };
   }, [longPressTimer]);
