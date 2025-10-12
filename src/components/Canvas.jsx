@@ -51,6 +51,8 @@ const Canvas = forwardRef(({
   const [roomCornerSnapTarget, setRoomCornerSnapTarget] = useState(null); // Visual feedback for room corner snapping
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
+  const clickTimeoutRef = useRef(null);
+  const clickCountRef = useRef(0);
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
@@ -455,71 +457,95 @@ const Canvas = forwardRef(({
 
   // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
-    // Manual entry mode takes priority
-    if (manualEntryMode && onCanvasClick) {
-      const stage = e.target.getStage();
-      if (!stage) return;
-      
-      const clickPoint = getCanvasCoordinates(stage);
-      if (!clickPoint) return;
-      
-      onCanvasClick(clickPoint);
+    // Increment click count
+    clickCountRef.current += 1;
+    
+    // Clear any existing timeout
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+    }
+    
+    // Set a timeout to reset click count
+    clickTimeoutRef.current = setTimeout(() => {
+      clickCountRef.current = 0;
+    }, 300); // 300ms window for double-click detection
+    
+    // If this is a double-click, let the double-click handler deal with it
+    if (clickCountRef.current === 2) {
+      clickCountRef.current = 0;
       return;
     }
     
-    // Perimeter vertex placement mode (room overlay exists, no perimeter overlay, no tools active)
-    if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) {
-      const stage = e.target.getStage();
-      if (!stage) return;
+    // Wait a bit to see if a second click comes (to avoid processing single click when double-clicking)
+    setTimeout(() => {
+      if (clickCountRef.current !== 1) return; // A double-click happened, skip single-click processing
       
-      const clickPoint = getCanvasCoordinates(stage);
-      if (!clickPoint) return;
-      
-      // Apply snapping to intersection points
-      const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
-      const finalPoint = { x: snappedResult.x, y: snappedResult.y };
-      
-      onAddPerimeterVertex(finalPoint);
-      return;
-    }
-    
-    // Line tool mode
-    if (lineToolActive && onMeasurementLineUpdate) {
-      const stage = e.target.getStage();
-      if (!stage) return;
-      
-      const clickPoint = getCanvasCoordinates(stage);
-      if (!clickPoint) return;
-      
-      // If no start point, set it
-      if (!measurementLine || !measurementLine.start) {
-        onMeasurementLineUpdate({ start: clickPoint, end: clickPoint });
+      // Manual entry mode takes priority
+      if (manualEntryMode && onCanvasClick) {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        
+        const clickPoint = getCanvasCoordinates(stage);
+        if (!clickPoint) return;
+        
+        onCanvasClick(clickPoint);
+        return;
       }
-      // If we already have a start point, this is just updating the end point
-      // (the end point is continuously updated by mouse move)
-      return;
-    }
-    
-    // Draw area tool mode
-    if (drawAreaActive && onCustomShapeUpdate) {
-      const stage = e.target.getStage();
-      if (!stage) return;
       
-      const clickPoint = getCanvasCoordinates(stage);
-      if (!clickPoint) return;
-      
-      // Add vertex to the shape
-      if (!customShape || !customShape.vertices) {
-        // Start new shape
-        onCustomShapeUpdate({ vertices: [clickPoint], closed: false });
-      } else if (!customShape.closed) {
-        // Add vertex to existing shape
-        onCustomShapeUpdate({
-          vertices: [...customShape.vertices, clickPoint],
-          closed: false
-        });
+      // Perimeter vertex placement mode (room overlay exists, no perimeter overlay, no tools active)
+      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        
+        const clickPoint = getCanvasCoordinates(stage);
+        if (!clickPoint) return;
+        
+        // Apply snapping to intersection points
+        const snappedResult = snapVertexToIntersection(clickPoint, intersectionPoints);
+        const finalPoint = { x: snappedResult.x, y: snappedResult.y };
+        
+        onAddPerimeterVertex(finalPoint);
+        return;
       }
-    }
+      
+      // Line tool mode
+      if (lineToolActive && onMeasurementLineUpdate) {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        
+        const clickPoint = getCanvasCoordinates(stage);
+        if (!clickPoint) return;
+        
+        // If no start point, set it
+        if (!measurementLine || !measurementLine.start) {
+          onMeasurementLineUpdate({ start: clickPoint, end: clickPoint });
+        }
+        // If we already have a start point, this is just updating the end point
+        // (the end point is continuously updated by mouse move)
+        return;
+      }
+      
+      // Draw area tool mode
+      if (drawAreaActive && onCustomShapeUpdate) {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        
+        const clickPoint = getCanvasCoordinates(stage);
+        if (!clickPoint) return;
+        
+        // Add vertex to the shape
+        if (!customShape || !customShape.vertices) {
+          // Start new shape
+          onCustomShapeUpdate({ vertices: [clickPoint], closed: false });
+        } else if (!customShape.closed) {
+          // Add vertex to existing shape
+          onCustomShapeUpdate({
+            vertices: [...customShape.vertices, clickPoint],
+            closed: false
+          });
+        }
+      }
+    }, 250); // Wait 250ms to distinguish single from double-click
   };
   
   // Handle right click for line tool, draw area tool, or perimeter vertex placement
@@ -670,6 +696,12 @@ const Canvas = forwardRef(({
       if (longPressTimer) {
         clearTimeout(longPressTimer);
       }
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
     };
   }, [longPressTimer]);
 
@@ -768,8 +800,8 @@ const Canvas = forwardRef(({
           height={dimensions.height}
           onWheel={handleWheel}
           draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
-          onClick={(manualEntryMode || lineToolActive || drawAreaActive || (roomOverlay && !perimeterOverlay)) ? handleStageClick : undefined}
-          onTap={(manualEntryMode || lineToolActive || drawAreaActive || (roomOverlay && !perimeterOverlay)) ? handleStageClick : undefined}
+          onClick={handleStageClick}
+          onTap={handleStageClick}
           onContextMenu={handleStageContextMenu}
           onMouseMove={handleStageMouseMove}
           onMouseUp={handleStageMouseUp}
