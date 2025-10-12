@@ -940,9 +940,9 @@ const Canvas = forwardRef(({
                       y={dim.bbox.y}
                       width={dim.bbox.width}
                       height={dim.bbox.height}
-                      stroke="#f59e0b"
+                      stroke="#8b5cf6"
                       strokeWidth={2 / scale}
-                      fill="rgba(245, 158, 11, 0.15)"
+                      fill="rgba(139, 92, 246, 0.15)"
                       onClick={() => onDimensionSelect && onDimensionSelect(dim)}
                       onTap={() => onDimensionSelect && onDimensionSelect(dim)}
                       onMouseEnter={(e) => {
@@ -960,7 +960,7 @@ const Canvas = forwardRef(({
                       y={dim.bbox.y + dim.bbox.height + 5 / scale}
                       text={`${formatLength(dim.width, unit)} x ${formatLength(dim.height, unit)}`}
                       fontSize={14 / scale}
-                      fill="#ff9800"
+                      fill="#8b5cf6"
                       fontStyle="bold"
                     />
                   </React.Fragment>
@@ -971,7 +971,7 @@ const Canvas = forwardRef(({
                   y={10}
                   text="Click on a room dimension to select it"
                   fontSize={16 / scale}
-                  fill="#ff9800"
+                  fill="#8b5cf6"
                   fontStyle="bold"
                 />
               </>
@@ -989,17 +989,6 @@ const Canvas = forwardRef(({
               />
             )}
             
-            {/* Manual Mode Active but no dimensions detected */}
-            {mode === 'manual' && (!detectedDimensions || detectedDimensions.length === 0) && !manualEntryMode && (
-              <Text
-                x={10}
-                y={10}
-                text="Enter dimensions in sidebar and click on canvas"
-                fontSize={16 / scale}
-                fill="orange"
-                fontStyle="bold"
-              />
-            )}
             
             {/* Measurement Line Tool */}
             {lineToolActive && measurementLine && measurementLine.start && measurementLine.end && (

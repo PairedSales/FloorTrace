@@ -301,16 +301,32 @@ function App() {
     }
   };
 
-  // Handle line tool toggle
+  // Toggle line tool
   const handleLineToolToggle = () => {
-    setLineToolActive(!lineToolActive);
-    setMeasurementLine(null); // Clear any existing line
+    const newState = !lineToolActive;
+    setLineToolActive(newState);
+    if (newState) {
+      // Deactivate draw area tool when line tool is activated
+      setDrawAreaActive(false);
+      setCustomShape(null);
+    }
+    if (!newState) {
+      setMeasurementLine(null);
+    }
   };
 
-  // Handle draw area tool toggle
+  // Toggle draw area tool
   const handleDrawAreaToggle = () => {
-    setDrawAreaActive(!drawAreaActive);
-    setCustomShape(null); // Clear any existing shape
+    const newState = !drawAreaActive;
+    setDrawAreaActive(newState);
+    if (newState) {
+      // Deactivate line tool when draw area tool is activated
+      setLineToolActive(false);
+      setMeasurementLine(null);
+    }
+    if (!newState) {
+      setCustomShape(null);
+    }
   };
 
   // Handle save image (screenshot entire app)
@@ -808,13 +824,13 @@ function App() {
 
         {/* Measurement Tool Buttons - positioned to the right of options panel, only visible when area is calculated */}
         {area > 0 && (
-          <div className="absolute top-4 left-[41rem] z-10 m-0 flex flex-col gap-2">
+          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 12rem + 0.625rem)' }}>
             {/* Line Tool Button */}
             <button
               onClick={handleLineToolToggle}
               className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
                 lineToolActive 
-                  ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-md shadow-cyan-500/40 scale-105' 
+                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 text-white shadow-md scale-105' 
                   : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
               }`}
               title="Measure distances"
@@ -831,7 +847,7 @@ function App() {
               onClick={handleDrawAreaToggle}
               className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
                 drawAreaActive 
-                  ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white shadow-md shadow-pink-500/40 scale-105' 
+                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 text-white shadow-md scale-105' 
                   : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
               }`}
               title="Draw custom area"
