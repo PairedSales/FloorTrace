@@ -212,13 +212,46 @@ function App() {
         return;
       }
       
-      // Skip OCR entirely - go straight to manual entry mode
+      setIsProcessing(true);
       setMode('manual');
       setManualEntryMode(false);
-      setOcrFailed(true); // Set to true to show the manual entry instructions
-      setDetectedDimensions([]);
+      setOcrFailed(false);
       
-      console.log('Manual Mode - Skipping OCR, going straight to manual entry');
+      try {
+        const { detectAllDimensions } = await import('./utils/roomDetector');
+        const result = await detectAllDimensions(image);
+        
+        // Handle new return format (object with dimensions and detectedFormat)
+        const dimensions = result.dimensions || result || [];
+        const detectedFormat = result.detectedFormat;
+        
+        console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
+        
+        console.log('Manual Mode - Dimensions received:', dimensions.length);
+        setDetectedDimensions(dimensions);
+        
+        if (dimensions.length === 0) {
+          // OCR failed - enter manual entry mode
+          setOcrFailed(true);
+        } else {
+          // OCR succeeded - clear the failed flag
+          setOcrFailed(false);
+          // Auto-switch unit based on detected format
+          if (detectedFormat && unit !== detectedFormat) {
+            console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
+            setUnit(detectedFormat);
+            console.log('Manual Mode - setUnit called with:', detectedFormat);
+          } else {
+            console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
+          }
+        }
+      } catch (error) {
+        console.error('Error detecting dimensions:', error);
+        // OCR failed - enter manual entry mode
+        setOcrFailed(true);
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 

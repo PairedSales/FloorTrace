@@ -19,20 +19,16 @@ export const testOCR = async (imageDataUrl) => {
     
     // Run OCR on the image
     console.log('Running OCR...');
-    const result = await Tesseract.recognize(
-      canvas,
-      'eng',
-      {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-          }
-        },
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js'
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+        }
       }
-    );
+    });
+    
+    const result = await worker.recognize(canvas);
+    await worker.terminate();
     
     console.log('=== RAW OCR TEXT ===');
     console.log(result.data.text);
