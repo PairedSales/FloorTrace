@@ -618,7 +618,7 @@ function App() {
       {/* Title Bar */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
         <div 
-          className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity w-fit"
+          className="flex items-center gap-3 hover:opacity-80 transition-opacity w-fit"
           onClick={handleRestart}
           title="Restart FloorTrace"
         >

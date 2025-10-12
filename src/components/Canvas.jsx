@@ -734,14 +734,6 @@ const Canvas = forwardRef(({
                 fill="rgba(99, 102, 241, 0.15)"
                 onDblClick={handleStageDoubleClick}
                 onDblTap={handleStageDoubleClick}
-                onMouseEnter={(e) => {
-                  const container = e.target.getStage().container();
-                  container.style.cursor = 'crosshair';
-                }}
-                onMouseLeave={(e) => {
-                  const container = e.target.getStage().container();
-                  container.style.cursor = 'default';
-                }}
               />
             )}
             
@@ -758,16 +750,6 @@ const Canvas = forwardRef(({
                   fill="rgba(16, 185, 129, 0.15)"
                   onMouseDown={handleRoomMouseDown}
                   onTouchStart={isMobile ? handleRoomMouseDown : undefined}
-                  onMouseEnter={(e) => {
-                    if (!lineToolActive && !drawAreaActive) {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = 'move';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    const container = e.target.getStage().container();
-                    container.style.cursor = 'default';
-                  }}
                 />
                 
                 {/* Room Corner Handles */}
@@ -777,12 +759,6 @@ const Canvas = forwardRef(({
                   { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
                   { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
                 ].map((handle, i) => {
-                  // Determine cursor based on corner position
-                  let resizeCursor = 'nwse-resize';
-                  if (handle.corner === 'tr' || handle.corner === 'bl') {
-                    resizeCursor = 'nesw-resize';
-                  }
-                  
                   return (
                     <Circle
                       key={i}
@@ -794,16 +770,6 @@ const Canvas = forwardRef(({
                       strokeWidth={2 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
                       onTouchStart={isMobile ? (e) => handleRoomCornerMouseDown(handle.corner, e) : undefined}
-                      onMouseEnter={(e) => {
-                        if (!lineToolActive && !drawAreaActive) {
-                          const container = e.target.getStage().container();
-                          container.style.cursor = resizeCursor;
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        const container = e.target.getStage().container();
-                        container.style.cursor = 'default';
-                      }}
                     />
                   );
                 })}
@@ -827,14 +793,6 @@ const Canvas = forwardRef(({
                       onDragMove={(e) => handleVertexDrag(i, e)}
                       onDragEnd={() => handleVertexDragEnd(i)}
                       onContextMenu={(e) => handleVertexContextMenu(i, e)}
-                      onMouseEnter={(e) => {
-                        const container = e.target.getStage().container();
-                        container.style.cursor = (!lineToolActive && !drawAreaActive) ? 'move' : 'default';
-                      }}
-                      onMouseLeave={(e) => {
-                        const container = e.target.getStage().container();
-                        container.style.cursor = 'default';
-                      }}
                     />
                     
                     {/* Delete button for mobile long press */}
@@ -945,14 +903,6 @@ const Canvas = forwardRef(({
                       fill="rgba(139, 92, 246, 0.15)"
                       onClick={() => onDimensionSelect && onDimensionSelect(dim)}
                       onTap={() => onDimensionSelect && onDimensionSelect(dim)}
-                      onMouseEnter={(e) => {
-                        const container = e.target.getStage().container();
-                        container.style.cursor = 'pointer';
-                      }}
-                      onMouseLeave={(e) => {
-                        const container = e.target.getStage().container();
-                        container.style.cursor = 'default';
-                      }}
                     />
                     {/* Label with dimension text */}
                     <Text
@@ -1129,14 +1079,6 @@ const Canvas = forwardRef(({
                     onDragStart={() => handleCustomVertexDragStart(i)}
                     onDragMove={(e) => handleCustomVertexDrag(i, e)}
                     onDragEnd={() => handleCustomVertexDragEnd(i)}
-                    onMouseEnter={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = customShape.closed ? 'move' : 'pointer';
-                    }}
-                    onMouseLeave={(e) => {
-                      const container = e.target.getStage().container();
-                      container.style.cursor = 'default';
-                    }}
                   />
                 ))}
                 
