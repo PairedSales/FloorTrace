@@ -134,7 +134,7 @@ const MobileUI = forwardRef(({
       {/* Mobile Header */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-4 py-3 shadow-sm flex items-center justify-between">
         <div 
-          className="flex items-center gap-2 active:opacity-70 transition-opacity"
+          className="flex items-center gap-2 active:opacity-70 transition-opacity cursor-pointer select-none"
           onClick={handleRestart}
           title="Restart FloorTrace"
         >

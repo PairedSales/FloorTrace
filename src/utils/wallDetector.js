@@ -97,8 +97,12 @@ export const detectWalls = async (imageSource, options = {}) => {
     const { horizontal, vertical } = classifyWalls(wallSegments);
     console.log(`Classified: ${horizontal.length} horizontal, ${vertical.length} vertical`);
 
+    // Step 4.5: Merge aligned wall segments (connect walls separated by windows/doors)
+    const { horizontal: mergedHorizontal, vertical: mergedVertical } = mergeAlignedWalls(horizontal, vertical);
+    console.log(`After merging: ${mergedHorizontal.length} horizontal, ${mergedVertical.length} vertical`);
+
     // Step 5: Separate exterior and interior walls
-    const { exterior, interior } = separateExteriorInterior(horizontal, vertical, width, height);
+    const { exterior, interior } = separateExteriorInterior(mergedHorizontal, mergedVertical, width, height);
     console.log(`Separated: ${exterior.length} exterior, ${interior.length} interior`);
 
     // Step 6: Build perimeter from exterior walls
@@ -263,6 +267,170 @@ const classifyWalls = (wallSegments) => {
   vertical.sort((a, b) => a.centerX - b.centerX);
 
   return { horizontal, vertical };
+};
+
+/**
+ * Merge aligned wall segments that are separated by gaps (windows/doors)
+ * This connects wall segments that are on the same line but broken up
+ */
+const mergeAlignedWalls = (horizontal, vertical) => {
+  const mergedHorizontal = mergeAlignedHorizontalWalls(horizontal);
+  const mergedVertical = mergeAlignedVerticalWalls(vertical);
+  return { horizontal: mergedHorizontal, vertical: mergedVertical };
+};
+
+/**
+ * Merge horizontal walls that are aligned (same Y coordinate) and close together
+ */
+const mergeAlignedHorizontalWalls = (walls) => {
+  if (walls.length === 0) return [];
+  
+  const alignmentTolerance = 10; // pixels - how much Y variation is allowed
+  const maxGap = 150; // pixels - maximum gap between wall segments to merge
+  
+  const merged = [];
+  const groups = [];
+  
+  // Group walls by similar centerY
+  for (const wall of walls) {
+    let foundGroup = false;
+    
+    for (const group of groups) {
+      const avgY = group.reduce((sum, w) => sum + w.centerY, 0) / group.length;
+      if (Math.abs(wall.centerY - avgY) <= alignmentTolerance) {
+        group.push(wall);
+        foundGroup = true;
+        break;
+      }
+    }
+    
+    if (!foundGroup) {
+      groups.push([wall]);
+    }
+  }
+  
+  // For each group, check if walls are close enough to merge
+  for (const group of groups) {
+    // Sort by x position
+    group.sort((a, b) => a.boundingBox.x1 - b.boundingBox.x1);
+    
+    let currentMerge = [group[0]];
+    
+    for (let i = 1; i < group.length; i++) {
+      const prevWall = currentMerge[currentMerge.length - 1];
+      const currWall = group[i];
+      
+      const gap = currWall.boundingBox.x1 - prevWall.boundingBox.x2;
+      
+      if (gap <= maxGap) {
+        // Close enough to merge
+        currentMerge.push(currWall);
+      } else {
+        // Gap too large, create merged wall from current group and start new one
+        if (currentMerge.length > 1) {
+          merged.push(createMergedWall(currentMerge, true));
+        } else {
+          merged.push(currentMerge[0]);
+        }
+        currentMerge = [currWall];
+      }
+    }
+    
+    // Add the last merge
+    if (currentMerge.length > 1) {
+      merged.push(createMergedWall(currentMerge, true));
+    } else {
+      merged.push(currentMerge[0]);
+    }
+  }
+  
+  return merged;
+};
+
+/**
+ * Merge vertical walls that are aligned (same X coordinate) and close together
+ */
+const mergeAlignedVerticalWalls = (walls) => {
+  if (walls.length === 0) return [];
+  
+  const alignmentTolerance = 10; // pixels - how much X variation is allowed
+  const maxGap = 150; // pixels - maximum gap between wall segments to merge
+  
+  const merged = [];
+  const groups = [];
+  
+  // Group walls by similar centerX
+  for (const wall of walls) {
+    let foundGroup = false;
+    
+    for (const group of groups) {
+      const avgX = group.reduce((sum, w) => sum + w.centerX, 0) / group.length;
+      if (Math.abs(wall.centerX - avgX) <= alignmentTolerance) {
+        group.push(wall);
+        foundGroup = true;
+        break;
+      }
+    }
+    
+    if (!foundGroup) {
+      groups.push([wall]);
+    }
+  }
+  
+  // For each group, check if walls are close enough to merge
+  for (const group of groups) {
+    // Sort by y position
+    group.sort((a, b) => a.boundingBox.y1 - b.boundingBox.y1);
+    
+    let currentMerge = [group[0]];
+    
+    for (let i = 1; i < group.length; i++) {
+      const prevWall = currentMerge[currentMerge.length - 1];
+      const currWall = group[i];
+      
+      const gap = currWall.boundingBox.y1 - prevWall.boundingBox.y2;
+      
+      if (gap <= maxGap) {
+        // Close enough to merge
+        currentMerge.push(currWall);
+      } else {
+        // Gap too large, create merged wall from current group and start new one
+        if (currentMerge.length > 1) {
+          merged.push(createMergedWall(currentMerge, false));
+        } else {
+          merged.push(currentMerge[0]);
+        }
+        currentMerge = [currWall];
+      }
+    }
+    
+    // Add the last merge
+    if (currentMerge.length > 1) {
+      merged.push(createMergedWall(currentMerge, false));
+    } else {
+      merged.push(currentMerge[0]);
+    }
+  }
+  
+  return merged;
+};
+
+/**
+ * Create a single merged wall from multiple wall segments
+ */
+const createMergedWall = (walls, isHorizontal) => {
+  // Combine all pixels from all walls
+  const allPixels = walls.flatMap(w => w.pixels);
+  
+  // Create combined bounding box
+  const boundingBox = {
+    x1: Math.min(...walls.map(w => w.boundingBox.x1)),
+    y1: Math.min(...walls.map(w => w.boundingBox.y1)),
+    x2: Math.max(...walls.map(w => w.boundingBox.x2)),
+    y2: Math.max(...walls.map(w => w.boundingBox.y2))
+  };
+  
+  return new WallSegment(allPixels, boundingBox, isHorizontal);
 };
 
 /**

@@ -163,10 +163,12 @@ function App() {
       if (result) {
         setPerimeterOverlay({ vertices: result.vertices });
         
-        // Only calculate area if we have scale (room dimensions exist)
-        if (scale > 1 || (roomDimensions.width && roomDimensions.height)) {
+        // Only calculate area if we have both room overlay and scale
+        if (roomOverlay && (scale > 1 || (roomDimensions.width && roomDimensions.height))) {
           const calculatedArea = calculateArea(result.vertices, scale);
           setArea(calculatedArea);
+        } else {
+          setArea(0);
         }
         
         // Store line data if we didn't have it before
@@ -282,8 +284,13 @@ function App() {
         
         if (result) {
           setPerimeterOverlay({ vertices: result.vertices });
-          const calculatedArea = calculateArea(result.vertices, scale);
-          setArea(calculatedArea);
+          // Only calculate area if room overlay exists
+          if (roomOverlay) {
+            const calculatedArea = calculateArea(result.vertices, scale);
+            setArea(calculatedArea);
+          } else {
+            setArea(0);
+          }
         }
       } catch (error) {
         console.error('Error redetecting perimeter:', error);
@@ -394,8 +401,8 @@ function App() {
     const newScale = minDim / minOverlay; // feet per pixel
     setScale(newScale);
     
-    // If perimeter already exists, recalculate area with new scale
-    if (perimeterOverlay && perimeterOverlay.vertices) {
+    // If perimeter already exists, recalculate area with new scale (only if room overlay exists)
+    if (perimeterOverlay && perimeterOverlay.vertices && overlay) {
       const calculatedArea = calculateArea(perimeterOverlay.vertices, newScale);
       setArea(calculatedArea);
     }
@@ -412,8 +419,13 @@ function App() {
   // Update perimeter vertices
   const updatePerimeterVertices = (vertices) => {
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
-    const calculatedArea = calculateArea(vertices, scale);
-    setArea(calculatedArea);
+    // Only calculate area if room overlay exists
+    if (roomOverlay) {
+      const calculatedArea = calculateArea(vertices, scale);
+      setArea(calculatedArea);
+    } else {
+      setArea(0);
+    }
   };
 
   // Handle adding perimeter vertex in manual mode
@@ -424,8 +436,13 @@ function App() {
     // If we have 3 vertices, create the perimeter overlay
     if (newVertices.length === 3) {
       setPerimeterOverlay({ vertices: newVertices });
-      const calculatedArea = calculateArea(newVertices, scale);
-      setArea(calculatedArea);
+      // Only calculate area if room overlay exists
+      if (roomOverlay) {
+        const calculatedArea = calculateArea(newVertices, scale);
+        setArea(calculatedArea);
+      } else {
+        setArea(0);
+      }
       setPerimeterVertices([]); // Clear the temporary vertices
     }
   };
@@ -623,7 +640,7 @@ function App() {
       {/* Title Bar */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
         <div 
-          className="flex items-center gap-3 hover:opacity-80 transition-opacity w-fit"
+          className="flex items-center gap-3 hover:opacity-80 transition-opacity w-fit cursor-pointer select-none"
           onClick={handleRestart}
           title="Restart FloorTrace"
         >

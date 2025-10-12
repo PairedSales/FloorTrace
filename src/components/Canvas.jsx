@@ -24,7 +24,6 @@ const Canvas = forwardRef(({
   customShape,
   onCustomShapeUpdate,
   isMobile,
-  lineData,
   perimeterVertices,
   onAddPerimeterVertex,
   onRemovePerimeterVertex
@@ -278,9 +277,9 @@ const Canvas = forwardRef(({
     // Perimeter tool - add vertex (only when no tools are active)
     if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive) return;
     
-    // Don't add vertex if clicking on an existing element
+    // Don't add vertex if clicking on a perimeter vertex (Circle)
     const targetType = e.target.getType();
-    if (targetType !== 'Stage' && targetType !== 'Image' && targetType !== 'Line') return;
+    if (targetType === 'Circle') return; // Prevent adding vertex when clicking on existing vertices
     
     const stage = e.target.getStage();
     if (!stage) return;
@@ -461,6 +460,12 @@ const Canvas = forwardRef(({
       
       // Perimeter vertex placement mode (room overlay exists, no perimeter overlay, no tools active)
       if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) {
+        // Don't place vertex if clicking on room overlay (allow dragging though)
+        const targetType = e.target.getType();
+        if (targetType === 'Rect' || targetType === 'Circle') {
+          return; // Clicked on room overlay or its handles
+        }
+        
         const stage = e.target.getStage();
         if (!stage) return;
         
@@ -508,7 +513,7 @@ const Canvas = forwardRef(({
           });
         }
       }
-    }, 250); // Wait 250ms to distinguish single from double-click
+    }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
   
   // Handle right click for line tool, draw area tool, or perimeter vertex placement
@@ -1266,6 +1271,7 @@ const Canvas = forwardRef(({
       )}
     </div>
   );
+});
 
 Canvas.displayName = 'Canvas';
 

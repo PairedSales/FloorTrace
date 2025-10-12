@@ -65,14 +65,14 @@ The built files will be in the `dist/` directory, ready to deploy to any static 
    - Automatically places room overlay using detected wall lines
 3. **Adjust Room Overlay**: 
    - Drag the green room overlay to move it
-   - Drag corner handles to resize (automatically snaps to wall lines)
+   - Drag corner handles to resize
 4. **Trace Perimeter**: Click "Trace Perimeter" to automatically detect the floor plan outline
    - Uses detected wall line intersections for precise placement
    - Toggle "Interior Walls" checkbox to switch between interior/exterior wall detection
 5. **Adjust Perimeter**: 
-   - Drag purple vertices to adjust position (snaps to wall intersections)
-   - Double-click anywhere on canvas to add a new vertex (even outside image bounds)
-   - Vertices snap to wall intersections and align nearby vertices automatically
+   - Drag purple vertices to adjust position precisely
+   - Double-click anywhere on canvas to add a new vertex
+   - Right-click on a vertex to delete it (minimum 3 vertices required)
 6. **View Side Lengths** (optional): Check "Show Side Lengths" to display measurements on each perimeter side
 7. **View Area**: The calculated area appears in the sidebar in square feet
 
