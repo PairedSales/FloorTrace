@@ -2,6 +2,7 @@ import Tesseract from 'tesseract.js';
 import { dataUrlToImage, imageToCanvas } from './imageLoader';
 import { detectLines, findRoomBox } from './lineDetector';
 import { findRoomMorphological, findRoomByLines } from './morphologicalRoomDetector';
+import { detectWalls, findRoomFromWalls } from './wallDetector';
 
 /**
  * Parse dimension text and extract width and height in feet
@@ -140,20 +141,37 @@ export const detectRoom = async (imageDataUrl) => {
     
     console.log(`Found dimension: ${firstDimension.width} x ${firstDimension.height} ft`);
     
-    // Use morphological room detection (primary method)
+    // Try wall-based room detection first (most accurate)
     let roomOverlay = null;
     if (dimensionBBox) {
-      console.log('Finding room box using morphological detection...');
+      console.log('Finding room box using wall-based detection...');
+      try {
+        const wallData = await detectWalls(imageDataUrl, {
+          minWallLength: 50, // Lower threshold for room detection to catch smaller walls
+          debugMode: false
+        });
+        roomOverlay = findRoomFromWalls(wallData, dimensionBBox);
+        if (roomOverlay) {
+          console.log('Wall-based room detection successful');
+        }
+      } catch (error) {
+        console.error('Wall-based room detection error:', error);
+      }
+    }
+    
+    // Fallback 1: Use morphological room detection
+    if (!roomOverlay && dimensionBBox) {
+      console.log('Wall-based detection failed, trying morphological detection...');
       roomOverlay = await findRoomMorphological(imageDataUrl, dimensionBBox);
     }
     
-    // Fallback 1: Try line-based detection
+    // Fallback 2: Try line-based detection
     if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
       console.log('Morphological detection failed, trying line-based detection...');
       roomOverlay = await findRoomByLines(imageDataUrl, dimensionBBox, lineData.horizontal, lineData.vertical);
     }
     
-    // Fallback 2: Try legacy line detection
+    // Fallback 3: Try legacy line detection
     if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
       console.log('Line-based detection failed, trying legacy method...');
       roomOverlay = findRoomBox(dimensionBBox, lineData.horizontal, lineData.vertical);
