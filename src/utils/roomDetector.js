@@ -141,21 +141,25 @@ export const detectRoom = async (imageDataUrl) => {
     
     console.log(`Found dimension: ${firstDimension.width} x ${firstDimension.height} ft`);
     
-    // Try wall-based room detection first (most accurate)
+    // Try wall-based room detection first using NEW HYBRID SYSTEM (most accurate)
     let roomOverlay = null;
     if (dimensionBBox) {
-      console.log('Finding room box using wall-based detection...');
+      console.log('Finding room box using hybrid wall detection system...');
       try {
         const wallData = await detectWalls(imageDataUrl, {
           minWallLength: 50, // Lower threshold for room detection to catch smaller walls
+          thresholdMethod: 'adaptive', // Use adaptive thresholding
+          orientationConstraints: true, // Only H/V walls
+          fillGaps: true, // Bridge gaps from doors/windows
+          maxGapLength: 100,
           debugMode: false
         });
         roomOverlay = findRoomFromWalls(wallData, dimensionBBox);
         if (roomOverlay) {
-          console.log('Wall-based room detection successful');
+          console.log('Hybrid wall-based room detection successful');
         }
       } catch (error) {
-        console.error('Wall-based room detection error:', error);
+        console.error('Hybrid wall-based room detection error:', error);
       }
     }
     

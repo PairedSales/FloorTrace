@@ -68,6 +68,9 @@ const Canvas = forwardRef(({
   const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
   const touchMoveThreshold = 10; // pixels to distinguish tap from drag
   const longPressDelay = 500; // milliseconds for long press
+  
+  // Track Control key state to disable snapping
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
   // Use corner points for snapping, extract lines for room overlay snapping
   const { horizontalLines, verticalLines, snapPoints } = useMemo(() => {
@@ -90,6 +93,29 @@ const Canvas = forwardRef(({
       snapPoints: corners
     };
   }, [lineData, cornerPoints]);
+  
+  // Listen for Control key press/release to disable snapping
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        setIsCtrlPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (e) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        setIsCtrlPressed(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Fit to window function
   const fitToWindow = () => {
@@ -276,8 +302,8 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Apply snapping to intersection points for visual feedback
-    const snappedPoint = findNearestIntersection(
+    // Apply snapping to intersection points for visual feedback (unless Ctrl is pressed)
+    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
       canvasPos,
       snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
@@ -311,8 +337,8 @@ const Canvas = forwardRef(({
     // Get current position from visual snap or current vertex position
     const currentVertex = perimeterOverlay.vertices[index];
     
-    // Apply snapping to intersection points
-    const snappedPoint = findNearestIntersection(
+    // Apply snapping to intersection points (unless Ctrl is pressed)
+    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
       currentVertex,
       snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
@@ -401,8 +427,8 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Apply snapping to corner points
-    const snappedPoint = findNearestIntersection(
+    // Apply snapping to corner points (unless Ctrl is pressed)
+    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
       clickPoint,
       snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
@@ -448,7 +474,8 @@ const Canvas = forwardRef(({
 
   // Helper function to snap a value to the nearest line within threshold
   const snapToNearestLine = (value, lines, threshold) => {
-    if (!lines || lines.length === 0) {
+    // Disable snapping if Control key is pressed
+    if (isCtrlPressed || !lines || lines.length === 0) {
       return null;
     }
     
@@ -706,8 +733,8 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        // Apply snapping to corner points
-        const snappedPoint = findNearestIntersection(
+        // Apply snapping to corner points (unless Ctrl is pressed)
+        const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
           clickPoint,
           snapPoints,
           SNAP_TO_INTERSECTION_DISTANCE
@@ -1037,7 +1064,14 @@ const Canvas = forwardRef(({
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
+    <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: isCtrlPressed ? 'crosshair' : 'default' }}>
+      {/* Snapping disabled indicator */}
+      {isCtrlPressed && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-yellow-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 font-semibold pointer-events-none">
+          🔓 Snapping Disabled (Ctrl)
+        </div>
+      )}
+      
       {!image && !isProcessing && !isMobile && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">

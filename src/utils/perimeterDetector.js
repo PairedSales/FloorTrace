@@ -2,21 +2,30 @@ import { dataUrlToImage } from './imageLoader';
 import { detectLines, findPerimeter } from './lineDetector';
 import { detectPerimeterMorphological } from './morphologicalPerimeterDetector';
 import { detectWalls } from './wallDetector';
+import { detectPerimeterHybrid } from './perimeterDetectorHybrid';
 
 /**
- * Detect the perimeter of a floor plan using morphological closing and contour detection
- * This is the primary method that handles complex floorplans with varying wall thicknesses,
- * window openings, and corner columns.
+ * Detect the perimeter of a floor plan using the HYBRID wall detection system
+ * Supports interior/exterior wall edge selection
  * 
  * @param {string} imageDataUrl - The image data URL
- * @param {boolean} useInterior - True for interior walls, false for exterior walls (legacy parameter)
- * @param {Object} existingLineData - Optional pre-computed line data from room detection (legacy parameter)
- * @returns {Object} Perimeter overlay with vertices
+ * @param {boolean} useInteriorWalls - True for interior edge (default), false for exterior edge
+ * @param {Object} existingWallData - Optional pre-computed wall data from room detection
+ * @returns {Object} Perimeter overlay with vertices and metadata
  */
-export const detectPerimeter = async (imageDataUrl, useInterior = true, existingLineData = null) => {
+export const detectPerimeter = async (imageDataUrl, useInteriorWalls = true, existingWallData = null) => {
   try {
-    // Try new wall-based detection first (most accurate)
-    console.log('Using wall-based perimeter detection...');
+    // PRIMARY METHOD: Use new hybrid wall detection system with interior/exterior edge support
+    console.log('Using HYBRID wall detection system for perimeter...');
+    const hybridResult = await detectPerimeterHybrid(imageDataUrl, useInteriorWalls, existingWallData);
+    
+    if (hybridResult && hybridResult.vertices && hybridResult.vertices.length >= 4) {
+      console.log(`✅ Hybrid detection successful: ${hybridResult.vertices.length} vertices on ${useInteriorWalls ? 'interior' : 'exterior'} edge`);
+      return hybridResult;
+    }
+    
+    // FALLBACK 1: Try legacy wall-based detection
+    console.log('Hybrid detection failed, trying legacy wall-based detection...');
     const wallResult = await detectPerimeterWallBased(imageDataUrl);
     
     if (wallResult && wallResult.vertices && wallResult.vertices.length >= 4) {
@@ -24,7 +33,7 @@ export const detectPerimeter = async (imageDataUrl, useInterior = true, existing
       return wallResult;
     }
     
-    // Fallback to morphological approach
+    // FALLBACK 2: Morphological approach
     console.log('Wall-based detection failed, trying morphological detection...');
     const morphResult = await detectPerimeterMorphological(imageDataUrl);
     
@@ -33,17 +42,17 @@ export const detectPerimeter = async (imageDataUrl, useInterior = true, existing
       return morphResult;
     }
     
-    // Final fallback to line-based detection
+    // FALLBACK 3: Line-based detection
     console.log('Morphological detection failed, falling back to line detection...');
-    return await detectPerimeterLinesBased(imageDataUrl, useInterior, existingLineData);
+    return await detectPerimeterLinesBased(imageDataUrl, useInteriorWalls, existingWallData);
     
   } catch (error) {
     console.error('Error in perimeter detection:', error);
     
-    // Try fallback method
+    // Try final fallback method
     try {
       console.log('Attempting fallback line detection...');
-      return await detectPerimeterLinesBased(imageDataUrl, useInterior, existingLineData);
+      return await detectPerimeterLinesBased(imageDataUrl, useInteriorWalls, existingWallData);
     } catch (fallbackError) {
       console.error('Fallback detection also failed:', fallbackError);
       return null;

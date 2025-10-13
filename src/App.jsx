@@ -18,8 +18,9 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedDimensions, setDetectedDimensions] = useState([]);
   const [showSideLengths, setShowSideLengths] = useState(false);
-  const [useInteriorWalls, setUseInteriorWalls] = useState(true);
-  const [lineData, setLineData] = useState(null); // Store line detection data
+  const [useInteriorWalls, setUseInteriorWalls] = useState(true); // Default to interior edge
+  const [lineData, setLineData] = useState(null); // Store line detection data (legacy)
+  const [wallData, setWallData] = useState(null); // Store hybrid wall detection data
   const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
@@ -39,7 +40,7 @@ function App() {
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
 
-  // Reset overlays
+  // Reset overlays (keeps wallData - only clears when new image loaded)
   const resetOverlays = useCallback(() => {
     setRoomOverlay(null);
     setPerimeterOverlay(null);
@@ -48,7 +49,7 @@ function App() {
     setScale(1);
     setDetectedDimensions([]);
     setMode('normal');
-    setLineData(null);
+    // Note: lineData and wallData are NOT cleared here - they persist with the image
     setManualEntryMode(false);
     setOcrFailed(false);
     setLineToolActive(false);
@@ -145,7 +146,7 @@ function App() {
     }
   };
 
-  // Handle trace perimeter
+  // Handle trace perimeter using HYBRID wall detection system
   const handleTracePerimeter = async () => {
     if (!image) {
       alert('Please load an image first');
@@ -154,14 +155,27 @@ function App() {
     
     setIsProcessing(true);
     try {
-      // Import the new perimeter detector
+      // Import the new hybrid perimeter detector
       const { detectPerimeter } = await import('./utils/perimeterDetector');
       
-      // Use existing line data if available, otherwise detect lines
-      const result = await detectPerimeter(image, useInteriorWalls, lineData);
+      // Use existing wall data if available (from room detection), otherwise detect walls
+      // Pass useInteriorWalls to control interior/exterior edge placement
+      const result = await detectPerimeter(image, useInteriorWalls, wallData);
       
       if (result) {
-        setPerimeterOverlay({ vertices: result.vertices });
+        // Store the full result including wallData for edge switching
+        setPerimeterOverlay({
+          vertices: result.vertices,
+          wallData: result.wallData,
+          edgeType: result.edgeType,
+          wallThickness: result.wallThickness,
+          centerlineVertices: result.centerlineVertices
+        });
+        
+        // Store wall data for future use (snapping, edge switching)
+        if (result.wallData) {
+          setWallData(result.wallData);
+        }
         
         // Only calculate area if we have both room overlay and scale
         if (roomOverlay && (scale > 1 || (roomDimensions.width && roomDimensions.height))) {
@@ -171,10 +185,7 @@ function App() {
           setArea(0);
         }
         
-        // Store line data if we didn't have it before
-        if (result.lineData && !lineData) {
-          setLineData(result.lineData);
-        }
+        console.log(`✅ Perimeter placed on ${useInteriorWalls ? 'interior' : 'exterior'} edge of walls`);
       } else {
         alert('Could not detect perimeter. Try adjusting the room overlay or use Manual Mode.');
       }
@@ -303,37 +314,62 @@ function App() {
     setDetectedDimensions([]); // Clear detected dimensions
   };
 
-  // Handle interior/exterior wall toggle
+  // Handle interior/exterior wall toggle - Switches perimeter edge without redetection
   const handleInteriorWallToggle = async (e) => {
     const newValue = e.target.checked;
     
-    // If perimeter exists, confirm before changing
-    if (perimeterOverlay) {
+    // If perimeter exists, switch the edge
+    if (perimeterOverlay && perimeterOverlay.wallData && perimeterOverlay.centerlineVertices) {
       const confirmed = window.confirm(
-        'Changing wall detection will reposition the perimeter vertices. Are you sure?'
+        `Switch perimeter to ${newValue ? 'interior' : 'exterior'} edge of walls?`
       );
       if (!confirmed) {
         return;
       }
       
-      // Redetect perimeter with new setting
+      // Use fast edge switching (no redetection needed)
       setIsProcessing(true);
       try {
-        const { detectPerimeter } = await import('./utils/perimeterDetector');
-        const result = await detectPerimeter(image, newValue, lineData);
+        const { switchPerimeterEdge } = await import('./utils/perimeterDetectorHybrid');
+        const result = switchPerimeterEdge(perimeterOverlay, newValue);
         
         if (result) {
-          setPerimeterOverlay({ vertices: result.vertices });
-          // Only calculate area if room overlay exists
+          setPerimeterOverlay(result);
+          
+          // Recalculate area if room overlay exists
           if (roomOverlay) {
             const calculatedArea = calculateArea(result.vertices, scale);
             setArea(calculatedArea);
           } else {
             setArea(0);
           }
+          
+          console.log(`✅ Switched perimeter to ${newValue ? 'interior' : 'exterior'} edge`);
+        } else {
+          // Fallback: Full redetection if edge switching fails
+          console.log('Edge switching failed, performing full redetection...');
+          const { detectPerimeter } = await import('./utils/perimeterDetector');
+          const detectResult = await detectPerimeter(image, newValue, wallData);
+          
+          if (detectResult) {
+            setPerimeterOverlay({
+              vertices: detectResult.vertices,
+              wallData: detectResult.wallData,
+              edgeType: detectResult.edgeType,
+              wallThickness: detectResult.wallThickness,
+              centerlineVertices: detectResult.centerlineVertices
+            });
+            
+            if (roomOverlay) {
+              const calculatedArea = calculateArea(detectResult.vertices, scale);
+              setArea(calculatedArea);
+            } else {
+              setArea(0);
+            }
+          }
         }
       } catch (error) {
-        console.error('Error redetecting perimeter:', error);
+        console.error('Error switching perimeter edge:', error);
         alert('Error repositioning perimeter.');
       } finally {
         setIsProcessing(false);
@@ -664,51 +700,97 @@ function App() {
     loadExampleImage();
   }, []);
 
-  // Automatically detect lines and calculate intersections when image is loaded for snapping support
-  // Line-by-line port from .NET: MainWindow.xaml.cs lines 416-419 and SetWallLines
+  // Automatically detect walls using HYBRID SYSTEM and calculate intersections for snapping support
+  // Enhanced version using the new hybrid wall detection system
   useEffect(() => {
-    const detectLinesForSnapping = async () => {
+    const detectWallsForSnapping = async () => {
       if (!image) {
         setCornerPoints([]);
         setLineData(null);
+        setWallData(null);
         return;
       }
 
       try {
-        console.log('Auto-detecting wall lines and intersections for snapping...');
-        const { dataUrlToImage } = await import('./utils/imageLoader');
-        const { detectLines } = await import('./utils/lineDetector');
+        console.log('Auto-detecting walls using HYBRID system for snapping...');
+        const { detectWalls } = await import('./utils/wallDetector');
         const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
         
-        const img = await dataUrlToImage(image);
+        // Use hybrid wall detection system
+        const walls = await detectWalls(image, {
+          minWallLength: 50,
+          thresholdMethod: 'adaptive',
+          orientationConstraints: true,
+          fillGaps: false, // Don't fill gaps for snapping - we want exact wall positions
+          debugMode: false
+        });
         
-        // Detect lines
-        const lines = detectLines(img);
-        console.log(`Detected ${lines.horizontal.length} horizontal and ${lines.vertical.length} vertical lines`);
+        console.log(`Detected ${walls.horizontal.length} horizontal and ${walls.vertical.length} vertical walls (hybrid system)`);
         
-        setLineData(lines);
+        // Store wall data for perimeter detection
+        setWallData(walls);
         
-        // Extract center positions of lines (matching .NET's HorizontalWallLines and VerticalWallLines)
-        // HorizontalWallLines = List of Y-coordinates for horizontal lines
-        // VerticalWallLines = List of X-coordinates for vertical lines
-        const horizontalWallLines = lines.horizontal.map(line => line.center);
-        const verticalWallLines = lines.vertical.map(line => line.center);
+        // Extract wall positions for snapping
+        // For horizontal walls, use the Y-coordinate (top or center)
+        // For vertical walls, use the X-coordinate (left or center)
+        const horizontalWallLines = walls.horizontal.map(wall => {
+          // Use center Y coordinate of the wall
+          return (wall.boundingBox.y1 + wall.boundingBox.y2) / 2;
+        });
         
-        // Generate ALL intersection points from crossing horizontal and vertical lines
-        // This matches .NET's SetWallLines -> FindAllIntersectionPoints
+        const verticalWallLines = walls.vertical.map(wall => {
+          // Use center X coordinate of the wall
+          return (wall.boundingBox.x1 + wall.boundingBox.x2) / 2;
+        });
+        
+        // Generate ALL intersection points from crossing horizontal and vertical walls
         const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
         
-        console.log(`Generated ${intersectionPoints.length} intersection points for snapping`);
-        console.log(`  From ${horizontalWallLines.length} horizontal lines x ${verticalWallLines.length} vertical lines`);
+        console.log(`Generated ${intersectionPoints.length} intersection points for snapping (hybrid system)`);
+        console.log(`  From ${horizontalWallLines.length} horizontal walls × ${verticalWallLines.length} vertical walls`);
         
         setCornerPoints(intersectionPoints);
+        
+        // Also store legacy line data for backward compatibility
+        setLineData({
+          horizontal: walls.horizontal.map(wall => ({
+            center: (wall.boundingBox.y1 + wall.boundingBox.y2) / 2,
+            start: wall.boundingBox.x1,
+            end: wall.boundingBox.x2
+          })),
+          vertical: walls.vertical.map(wall => ({
+            center: (wall.boundingBox.x1 + wall.boundingBox.x2) / 2,
+            start: wall.boundingBox.y1,
+            end: wall.boundingBox.y2
+          }))
+        });
       } catch (error) {
-        console.error('Error detecting lines for snapping:', error);
-        // Don't alert user - snapping will just not work
+        console.error('Error detecting walls for snapping:', error);
+        // Fallback to legacy line detection
+        try {
+          console.log('Falling back to legacy line detection for snapping...');
+          const { dataUrlToImage } = await import('./utils/imageLoader');
+          const { detectLines } = await import('./utils/lineDetector');
+          const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
+          
+          const img = await dataUrlToImage(image);
+          const lines = detectLines(img);
+          
+          setLineData(lines);
+          
+          const horizontalWallLines = lines.horizontal.map(line => line.center);
+          const verticalWallLines = lines.vertical.map(line => line.center);
+          const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
+          
+          setCornerPoints(intersectionPoints);
+          console.log(`Legacy detection: ${intersectionPoints.length} snap points`);
+        } catch (fallbackError) {
+          console.error('Fallback snapping detection also failed:', fallbackError);
+        }
       }
     };
 
-    detectLinesForSnapping();
+    detectWallsForSnapping();
   }, [image]);
 
   // Handle keyboard shortcuts
