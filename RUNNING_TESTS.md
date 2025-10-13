@@ -2,7 +2,7 @@
 
 ## CORS Error Fix
 
-The test HTML files (`test-room-finding.html`, `test-perimeter-tracing.html`) use ES6 modules which **cannot** be loaded from `file://` protocol due to browser security (CORS policy).
+The test HTML files use ES6 modules which **cannot** be loaded from `file://` protocol due to browser security (CORS policy).
 
 ## ✅ Solution: Use Vite Dev Server
 
@@ -14,7 +14,7 @@ npm run dev
 ```
 
 Then open in your browser:
-- **Room Finding Test**: http://localhost:5173/test-room-finding.html
+- **Deep Testing Suite** (NEW): http://localhost:5173/test-wall-detection.html
 - **Perimeter Test**: http://localhost:5173/test-perimeter-tracing.html
 
 ### Method 2: Alternative HTTP Server
@@ -38,24 +38,38 @@ Then open:
 
 ## 🧪 Test Features
 
-### Room Finding Test (`test-room-finding.html`)
+### 🆕 Deep Testing Suite (`test-wall-detection.html`) - RECOMMENDED
 
-Tests the complete pipeline:
-1. **Hybrid Wall Detection** - New preprocessing + segmentation + line detection
-2. **OCR Dimension Detection** - Tesseract.js room dimension extraction
-3. **Room Boundary Finding** - Maps OCR text to wall-enclosed rooms
+**The most comprehensive testing system with step-by-step validation:**
+
+**What it tests:**
+1. ✅ **Preprocessing & Binarization** - Grayscale conversion, thresholding, noise removal
+2. ✅ **Wall Segmentation** - Likelihood map generation with validation
+3. ✅ **Line Detection** - Edge detection and line segment extraction
+4. ✅ **Collinear Merging** - Segment consolidation
+5. ✅ **Gap Filling** - Door/window gap bridging
+6. ✅ **Post-Processing** - Filtering, snapping, classification
+7. ✅ **Complete Pipeline** - Full integration test with perimeter
+8. ✅ **Room Finding** - OCR + room boundary detection
+
+**Features:**
+- ⚡ Real-time progress tracking
+- ✓ Automated assertions for each step
+- 📊 Detailed metrics (timing, counts, ratios)
+- 🎨 Rich visualizations (heatmaps, overlays, comparisons)
+- 💾 Exportable JSON test reports
+- 🔍 Collapsible sections for detailed inspection
+- ⚠️ Warning and error detection
 
 **Interactive Controls:**
 - Min Wall Length (10-500px)
 - Threshold Method (Adaptive/Otsu/Global)
-- Fill Gaps (Enable/Disable)
+- Max Gap Length (20-300px)
+- Gap Filling toggle
+- Orientation Constraints toggle
+- OCR toggle
 
-**Visualizations:**
-- Binary conversion
-- All detected walls
-- Horizontal/Vertical classification
-- Exterior/Interior separation
-- Room finding results with OCR overlay
+**See TESTING_SYSTEM.md for complete documentation.**
 
 ### Perimeter Tracing Test (`test-perimeter-tracing.html`)
 

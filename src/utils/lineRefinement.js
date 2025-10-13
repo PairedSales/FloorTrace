@@ -48,8 +48,17 @@ export class LineSegment {
    * Get orientation ('horizontal', 'vertical', or 'diagonal')
    */
   getOrientation(tolerance = Math.PI / 12) {
-    if (this.isHorizontal(tolerance)) return 'horizontal';
-    if (this.isVertical(tolerance)) return 'vertical';
+    const isH = this.isHorizontal(tolerance);
+    const isV = this.isVertical(tolerance);
+    
+    // DEBUG: Log first few segments
+    if (Math.random() < 0.2) { // Sample 20% of segments
+      const angleDeg = (this.angle * 180 / Math.PI).toFixed(1);
+      console.log(`DEBUG: Segment angle=${angleDeg}°, isH=${isH}, isV=${isV}, dx=${(this.x2-this.x1).toFixed(1)}, dy=${(this.y2-this.y1).toFixed(1)}`);
+    }
+    
+    if (isH) return 'horizontal';
+    if (isV) return 'vertical';
     return 'diagonal';
   }
 }
@@ -159,9 +168,29 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   
   console.log('Detecting line segments...');
   
+  // DEBUG: Check likelihood map
+  let nonZero = 0;
+  let maxVal = 0;
+  let minVal = 1;
+  for (let i = 0; i < likelihood.length; i++) {
+    if (likelihood[i] > 0) nonZero++;
+    if (likelihood[i] > maxVal) maxVal = likelihood[i];
+    if (likelihood[i] < minVal) minVal = likelihood[i];
+  }
+  console.log(`DEBUG: Likelihood map - nonzero: ${nonZero}/${likelihood.length}, range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
+  
   // Detect edges
   const { magnitude, direction } = detectEdges(likelihood, width, height);
   const edges = nonMaximumSuppression(magnitude, direction, width, height);
+  
+  // DEBUG: Check edge magnitude
+  let edgeNonZero = 0;
+  let edgeMax = 0;
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] > 0) edgeNonZero++;
+    if (edges[i] > edgeMax) edgeMax = edges[i];
+  }
+  console.log(`DEBUG: Edge magnitude - nonzero: ${edgeNonZero}/${edges.length}, max: ${edgeMax.toFixed(3)}`);
   
   // Threshold edges
   const binary = new Uint8Array(width * height);

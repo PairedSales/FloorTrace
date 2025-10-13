@@ -127,117 +127,26 @@ const createLightweightSegmentationModel = () => {
 export const generateClassicalLikelihoodMap = (binary, width, height) => {
   console.log('Generating classical wall likelihood map...');
   
+  // DEBUG: Check binary image
+  let wallPixels = 0;
+  for (let i = 0; i < binary.length; i++) {
+    if (binary[i] === 1) wallPixels++;
+  }
+  console.log(`DEBUG: Binary image - ${wallPixels}/${binary.length} wall pixels (${(100*wallPixels/binary.length).toFixed(1)}%)`);
+  
+  // SIMPLIFIED APPROACH: Just convert binary to float likelihood
+  // The preprocessing already did morphological operations to clean up the image
+  // The edge detection will find the wall edges from this
   const likelihood = new Float32Array(width * height);
   
-  // Parameters for wall detection
-  const minWallLength = 50;
-  const maxWallThickness = 20;
-  
-  // For each pixel, calculate likelihood based on local structure
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      
-      if (binary[idx] === 0) {
-        likelihood[idx] = 0;
-        continue;
-      }
-      
-      // Measure horizontal and vertical extents
-      const hExtent = measureExtent(binary, width, height, x, y, 1, 0);
-      const vExtent = measureExtent(binary, width, height, x, y, 0, 1);
-      const hThickness = measureThickness(binary, width, height, x, y, 0, 1);
-      const vThickness = measureThickness(binary, width, height, x, y, 1, 0);
-      
-      // Calculate wall-like score
-      let score = 0;
-      
-      // Horizontal wall
-      if (hExtent > minWallLength && hThickness <= maxWallThickness) {
-        const aspectRatio = hExtent / Math.max(hThickness, 1);
-        score = Math.max(score, Math.min(1, aspectRatio / 10));
-      }
-      
-      // Vertical wall
-      if (vExtent > minWallLength && vThickness <= maxWallThickness) {
-        const aspectRatio = vExtent / Math.max(vThickness, 1);
-        score = Math.max(score, Math.min(1, aspectRatio / 10));
-      }
-      
-      likelihood[idx] = score;
-    }
+  for (let i = 0; i < binary.length; i++) {
+    likelihood[i] = binary[i]; // 1.0 for walls, 0.0 for background
   }
   
-  // Apply Gaussian smoothing to likelihood map
-  return gaussianBlur(likelihood, width, height, 2);
-};
-
-/**
- * Measure extent in a direction
- */
-const measureExtent = (binary, width, height, x, y, dx, dy) => {
-  let extent = 0;
-  let nx = x, ny = y;
+  console.log(`DEBUG: Created likelihood map from binary image (${wallPixels} pixels with score 1.0)`);
   
-  // Measure in positive direction
-  while (true) {
-    nx += dx;
-    ny += dy;
-    if (nx < 0 || nx >= width || ny < 0 || ny >= height) break;
-    const idx = ny * width + nx;
-    if (binary[idx] === 0) break;
-    extent++;
-  }
-  
-  // Measure in negative direction
-  nx = x;
-  ny = y;
-  while (true) {
-    nx -= dx;
-    ny -= dy;
-    if (nx < 0 || nx >= width || ny < 0 || ny >= height) break;
-    const idx = ny * width + nx;
-    if (binary[idx] === 0) break;
-    extent++;
-  }
-  
-  return extent;
-};
-
-/**
- * Measure thickness perpendicular to a direction
- */
-const measureThickness = (binary, width, height, x, y, dx, dy) => {
-  // Perpendicular direction
-  const px = dy;
-  const py = dx;
-  
-  let thickness = 1; // Count center pixel
-  
-  // Measure in positive perpendicular direction
-  let nx = x, ny = y;
-  while (true) {
-    nx += px;
-    ny += py;
-    if (nx < 0 || nx >= width || ny < 0 || ny >= height) break;
-    const idx = ny * width + nx;
-    if (binary[idx] === 0) break;
-    thickness++;
-  }
-  
-  // Measure in negative perpendicular direction
-  nx = x;
-  ny = y;
-  while (true) {
-    nx -= px;
-    ny -= py;
-    if (nx < 0 || nx >= width || ny < 0 || ny >= height) break;
-    const idx = ny * width + nx;
-    if (binary[idx] === 0) break;
-    thickness++;
-  }
-  
-  return thickness;
+  // Apply slight Gaussian smoothing to help edge detection
+  return gaussianBlur(likelihood, width, height, 1.5);
 };
 
 /**

@@ -156,7 +156,7 @@ export const detectWalls = async (imageSource, options = {}) => {
       enforceOrientation: orientationConstraints,
       allowedOrientations: ['horizontal', 'vertical'],
       angleTolerance: Math.PI / 12,
-      removeIsolated: true,
+      removeIsolated: false, // Disabled - too aggressive, removes valid walls
       connectionThreshold: 25,
       snapGrid: true,
       gridSize: 5,
