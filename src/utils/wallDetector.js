@@ -103,9 +103,9 @@ export const detectWalls = async (imageSource, options = {}) => {
     const preprocessed = preprocessImage(imageData, {
       thresholdMethod,
       removeNoise: true,
-      minComponentSize: 30,
+      minComponentSize: 15, // Reduced from 30 to keep dashed line segments
       useClosing: true,
-      closingKernelSize: 5
+      closingKernelSize: 9 // Increased from 5 to better connect dashed lines
     });
 
     // STEP 2: CNN-based segmentation (or classical fallback)

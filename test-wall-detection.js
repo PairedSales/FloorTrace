@@ -38,7 +38,7 @@ async function loadTestImage() {
   const blob = await response.blob();
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result());
+    reader.onloadend = () => resolve(reader.result);
     reader.readAsDataURL(blob);
   });
 }
@@ -132,6 +132,8 @@ async function runTestSuite() {
       minWallLength: parseInt(document.getElementById('minWallLength').value),
       thresholdMethod: document.getElementById('thresholdMethod').value,
       maxGapLength: parseInt(document.getElementById('maxGapLength').value),
+      minComponentSize: parseInt(document.getElementById('minComponentSize').value),
+      closingKernelSize: parseInt(document.getElementById('closingKernelSize').value),
       fillGaps: document.getElementById('fillGaps').checked,
       orientationConstraints: document.getElementById('orientationConstraints').checked,
       runOCR: document.getElementById('runOCR').checked
@@ -158,9 +160,9 @@ async function runTestSuite() {
     const preprocessed = preprocessImage(imageData, {
       thresholdMethod: config.thresholdMethod,
       removeNoise: true,
-      minComponentSize: 30,
+      minComponentSize: config.minComponentSize,
       useClosing: true,
-      closingKernelSize: 5
+      closingKernelSize: config.closingKernelSize
     });
     
     Validators.validatePreprocessing(preprocessed, imageData).forEach(a => step1.addAssertion(a));
@@ -269,6 +271,16 @@ async function runTestSuite() {
     const processed = postProcessSegments(segments, width, height, {
       minLength: config.minWallLength,
       enforceOrientation: config.orientationConstraints,
+      allowedOrientations: ['horizontal', 'vertical'],
+      angleTolerance: Math.PI / 12,
+      removeIsolated: false, // Disabled - too aggressive
+      connectionThreshold: 25,
+      snapGrid: true,
+      gridSize: 5,
+      snapOrientation: true,
+      removeDups: true,
+      duplicateThreshold: 10,
+      applyConstraints: false, // Disabled to avoid over-filtering
       classifyExterior: true
     });
     

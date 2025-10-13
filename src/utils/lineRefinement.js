@@ -160,8 +160,8 @@ export const nonMaximumSuppression = (magnitude, direction, width, height) => {
 export const detectLineSegments = (likelihood, width, height, options = {}) => {
   const {
     minLength = 50,
-    minScore = 0.3,
-    maxGap = 10,
+    minScore = 0.1, // Lowered from 0.3 to catch more edges
+    maxGap = 10, // Reduced back to 10 for more conservative chain tracing
     orientationConstraint = true,
     angleTolerance = Math.PI / 12 // 15 degrees
   } = options;
@@ -179,9 +179,14 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Likelihood map - nonzero: ${nonZero}/${likelihood.length}, range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
   
-  // Detect edges
+  // Apply edge detection to find wall boundaries
+  // Use Sobel operator to detect edges in the likelihood map
   const { magnitude, direction } = detectEdges(likelihood, width, height);
+  
+  // Apply non-maximum suppression to thin edges
   const edges = nonMaximumSuppression(magnitude, direction, width, height);
+  
+  console.log(`DEBUG: Using edge detection approach`);
   
   // DEBUG: Check edge magnitude
   let edgeNonZero = 0;
@@ -207,12 +212,15 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   // Fit lines to chains
   const segments = [];
   for (const chain of chains) {
-    if (chain.length < minLength / 2) continue;
+    // Don't pre-filter by chain length - let line fitting handle it
+    // Dashed/thin walls may have short chains that extend into long lines
+    if (chain.length < 3) continue; // Need at least 3 points to fit a line
     
     // Fit line using least squares
     const line = fitLineToPoints(chain);
     
     if (line && line.length >= minLength) {
+      
       // Filter by orientation if enabled
       if (orientationConstraint) {
         const orientation = line.getOrientation(angleTolerance);
@@ -295,9 +303,10 @@ const traceEdgeChain = (binary, direction, visited, width, height, startX, start
 const getEdgeNeighbors = (x, y, angle, maxGap) => {
   const neighbors = [];
   
-  // 8-connected neighbors
-  for (let dy = -maxGap; dy <= maxGap; dy++) {
-    for (let dx = -maxGap; dx <= maxGap; dx++) {
+  // Only check 8-connected immediate neighbors for skeleton pixels
+  // The skeleton is already 1-pixel wide, no need for large gaps
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
       if (dx === 0 && dy === 0) continue;
       neighbors.push({ x: x + dx, y: y + dy });
     }
@@ -524,5 +533,133 @@ const mergeLineGroup = (lines) => {
     return new LineSegment(minX, (minY + maxY) / 2, maxX, (minY + maxY) / 2, avgScore);
   } else {
     return new LineSegment((minX + maxX) / 2, minY, (minX + maxX) / 2, maxY, avgScore);
+  }
+};
+
+/**
+ * Morphological dilation to expand wall regions and bridge gaps
+ */
+const morphologicalDilation = (binary, width, height, iterations = 1) => {
+  let result = new Uint8Array(binary);
+  
+  for (let iter = 0; iter < iterations; iter++) {
+    const temp = new Uint8Array(result);
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        
+        // If any 8-neighbor is 1, set this pixel to 1
+        if (temp[idx] === 0) {
+          let hasNeighbor = false;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nIdx = (y + dy) * width + (x + dx);
+              if (temp[nIdx] === 1) {
+                hasNeighbor = true;
+                break;
+              }
+            }
+            if (hasNeighbor) break;
+          }
+          if (hasNeighbor) {
+            result[idx] = 1;
+          }
+        }
+      }
+    }
+  }
+  
+  return result;
+};
+
+/**
+ * Morphological thinning to extract wall centerlines
+ * Uses Zhang-Suen algorithm for skeletonization
+ */
+const morphologicalThinning = (binary, width, height) => {
+  // Create working copy
+  let skeleton = new Uint8Array(binary);
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 20; // Limit iterations to prevent infinite loops
+  
+  while (changed && iterations < maxIterations) {
+    changed = false;
+    iterations++;
+    
+    // Sub-iteration 1
+    const toDelete1 = [];
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        if (skeleton[idx] === 1 && shouldDeletePixel(skeleton, width, x, y, 1)) {
+          toDelete1.push(idx);
+        }
+      }
+    }
+    
+    for (const idx of toDelete1) {
+      skeleton[idx] = 0;
+      changed = true;
+    }
+    
+    // Sub-iteration 2
+    const toDelete2 = [];
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        if (skeleton[idx] === 1 && shouldDeletePixel(skeleton, width, x, y, 2)) {
+          toDelete2.push(idx);
+        }
+      }
+    }
+    
+    for (const idx of toDelete2) {
+      skeleton[idx] = 0;
+      changed = true;
+    }
+  }
+  
+  return skeleton;
+};
+
+/**
+ * Check if pixel should be deleted in Zhang-Suen algorithm
+ */
+const shouldDeletePixel = (img, width, x, y, step) => {
+  // Get 8-neighbors (clockwise from top)
+  const p2 = img[(y - 1) * width + x];
+  const p3 = img[(y - 1) * width + (x + 1)];
+  const p4 = img[y * width + (x + 1)];
+  const p5 = img[(y + 1) * width + (x + 1)];
+  const p6 = img[(y + 1) * width + x];
+  const p7 = img[(y + 1) * width + (x - 1)];
+  const p8 = img[y * width + (x - 1)];
+  const p9 = img[(y - 1) * width + (x - 1)];
+  
+  // Count transitions from 0 to 1
+  const neighbors = [p2, p3, p4, p5, p6, p7, p8, p9, p2];
+  let transitions = 0;
+  for (let i = 0; i < 8; i++) {
+    if (neighbors[i] === 0 && neighbors[i + 1] === 1) {
+      transitions++;
+    }
+  }
+  
+  // Count black neighbors
+  const blackCount = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+  
+  // Zhang-Suen conditions
+  if (transitions !== 1) return false;
+  if (blackCount < 2 || blackCount > 6) return false;
+  
+  if (step === 1) {
+    // Step 1: p2 * p4 * p6 = 0 AND p4 * p6 * p8 = 0
+    return (p2 * p4 * p6 === 0) && (p4 * p6 * p8 === 0);
+  } else {
+    // Step 2: p2 * p4 * p8 = 0 AND p2 * p6 * p8 = 0
+    return (p2 * p4 * p8 === 0) && (p2 * p6 * p8 === 0);
   }
 };

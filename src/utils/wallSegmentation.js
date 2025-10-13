@@ -145,8 +145,9 @@ export const generateClassicalLikelihoodMap = (binary, width, height) => {
   
   console.log(`DEBUG: Created likelihood map from binary image (${wallPixels} pixels with score 1.0)`);
   
-  // Apply slight Gaussian smoothing to help edge detection
-  return gaussianBlur(likelihood, width, height, 1.5);
+  // Minimal blur to smooth edges for chain tracing (0.3σ = 1x1 kernel)
+  // Too much blur (1.5) loses thin walls, no blur (0) crashes edge tracer
+  return gaussianBlur(likelihood, width, height, 0.3);
 };
 
 /**

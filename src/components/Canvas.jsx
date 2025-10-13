@@ -2,11 +2,13 @@ import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, us
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
 import {
-  findNearestIntersection,
+  extractSnapPointsFromTopology,
+  findBestSnapPoint,
   applySecondaryAlignment,
-  SNAP_TO_INTERSECTION_DISTANCE,
+  SNAP_TO_CORNER_DISTANCE,
+  SNAP_TO_EDGE_DISTANCE,
   SECONDARY_ALIGNMENT_DISTANCE
-} from '../utils/snappingHelper';
+} from '../utils/topologySnappingHelper';
 
 const Canvas = forwardRef(({
   image,
@@ -72,27 +74,34 @@ const Canvas = forwardRef(({
   // Track Control key state to disable snapping
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
-  // Use corner points for snapping, extract lines for room overlay snapping
-  const { horizontalLines, verticalLines, snapPoints } = useMemo(() => {
-    // Extract line positions for room overlay edge snapping
+  // Extract snap data from topology (corners and edges)
+  const snapData = useMemo(() => {
+    // Try to get topology data from perimeter or room overlay
+    const topologyData = perimeterOverlay?.topologyData || roomOverlay?.topologyData;
+    
+    if (topologyData) {
+      const { corners, edges } = extractSnapPointsFromTopology(topologyData);
+      console.log(`Topology snapping: ${corners.length} corners, ${edges.length} edges`);
+      return { corners, edges };
+    }
+    
+    // Fallback to corner points if no topology data
+    const corners = cornerPoints || [];
+    if (corners.length > 0) {
+      console.log(`Fallback snapping: Using ${corners.length} corner points`);
+    } else {
+      console.log('Snapping: No snap data available');
+    }
+    
+    return { corners, edges: [] };
+  }, [perimeterOverlay, roomOverlay, cornerPoints]);
+  
+  // Extract line positions for room overlay edge snapping (backward compatibility)
+  const { horizontalLines, verticalLines } = useMemo(() => {
     const hLines = lineData?.horizontal ? lineData.horizontal.map(line => line.center) : [];
     const vLines = lineData?.vertical ? lineData.vertical.map(line => line.center) : [];
-    
-    // Use corner points for vertex snapping
-    const corners = cornerPoints || [];
-    
-    if (corners.length > 0) {
-      console.log(`Snapping: Using ${corners.length} detected corner points`);
-    } else {
-      console.log('Snapping: No corner points available');
-    }
-
-    return {
-      horizontalLines: hLines,
-      verticalLines: vLines,
-      snapPoints: corners
-    };
-  }, [lineData, cornerPoints]);
+    return { horizontalLines: hLines, verticalLines: vLines };
+  }, [lineData]);
   
   // Listen for Control key press/release to disable snapping
   useEffect(() => {
@@ -302,12 +311,12 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Apply snapping to intersection points for visual feedback (unless Ctrl is pressed)
-    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
-      canvasPos,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
+    const snappedPoint = findBestSnapPoint(canvasPos, snapData, {
+      cornerDistance: SNAP_TO_CORNER_DISTANCE,
+      edgeDistance: SNAP_TO_EDGE_DISTANCE,
+      disableSnapping: isCtrlPressed
+    });
     
     // Use snapped position if available, otherwise use raw position
     const visualPoint = snappedPoint || canvasPos;
@@ -337,12 +346,12 @@ const Canvas = forwardRef(({
     // Get current position from visual snap or current vertex position
     const currentVertex = perimeterOverlay.vertices[index];
     
-    // Apply snapping to intersection points (unless Ctrl is pressed)
-    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
-      currentVertex,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
+    const snappedPoint = findBestSnapPoint(currentVertex, snapData, {
+      cornerDistance: SNAP_TO_CORNER_DISTANCE,
+      edgeDistance: SNAP_TO_EDGE_DISTANCE,
+      disableSnapping: isCtrlPressed
+    });
     
     // Use snapped position if available, otherwise use raw position
     const finalPoint = snappedPoint || currentVertex;
@@ -427,12 +436,12 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Apply snapping to corner points (unless Ctrl is pressed)
-    const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
-      clickPoint,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
+    const snappedPoint = findBestSnapPoint(clickPoint, snapData, {
+      cornerDistance: SNAP_TO_CORNER_DISTANCE,
+      edgeDistance: SNAP_TO_EDGE_DISTANCE,
+      disableSnapping: isCtrlPressed
+    });
     
     // Use snapped position if available, otherwise use raw position
     const finalPoint = snappedPoint || clickPoint;
@@ -733,12 +742,12 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        // Apply snapping to corner points (unless Ctrl is pressed)
-        const snappedPoint = isCtrlPressed ? null : findNearestIntersection(
-          clickPoint,
-          snapPoints,
-          SNAP_TO_INTERSECTION_DISTANCE
-        );
+        // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
+        const snappedPoint = findBestSnapPoint(clickPoint, snapData, {
+          cornerDistance: SNAP_TO_CORNER_DISTANCE,
+          edgeDistance: SNAP_TO_EDGE_DISTANCE,
+          disableSnapping: isCtrlPressed
+        });
         
         // Use snapped position if available, otherwise use raw position
         const finalPoint = snappedPoint || clickPoint;
@@ -867,12 +876,12 @@ const Canvas = forwardRef(({
     if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
         perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
       const timer = setTimeout(() => {
-        // Apply snapping to corner points
-        const snappedPoint = findNearestIntersection(
-          canvasPos,
-          snapPoints,
-          SNAP_TO_INTERSECTION_DISTANCE
-        );
+        // Apply topology-based snapping to corners and edges (Ctrl check not needed - touch has no Ctrl key)
+        const snappedPoint = findBestSnapPoint(canvasPos, snapData, {
+          cornerDistance: SNAP_TO_CORNER_DISTANCE,
+          edgeDistance: SNAP_TO_EDGE_DISTANCE,
+          disableSnapping: false
+        });
         
         // Use snapped position if available, otherwise use raw position
         const finalPoint = snappedPoint || canvasPos;

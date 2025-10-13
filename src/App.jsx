@@ -3,7 +3,8 @@ import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
 import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
-import { detectRoom } from './utils/roomDetector';
+import { detectRoom, detectAllDimensions } from './utils/topologyRoomDetector';
+import { tracePerimeter, switchPerimeterEdge } from './utils/topologyPerimeterTracer';
 import { calculateArea } from './utils/areaCalculator';
 import FloorTraceLogo from './assets/logo.svg';
 
@@ -146,7 +147,7 @@ function App() {
     }
   };
 
-  // Handle trace perimeter using HYBRID wall detection system
+  // Handle trace perimeter using TOPOLOGY-GUIDED wall detection system
   const handleTracePerimeter = async () => {
     if (!image) {
       alert('Please load an image first');
@@ -155,26 +156,24 @@ function App() {
     
     setIsProcessing(true);
     try {
-      // Import the new hybrid perimeter detector
-      const { detectPerimeter } = await import('./utils/perimeterDetector');
-      
-      // Use existing wall data if available (from room detection), otherwise detect walls
-      // Pass useInteriorWalls to control interior/exterior edge placement
-      const result = await detectPerimeter(image, useInteriorWalls, wallData);
+      // Use new topology-guided perimeter tracer with interior/exterior edge option
+      const result = await tracePerimeter(image, useInteriorWalls, wallData);
       
       if (result) {
-        // Store the full result including wallData for edge switching
+        // Store the result with topology data and edge switching capabilities
         setPerimeterOverlay({
           vertices: result.vertices,
-          wallData: result.wallData,
-          edgeType: result.edgeType,
+          centerlineVertices: result.centerlineVertices,
+          walls: result.walls,
+          area: result.area,
           wallThickness: result.wallThickness,
-          centerlineVertices: result.centerlineVertices
+          edgeType: result.edgeType,
+          topologyData: result.topologyData
         });
         
-        // Store wall data for future use (snapping, edge switching)
-        if (result.wallData) {
-          setWallData(result.wallData);
+        // Store wall data from topology for future use
+        if (result.topologyData && result.topologyData.walls) {
+          setWallData(result.topologyData);
         }
         
         // Only calculate area if we have both room overlay and scale
@@ -185,7 +184,7 @@ function App() {
           setArea(0);
         }
         
-        console.log(`✅ Perimeter placed on ${useInteriorWalls ? 'interior' : 'exterior'} edge of walls`);
+        console.log(`✅ Perimeter traced using topology-guided wall analysis (${useInteriorWalls ? 'interior' : 'exterior'} edge)`);
       } else {
         alert('Could not detect perimeter. Try adjusting the room overlay or use Manual Mode.');
       }
@@ -231,7 +230,7 @@ function App() {
       setOcrFailed(false);
       
       try {
-        const { detectAllDimensions } = await import('./utils/roomDetector');
+        // Use topology-guided room detector
         const result = await detectAllDimensions(image);
         
         // Handle new return format (object with dimensions and detectedFormat)
@@ -319,7 +318,7 @@ function App() {
     const newValue = e.target.checked;
     
     // If perimeter exists, switch the edge
-    if (perimeterOverlay && perimeterOverlay.wallData && perimeterOverlay.centerlineVertices) {
+    if (perimeterOverlay && perimeterOverlay.centerlineVertices && perimeterOverlay.wallThickness) {
       const confirmed = window.confirm(
         `Switch perimeter to ${newValue ? 'interior' : 'exterior'} edge of walls?`
       );
@@ -327,10 +326,9 @@ function App() {
         return;
       }
       
-      // Use fast edge switching (no redetection needed)
+      // Use fast edge switching (no redetection needed) with topology system
       setIsProcessing(true);
       try {
-        const { switchPerimeterEdge } = await import('./utils/perimeterDetectorHybrid');
         const result = switchPerimeterEdge(perimeterOverlay, newValue);
         
         if (result) {
@@ -348,16 +346,17 @@ function App() {
         } else {
           // Fallback: Full redetection if edge switching fails
           console.log('Edge switching failed, performing full redetection...');
-          const { detectPerimeter } = await import('./utils/perimeterDetector');
-          const detectResult = await detectPerimeter(image, newValue, wallData);
+          const detectResult = await tracePerimeter(image, newValue, wallData);
           
           if (detectResult) {
             setPerimeterOverlay({
               vertices: detectResult.vertices,
-              wallData: detectResult.wallData,
-              edgeType: detectResult.edgeType,
+              centerlineVertices: detectResult.centerlineVertices,
+              walls: detectResult.walls,
+              area: detectResult.area,
               wallThickness: detectResult.wallThickness,
-              centerlineVertices: detectResult.centerlineVertices
+              edgeType: detectResult.edgeType,
+              topologyData: detectResult.topologyData
             });
             
             if (roomOverlay) {

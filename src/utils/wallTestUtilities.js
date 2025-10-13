@@ -443,13 +443,20 @@ export const MetricsCalculators = {
     const metrics = {};
     
     if (result.binary) {
-      const wallPixels = Array.from(result.binary).filter(v => v === 1).length;
+      let wallPixels = 0;
+      for (let i = 0; i < result.binary.length; i++) {
+        if (result.binary[i] === 1) wallPixels++;
+      }
       metrics.wallPixels = wallPixels;
       metrics.wallRatio = (wallPixels / result.binary.length * 100).toFixed(2) + '%';
     }
     
     if (result.grayscale) {
-      const avgBrightness = Array.from(result.grayscale).reduce((sum, v) => sum + v, 0) / result.grayscale.length;
+      let sum = 0;
+      for (let i = 0; i < result.grayscale.length; i++) {
+        sum += result.grayscale[i];
+      }
+      const avgBrightness = sum / result.grayscale.length;
       metrics.avgBrightness = avgBrightness.toFixed(2);
     }
     
@@ -462,14 +469,25 @@ export const MetricsCalculators = {
   segmentationMetrics(likelihood) {
     const metrics = {};
     
-    const values = Array.from(likelihood);
-    metrics.minLikelihood = Math.min(...values).toFixed(3);
-    metrics.maxLikelihood = Math.max(...values).toFixed(3);
-    metrics.avgLikelihood = (values.reduce((sum, v) => sum + v, 0) / values.length).toFixed(3);
+    // Calculate min/max/avg without spread operator (avoid stack overflow on large arrays)
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+    let highLikelihood = 0;
     
-    const highLikelihood = values.filter(v => v > 0.5).length;
+    for (let i = 0; i < likelihood.length; i++) {
+      const value = likelihood[i];
+      if (value < min) min = value;
+      if (value > max) max = value;
+      sum += value;
+      if (value > 0.5) highLikelihood++;
+    }
+    
+    metrics.minLikelihood = min.toFixed(3);
+    metrics.maxLikelihood = max.toFixed(3);
+    metrics.avgLikelihood = (sum / likelihood.length).toFixed(3);
     metrics.highLikelihoodPixels = highLikelihood;
-    metrics.highLikelihoodRatio = (highLikelihood / values.length * 100).toFixed(2) + '%';
+    metrics.highLikelihoodRatio = (highLikelihood / likelihood.length * 100).toFixed(2) + '%';
     
     return metrics;
   },
@@ -483,13 +501,28 @@ export const MetricsCalculators = {
     metrics.totalSegments = segments.length;
     
     if (segments.length > 0) {
-      const lengths = segments.map(s => s.length);
-      metrics.avgLength = (lengths.reduce((sum, l) => sum + l, 0) / lengths.length).toFixed(2) + 'px';
-      metrics.minLength = Math.min(...lengths).toFixed(2) + 'px';
-      metrics.maxLength = Math.max(...lengths).toFixed(2) + 'px';
+      let minLength = Infinity;
+      let maxLength = -Infinity;
+      let sumLength = 0;
+      let minAngle = Infinity;
+      let maxAngle = -Infinity;
       
-      const angles = segments.map(s => (s.angle * 180 / Math.PI).toFixed(1));
-      metrics.angleRange = `${Math.min(...angles)}° to ${Math.max(...angles)}°`;
+      for (let i = 0; i < segments.length; i++) {
+        const length = segments[i].length;
+        const angle = segments[i].angle * 180 / Math.PI;
+        
+        if (length < minLength) minLength = length;
+        if (length > maxLength) maxLength = length;
+        sumLength += length;
+        
+        if (angle < minAngle) minAngle = angle;
+        if (angle > maxAngle) maxAngle = angle;
+      }
+      
+      metrics.avgLength = (sumLength / segments.length).toFixed(2) + 'px';
+      metrics.minLength = minLength.toFixed(2) + 'px';
+      metrics.maxLength = maxLength.toFixed(2) + 'px';
+      metrics.angleRange = `${minAngle.toFixed(1)}° to ${maxAngle.toFixed(1)}°`;
     }
     
     return metrics;
