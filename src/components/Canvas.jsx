@@ -2,7 +2,6 @@ import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, us
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
 import {
-  findAllIntersectionPoints,
   findNearestIntersection,
   applySecondaryAlignment,
   SNAP_TO_INTERSECTION_DISTANCE,
@@ -32,6 +31,7 @@ const Canvas = forwardRef(({
   onCustomShapeUpdate,
   isMobile,
   lineData,
+  cornerPoints,
   perimeterVertices,
   onAddPerimeterVertex,
   onUndoRedo
@@ -60,6 +60,7 @@ const Canvas = forwardRef(({
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
+  const visualSnapPositionRef = useRef(null); // Stores the visual snap position during drag (like .NET's _visualSnapPosition)
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
@@ -68,26 +69,27 @@ const Canvas = forwardRef(({
   const touchMoveThreshold = 10; // pixels to distinguish tap from drag
   const longPressDelay = 500; // milliseconds for long press
 
-  // Extract wall lines and create intersection points for snapping
-  const { horizontalLines, verticalLines, intersectionPoints } = useMemo(() => {
-    if (!lineData || !lineData.horizontal || !lineData.vertical) {
-      console.log('Snapping: No line data available');
-      return { horizontalLines: [], verticalLines: [], intersectionPoints: [] };
+  // Use corner points for snapping, extract lines for room overlay snapping
+  const { horizontalLines, verticalLines, snapPoints } = useMemo(() => {
+    // Extract line positions for room overlay edge snapping
+    const hLines = lineData?.horizontal ? lineData.horizontal.map(line => line.center) : [];
+    const vLines = lineData?.vertical ? lineData.vertical.map(line => line.center) : [];
+    
+    // Use corner points for vertex snapping
+    const corners = cornerPoints || [];
+    
+    if (corners.length > 0) {
+      console.log(`Snapping: Using ${corners.length} detected corner points`);
+    } else {
+      console.log('Snapping: No corner points available');
     }
-
-    // Extract center positions from detected lines
-    const hLines = lineData.horizontal.map(line => line.center);
-    const vLines = lineData.vertical.map(line => line.center);
-    const intersections = findAllIntersectionPoints(hLines, vLines);
-
-    console.log(`Snapping: Created ${intersections.length} intersection points from ${hLines.length} horizontal and ${vLines.length} vertical lines`);
 
     return {
       horizontalLines: hLines,
       verticalLines: vLines,
-      intersectionPoints: intersections
+      snapPoints: corners
     };
-  }, [lineData]);
+  }, [lineData, cornerPoints]);
 
   // Fit to window function
   const fitToWindow = () => {
@@ -268,6 +270,7 @@ const Canvas = forwardRef(({
     setDraggingVertex(index);
   };
 
+  // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseMove
   const handleVertexDrag = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index || lineToolActive || drawAreaActive) return;
     const canvasPos = getCanvasCoordinates(e.target.getStage());
@@ -276,19 +279,26 @@ const Canvas = forwardRef(({
     // Apply snapping to intersection points for visual feedback
     const snappedPoint = findNearestIntersection(
       canvasPos,
-      intersectionPoints,
+      snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
     );
     
     // Use snapped position if available, otherwise use raw position
     const visualPoint = snappedPoint || canvasPos;
     
+    // Store the snap position for use in MouseUp (drag end)
+    visualSnapPositionRef.current = snappedPoint;
+    
+    // Update only the visual elements, not the actual data
+    // In .NET this updates Canvas.SetLeft/SetTop and polygon.Points
+    // In React-Konva, we update the state which re-renders, but mark saveAction=false
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = { x: visualPoint.x, y: visualPoint.y };
     
     onPerimeterUpdate(newVertices, false); // Don't save action during drag
   };
 
+  // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseUp
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     
@@ -298,40 +308,40 @@ const Canvas = forwardRef(({
         i === index ? lastDragStartPosRef.current : v
       ) : null;
     
-    // Apply snapping and secondary alignment on drag end
+    // Get current position from visual snap or current vertex position
     const currentVertex = perimeterOverlay.vertices[index];
+    
+    // Apply snapping to intersection points
     const snappedPoint = findNearestIntersection(
       currentVertex,
-      intersectionPoints,
+      snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
     );
     
-    // If snapped, apply secondary alignment to nearby vertices
+    // Use snapped position if available, otherwise use raw position
+    const finalPoint = snappedPoint || currentVertex;
+    
+    // Now update the actual data point
+    let newVertices = [...perimeterOverlay.vertices];
+    newVertices[index] = finalPoint;
+    
+    // Apply secondary alignment to nearby vertices if snapped
     if (snappedPoint) {
-      const finalPoint = snappedPoint;
-      let newVertices = [...perimeterOverlay.vertices];
-      newVertices[index] = finalPoint;
-      
-      // Apply secondary alignment
-      newVertices = applySecondaryAlignment(
+      applySecondaryAlignment(
         newVertices,
         index,
         finalPoint,
         SECONDARY_ALIGNMENT_DISTANCE
       );
-      
-      onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
-    } else {
-      // Even without snapping, save action if position changed
-      const currentPos = perimeterOverlay.vertices[index];
-      if (lastDragStartPosRef.current && 
-          (currentPos.x !== lastDragStartPosRef.current.x || 
-           currentPos.y !== lastDragStartPosRef.current.y)) {
-        onPerimeterUpdate(perimeterOverlay.vertices, true, previousVertices); // Save action for undo
-      }
     }
     
+    // Re-render to show final position and any aligned vertices
+    // Notify that perimeter changed
+    onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
+    
+    // Clean up
     setDraggingVertex(null);
+    visualSnapPositionRef.current = null;
   };
 
   // Delete perimeter vertex (for mobile)
@@ -391,10 +401,10 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Apply snapping to intersection points
+    // Apply snapping to corner points
     const snappedPoint = findNearestIntersection(
       clickPoint,
-      intersectionPoints,
+      snapPoints,
       SNAP_TO_INTERSECTION_DISTANCE
     );
     
@@ -423,9 +433,9 @@ const Canvas = forwardRef(({
     let newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
     
-    // Apply secondary alignment if snapped
+    // Apply secondary alignment to nearby vertices if snapped
     if (snappedPoint) {
-      newVertices = applySecondaryAlignment(
+      applySecondaryAlignment(
         newVertices,
         closestEdgeIndex + 1,
         finalPoint,
@@ -636,7 +646,7 @@ const Canvas = forwardRef(({
     // Check if we're in a mode that needs single-click handling
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
-      (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) ||
+      (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) ||
       (lineToolActive && onMeasurementLineUpdate) ||
       (drawAreaActive && onCustomShapeUpdate);
     
@@ -681,8 +691,9 @@ const Canvas = forwardRef(({
         return;
       }
       
-      // Perimeter vertex placement mode (room overlay exists, no perimeter overlay, no tools active)
-      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== undefined) {
+      // Perimeter vertex placement mode (only active after manual mode or trace perimeter)
+      // perimeterVertices !== null means user has explicitly entered vertex placement mode
+      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) {
         // Don't place vertex if clicking on room overlay (allow dragging though)
         const targetType = e.target.getType();
         if (targetType === 'Rect' || targetType === 'Circle') {
@@ -695,10 +706,10 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        // Apply snapping to intersection points
+        // Apply snapping to corner points
         const snappedPoint = findNearestIntersection(
           clickPoint,
-          intersectionPoints,
+          snapPoints,
           SNAP_TO_INTERSECTION_DISTANCE
         );
         
@@ -829,10 +840,10 @@ const Canvas = forwardRef(({
     if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
         perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
       const timer = setTimeout(() => {
-        // Apply snapping to intersection points
+        // Apply snapping to corner points
         const snappedPoint = findNearestIntersection(
           canvasPos,
-          intersectionPoints,
+          snapPoints,
           SNAP_TO_INTERSECTION_DISTANCE
         );
         
@@ -858,9 +869,9 @@ const Canvas = forwardRef(({
         let newVertices = [...vertices];
         newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
         
-        // Apply secondary alignment if snapped
+        // Apply secondary alignment to nearby vertices if snapped
         if (snappedPoint) {
-          newVertices = applySecondaryAlignment(
+          applySecondaryAlignment(
             newVertices,
             closestEdgeIndex + 1,
             finalPoint,

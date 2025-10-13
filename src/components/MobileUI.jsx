@@ -26,6 +26,7 @@ const MobileUI = forwardRef(({
   setCustomShape,
   area,
   lineData,
+  cornerPoints,
   mobileSheetOpen,
   setMobileSheetOpen,
   fileInputRef,
@@ -52,6 +53,14 @@ const MobileUI = forwardRef(({
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
   const [originalValues, setOriginalValues] = useState({ width: '', height: '' });
+  const [showWelcomePrompt, setShowWelcomePrompt] = useState(true);
+
+  // Auto-hide welcome prompt when image is loaded
+  useEffect(() => {
+    if (image) {
+      setShowWelcomePrompt(false);
+    }
+  }, [image]);
 
   // Update display values when roomDimensions or unit changes
   useEffect(() => {
@@ -130,8 +139,38 @@ const MobileUI = forwardRef(({
     setEditingField(null);
   };
 
+  const handleLoadImageClick = () => {
+    setShowWelcomePrompt(false);
+    fileInputRef.current?.click();
+  };
+
   return (
     <div className="flex flex-col h-screen bg-white">
+      {/* Welcome Prompt Modal - Shows on first load */}
+      {showWelcomePrompt && !image && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 mx-4 max-w-sm">
+            <div className="text-center">
+              <img src={FloorTraceLogo} alt="FloorTrace Logo" className="w-16 h-16 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Welcome to FloorTrace</h2>
+              <p className="text-slate-600 mb-6">Load a floor plan image to calculate room area</p>
+              <button
+                onClick={handleLoadImageClick}
+                className="w-full px-6 py-4 text-lg font-semibold text-white bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors shadow-lg active:scale-95 transform"
+              >
+                📷 Load Floor Plan
+              </button>
+              <button
+                onClick={() => setShowWelcomePrompt(false)}
+                className="mt-3 text-sm text-slate-500 hover:text-slate-700 underline"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Header */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-4 py-3 shadow-sm flex items-center justify-between">
         <div 
@@ -154,11 +193,11 @@ const MobileUI = forwardRef(({
 
       {/* Mobile Canvas - Full Screen */}
       <div className="relative flex-1 overflow-hidden">
-        {/* Tap to Load Image Overlay - Only show when no image */}
-        {!image && (
+        {/* Tap to Load Image Overlay - Only show when no image and welcome prompt is dismissed */}
+        {!image && !showWelcomePrompt && (
           <div 
-            className="absolute inset-0 flex items-center justify-center bg-slate-50 z-20"
-            onClick={() => fileInputRef.current?.click()}
+            className="absolute inset-0 flex items-center justify-center bg-slate-50 z-20 active:bg-slate-100 transition-colors"
+            onClick={handleLoadImageClick}
           >
             <div className="text-center px-6">
               <div className="mb-4">
@@ -196,6 +235,7 @@ const MobileUI = forwardRef(({
           onCustomShapeUpdate={setCustomShape}
           isMobile={true}
           lineData={lineData}
+          cornerPoints={cornerPoints}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={onAddPerimeterVertex}
           onRemovePerimeterVertex={onRemovePerimeterVertex}
@@ -433,6 +473,7 @@ const MobileUI = forwardRef(({
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        capture="environment"
         onChange={handleFileUpload}
         className="hidden"
       />

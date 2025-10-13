@@ -1,15 +1,23 @@
 import { dataUrlToImage, imageToCanvas } from './imageLoader';
+import { preprocessImage, otsuThreshold } from './imagePreprocessor';
+import { segmentWalls, generateAttractionField } from './wallSegmentation';
+import { detectLineSegments, mergeCollinearSegments } from './lineRefinement';
+import { extractCenterlineFromDistance } from './wallCenterline';
+import { fillGapsInSegments, morphologicalGapBridging } from './gapFilling';
+import { postProcessSegments } from './wallPostProcessing';
 
 /**
- * Advanced Wall Detection System
+ * Hybrid Deep Learning + Classical Wall Detection System
  * 
- * This system detects walls in floor plan images by:
- * 1. Converting to binary (black/white)
- * 2. Finding all connected dark regions
- * 3. Filtering out text and symbols based on size (walls are longer)
- * 4. Classifying walls as horizontal or vertical
- * 5. Separating exterior walls from interior walls
- * 6. Connecting gaps in exterior walls to form complete perimeter
+ * This system detects walls in floor plan images using a hybrid approach:
+ * 1. Preprocessing: Adaptive thresholding, morphological operations, noise removal
+ * 2. CNN-based segmentation: Generate wall likelihood maps (with classical fallback)
+ * 3. Classical line detection: Extract line segments from likelihood maps
+ * 4. Wall centerline extraction: Handle thick walls and double lines
+ * 5. Gap filling: Bridge gaps from doors/windows using morphological closing
+ * 6. Post-processing: Orientation constraints, filtering, snapping, quantization
+ * 7. Classification: Separate exterior from interior walls
+ * 8. Perimeter building: Connect exterior walls to form complete perimeter
  */
 
 /**
@@ -57,19 +65,27 @@ export class WallSegment {
 }
 
 /**
- * Main wall detection function
+ * Main wall detection function using hybrid approach
  * @param {string|HTMLImageElement} imageSource - Image data URL or image element
  * @param {Object} options - Detection options
  * @returns {Object} Detected walls and metadata
  */
 export const detectWalls = async (imageSource, options = {}) => {
   const {
-    minWallLength = 100, // Minimum pixels to be considered a wall
-    binaryThreshold = 128, // Brightness threshold for binary conversion
+    minWallLength = 50,
+    useCNN = false,              // Use CNN-based segmentation (experimental)
+    cnnModelPath = null,         // Path to pre-trained model
+    thresholdMethod = 'adaptive', // 'global', 'adaptive', or 'otsu'
+    orientationConstraints = true, // Only horizontal/vertical walls
+    fillGaps = true,             // Bridge gaps from doors/windows
+    maxGapLength = 100,
     debugMode = false
   } = options;
 
   try {
+    console.log('=== Hybrid Wall Detection Started ===');
+    const startTime = performance.now();
+    
     // Load and prepare image
     const img = typeof imageSource === 'string' 
       ? await dataUrlToImage(imageSource) 
@@ -78,51 +94,114 @@ export const detectWalls = async (imageSource, options = {}) => {
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
     const height = canvas.height;
+    const imageData = ctx.getImageData(0, 0, width, height);
 
-    console.log(`Wall detection started: ${width}x${height}px, minLength=${minWallLength}`);
+    console.log(`Image size: ${width}x${height}px`);
 
-    // Step 1: Convert to binary
-    const binaryImage = convertToBinary(ctx, width, height, binaryThreshold);
-    console.log('Binary conversion complete');
+    // STEP 1: Preprocessing
+    console.log('\n--- Step 1: Preprocessing ---');
+    const preprocessed = preprocessImage(imageData, {
+      thresholdMethod,
+      removeNoise: true,
+      minComponentSize: 30,
+      useClosing: true,
+      closingKernelSize: 5
+    });
 
-    // Step 2: Find all connected components (dark regions)
-    const components = findConnectedComponents(binaryImage, width, height);
-    console.log(`Found ${components.length} connected components`);
+    // STEP 2: CNN-based segmentation (or classical fallback)
+    console.log('\n--- Step 2: Wall Segmentation ---');
+    const likelihood = await segmentWalls(
+      preprocessed.grayscale,
+      width,
+      height,
+      {
+        useModel: useCNN,
+        modelPath: cnnModelPath,
+        useFallback: true
+      }
+    );
 
-    // Step 3: Filter components to identify walls (long segments)
-    const wallSegments = filterWalls(components, minWallLength);
-    console.log(`Identified ${wallSegments.length} wall segments`);
+    // STEP 3: Line detection and refinement
+    console.log('\n--- Step 3: Line Detection ---');
+    let segments = detectLineSegments(likelihood, width, height, {
+      minLength: minWallLength,
+      minScore: 0.2,
+      maxGap: 10,
+      orientationConstraint: orientationConstraints,
+      angleTolerance: Math.PI / 12
+    });
 
-    // Step 4: Classify walls as horizontal or vertical
-    const { horizontal, vertical } = classifyWalls(wallSegments);
-    console.log(`Classified: ${horizontal.length} horizontal, ${vertical.length} vertical`);
+    // STEP 4: Merge collinear segments
+    console.log('\n--- Step 4: Merging Collinear Segments ---');
+    segments = mergeCollinearSegments(segments, {
+      maxDistance: 15,
+      maxGap: 30,
+      angleTolerance: 0.15
+    });
 
-    // Step 4.5: Merge aligned wall segments (connect walls separated by windows/doors)
-    const { horizontal: mergedHorizontal, vertical: mergedVertical } = mergeAlignedWalls(horizontal, vertical);
-    console.log(`After merging: ${mergedHorizontal.length} horizontal, ${mergedVertical.length} vertical`);
+    // STEP 5: Gap filling
+    if (fillGaps) {
+      console.log('\n--- Step 5: Gap Filling ---');
+      segments = fillGapsInSegments(segments, {
+        maxGapLength,
+        alignmentTolerance: 10,
+        angleTolerance: 0.1
+      });
+    }
 
-    // Step 5: Separate exterior and interior walls
-    const { exterior, interior } = separateExteriorInterior(mergedHorizontal, mergedVertical, width, height);
-    console.log(`Separated: ${exterior.length} exterior, ${interior.length} interior`);
+    // STEP 6: Post-processing and filtering
+    console.log('\n--- Step 6: Post-Processing ---');
+    const processed = postProcessSegments(segments, width, height, {
+      minLength: minWallLength,
+      enforceOrientation: orientationConstraints,
+      allowedOrientations: ['horizontal', 'vertical'],
+      angleTolerance: Math.PI / 12,
+      removeIsolated: true,
+      connectionThreshold: 25,
+      snapGrid: true,
+      gridSize: 5,
+      snapOrientation: true,
+      removeDups: true,
+      duplicateThreshold: 10,
+      applyConstraints: false, // Disabled to avoid over-filtering
+      classifyExterior: true
+    });
 
-    // Step 6: Build perimeter from exterior walls
+    // STEP 7: Convert line segments back to WallSegment format for compatibility
+    console.log('\n--- Step 7: Format Conversion ---');
+    const allWalls = convertLineSegmentsToWallSegments(processed.all);
+    const horizontal = convertLineSegmentsToWallSegments(processed.horizontal);
+    const vertical = convertLineSegmentsToWallSegments(processed.vertical);
+    const exterior = convertLineSegmentsToWallSegments(processed.exterior);
+    const interior = convertLineSegmentsToWallSegments(processed.interior);
+
+    // STEP 8: Build perimeter from exterior walls
+    console.log('\n--- Step 8: Building Perimeter ---');
     const perimeter = buildPerimeter(exterior, width, height);
     console.log(`Built perimeter with ${perimeter ? perimeter.vertices.length : 0} vertices`);
 
+    const detectionTime = performance.now() - startTime;
+    console.log(`\n=== Detection Complete (${detectionTime.toFixed(2)}ms) ===`);
+    console.log(`Total walls: ${allWalls.length}`);
+    console.log(`Horizontal: ${horizontal.length}, Vertical: ${vertical.length}`);
+    console.log(`Exterior: ${exterior.length}, Interior: ${interior.length}`);
+
     const result = {
-      allWalls: wallSegments,
+      allWalls,
       horizontal,
       vertical,
       exterior,
       interior,
       perimeter,
-      imageSize: { width, height }
+      imageSize: { width, height },
+      detectionTime: `${detectionTime.toFixed(2)}ms`
     };
 
     if (debugMode) {
       result.debug = {
-        binaryImage,
-        components,
+        preprocessed,
+        likelihood,
+        lineSegments: processed.all,
         visualizations: createDebugVisualizations(result, width, height)
       };
     }
@@ -135,7 +214,40 @@ export const detectWalls = async (imageSource, options = {}) => {
 };
 
 /**
+ * Convert LineSegment objects to WallSegment format for backward compatibility
+ * @param {Array<LineSegment>} lineSegments - Array of LineSegment objects
+ * @returns {Array<WallSegment>} Array of WallSegment objects
+ */
+const convertLineSegmentsToWallSegments = (lineSegments) => {
+  return lineSegments.map(lineSeg => {
+    // Create bounding box from line segment
+    const boundingBox = {
+      x1: Math.min(lineSeg.x1, lineSeg.x2),
+      y1: Math.min(lineSeg.y1, lineSeg.y2),
+      x2: Math.max(lineSeg.x1, lineSeg.x2),
+      y2: Math.max(lineSeg.y1, lineSeg.y2)
+    };
+    
+    // Determine if horizontal or vertical
+    const isHorizontal = lineSeg.isHorizontal();
+    
+    // Generate pixel array (sample points along the line)
+    const pixels = [];
+    const numSamples = Math.ceil(lineSeg.length);
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+      const x = Math.round(lineSeg.x1 + t * (lineSeg.x2 - lineSeg.x1));
+      const y = Math.round(lineSeg.y1 + t * (lineSeg.y2 - lineSeg.y1));
+      pixels.push({ x, y });
+    }
+    
+    return new WallSegment(pixels, boundingBox, isHorizontal);
+  });
+};
+
+/**
  * Convert image to binary (1 = dark/wall, 0 = light/background)
+ * @deprecated - Use preprocessImage from imagePreprocessor instead
  */
 const convertToBinary = (ctx, width, height, threshold) => {
   const imageData = ctx.getImageData(0, 0, width, height);
@@ -226,6 +338,7 @@ const floodFillComponent = (binary, visited, width, height, startX, startY) => {
 
 /**
  * Filter components to identify walls (long segments vs text/symbols)
+ * Walls are elongated rectangles with high aspect ratio
  */
 const filterWalls = (components, minWallLength) => {
   const walls = [];
@@ -235,9 +348,16 @@ const filterWalls = (components, minWallLength) => {
     const width = boundingBox.x2 - boundingBox.x1;
     const height = boundingBox.y2 - boundingBox.y1;
     const maxDimension = Math.max(width, height);
+    const minDimension = Math.min(width, height);
 
-    // A wall must have at least one dimension >= minWallLength
-    if (maxDimension >= minWallLength) {
+    // Calculate aspect ratio to identify elongated shapes
+    const aspectRatio = maxDimension / Math.max(minDimension, 1);
+
+    // A wall must be:
+    // 1. Long enough (maxDimension >= minWallLength)
+    // 2. Elongated (aspect ratio >= 3, meaning length is at least 3x the thickness)
+    // This filters out square text blobs while keeping thick walls
+    if (maxDimension >= minWallLength && aspectRatio >= 3) {
       // Determine if horizontal or vertical based on aspect ratio
       const isHorizontal = width > height;
       walls.push(new WallSegment(component.pixels, boundingBox, isHorizontal));

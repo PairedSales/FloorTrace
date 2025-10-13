@@ -15,30 +15,48 @@ import { dataUrlToImage } from './imageLoader';
  */
 export const testWallDetection = async (imageDataUrl, options = {}) => {
   const {
-    minWallLength = 100,
+    minWallLength = 50,
+    useCNN = false,
+    thresholdMethod = 'adaptive',
+    orientationConstraints = true,
+    fillGaps = true,
+    maxGapLength = 100,
     testPerimeter = true,
     testRoomDetection = false,
     dimensionBBox = null, // Required for room detection test
     showDebugInfo = true
   } = options;
 
-  console.log('=== Wall Detection Test Started ===');
-  console.log('Options:', { minWallLength, testPerimeter, testRoomDetection });
+  console.log('=== Hybrid Wall Detection Test Started ===');
+  console.log('Options:', { 
+    minWallLength, 
+    useCNN,
+    thresholdMethod,
+    orientationConstraints,
+    fillGaps,
+    testPerimeter, 
+    testRoomDetection 
+  });
 
   const startTime = performance.now();
 
   // Run wall detection with debug mode
   const wallData = await detectWalls(imageDataUrl, {
     minWallLength,
+    useCNN,
+    thresholdMethod,
+    orientationConstraints,
+    fillGaps,
+    maxGapLength,
     debugMode: true
   });
 
-  const detectionTime = performance.now() - startTime;
+  const detectionTime = wallData.detectionTime || `${(performance.now() - startTime).toFixed(2)}ms`;
 
   // Prepare test results
   const results = {
     success: true,
-    detectionTime: `${detectionTime.toFixed(2)}ms`,
+    detectionTime,
     statistics: {
       totalWalls: wallData.allWalls.length,
       horizontalWalls: wallData.horizontal.length,
@@ -352,48 +370,64 @@ const printTestSummary = (results) => {
 
 /**
  * Compare wall detection with different parameters
- * Useful for tuning the minWallLength parameter
+ * Useful for tuning detection parameters
  */
-export const compareWallDetectionParameters = async (imageDataUrl, minLengths = [50, 75, 100, 125, 150]) => {
+export const compareWallDetectionParameters = async (imageDataUrl, parameterSets = null) => {
   console.log('=== Parameter Comparison Test ===');
-  console.log(`Testing minWallLength values: ${minLengths.join(', ')}`);
+  
+  // Default parameter sets to test
+  if (!parameterSets) {
+    parameterSets = [
+      { minWallLength: 30, thresholdMethod: 'adaptive', fillGaps: true },
+      { minWallLength: 50, thresholdMethod: 'adaptive', fillGaps: true },
+      { minWallLength: 75, thresholdMethod: 'adaptive', fillGaps: true },
+      { minWallLength: 50, thresholdMethod: 'otsu', fillGaps: true },
+      { minWallLength: 50, thresholdMethod: 'adaptive', fillGaps: false }
+    ];
+  }
+  
+  console.log(`Testing ${parameterSets.length} parameter combinations`);
 
   const results = [];
 
-  for (const minLength of minLengths) {
-    console.log(`\nTesting minWallLength = ${minLength}...`);
+  for (let i = 0; i < parameterSets.length; i++) {
+    const params = parameterSets[i];
+    console.log(`\nTest ${i + 1}/${parameterSets.length}:`, params);
     
     const result = await testWallDetection(imageDataUrl, {
-      minWallLength: minLength,
+      ...params,
       testPerimeter: true,
       showDebugInfo: false
     });
 
     results.push({
-      minWallLength: minLength,
+      parameters: params,
       statistics: result.statistics,
       perimeterPassed: result.perimeterTest ? result.perimeterTest.passed : false,
-      errors: result.errors.length
+      errors: result.errors.length,
+      detectionTime: result.detectionTime
     });
   }
 
   // Print comparison table
   console.log('\n=== Comparison Results ===');
-  console.log('minLength | Total | H | V | Ext | Int | Perim | Pass | Errors');
-  console.log('----------|-------|---|---|-----|-----|-------|------|-------');
+  console.log('Test | minLen | Threshold | FillGaps | Total | Ext | Int | Perim | Time   | Pass');
+  console.log('-----|--------|-----------|----------|-------|-----|-----|-------|--------|-----');
   
-  results.forEach(r => {
+  results.forEach((r, i) => {
     const s = r.statistics;
+    const p = r.parameters;
     console.log(
-      `${String(r.minWallLength).padStart(9)} | ` +
+      `${String(i + 1).padStart(4)} | ` +
+      `${String(p.minWallLength).padStart(6)} | ` +
+      `${String(p.thresholdMethod).padStart(9)} | ` +
+      `${String(p.fillGaps ? 'Yes' : 'No').padStart(8)} | ` +
       `${String(s.totalWalls).padStart(5)} | ` +
-      `${String(s.horizontalWalls).padStart(1)} | ` +
-      `${String(s.verticalWalls).padStart(1)} | ` +
       `${String(s.exteriorWalls).padStart(3)} | ` +
       `${String(s.interiorWalls).padStart(3)} | ` +
       `${String(s.perimeterVertices).padStart(5)} | ` +
-      `${r.perimeterPassed ? ' ✓  ' : ' ✗  '} | ` +
-      `${String(r.errors).padStart(6)}`
+      `${String(r.detectionTime).padStart(6)} | ` +
+      `${r.perimeterPassed ? ' ✓ ' : ' ✗ '}`
     );
   });
 

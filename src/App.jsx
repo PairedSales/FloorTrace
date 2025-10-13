@@ -20,6 +20,7 @@ function App() {
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
+  const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
@@ -32,7 +33,7 @@ function App() {
   const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
   const [drawAreaActive, setDrawAreaActive] = useState(false);
   const [customShape, setCustomShape] = useState(null); // { vertices: [{x, y}], closed: boolean }
-  const [perimeterVertices, setPerimeterVertices] = useState([]); // Vertices being placed in manual mode
+  const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
   const [lastAction, setLastAction] = useState(null); // Track last action for undo/redo
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -54,7 +55,7 @@ function App() {
     setMeasurementLine(null);
     setDrawAreaActive(false);
     setCustomShape(null);
-    setPerimeterVertices([]);
+    setPerimeterVertices(null);
     setLastAction(null);
   }, []);
 
@@ -507,13 +508,13 @@ function App() {
       } else {
         setArea(0);
       }
-      setPerimeterVertices([]); // Clear the temporary vertices
+      setPerimeterVertices(null); // Exit vertex placement mode
     }
   };
 
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = () => {
-    if (perimeterVertices.length > 0) {
+    if (perimeterVertices && perimeterVertices.length > 0) {
       const newVertices = perimeterVertices.slice(0, -1);
       setLastAction({
         type: 'removeVertex',
@@ -663,24 +664,44 @@ function App() {
     loadExampleImage();
   }, []);
 
-  // Automatically detect lines when image loads (for snapping support)
+  // Automatically detect lines and calculate intersections when image is loaded for snapping support
+  // Line-by-line port from .NET: MainWindow.xaml.cs lines 416-419 and SetWallLines
   useEffect(() => {
     const detectLinesForSnapping = async () => {
       if (!image) {
+        setCornerPoints([]);
         setLineData(null);
         return;
       }
 
       try {
-        console.log('Auto-detecting lines for snapping...');
+        console.log('Auto-detecting wall lines and intersections for snapping...');
         const { dataUrlToImage } = await import('./utils/imageLoader');
         const { detectLines } = await import('./utils/lineDetector');
+        const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
         
         const img = await dataUrlToImage(image);
-        const lines = detectLines(img);
         
-        console.log(`Detected ${lines.horizontal.length} horizontal and ${lines.vertical.length} vertical lines for snapping`);
+        // Detect lines
+        const lines = detectLines(img);
+        console.log(`Detected ${lines.horizontal.length} horizontal and ${lines.vertical.length} vertical lines`);
+        
         setLineData(lines);
+        
+        // Extract center positions of lines (matching .NET's HorizontalWallLines and VerticalWallLines)
+        // HorizontalWallLines = List of Y-coordinates for horizontal lines
+        // VerticalWallLines = List of X-coordinates for vertical lines
+        const horizontalWallLines = lines.horizontal.map(line => line.center);
+        const verticalWallLines = lines.vertical.map(line => line.center);
+        
+        // Generate ALL intersection points from crossing horizontal and vertical lines
+        // This matches .NET's SetWallLines -> FindAllIntersectionPoints
+        const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
+        
+        console.log(`Generated ${intersectionPoints.length} intersection points for snapping`);
+        console.log(`  From ${horizontalWallLines.length} horizontal lines x ${verticalWallLines.length} vertical lines`);
+        
+        setCornerPoints(intersectionPoints);
       } catch (error) {
         console.error('Error detecting lines for snapping:', error);
         // Don't alert user - snapping will just not work
@@ -776,6 +797,7 @@ function App() {
         setCustomShape={setCustomShape}
         area={area}
         lineData={lineData}
+        cornerPoints={cornerPoints}
         mobileSheetOpen={mobileSheetOpen}
         setMobileSheetOpen={setMobileSheetOpen}
         fileInputRef={fileInputRef}
@@ -909,6 +931,7 @@ function App() {
           onCustomShapeUpdate={setCustomShape}
           isMobile={false}
           lineData={lineData}
+          cornerPoints={cornerPoints}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
