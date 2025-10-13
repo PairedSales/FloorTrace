@@ -66,7 +66,7 @@ The built files will be in the `dist/` directory, ready to deploy to any static 
 3. **Adjust Room Overlay**: 
    - Drag the green room overlay to move it
    - Drag corner handles to resize
-4. **Trace Perimeter**: Click "Trace Perimeter" to automatically detect the floor plan outline
+4. **Find Perimeter**: Click "Find Perimeter" to automatically detect the floor plan outline
    - Uses detected wall line intersections for precise placement
    - Toggle "Interior Walls" checkbox to switch between interior/exterior wall detection
 5. **Adjust Perimeter**: 

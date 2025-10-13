@@ -364,7 +364,7 @@ const MobileUI = forwardRef(({
                   className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
                   disabled={isProcessing}
                 >
-                  ✏️ Trace Perimeter
+                  ✏️ Find Perimeter
                 </button>
 
                 <button

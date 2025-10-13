@@ -315,7 +315,7 @@ Initial Bounding Box
          ┌───────────────┴───────────────┐
          │                               │
          ▼                               ▼
-  "Trace Perimeter"              "Detect Room"
+  "Find Perimeter"              "Detect Room"
          │                               │
          ▼                               ▼
 ┌─────────────────┐            ┌─────────────────┐
