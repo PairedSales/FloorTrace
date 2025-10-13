@@ -232,8 +232,28 @@ function App() {
         setDetectedDimensions(dimensions);
         
         if (dimensions.length === 0) {
-          // OCR failed - enter manual entry mode
+          // OCR failed - automatically create 200x200 room overlay at center
           setOcrFailed(true);
+          
+          // Get image dimensions to center the overlay
+          const img = new Image();
+          img.onload = () => {
+            const centerX = img.width / 2;
+            const centerY = img.height / 2;
+            
+            // Create 200x200 room overlay at center
+            const newRoomOverlay = {
+              x1: centerX - 100,
+              y1: centerY - 100,
+              x2: centerX + 100,
+              y2: centerY + 100
+            };
+            
+            setRoomOverlay(newRoomOverlay);
+            setPerimeterVertices([]);
+            setMode('normal');
+          };
+          img.src = image;
         } else {
           // OCR succeeded - clear the failed flag
           setOcrFailed(false);
@@ -248,8 +268,28 @@ function App() {
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
-        // OCR failed - enter manual entry mode
+        // OCR failed - automatically create 200x200 room overlay at center
         setOcrFailed(true);
+        
+        // Get image dimensions to center the overlay
+        const img = new Image();
+        img.onload = () => {
+          const centerX = img.width / 2;
+          const centerY = img.height / 2;
+          
+          // Create 200x200 room overlay at center
+          const newRoomOverlay = {
+            x1: centerX - 100,
+            y1: centerY - 100,
+            x2: centerX + 100,
+            y2: centerY + 100
+          };
+          
+          setRoomOverlay(newRoomOverlay);
+          setPerimeterVertices([]);
+          setMode('normal');
+        };
+        img.src = image;
       } finally {
         setIsProcessing(false);
       }
@@ -623,6 +663,33 @@ function App() {
     loadExampleImage();
   }, []);
 
+  // Automatically detect lines when image loads (for snapping support)
+  useEffect(() => {
+    const detectLinesForSnapping = async () => {
+      if (!image) {
+        setLineData(null);
+        return;
+      }
+
+      try {
+        console.log('Auto-detecting lines for snapping...');
+        const { dataUrlToImage } = await import('./utils/imageLoader');
+        const { detectLines } = await import('./utils/lineDetector');
+        
+        const img = await dataUrlToImage(image);
+        const lines = detectLines(img);
+        
+        console.log(`Detected ${lines.horizontal.length} horizontal and ${lines.vertical.length} vertical lines for snapping`);
+        setLineData(lines);
+      } catch (error) {
+        console.error('Error detecting lines for snapping:', error);
+        // Don't alert user - snapping will just not work
+      }
+    };
+
+    detectLinesForSnapping();
+  }, [image]);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -720,7 +787,6 @@ function App() {
         roomDimensions={roomDimensions}
         setRoomDimensions={setRoomDimensions}
         setUnit={setUnit}
-        handleEnterManually={handleEnterManually}
         handleLineToolToggle={handleLineToolToggle}
         handleDrawAreaToggle={handleDrawAreaToggle}
         setShowSideLengths={setShowSideLengths}
@@ -731,6 +797,7 @@ function App() {
         onAddPerimeterVertex={handleAddPerimeterVertex}
         onRemovePerimeterVertex={handleRemovePerimeterVertex}
         onUndoRedo={handleUndoRedo}
+        ocrFailed={ocrFailed}
       />
     );
   }
@@ -867,6 +934,7 @@ function App() {
             unit={unit}
             onUnitChange={setUnit}
             isProcessing={isProcessing}
+            ocrFailed={ocrFailed}
           />
         </div>
 

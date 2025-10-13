@@ -42,12 +42,12 @@ const MobileUI = forwardRef(({
   setShowSideLengths,
   useInteriorWalls,
   handleInteriorWallToggle,
-  handleEnterManually,
   handleRestart,
   perimeterVertices,
   onAddPerimeterVertex,
   onRemovePerimeterVertex,
-  onUndoRedo
+  onUndoRedo,
+  ocrFailed
 }, ref) => {
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
@@ -287,38 +287,22 @@ const MobileUI = forwardRef(({
               </div>
             </div>
 
+            {/* Instructions for manual mode - OCR succeeded */}
             {mode === 'manual' && !manualEntryMode && detectedDimensions && detectedDimensions.length > 0 && (
               <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-xs text-blue-800 font-medium">
-                  Tap on a detected dimension or use the button below to enter manually.
+                  Tap on a detected room dimension.
                 </p>
               </div>
             )}
             
-            {mode === 'manual' && !manualEntryMode && !isProcessing && (!detectedDimensions || detectedDimensions.length === 0) && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-800 font-medium">
-                  No dimensions detected. Enter dimensions above and use the button below.
+            {/* Instructions for manual mode - OCR failed */}
+            {mode === 'manual' && ocrFailed && !isProcessing && (
+              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-xs text-yellow-800 font-medium">
+                  Room Scanning Failed. Enter Room Size Manually.
                 </p>
               </div>
-            )}
-
-            {manualEntryMode && (
-              <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-xs text-green-800 font-medium">
-                  Tap on the canvas to place overlays.
-                </p>
-              </div>
-            )}
-            
-            {/* Place Overlays Button - Always available in manual mode */}
-            {mode === 'manual' && !manualEntryMode && (
-              <button
-                onClick={handleEnterManually}
-                className="w-full mt-3 px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm"
-              >
-                Place Overlays on Canvas
-              </button>
             )}
           </div>
 

@@ -34,7 +34,6 @@ const Canvas = forwardRef(({
   lineData,
   perimeterVertices,
   onAddPerimeterVertex,
-  onRemovePerimeterVertex,
   onUndoRedo
 }, ref) => {
   const stageRef = useRef(null);
@@ -59,6 +58,8 @@ const Canvas = forwardRef(({
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
   const lastDragStartPosRef = useRef(null); // Track starting position before drag
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
+  const isDraggingRef = useRef(false); // Track if any drag operation is in progress
+  const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
@@ -70,6 +71,7 @@ const Canvas = forwardRef(({
   // Extract wall lines and create intersection points for snapping
   const { horizontalLines, verticalLines, intersectionPoints } = useMemo(() => {
     if (!lineData || !lineData.horizontal || !lineData.vertical) {
+      console.log('Snapping: No line data available');
       return { horizontalLines: [], verticalLines: [], intersectionPoints: [] };
     }
 
@@ -77,6 +79,8 @@ const Canvas = forwardRef(({
     const hLines = lineData.horizontal.map(line => line.center);
     const vLines = lineData.vertical.map(line => line.center);
     const intersections = findAllIntersectionPoints(hLines, vLines);
+
+    console.log(`Snapping: Created ${intersections.length} intersection points from ${hLines.length} horizontal and ${vLines.length} vertical lines`);
 
     return {
       horizontalLines: hLines,
@@ -210,14 +214,22 @@ const Canvas = forwardRef(({
   const handleRoomMouseDown = (e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
     
+    // ONLY allow LEFT mouse button (button 0) for dragging
+    if (e.evt && e.evt.button !== 0) return;
+    
     e.cancelBubble = true;
     e.evt.preventDefault();
     
     // Save initial state for undo
     lastRoomDragStartRef.current = { ...roomOverlay };
     
-    setDraggingRoom(true);
+    // Track drag start position
     const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (canvasPos) {
+      dragStartPosRef.current = canvasPos;
+    }
+    
+    setDraggingRoom(true);
     if (canvasPos) {
       setRoomStart(canvasPos);
     }
@@ -227,11 +239,20 @@ const Canvas = forwardRef(({
   const handleRoomCornerMouseDown = (corner, e) => {
     if (!roomOverlay || lineToolActive || drawAreaActive) return;
     
+    // ONLY allow LEFT mouse button (button 0) for dragging
+    if (e.evt && e.evt.button !== 0) return;
+    
     e.cancelBubble = true;
     e.evt.preventDefault();
     
     // Save initial state for undo
     lastRoomDragStartRef.current = { ...roomOverlay };
+    
+    // Track drag start position
+    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    if (canvasPos) {
+      dragStartPosRef.current = canvasPos;
+    }
     
     setDraggingRoomCorner(corner);
   };
@@ -313,40 +334,6 @@ const Canvas = forwardRef(({
     setDraggingVertex(null);
   };
 
-  // Handle perimeter vertex right-click - ONLY for undo/redo
-  const handleVertexContextMenu = (index, e) => {
-    e.evt.preventDefault();
-    
-    // Increment right-click count
-    rightClickCountRef.current += 1;
-    
-    // Clear any existing timeout
-    if (rightClickTimeoutRef.current) {
-      clearTimeout(rightClickTimeoutRef.current);
-    }
-    
-    // Set a timeout to reset right-click count
-    rightClickTimeoutRef.current = setTimeout(() => {
-      rightClickCountRef.current = 0;
-    }, 300);
-    
-    // If this is a double right-click, do nothing
-    if (rightClickCountRef.current === 2) {
-      rightClickCountRef.current = 0;
-      return;
-    }
-    
-    // Wait a bit to see if a second right-click comes
-    setTimeout(() => {
-      if (rightClickCountRef.current !== 1) return; // Double right-click happened, skip
-      
-      // Single right-click - perform undo/redo
-      if (onUndoRedo) {
-        onUndoRedo();
-      }
-    }, 50);
-  };
-  
   // Delete perimeter vertex (for mobile)
   const deletePerimeterVertex = (index) => {
     if (!perimeterOverlay || perimeterOverlay.vertices.length <= 3) return;
@@ -506,6 +493,18 @@ const Canvas = forwardRef(({
     
     setCurrentMousePos(mousePoint);
     
+    // Detect if mouse has moved enough to be considered a drag
+    if (dragStartPosRef.current && !isDraggingRef.current) {
+      const dx = mousePoint.x - dragStartPosRef.current.x;
+      const dy = mousePoint.y - dragStartPosRef.current.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // If moved more than 3 pixels, consider it a drag
+      if (distance > 3) {
+        isDraggingRef.current = true;
+      }
+    }
+    
     // Handle room overlay dragging
     if (draggingRoom && roomStart) {
       const deltaX = mousePoint.x - roomStart.x;
@@ -614,10 +613,26 @@ const Canvas = forwardRef(({
       setDraggingRoomCorner(null);
       lastRoomDragStartRef.current = null;
     }
+    
+    // Reset drag tracking after a short delay to prevent click from firing
+    if (isDraggingRef.current) {
+      setTimeout(() => {
+        isDraggingRef.current = false;
+        dragStartPosRef.current = null;
+      }, 100);
+    } else {
+      // No drag occurred, reset immediately
+      dragStartPosRef.current = null;
+    }
   };
 
   // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
+    // Ignore clicks that occurred after a drag operation
+    if (isDraggingRef.current) {
+      return;
+    }
+    
     // Check if we're in a mode that needs single-click handling
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
@@ -736,12 +751,7 @@ const Canvas = forwardRef(({
   
   // Handle right click for undo/redo functionality - ONLY undo/redo, nothing else
   const handleStageContextMenu = (e) => {
-    // Don't prevent default if clicking on a vertex (handled by vertex context menu)
-    const targetType = e.target.getType();
-    if (targetType === 'Circle') {
-      return; // Let the vertex handle its own context menu
-    }
-    
+    // ALWAYS prevent default context menu
     e.evt.preventDefault();
     
     // Increment right-click count
@@ -767,7 +777,7 @@ const Canvas = forwardRef(({
     setTimeout(() => {
       if (rightClickCountRef.current !== 1) return; // A double right-click happened, skip
       
-      // Single right-click - ONLY perform undo/redo
+      // Single right-click - ONLY perform undo/redo (works anywhere, including on vertices)
       if (onUndoRedo) {
         onUndoRedo();
       }
@@ -985,6 +995,36 @@ const Canvas = forwardRef(({
     });
   };
 
+  // Handle Stage drag start (for panning)
+  const handleStageDragStart = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    
+    const pos = stage.getPointerPosition();
+    if (pos) {
+      const stagePos = stage.position();
+      const currentScale = scaleRef.current;
+      dragStartPosRef.current = {
+        x: (pos.x - stagePos.x) / currentScale,
+        y: (pos.y - stagePos.y) / currentScale
+      };
+    }
+  };
+  
+  // Handle Stage drag end (for panning)
+  const handleStageDragEnd = () => {
+    // Mark as dragging to prevent click event
+    if (dragStartPosRef.current) {
+      isDraggingRef.current = true;
+      
+      // Reset after a delay
+      setTimeout(() => {
+        isDraggingRef.current = false;
+        dragStartPosRef.current = null;
+      }, 100);
+    }
+  };
+
   return (
     <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
       {!image && !isProcessing && !isMobile && (
@@ -1015,6 +1055,8 @@ const Canvas = forwardRef(({
           height={dimensions.height}
           onWheel={handleWheel}
           draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
+          onDragStart={handleStageDragStart}
+          onDragEnd={handleStageDragEnd}
           onClick={handleStageClick}
           onTap={handleStageClick}
           onContextMenu={handleStageContextMenu}
@@ -1077,10 +1119,10 @@ const Canvas = forwardRef(({
                       key={i}
                       x={handle.x}
                       y={handle.y}
-                      radius={isMobile ? 12 / scale : 6 / scale}
+                      radius={isMobile ? 10 / scale : 5 / scale}
                       fill="#10b981"
                       stroke="#fff"
-                      strokeWidth={2 / scale}
+                      strokeWidth={1.5 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
                       onTouchStart={isMobile ? (e) => handleRoomCornerMouseDown(handle.corner, e) : undefined}
                     />
@@ -1097,15 +1139,14 @@ const Canvas = forwardRef(({
                     <Circle
                       x={vertex.x}
                       y={vertex.y}
-                      radius={isMobile ? 12 / scale : 6 / scale}
+                      radius={isMobile ? 10 / scale : 5 / scale}
                       fill="#6366f1"
                       stroke="#fff"
-                      strokeWidth={2 / scale}
+                      strokeWidth={1.5 / scale}
                       draggable={!lineToolActive && !drawAreaActive}
                       onDragStart={() => handleVertexDragStart(i)}
                       onDragMove={(e) => handleVertexDrag(i, e)}
                       onDragEnd={() => handleVertexDragEnd(i)}
-                      onContextMenu={(e) => handleVertexContextMenu(i, e)}
                     />
                     
                     {/* Delete button for mobile long press */}
@@ -1271,10 +1312,10 @@ const Canvas = forwardRef(({
                     <Circle
                       x={vertex.x}
                       y={vertex.y}
-                      radius={isMobile ? 12 / scale : 6 / scale}
+                      radius={isMobile ? 10 / scale : 5 / scale}
                       fill="#f59e0b"
                       stroke="#fff"
-                      strokeWidth={2 / scale}
+                      strokeWidth={1.5 / scale}
                     />
                     
                     {/* Preview line from previous vertex */}
@@ -1443,10 +1484,10 @@ const Canvas = forwardRef(({
                     key={i}
                     x={vertex.x}
                     y={vertex.y}
-                    radius={6 / scale}
+                    radius={5 / scale}
                     fill="#ec4899"
                     stroke="#fff"
-                    strokeWidth={2 / scale}
+                    strokeWidth={1.5 / scale}
                     draggable={customShape.closed}
                     onDragStart={() => handleCustomVertexDragStart(i)}
                     onDragMove={(e) => handleCustomVertexDrag(i, e)}
