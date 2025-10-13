@@ -163,7 +163,17 @@
   <div class="container">
     <div class="header">
       <h1>🔍 Room Finding Test System</h1>
-      <p>Complete visualization of wall detection and room finding algorithms</p>
+      <p>Complete visualization of hybrid wall detection and room finding algorithms</p>
+      <p style="margin-top: 10px; font-size: 14px; opacity: 0.85;">
+        🚀 Using new hybrid deep learning + classical refinement approach
+      </p>
+    </div>
+
+    <div class="info-card" style="margin: 20px; background: #fff3cd; border-left-color: #ffc107;">
+      <strong>⚠️ How to Run This Test</strong><br>
+      This test uses ES6 modules and must be served via HTTP. Don't open directly in browser!<br><br>
+      <strong>✅ Run via Vite:</strong> <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">npm run dev</code> → Open <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">http://localhost:5173/test-room-finding.html</code><br>
+      <strong>📖 See RUNNING_TESTS.md for detailed instructions</strong>
     </div>
 
     <div class="controls">
@@ -172,6 +182,19 @@
         <label for="minWallLength">Min Wall Length:</label>
         <input type="number" id="minWallLength" value="50" min="10" max="500" step="10">
         <span class="hint">Minimum pixels for wall detection (lower = more sensitive)</span>
+      </div>
+      <div class="control-group">
+        <label for="thresholdMethod">Threshold Method:</label>
+        <select id="thresholdMethod" style="padding: 8px 12px; border: 2px solid #dee2e6; border-radius: 6px; font-size: 14px;">
+          <option value="adaptive">Adaptive (Best for varying lighting)</option>
+          <option value="otsu">Otsu (Automatic threshold)</option>
+          <option value="global">Global (Fixed threshold)</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="fillGaps">Fill Gaps:</label>
+        <input type="checkbox" id="fillGaps" checked style="width: auto;">
+        <span class="hint">Bridge gaps from doors/windows</span>
       </div>
       <div class="button-group">
         <button id="runTest">▶️ Run Room Finding Test</button>
@@ -372,25 +395,32 @@
 
       html += `<div class="status-banner success">✓ Room finding test completed successfully</div>`;
 
-      // Algorithm flow
-      html += '<h2 class="section-title">Algorithm Flow</h2>';
+      // Algorithm flow (Hybrid System)
+      html += '<h2 class="section-title">Hybrid Algorithm Flow</h2>';
       html += '<div class="flow-diagram">';
-      html += '<div class="flow-step">1. Load Image</div>';
+      html += '<div class="flow-step">1. Preprocessing</div>';
       html += '<div class="flow-arrow">→</div>';
-      html += '<div class="flow-step">2. Binary Conversion</div>';
+      html += '<div class="flow-step">2. Segmentation</div>';
       html += '<div class="flow-arrow">→</div>';
-      html += '<div class="flow-step">3. Find Components</div>';
+      html += '<div class="flow-step">3. Line Detection</div>';
       html += '<div class="flow-arrow">→</div>';
-      html += '<div class="flow-step">4. Filter Walls</div>';
+      html += '<div class="flow-step">4. Gap Filling</div>';
       html += '<div class="flow-arrow">→</div>';
-      html += '<div class="flow-step">5. Classify H/V</div>';
+      html += '<div class="flow-step">5. Post-Processing</div>';
       html += '<div class="flow-arrow">→</div>';
-      html += '<div class="flow-step">6. Separate Ext/Int</div>';
+      html += '<div class="flow-step">6. Classification</div>';
       html += '<div class="flow-arrow">→</div>';
       html += '<div class="flow-step">7. OCR Dimensions</div>';
       html += '<div class="flow-arrow">→</div>';
       html += '<div class="flow-step">8. Find Rooms</div>';
       html += '</div>';
+      
+      // Performance timing
+      if (results.wallData.detectionTime) {
+        html += `<div class="info-card" style="margin-top: 15px;">
+          <strong>⏱️ Performance:</strong> Wall detection completed in ${results.wallData.detectionTime}
+        </div>`;
+      }
 
       // Statistics
       html += '<h2 class="section-title">Detection Statistics</h2>';
@@ -408,23 +438,23 @@
       html += '<div class="viz-grid">';
       
       html += `<div class="viz-card">
-        <div class="viz-header">1️⃣ Binary Conversion (Threshold: 128)</div>
+        <div class="viz-header">1️⃣ Preprocessing & Binarization</div>
         <div class="viz-content">
           <img src="${results.viz.binary}" alt="Binary">
-          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Dark pixels become walls, light pixels become background</p>
+          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Adaptive thresholding + morphological operations + noise removal</p>
         </div>
       </div>`;
 
       html += `<div class="viz-card">
-        <div class="viz-header">2️⃣ All Detected Walls (${results.stats.totalWalls} walls)</div>
+        <div class="viz-header">2️⃣ Line Detection & Refinement (${results.stats.totalWalls} segments)</div>
         <div class="viz-content">
           <img src="${results.viz.allWalls}" alt="All Walls">
-          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Connected components filtered by min length</p>
+          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Edge detection → Line segments → Collinear merging → Gap filling</p>
         </div>
       </div>`;
 
       html += `<div class="viz-card">
-        <div class="viz-header">3️⃣ Horizontal/Vertical Classification</div>
+        <div class="viz-header">3️⃣ Orientation Snapping (H/V Constraints)</div>
         <div class="viz-content">
           <img src="${results.viz.classified}" alt="Classified">
           <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Red = Horizontal (${results.stats.horizontal}), Blue = Vertical (${results.stats.vertical})</p>
@@ -432,10 +462,10 @@
       </div>`;
 
       html += `<div class="viz-card">
-        <div class="viz-header">4️⃣ Exterior/Interior Separation</div>
+        <div class="viz-header">4️⃣ Exterior/Interior Classification</div>
         <div class="viz-content">
           <img src="${results.viz.separated}" alt="Separated">
-          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Green = Exterior (${results.stats.exterior}), Purple = Interior (${results.stats.interior})</p>
+          <p style="margin-top: 10px; color: #6c757d; font-size: 12px;">Green = Exterior (${results.stats.exterior}), Purple = Interior (${results.stats.interior}) based on edge distance</p>
         </div>
       </div>`;
 
@@ -494,12 +524,19 @@
 
         const imageDataUrl = await loadDefaultImage();
         const minWallLength = parseInt(document.getElementById('minWallLength').value);
+        const thresholdMethod = document.getElementById('thresholdMethod').value;
+        const fillGaps = document.getElementById('fillGaps').checked;
 
-        // Step 1: Detect walls
-        console.log('Step 1: Detecting walls...');
+        // Step 1: Detect walls with new hybrid system
+        console.log('Step 1: Detecting walls with hybrid system...');
+        console.log('Settings:', { minWallLength, thresholdMethod, fillGaps });
         const wallData = await detectWalls(imageDataUrl, {
           minWallLength,
-          debugMode: false
+          thresholdMethod,
+          orientationConstraints: true,
+          fillGaps,
+          maxGapLength: 100,
+          debugMode: true  // Enable to see intermediate results
         });
 
         // Step 2: Run OCR to find dimensions

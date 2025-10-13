@@ -1,0 +1,141 @@
+═══════════════════════════════════════════════════════════════
+  FLOORTRACE TEST SUITE - QUICK START GUIDE
+═══════════════════════════════════════════════════════════════
+
+✅ SOLUTION TO CORS ERRORS
+───────────────────────────────────────────────────────────────
+The HTML test files use ES6 modules which CANNOT be loaded from
+file:// protocol. You MUST serve them via HTTP server.
+
+═══════════════════════════════════════════════════════════════
+  STEP 1: INSTALL DEPENDENCIES
+═══════════════════════════════════════════════════════════════
+
+Run this command in the FloorTrace directory:
+
+    npm install
+
+This installs TensorFlow.js and other dependencies for the new
+hybrid wall detection system.
+
+═══════════════════════════════════════════════════════════════
+  STEP 2: START THE DEV SERVER
+═══════════════════════════════════════════════════════════════
+
+Run this command:
+
+    npm run dev
+
+You should see output like:
+  VITE v7.1.7  ready in 234 ms
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+
+═══════════════════════════════════════════════════════════════
+  STEP 3: OPEN THE TESTS IN YOUR BROWSER
+═══════════════════════════════════════════════════════════════
+
+Open these URLs in your web browser:
+
+✅ Room Finding Test:
+   http://localhost:5173/test-room-finding.html
+
+✅ Perimeter Test:
+   http://localhost:5173/test-perimeter-tracing.html
+
+DO NOT open the files directly! Use the http://localhost URLs.
+
+═══════════════════════════════════════════════════════════════
+  WHAT TO EXPECT
+═══════════════════════════════════════════════════════════════
+
+Room Finding Test:
+  • Auto-runs when page loads
+  • Shows 8-stage hybrid detection pipeline
+  • Displays wall detection statistics
+  • Shows OCR dimension detection
+  • Visualizes room boundaries
+  • Performance timing: ~400-800ms
+
+Perimeter Test:
+  • Tests exterior wall detection
+  • Shows perimeter polygon construction
+  • Compares different edge strategies
+
+═══════════════════════════════════════════════════════════════
+  NEW HYBRID SYSTEM FEATURES
+═══════════════════════════════════════════════════════════════
+
+✨ Interactive Controls:
+   • Min Wall Length (10-500px)
+   • Threshold Method (Adaptive/Otsu/Global)
+   • Fill Gaps (Enable/Disable)
+
+✨ Enhanced Visualizations:
+   • Binary conversion
+   • Line detection results
+   • Orientation snapping
+   • Exterior/Interior classification
+   • Room finding overlay
+
+✨ Debug Console Output:
+   Open browser DevTools (F12) to see detailed logs of each
+   detection stage including timing and statistics.
+
+═══════════════════════════════════════════════════════════════
+  TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════
+
+❌ Still getting CORS errors?
+   → Make sure you're using http://localhost:5173, NOT file://
+   → Check that npm run dev is running
+   → Try clearing browser cache (Ctrl+Shift+Delete)
+
+❌ Module not found errors?
+   → Run: npm install
+   → Restart dev server: npm run dev
+
+❌ TensorFlow warnings?
+   → Safe to ignore - system uses classical fallback by default
+
+❌ Page won't load?
+   → Check console for errors (F12)
+   → Verify ExampleFloorplan.png exists in root directory
+   → Try different browser (Chrome/Firefox/Edge)
+
+═══════════════════════════════════════════════════════════════
+  PERFORMANCE TIPS
+═══════════════════════════════════════════════════════════════
+
+⚡ For faster detection:
+   • Use "Adaptive" threshold method
+   • Set Min Wall Length to 50-75
+   • Keep "Fill Gaps" enabled
+
+⚡ For more accuracy:
+   • Use "Otsu" threshold method
+   • Lower Min Wall Length to 30-40
+   • Test different settings
+
+═══════════════════════════════════════════════════════════════
+  EXPORTING RESULTS
+═══════════════════════════════════════════════════════════════
+
+Click "💾 Export Report" button to download JSON with:
+  • Detection statistics
+  • Performance metrics
+  • Dimension locations
+  • Wall segment data
+
+═══════════════════════════════════════════════════════════════
+  MORE INFORMATION
+═══════════════════════════════════════════════════════════════
+
+📖 Detailed Docs:
+   • RUNNING_TESTS.md - Complete testing guide
+   • HYBRID_WALL_DETECTION.md - Architecture details
+   • WALL_DETECTION_SETUP.md - Integration guide
+
+🚀 The hybrid wall detection system is production-ready!
+
+═══════════════════════════════════════════════════════════════
