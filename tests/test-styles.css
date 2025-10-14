@@ -68,6 +68,15 @@ body {
   font-size: 14px;
 }
 
+.control-group small {
+  color: #6c757d;
+  font-size: 12px;
+  line-height: 1.4;
+  display: block;
+  margin-top: 4px;
+  font-weight: normal;
+}
+
 .control-group input, .control-group select {
   padding: 10px 12px;
   border: 2px solid #dee2e6;
@@ -78,6 +87,56 @@ body {
 .control-group input[type="checkbox"] {
   width: auto;
   margin-right: 8px;
+}
+
+/* Collapsible sections */
+details {
+  background: white;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+details summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  padding: 10px;
+  margin: -15px -15px 15px -15px;
+  background: #f8f9fa;
+  border-radius: 6px 6px 0 0;
+  font-size: 16px;
+  transition: background 0.3s;
+}
+
+details summary:hover {
+  background: #e9ecef;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::before {
+  content: '▼ ';
+  display: inline-block;
+  transition: transform 0.3s;
+}
+
+details:not([open]) summary::before {
+  transform: rotate(-90deg);
+}
+
+details[open] summary {
+  border-bottom: 2px solid #dee2e6;
+  margin-bottom: 20px;
+}
+
+/* Tooltips */
+label[title], span[title] {
+  cursor: help;
+  border-bottom: 1px dotted #6c757d;
 }
 
 .button-group {
@@ -300,3 +359,157 @@ button:disabled { background: #adb5bd; cursor: not-allowed; }
 }
 
 .collapsible-content.hidden { display: none; }
+
+/* Test History Floating Panel */
+.history-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 400px;
+  max-height: 600px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  transition: all 0.3s ease;
+}
+
+.history-panel.collapsed {
+  max-height: 50px;
+}
+
+.history-panel.collapsed .history-content {
+  display: none;
+}
+
+.history-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.history-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.history-toggle {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  padding: 0;
+}
+
+.history-toggle:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: none;
+}
+
+.history-content {
+  overflow-y: auto;
+  max-height: 550px;
+  padding: 15px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-empty {
+  text-align: center;
+  color: #6c757d;
+  padding: 30px 20px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.history-item {
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.history-item:hover {
+  border-color: #667eea;
+  background: #f0f4ff;
+  transform: translateX(-3px);
+}
+
+.history-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.history-item-number {
+  font-weight: 700;
+  color: #667eea;
+  font-size: 14px;
+}
+
+.history-item-time {
+  font-size: 11px;
+  color: #6c757d;
+}
+
+.history-item-changes {
+  font-size: 12px;
+  color: #495057;
+  line-height: 1.5;
+}
+
+.history-item-change {
+  background: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin: 3px 0;
+  border-left: 3px solid #ffc107;
+}
+
+.history-item-change strong {
+  color: #667eea;
+}
+
+.history-item-change .old-value {
+  text-decoration: line-through;
+  color: #dc3545;
+  margin-right: 5px;
+}
+
+.history-item-change .new-value {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.history-item-baseline {
+  background: #d1ecf1;
+  border-color: #0c5460;
+}
+
+.history-item-baseline .history-item-changes {
+  color: #0c5460;
+  font-style: italic;
+}

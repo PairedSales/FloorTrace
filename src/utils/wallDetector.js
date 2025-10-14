@@ -107,7 +107,7 @@ export const detectWalls = async (imageSource, options = {}) => {
     // STEP 2: Classical wall segmentation
     console.log('\n--- Step 2: Wall Segmentation ---');
     const likelihood = await segmentWalls(
-      preprocessed.grayscale,
+      preprocessed,
       width,
       height
     );

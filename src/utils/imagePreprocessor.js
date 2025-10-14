@@ -395,6 +395,9 @@ export const preprocessImage = (imageData, options = {}) => {
     binary = globalThreshold(gray, globalThresholdValue);
   }
   
+  // Keep original binary for line pair detection (walls as double lines)
+  const originalBinary = new Uint8Array(binary);
+  
   // Apply morphological closing to fill small gaps (doors/windows)
   if (useClosing) {
     console.log('Preprocessing: Applying morphological closing...');
@@ -410,6 +413,7 @@ export const preprocessImage = (imageData, options = {}) => {
   return {
     grayscale: gray,
     binary,
+    originalBinary, // Include original for double-line detection
     width,
     height
   };

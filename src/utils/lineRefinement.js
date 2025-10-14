@@ -160,10 +160,10 @@ export const nonMaximumSuppression = (magnitude, direction, width, height) => {
 export const detectLineSegments = (likelihood, width, height, options = {}) => {
   const {
     minLength = 50,
-    minScore = 0.1, // Lowered from 0.3 to catch more edges
-    maxGap = 10, // Reduced back to 10 for more conservative chain tracing
-    orientationConstraint = true,
-    angleTolerance = Math.PI / 12 // 15 degrees
+    minScore = 0.15, // Moderate threshold to balance noise vs completeness
+    edgeThresholdPercent = 5, // Percentage of max edge magnitude
+    minEdgeThreshold = 0.1, // Absolute minimum threshold
+    minChainLength = 3 // Minimum pixels in edge chain
   } = options;
   
   console.log('Detecting line segments...');
@@ -179,14 +179,13 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Likelihood map - nonzero: ${nonZero}/${likelihood.length}, range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
   
-  // Apply edge detection to find wall boundaries (edges)
-  // This detects both inner and outer edges of thick walls
+  // Apply edge detection to find wall boundaries
   const { magnitude, direction } = detectEdges(likelihood, width, height);
   
   // Apply non-maximum suppression to thin edges
   const edges = nonMaximumSuppression(magnitude, direction, width, height);
   
-  console.log(`DEBUG: Using edge detection approach for wall boundaries`);
+  console.log(`DEBUG: Using adaptive edge detection with LOW threshold for completeness`);
   
   // DEBUG: Check edge magnitude
   let edgeNonZero = 0;
@@ -197,33 +196,33 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Edge magnitude - nonzero: ${edgeNonZero}/${edges.length}, max: ${edgeMax.toFixed(3)}`);
   
-  // Threshold edges - very low threshold to catch dashed/interrupted walls
+  // Use configurable threshold to capture walls
+  // Lower threshold = more walls detected (but more noise)
+  // Higher threshold = fewer walls (but cleaner)
   const binary = new Uint8Array(width * height);
-  const threshold = Math.max(minScore * 0.6, 0.2); // Very low threshold for dashed patterns
+  const threshold = Math.max(edgeMax * (edgeThresholdPercent / 100), minEdgeThreshold);
+  
+  console.log(`DEBUG: Using edge threshold: ${threshold.toFixed(3)} (${edgeThresholdPercent}% of max ${edgeMax.toFixed(3)}, min ${minEdgeThreshold})`);
+  
   for (let i = 0; i < edges.length; i++) {
     binary[i] = edges[i] > threshold ? 1 : 0;
   }
   
-  // Find connected edge chains with larger gap tolerance for dashed walls
-  const gapTolerance = Math.max(maxGap, 15); // At least 15px gap tolerance
-  const chains = findEdgeChains(binary, direction, width, height, gapTolerance);
+  // Find connected edge chains
+  const chains = findEdgeChains(binary, direction, width, height);
   
   console.log(`Found ${chains.length} edge chains`);
   
   // Fit lines to chains
   const segments = [];
   for (const chain of chains) {
-    // Don't pre-filter by chain length - let line fitting handle it
-    // Dashed/thin walls may have short chains that extend into long lines
-    if (chain.length < 3) continue; // Need at least 3 points to fit a line
+    // Need minimum chain length to fit a line
+    if (chain.length < minChainLength) continue;
     
     // Fit line using least squares
     const line = fitLineToPoints(chain);
     
     if (line && line.length >= minLength) {
-      
-      // Skip orientation filtering - floor plans can have diagonal walls
-      // The post-processing stage will handle orientation constraints if needed
       
       // Calculate average likelihood along line
       const avgLikelihood = calculateLineLikelihood(likelihood, width, height, line);
@@ -241,9 +240,80 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
 };
 
 /**
+ * Remove duplicate lines that are very similar
+ * (lines detected at multiple thresholds)
+ */
+const _removeDuplicateLines = (segments) => {
+  if (segments.length === 0) return [];
+  
+  const unique = [];
+  const used = new Set();
+  
+  for (let i = 0; i < segments.length; i++) {
+    if (used.has(i)) continue;
+    
+    const line1 = segments[i];
+    let bestScore = line1.score;
+    let bestLine = line1;
+    
+    // Find all similar lines
+    for (let j = i + 1; j < segments.length; j++) {
+      if (used.has(j)) continue;
+      
+      const line2 = segments[j];
+      
+      // Check if lines are very similar (likely duplicates)
+      if (areSimilarLines(line1, line2, 5, 10)) {
+        used.add(j);
+        // Keep the line with higher score
+        if (line2.score > bestScore) {
+          bestScore = line2.score;
+          bestLine = line2;
+        }
+      }
+    }
+    
+    unique.push(bestLine);
+    used.add(i);
+  }
+  
+  return unique;
+};
+
+/**
+ * Check if two lines are similar (likely duplicates)
+ */
+const areSimilarLines = (line1, line2, maxDistance, maxEndpointDist) => {
+  // Check angle similarity
+  const angleDiff = Math.abs(line1.angle - line2.angle);
+  const normalizedDiff = Math.min(angleDiff, Math.PI - angleDiff);
+  if (normalizedDiff > 0.15) return false; // ~8.5 degrees
+  
+  // Check if endpoints are close
+  const dist1 = Math.sqrt((line1.x1 - line2.x1)**2 + (line1.y1 - line2.y1)**2);
+  const dist2 = Math.sqrt((line1.x2 - line2.x2)**2 + (line1.y2 - line2.y2)**2);
+  const dist3 = Math.sqrt((line1.x1 - line2.x2)**2 + (line1.y1 - line2.y2)**2);
+  const dist4 = Math.sqrt((line1.x2 - line2.x1)**2 + (line1.y2 - line2.y1)**2);
+  
+  const minEndpointDist = Math.min(
+    Math.max(dist1, dist2),  // Same direction
+    Math.max(dist3, dist4)   // Opposite direction
+  );
+  
+  if (minEndpointDist > maxEndpointDist) {
+    // If endpoints are far, check perpendicular distance
+    const perpDist1 = perpendicularDistance(line1, line2.x1, line2.y1);
+    const perpDist2 = perpendicularDistance(line1, line2.x2, line2.y2);
+    return Math.max(perpDist1, perpDist2) <= maxDistance;
+  }
+  
+  return true;
+};
+
+/**
  * Find connected edge chains
  */
-const findEdgeChains = (binary, direction, width, height, maxGap) => {
+const findEdgeChains = (binary, direction, width, height) => {
   const visited = new Uint8Array(width * height);
   const chains = [];
   
@@ -252,7 +322,7 @@ const findEdgeChains = (binary, direction, width, height, maxGap) => {
       const idx = y * width + x;
       
       if (binary[idx] === 1 && visited[idx] === 0) {
-        const chain = traceEdgeChain(binary, direction, visited, width, height, x, y, maxGap);
+        const chain = traceEdgeChain(binary, direction, visited, width, height, x, y);
         if (chain.length > 0) {
           chains.push(chain);
         }
@@ -266,7 +336,7 @@ const findEdgeChains = (binary, direction, width, height, maxGap) => {
 /**
  * Trace a single edge chain
  */
-const traceEdgeChain = (binary, direction, visited, width, height, startX, startY, maxGap) => {
+const traceEdgeChain = (binary, direction, visited, width, height, startX, startY) => {
   const chain = [];
   const queue = [{ x: startX, y: startY }];
   
@@ -536,7 +606,7 @@ const mergeLineGroup = (lines) => {
 /**
  * Morphological dilation to expand wall regions and bridge gaps
  */
-const morphologicalDilation = (binary, width, height, iterations = 1) => {
+const _morphologicalDilation = (binary, width, height, iterations = 1) => {
   let result = new Uint8Array(binary);
   
   for (let iter = 0; iter < iterations; iter++) {
@@ -575,7 +645,7 @@ const morphologicalDilation = (binary, width, height, iterations = 1) => {
  * Morphological thinning to extract wall centerlines
  * Uses Zhang-Suen algorithm for skeletonization
  */
-const morphologicalThinning = (binary, width, height) => {
+const _morphologicalThinning = (binary, width, height) => {
   // Create working copy
   let skeleton = new Uint8Array(binary);
   let changed = true;

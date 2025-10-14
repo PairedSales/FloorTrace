@@ -32,6 +32,230 @@ import {
 let currentTestResults = null;
 const logger = new TestLogger();
 
+// Test History Management
+const MAX_HISTORY_ITEMS = 15;
+let testHistory = [];
+let testCounter = 0;
+
+// Get current settings as object
+function getCurrentSettings() {
+  return {
+    // Preprocessing
+    thresholdMethod: document.getElementById('thresholdMethod').value,
+    adaptiveWindowSize: parseInt(document.getElementById('adaptiveWindowSize').value),
+    adaptiveC: parseInt(document.getElementById('adaptiveC').value),
+    globalThresholdValue: parseInt(document.getElementById('globalThresholdValue').value),
+    closingKernelSize: parseInt(document.getElementById('closingKernelSize').value),
+    minComponentSize: parseInt(document.getElementById('minComponentSize').value),
+    useClosing: document.getElementById('useClosing').checked,
+    removeNoise: document.getElementById('removeNoise').checked,
+    
+    // Line Detection
+    edgeThresholdPercent: parseFloat(document.getElementById('edgeThresholdPercent').value),
+    minEdgeThreshold: parseFloat(document.getElementById('minEdgeThreshold').value),
+    minWallLength: parseInt(document.getElementById('minWallLength').value),
+    minLineScore: parseFloat(document.getElementById('minLineScore').value),
+    minChainLength: parseInt(document.getElementById('minChainLength').value),
+    
+    // Merging
+    mergeMaxDistance: parseInt(document.getElementById('mergeMaxDistance').value),
+    mergeMaxGap: parseInt(document.getElementById('mergeMaxGap').value),
+    mergeAngleTolerance: parseFloat(document.getElementById('mergeAngleTolerance').value),
+    
+    // Gap Filling
+    maxGapLength: parseInt(document.getElementById('maxGapLength').value),
+    gapAngleTolerance: parseFloat(document.getElementById('gapAngleTolerance').value),
+    gapMaxOffset: parseInt(document.getElementById('gapMaxOffset').value),
+    fillGaps: document.getElementById('fillGaps').checked,
+    
+    // Post-Processing
+    minFinalLength: parseInt(document.getElementById('minFinalLength').value),
+    maxFinalLength: parseInt(document.getElementById('maxFinalLength').value),
+    snapGridSize: parseInt(document.getElementById('snapGridSize').value),
+    duplicateDistanceTolerance: parseInt(document.getElementById('duplicateDistanceTolerance').value),
+    duplicateAngleTolerance: parseFloat(document.getElementById('duplicateAngleTolerance').value),
+    orientationConstraints: document.getElementById('orientationConstraints').checked,
+    snapToGrid: document.getElementById('snapToGrid').checked,
+    removeDuplicates: document.getElementById('removeDuplicates').checked,
+    
+    // Features
+    runOCR: document.getElementById('runOCR').checked
+  };
+}
+
+// Apply settings to UI
+function applySettings(settings) {
+  Object.keys(settings).forEach(key => {
+    const element = document.getElementById(key);
+    if (element) {
+      if (element.type === 'checkbox') {
+        element.checked = settings[key];
+      } else {
+        element.value = settings[key];
+      }
+    }
+  });
+}
+
+// Get friendly name for setting
+function getSettingFriendlyName(key) {
+  const names = {
+    thresholdMethod: 'Threshold Method',
+    adaptiveWindowSize: 'Adaptive Window',
+    adaptiveC: 'Adaptive C',
+    globalThresholdValue: 'Global Threshold',
+    closingKernelSize: 'Closing Kernel',
+    minComponentSize: 'Min Component',
+    useClosing: 'Use Closing',
+    removeNoise: 'Remove Noise',
+    edgeThresholdPercent: 'Edge Threshold %',
+    minEdgeThreshold: 'Min Edge Threshold',
+    minWallLength: 'Min Wall Length',
+    minLineScore: 'Min Line Score',
+    minChainLength: 'Min Chain Length',
+    mergeMaxDistance: 'Merge Max Distance',
+    mergeMaxGap: 'Merge Max Gap',
+    mergeAngleTolerance: 'Merge Angle',
+    maxGapLength: 'Max Gap Length',
+    gapAngleTolerance: 'Gap Angle',
+    gapMaxOffset: 'Gap Max Offset',
+    fillGaps: 'Fill Gaps',
+    minFinalLength: 'Min Final Length',
+    maxFinalLength: 'Max Final Length',
+    snapGridSize: 'Snap Grid',
+    duplicateDistanceTolerance: 'Duplicate Distance',
+    duplicateAngleTolerance: 'Duplicate Angle',
+    orientationConstraints: 'Orientation Constraints',
+    snapToGrid: 'Snap to Grid',
+    removeDuplicates: 'Remove Duplicates',
+    runOCR: 'Run OCR'
+  };
+  return names[key] || key;
+}
+
+// Compare settings and return differences
+function getSettingsDiff(oldSettings, newSettings) {
+  const changes = [];
+  Object.keys(newSettings).forEach(key => {
+    if (oldSettings[key] !== newSettings[key]) {
+      changes.push({
+        key,
+        name: getSettingFriendlyName(key),
+        oldValue: oldSettings[key],
+        newValue: newSettings[key]
+      });
+    }
+  });
+  return changes;
+}
+
+// Add test to history
+function addToHistory(settings) {
+  testCounter++;
+  const previousSettings = testHistory.length > 0 ? testHistory[0].settings : null;
+  const changes = previousSettings ? getSettingsDiff(previousSettings, settings) : [];
+  
+  const historyItem = {
+    id: testCounter,
+    timestamp: new Date(),
+    settings: { ...settings },
+    changes
+  };
+  
+  testHistory.unshift(historyItem);
+  
+  // Keep only last 15 tests
+  if (testHistory.length > MAX_HISTORY_ITEMS) {
+    testHistory = testHistory.slice(0, MAX_HISTORY_ITEMS);
+  }
+  
+  updateHistoryUI();
+}
+
+// Update history UI
+function updateHistoryUI() {
+  const historyList = document.getElementById('historyList');
+  
+  if (testHistory.length === 0) {
+    historyList.innerHTML = '<div class="history-empty">No tests run yet. Run your first test to start tracking history.</div>';
+    return;
+  }
+  
+  let html = '';
+  testHistory.forEach((item, index) => {
+    const isBaseline = index === testHistory.length - 1;
+    const timeStr = item.timestamp.toLocaleTimeString();
+    
+    let changesHtml = '';
+    if (item.changes.length === 0) {
+      changesHtml = '<div class="history-item-changes">Baseline test (no changes)</div>';
+    } else {
+      changesHtml = '<div class="history-item-changes">';
+      item.changes.slice(0, 3).forEach(change => {
+        changesHtml += `
+          <div class="history-item-change">
+            <strong>${change.name}:</strong>
+            <span class="old-value">${change.oldValue}</span>
+            → <span class="new-value">${change.newValue}</span>
+          </div>
+        `;
+      });
+      if (item.changes.length > 3) {
+        changesHtml += `<div style="margin-top: 5px; color: #6c757d; font-style: italic;">+ ${item.changes.length - 3} more changes</div>`;
+      }
+      changesHtml += '</div>';
+    }
+    
+    html += `
+      <div class="history-item ${isBaseline ? 'history-item-baseline' : ''}" data-test-id="${item.id}">
+        <div class="history-item-header">
+          <div class="history-item-number">Test #${item.id}</div>
+          <div class="history-item-time">${timeStr}</div>
+        </div>
+        ${changesHtml}
+      </div>
+    `;
+  });
+  
+  historyList.innerHTML = html;
+  
+  // Add click handlers
+  document.querySelectorAll('.history-item').forEach(item => {
+    item.addEventListener('click', function() {
+      const testId = parseInt(this.getAttribute('data-test-id'));
+      revertToTest(testId);
+    });
+  });
+}
+
+// Revert to a previous test
+function revertToTest(testId) {
+  const test = testHistory.find(t => t.id === testId);
+  if (!test) {
+    alert('Test not found in history');
+    return;
+  }
+  
+  if (confirm(`Revert to Test #${testId} settings?\n\nThis will restore all settings from that test.`)) {
+    applySettings(test.settings);
+    alert(`Settings restored to Test #${testId}`);
+  }
+}
+
+// Toggle history panel
+function toggleHistoryPanel() {
+  const panel = document.getElementById('historyPanel');
+  const toggle = document.getElementById('toggleHistory');
+  
+  if (panel.classList.contains('collapsed')) {
+    panel.classList.remove('collapsed');
+    toggle.textContent = '−';
+  } else {
+    panel.classList.add('collapsed');
+    toggle.textContent = '+';
+  }
+}
+
 // Load test image
 async function loadTestImage() {
   const response = await fetch('../ExampleFloorplan.png');
@@ -128,16 +352,9 @@ async function runTestSuite() {
   const suite = new TestSuiteResult('Wall Detection Pipeline');
   
   try {
-    const config = {
-      minWallLength: parseInt(document.getElementById('minWallLength').value),
-      thresholdMethod: document.getElementById('thresholdMethod').value,
-      maxGapLength: parseInt(document.getElementById('maxGapLength').value),
-      minComponentSize: parseInt(document.getElementById('minComponentSize').value),
-      closingKernelSize: parseInt(document.getElementById('closingKernelSize').value),
-      fillGaps: document.getElementById('fillGaps').checked,
-      orientationConstraints: document.getElementById('orientationConstraints').checked,
-      runOCR: document.getElementById('runOCR').checked
-    };
+    // Get current settings and add to history
+    const config = getCurrentSettings();
+    addToHistory(config);
     
     const imageDataUrl = await loadTestImage();
     const img = await dataUrlToImage(imageDataUrl);
@@ -159,9 +376,12 @@ async function runTestSuite() {
     
     const preprocessed = preprocessImage(imageData, {
       thresholdMethod: config.thresholdMethod,
-      removeNoise: true,
+      adaptiveWindowSize: config.adaptiveWindowSize,
+      adaptiveC: config.adaptiveC,
+      globalThresholdValue: config.globalThresholdValue,
+      removeNoise: config.removeNoise,
       minComponentSize: config.minComponentSize,
-      useClosing: true,
+      useClosing: config.useClosing,
       closingKernelSize: config.closingKernelSize
     });
     
@@ -180,7 +400,7 @@ async function runTestSuite() {
     step2.start();
     stepsDiv.innerHTML += renderTestStep(step2);
     
-    const likelihood = await segmentWalls(preprocessed.grayscale, width, height, {
+    const likelihood = await segmentWalls(preprocessed, width, height, {
       useModel: false,
       useFallback: true
     });
@@ -201,10 +421,10 @@ async function runTestSuite() {
     
     let segments = detectLineSegments(likelihood, width, height, {
       minLength: config.minWallLength,
-      minScore: 0.2,
-      maxGap: 10,
-      orientationConstraint: config.orientationConstraints,
-      angleTolerance: Math.PI / 12
+      minScore: config.minLineScore,
+      edgeThresholdPercent: config.edgeThresholdPercent,
+      minEdgeThreshold: config.minEdgeThreshold,
+      minChainLength: config.minChainLength
     });
     
     Validators.validateLineDetection(segments, config.minWallLength).forEach(a => step3.addAssertion(a));
@@ -224,9 +444,9 @@ async function runTestSuite() {
     
     const beforeMerge = segments.length;
     segments = mergeCollinearSegments(segments, {
-      maxDistance: 15,
-      maxGap: 30,
-      angleTolerance: 0.15
+      maxDistance: config.mergeMaxDistance,
+      maxGap: config.mergeMaxGap,
+      angleTolerance: config.mergeAngleTolerance
     });
     
     step4.addMetric('Before', beforeMerge);
@@ -248,8 +468,8 @@ async function runTestSuite() {
       const beforeGap = segments.length;
       segments = fillGapsInSegments(segments, {
         maxGapLength: config.maxGapLength,
-        alignmentTolerance: 10,
-        angleTolerance: 0.1
+        alignmentTolerance: config.gapMaxOffset,
+        angleTolerance: config.gapAngleTolerance
       });
       
       Validators.validateGapFilling([...Array(beforeGap)], segments).forEach(a => step5.addAssertion(a));
@@ -269,18 +489,20 @@ async function runTestSuite() {
     stepsDiv.innerHTML += renderTestStep(step6);
     
     const processed = postProcessSegments(segments, width, height, {
-      minLength: config.minWallLength,
+      minLength: config.minFinalLength,
+      maxLength: config.maxFinalLength,
       enforceOrientation: config.orientationConstraints,
       allowedOrientations: ['horizontal', 'vertical'],
       angleTolerance: Math.PI / 12,
-      removeIsolated: false, // Disabled - too aggressive
+      removeIsolated: false,
       connectionThreshold: 25,
-      snapGrid: true,
-      gridSize: 5,
+      snapGrid: config.snapToGrid,
+      gridSize: config.snapGridSize,
       snapOrientation: true,
-      removeDups: true,
-      duplicateThreshold: 10,
-      applyConstraints: false, // Disabled to avoid over-filtering
+      removeDups: config.removeDuplicates,
+      duplicateThreshold: config.duplicateDistanceTolerance,
+      duplicateAngleTolerance: config.duplicateAngleTolerance,
+      applyConstraints: false,
       classifyExterior: true
     });
     
@@ -445,6 +667,52 @@ function clearResults() {
   currentTestResults = null;
 }
 
+// Reset to defaults
+function resetDefaults() {
+  // Preprocessing
+  document.getElementById('thresholdMethod').value = 'adaptive';
+  document.getElementById('adaptiveWindowSize').value = '15';
+  document.getElementById('adaptiveC').value = '2';
+  document.getElementById('globalThresholdValue').value = '128';
+  document.getElementById('closingKernelSize').value = '9';
+  document.getElementById('minComponentSize').value = '15';
+  
+  // Line Detection
+  document.getElementById('edgeThresholdPercent').value = '5';
+  document.getElementById('minEdgeThreshold').value = '0.1';
+  document.getElementById('minWallLength').value = '50';
+  document.getElementById('minLineScore').value = '0.15';
+  document.getElementById('minChainLength').value = '3';
+  
+  // Merging
+  document.getElementById('mergeMaxDistance').value = '20';
+  document.getElementById('mergeMaxGap').value = '50';
+  document.getElementById('mergeAngleTolerance').value = '0.15';
+  
+  // Gap Filling
+  document.getElementById('maxGapLength').value = '100';
+  document.getElementById('gapAngleTolerance').value = '0.1';
+  document.getElementById('gapMaxOffset').value = '10';
+  
+  // Post-Processing
+  document.getElementById('minFinalLength').value = '50';
+  document.getElementById('maxFinalLength').value = '999999';
+  document.getElementById('snapGridSize').value = '5';
+  document.getElementById('duplicateDistanceTolerance').value = '10';
+  document.getElementById('duplicateAngleTolerance').value = '0.1';
+  
+  // Feature Toggles
+  document.getElementById('useClosing').checked = true;
+  document.getElementById('removeNoise').checked = true;
+  document.getElementById('fillGaps').checked = true;
+  document.getElementById('orientationConstraints').checked = true;
+  document.getElementById('snapToGrid').checked = true;
+  document.getElementById('removeDuplicates').checked = true;
+  document.getElementById('runOCR').checked = true;
+  
+  alert('Reset to default values');
+}
+
 // Event listeners
 document.getElementById('runTest').addEventListener('click', () => {
   document.getElementById('runTest').disabled = true;
@@ -455,6 +723,11 @@ document.getElementById('runTest').addEventListener('click', () => {
 
 document.getElementById('exportResults').addEventListener('click', exportResults);
 document.getElementById('clearResults').addEventListener('click', clearResults);
+document.getElementById('resetDefaults').addEventListener('click', resetDefaults);
+
+// History panel handlers
+document.getElementById('toggleHistory').addEventListener('click', toggleHistoryPanel);
+document.querySelector('.history-header').addEventListener('click', toggleHistoryPanel);
 
 // Auto-run on load
 window.addEventListener('load', () => {
