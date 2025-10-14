@@ -729,6 +729,303 @@ document.getElementById('resetDefaults').addEventListener('click', resetDefaults
 document.getElementById('toggleHistory').addEventListener('click', toggleHistoryPanel);
 document.querySelector('.history-header').addEventListener('click', toggleHistoryPanel);
 
+// Batch testing functionality
+import { testConfigurations } from './test-configurations.js';
+
+let batchResults = [];
+let isBatchRunning = false;
+
+// Programmatically set parameters
+function setParameters(params) {
+  // Preprocessing
+  document.getElementById('thresholdMethod').value = 'adaptive';
+  document.getElementById('adaptiveWindowSize').value = params.adaptiveWindowSize;
+  document.getElementById('adaptiveC').value = params.adaptiveC;
+  document.getElementById('closingKernelSize').value = params.closingKernelSize;
+  document.getElementById('useClosing').checked = true;
+  document.getElementById('removeNoise').checked = true;
+  document.getElementById('minComponentSize').value = 15;
+  
+  // Line Detection
+  document.getElementById('edgeThresholdPercent').value = params.edgeThresholdPercent;
+  document.getElementById('minEdgeThreshold').value = params.minEdgeThreshold;
+  document.getElementById('minWallLength').value = params.minWallLength;
+  document.getElementById('minLineScore').value = params.minLineScore;
+  document.getElementById('minChainLength').value = 3;
+  
+  // Merging
+  document.getElementById('mergeMaxDistance').value = 20;
+  document.getElementById('mergeMaxGap').value = params.mergeMaxGap;
+  document.getElementById('mergeAngleTolerance').value = 0.15;
+  
+  // Gap Filling
+  document.getElementById('fillGaps').checked = params.fillGaps;
+  document.getElementById('maxGapLength').value = params.maxGapLength;
+  document.getElementById('gapAngleTolerance').value = 0.1;
+  document.getElementById('gapMaxOffset').value = 10;
+  
+  // Post-Processing
+  document.getElementById('minFinalLength').value = params.minFinalLength;
+  document.getElementById('maxFinalLength').value = 999999;
+  document.getElementById('orientationConstraints').checked = params.orientationConstraints;
+  document.getElementById('snapToGrid').checked = true;
+  document.getElementById('removeDuplicates').checked = true;
+  document.getElementById('snapGridSize').value = 5;
+  document.getElementById('duplicateDistanceTolerance').value = 10;
+  document.getElementById('duplicateAngleTolerance').value = 0.1;
+  
+  document.getElementById('runOCR').checked = false; // Disable OCR for batch
+}
+
+// Extract visualizations from suite result
+function extractVisualizations(suite) {
+  const visualizations = [];
+  suite.steps.forEach(step => {
+    Object.entries(step.visualizations).forEach(([name, dataUrl]) => {
+      visualizations.push({ name, dataUrl });
+    });
+  });
+  return visualizations;
+}
+
+// Run batch tests
+async function runBatchTests() {
+  if (isBatchRunning) return;
+  isBatchRunning = true;
+  batchResults = [];
+  
+  const batchButton = document.getElementById('runBatch');
+  if (batchButton) batchButton.disabled = true;
+  
+  console.log('\n╔════════════════════════════════════════════╗');
+  console.log('║  Batch Wall Detection Tests - 25 Tests    ║');
+  console.log('╚════════════════════════════════════════════╝\n');
+  
+  for (let i = 0; i < testConfigurations.length; i++) {
+    const config = testConfigurations[i];
+    console.log(`\n[${i + 1}/25] Running: ${config.name}`);
+    console.log(`  ${config.description}`);
+    
+    try {
+      // Set parameters
+      setParameters(config.params);
+      
+      // Run test
+      const suite = await runTestSuiteProgrammatic();
+      
+      // Extract results
+      const visualizations = extractVisualizations(suite);
+      
+      batchResults.push({
+        testNumber: i + 1,
+        name: config.name,
+        description: config.description,
+        parameters: config.params,
+        visualizations,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`  ✓ Completed - ${visualizations.length} visualizations saved`);
+      
+    } catch (error) {
+      console.error(`  ✗ Error: ${error.message}`);
+      batchResults.push({
+        testNumber: i + 1,
+        name: config.name,
+        error: error.message
+      });
+    }
+  }
+  
+  console.log('\n✓ All batch tests completed!');
+  console.log(`${batchResults.length} tests completed\n`);
+  
+  if (batchButton) batchButton.disabled = false;
+  isBatchRunning = false;
+  
+  // Enable download button
+  const downloadButton = document.getElementById('downloadBatch');
+  if (downloadButton) downloadButton.disabled = false;
+}
+
+// Download batch results
+function downloadBatchResults() {
+  if (batchResults.length === 0) {
+    alert('No batch results to download. Run batch tests first.');
+    return;
+  }
+  
+  // Download index
+  const index = {
+    timestamp: new Date().toISOString(),
+    totalTests: batchResults.length,
+    tests: batchResults.map(r => ({
+      testNumber: r.testNumber,
+      name: r.name,
+      description: r.description,
+      parameters: r.parameters,
+      visualizationCount: r.visualizations ? r.visualizations.length : 0
+    }))
+  };
+  
+  const indexBlob = new Blob([JSON.stringify(index, null, 2)], { type: 'application/json' });
+  const indexUrl = URL.createObjectURL(indexBlob);
+  const indexLink = document.createElement('a');
+  indexLink.href = indexUrl;
+  indexLink.download = `batch_test_index_${Date.now()}.json`;
+  indexLink.click();
+  URL.revokeObjectURL(indexUrl);
+  
+  // Download each test
+  batchResults.forEach(result => {
+    if (!result.visualizations) return;
+    
+    // Download parameters
+    const paramsBlob = new Blob([JSON.stringify({
+      testNumber: result.testNumber,
+      name: result.name,
+      description: result.description,
+      parameters: result.parameters,
+      timestamp: result.timestamp
+    }, null, 2)], { type: 'application/json' });
+    const paramsUrl = URL.createObjectURL(paramsBlob);
+    const paramsLink = document.createElement('a');
+    paramsLink.href = paramsUrl;
+    paramsLink.download = `test_${result.testNumber.toString().padStart(2, '0')}_${result.name}_parameters.json`;
+    paramsLink.click();
+    URL.revokeObjectURL(paramsUrl);
+    
+    // Download visualizations
+    result.visualizations.forEach((viz, idx) => {
+      const link = document.createElement('a');
+      link.href = viz.dataUrl;
+      link.download = `test_${result.testNumber.toString().padStart(2, '0')}_${result.name}_${idx + 1}_${viz.name.replace(/\s+/g, '_')}.png`;
+      link.click();
+    });
+  });
+  
+  alert(`Downloading results from ${batchResults.length} tests!`);
+}
+
+// Programmatic test runner (no DOM updates)
+async function runTestSuiteProgrammatic() {
+  const suite = new TestSuiteResult('Wall Detection Pipeline');
+  const config = getCurrentSettings();
+  
+  const imageDataUrl = await loadTestImage();
+  const img = await dataUrlToImage(imageDataUrl);
+  const canvas = imageToCanvas(img);
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  
+  // Step 1: Preprocessing
+  const step1 = new TestStepResult('Preprocessing & Binarization', 1);
+  step1.start();
+  const preprocessed = preprocessImage(imageData, {
+    thresholdMethod: config.thresholdMethod,
+    adaptiveWindowSize: config.adaptiveWindowSize,
+    adaptiveC: config.adaptiveC,
+    globalThresholdValue: config.globalThresholdValue,
+    removeNoise: config.removeNoise,
+    minComponentSize: config.minComponentSize,
+    useClosing: config.useClosing,
+    closingKernelSize: config.closingKernelSize
+  });
+  step1.addVisualization('Grayscale', visualizeGrayscale(preprocessed.grayscale, width, height));
+  step1.addVisualization('Binary', visualizeBinary(preprocessed.binary, width, height));
+  step1.finish(preprocessed);
+  suite.addStep(step1);
+  
+  // Step 2: Segmentation
+  const step2 = new TestStepResult('Wall Segmentation', 2);
+  step2.start();
+  const likelihood = await segmentWalls(preprocessed, width, height, {
+    useModel: false,
+    useFallback: true
+  });
+  step2.addVisualization('Likelihood Heatmap', visualizeLikelihoodHeatmap(likelihood, width, height));
+  step2.finish(likelihood);
+  suite.addStep(step2);
+  
+  // Step 3: Line Detection
+  const step3 = new TestStepResult('Line Detection', 3);
+  step3.start();
+  let segments = detectLineSegments(likelihood, width, height, {
+    minLength: config.minWallLength,
+    minScore: config.minLineScore,
+    edgeThresholdPercent: config.edgeThresholdPercent,
+    minEdgeThreshold: config.minEdgeThreshold,
+    minChainLength: config.minChainLength
+  });
+  step3.addVisualization('Detected Lines', visualizeLineSegments(segments, width, height));
+  step3.addVisualization('By Orientation', visualizeSegmentsByOrientation(segments, width, height));
+  step3.finish(segments);
+  suite.addStep(step3);
+  
+  // Step 4: Merge Collinear
+  const step4 = new TestStepResult('Collinear Merging', 4);
+  step4.start();
+  segments = mergeCollinearSegments(segments, {
+    maxDistance: config.mergeMaxDistance,
+    maxGap: config.mergeMaxGap,
+    angleTolerance: config.mergeAngleTolerance
+  });
+  step4.addVisualization('After Merging', visualizeLineSegments(segments, width, height));
+  step4.finish(segments);
+  suite.addStep(step4);
+  
+  // Step 5: Gap Filling
+  if (config.fillGaps) {
+    const step5 = new TestStepResult('Gap Filling', 5);
+    step5.start();
+    segments = fillGapsInSegments(segments, {
+      maxGapLength: config.maxGapLength,
+      alignmentTolerance: config.gapMaxOffset,
+      angleTolerance: config.gapAngleTolerance
+    });
+    step5.addVisualization('After Gap Filling', visualizeLineSegments(segments, width, height));
+    step5.finish(segments);
+    suite.addStep(step5);
+  }
+  
+  // Step 6: Post-Processing
+  const step6 = new TestStepResult('Post-Processing & Classification', 6);
+  step6.start();
+  const processed = postProcessSegments(segments, width, height, {
+    minLength: config.minFinalLength,
+    maxLength: config.maxFinalLength,
+    enforceOrientation: config.orientationConstraints,
+    allowedOrientations: ['horizontal', 'vertical'],
+    angleTolerance: Math.PI / 12,
+    removeIsolated: false,
+    connectionThreshold: 25,
+    snapGrid: config.snapToGrid,
+    gridSize: config.snapGridSize,
+    snapOrientation: true,
+    removeDups: config.removeDuplicates,
+    duplicateThreshold: config.duplicateDistanceTolerance,
+    duplicateAngleTolerance: config.duplicateAngleTolerance,
+    applyConstraints: false,
+    classifyExterior: true
+  });
+  
+  if (processed.exterior && processed.interior) {
+    step6.addVisualization('Exterior/Interior', visualizeExteriorInterior(processed.exterior, processed.interior, width, height));
+  }
+  step6.addVisualization('Final Result', visualizeLineSegments(processed.all, width, height));
+  step6.finish(processed);
+  suite.addStep(step6);
+  
+  suite.finish();
+  return suite;
+}
+
+// Expose batch functions globally
+window.runBatchTests = runBatchTests;
+window.downloadBatchResults = downloadBatchResults;
+
 // Auto-run on load
 window.addEventListener('load', () => {
   console.log('Wall Detection Test Suite Ready');

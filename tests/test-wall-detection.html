@@ -281,6 +281,14 @@
         <button id="clearResults">🗑️ Clear</button>
         <button id="resetDefaults">🔄 Reset to Defaults</button>
       </div>
+      
+      <div class="button-group" style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+        <button id="runBatch" onclick="window.runBatchTests()" style="background: #28a745; font-size: 16px;">🚀 Run 25 Batch Tests</button>
+        <button id="downloadBatch" onclick="window.downloadBatchResults()" disabled style="background: #17a2b8;">📥 Download All Results</button>
+      </div>
+      <div style="margin-top: 10px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 14px;">
+        <strong>Batch Testing:</strong> Automatically runs 25 different parameter configurations and saves all visualizations and parameters for comparison.
+      </div>
     </div>
 
     <div id="results" class="results"></div>

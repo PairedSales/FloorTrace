@@ -6,6 +6,35 @@
  */
 
 /**
+ * Visualize thick walls using their actual bounding boxes
+ */
+export const visualizeThickWalls = (walls, width, height) => {
+  const { canvas, ctx } = createCanvas(width, height);
+  
+  ctx.fillStyle = 'rgba(0, 102, 204, 0.5)';
+  ctx.strokeStyle = '#0066cc';
+  ctx.lineWidth = 1;
+  
+  walls.forEach(wall => {
+    // Draw the full thick region using bounding box
+    const bbox = wall.boundingBox;
+    ctx.fillRect(bbox.x1, bbox.y1, bbox.x2 - bbox.x1, bbox.y2 - bbox.y1);
+    ctx.strokeRect(bbox.x1, bbox.y1, bbox.x2 - bbox.x1, bbox.y2 - bbox.y1);
+    
+    // Draw centerline for reference
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(wall.centerline.x1, wall.centerline.y1);
+    ctx.lineTo(wall.centerline.x2, wall.centerline.y2);
+    ctx.stroke();
+    ctx.strokeStyle = '#0066cc';
+  });
+  
+  return canvas.toDataURL();
+};
+
+/**
  * Create a blank canvas
  */
 const createCanvas = (width, height, fillColor = 'white') => {
