@@ -1,8 +1,8 @@
-# Hybrid Wall Detection System
+# Classical Wall Detection System
 
 ## Overview
 
-The FloorTrace wall detection system has been completely rewritten using a **hybrid deep learning + classical refinement approach**. This architecture combines the robustness of CNN-based semantic segmentation with the precision of classical line detection algorithms.
+The FloorTrace wall detection system uses a **classical image processing approach**. This architecture combines robust preprocessing with precise line detection algorithms to identify walls in floor plan images.
 
 ## Architecture
 
@@ -18,9 +18,8 @@ Image Input
     └─ Noise removal
     ↓
 2. Wall Segmentation (wallSegmentation.js)
-    ├─ CNN-based likelihood map generation (optional)
-    ├─ Classical fallback (aspect ratio analysis)
-    └─ Semantic filtering (walls vs furniture/text)
+    ├─ Binary to likelihood map conversion
+    └─ Gaussian smoothing for edge refinement
     ↓
 3. Line Detection (lineRefinement.js)
     ├─ Edge detection (Sobel)
@@ -28,24 +27,19 @@ Image Input
     ├─ Line segment detection (LSD-style)
     └─ Collinear segment merging
     ↓
-4. Centerline Extraction (wallCenterline.js)
-    ├─ Distance transform
-    ├─ Skeletonization (Zhang-Suen)
-    └─ Thick wall handling
-    ↓
-5. Gap Filling (gapFilling.js)
-    ├─ Morphological gap bridging
+4. Gap Filling (gapFilling.js)
     ├─ Intelligent gap analysis
+    ├─ Segment connection across gaps
     └─ Door/window handling
     ↓
-6. Post-Processing (wallPostProcessing.js)
+5. Post-Processing (wallPostProcessing.js)
     ├─ Orientation constraints (H/V only)
     ├─ Length/thickness filtering
     ├─ Grid snapping & quantization
     ├─ Duplicate removal
     └─ Geometric validation
     ↓
-7. Classification & Perimeter
+6. Classification & Perimeter
     ├─ Exterior/interior separation
     └─ Perimeter polygon construction
     ↓
@@ -70,18 +64,17 @@ Output: Wall Segments + Perimeter
 - Connected component analysis
 - Size-based filtering
 
-### 2. CNN-Based Segmentation (wallSegmentation.js)
+### 2. Classical Segmentation (wallSegmentation.js)
 
-**DeepLSD-style approach:**
-- Generates wall likelihood maps (0-1 probability per pixel)
-- Lightweight U-Net architecture optimized for browser
-- Optional: Load pre-trained models
-- **Classical fallback**: Aspect ratio & structural analysis when CNN unavailable
+**Binary-to-likelihood conversion:**
+- Converts binary preprocessed images to likelihood maps
+- Gaussian smoothing for refined edge detection
+- Produces 0-1 probability values per pixel
 
 **Benefits:**
-- Semantic filtering (ignores furniture, text, dimension lines)
-- Robust to varying line styles and quality
-- Learns wall patterns from data
+- Fast and lightweight (no model required)
+- Works entirely client-side
+- Consistent and predictable results
 
 ### 3. Line Refinement (lineRefinement.js)
 
@@ -96,30 +89,17 @@ Output: Wall Segments + Perimeter
 - Handles gaps and breaks
 - Score-based filtering using likelihood map
 
-### 4. Thick Wall Handling (wallCenterline.js)
-
-**Multiple strategies:**
-- **Distance transform**: Finds wall center by distance to edges
-- **Skeletonization**: Zhang-Suen thinning algorithm
-- **Boundary detection**: Separates inner/outer wall edges
-
-**Handles:**
-- Double-line walls
-- Solid thick walls
-- Variable wall thickness
-
-### 5. Gap Filling (gapFilling.js)
+### 4. Gap Filling (gapFilling.js)
 
 **Intelligent bridging:**
 - Connects aligned segments across gaps
-- Morphological closing for small gaps
 - Context-aware (differentiates doors vs windows)
 
 **Parameters:**
 - `maxGapLength`: Maximum gap to bridge (default 100px)
 - `alignmentTolerance`: How aligned segments must be
 
-### 6. Post-Processing (wallPostProcessing.js)
+### 5. Post-Processing (wallPostProcessing.js)
 
 **Multi-stage filtering:**
 1. **Orientation filtering**: Keep only H/V walls
@@ -144,7 +124,7 @@ import { detectWalls } from './utils/wallDetector';
 
 const wallData = await detectWalls(imageDataUrl, {
   minWallLength: 50,
-  thresholdMethod: 'adaptive',  // 'global', 'adaptive', 'otsu'
+  thresholdMethod: 'adaptive',  // 'global', 'adaptive', or 'otsu'
   orientationConstraints: true,
   fillGaps: true,
   maxGapLength: 100,
@@ -158,12 +138,10 @@ console.log('Interior walls:', wallData.interior.length);
 console.log('Perimeter vertices:', wallData.perimeter.vertices.length);
 ```
 
-### Advanced Usage with CNN
+### Advanced Usage with Debug Mode
 
 ```javascript
 const wallData = await detectWalls(imageDataUrl, {
-  useCNN: true,  // Enable CNN-based segmentation
-  cnnModelPath: '/models/wall-segmentation.json',  // Optional pre-trained model
   minWallLength: 50,
   debugMode: true  // Get likelihood maps and intermediate results
 });
@@ -201,9 +179,7 @@ const comparison = await compareWallDetectionParameters(imageDataUrl, [
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `minWallLength` | number | 50 | Minimum length in pixels for a wall segment |
-| `useCNN` | boolean | false | Use CNN-based segmentation (experimental) |
-| `cnnModelPath` | string | null | Path to pre-trained model file |
-| `thresholdMethod` | string | 'adaptive' | Thresholding: 'global', 'adaptive', 'otsu' |
+| `thresholdMethod` | string | 'adaptive' | Thresholding: 'global', 'adaptive', or 'otsu' |
 | `orientationConstraints` | boolean | true | Only detect horizontal/vertical walls |
 | `fillGaps` | boolean | true | Bridge gaps from doors/windows |
 | `maxGapLength` | number | 100 | Maximum gap to bridge (pixels) |
@@ -257,30 +233,27 @@ Typical performance on a 2000×1500px floor plan:
 | Stage | Time | Notes |
 |-------|------|-------|
 | Preprocessing | 50-100ms | Adaptive thresholding |
-| Segmentation (Classical) | 200-400ms | Fallback method |
-| Segmentation (CNN) | 500-1000ms | With lightweight U-Net |
+| Segmentation | 100-200ms | Binary to likelihood conversion |
 | Line Detection | 100-200ms | Edge detection + LSD |
 | Post-Processing | 50-100ms | Filtering + snapping |
-| **Total** | **400-800ms** | Classical pipeline |
-| **Total (CNN)** | **900-1500ms** | With CNN segmentation |
+| **Total** | **300-600ms** | Complete pipeline |
 
 ### Optimization Tips
 
-1. **Use classical fallback** for real-time performance
-2. **Reduce image size** before processing (downscale to ~1000px width)
-3. **Disable debug mode** in production
-4. **Adjust minWallLength** to filter more aggressively
-5. **Use Web Workers** for heavy computation
+1. **Reduce image size** before processing (downscale to ~1000px width)
+2. **Disable debug mode** in production
+3. **Adjust minWallLength** to filter more aggressively
+4. **Use Web Workers** for heavy computation
+5. **Cache wall data** when switching between interior/exterior edges
 
 ## Module Structure
 
 ```
 src/utils/
-├── wallDetector.js              # Main entry point, hybrid pipeline
+├── wallDetector.js              # Main entry point, classical pipeline
 ├── imagePreprocessor.js         # Adaptive thresholding, morphology
-├── wallSegmentation.js          # CNN + classical likelihood maps
+├── wallSegmentation.js          # Classical likelihood map generation
 ├── lineRefinement.js            # Line detection, edge detection
-├── wallCenterline.js            # Thick wall handling, skeletonization
 ├── gapFilling.js                # Intelligent gap bridging
 ├── wallPostProcessing.js        # Filtering, snapping, classification
 └── wallDetectorTest.js          # Testing utilities
@@ -295,30 +268,30 @@ src/utils/
 - ❌ Poor gap handling
 - ❌ No orientation awareness
 
-### New Hybrid System
+### New Classical System
 - ✅ Handles varying line widths
-- ✅ Semantic filtering (ignores non-walls)
-- ✅ Adaptive parameters based on likelihood
+- ✅ Better preprocessing for cleaner binary images
+- ✅ Adaptive thresholding methods
 - ✅ Intelligent gap filling
 - ✅ Orientation constraints
 - ✅ Vectorized output
 - ✅ Robust to noise
-- ✅ Extensible with CNN models
+- ✅ Fast and lightweight
 
 ## Future Improvements
 
 ### Short Term
-1. ✨ Fine-tune CNN model on architectural drawings
-2. ✨ Add support for diagonal walls
-3. ✨ Improve door/window detection
-4. ✨ Better room boundary detection
+1. ✨ Add support for diagonal walls
+2. ✨ Improve door/window detection
+3. ✨ Better room boundary detection
+4. ✨ Automatic parameter tuning
 
 ### Long Term
-1. 🚀 Pre-trained models for different floor plan styles
-2. 🚀 Transfer learning from wireframe datasets
-3. 🚀 Real-time processing with Web Workers
-4. 🚀 GPU acceleration via WebGL
-5. 🚀 Automatic parameter tuning
+1. 🚀 Real-time processing with Web Workers
+2. 🚀 GPU acceleration via WebGL for image processing
+3. 🚀 Support for curved walls
+4. 🚀 Integration with topology-guided system
+5. 🚀 3D floor plan reconstruction
 
 ## Troubleshooting
 
@@ -342,16 +315,15 @@ src/utils/
 
 ### Poor Performance
 - Downscale image before detection
-- Disable CNN (`useCNN: false`)
-- Increase `minWallLength`
-- Disable `debugMode`
+- Increase `minWallLength` to reduce segments
+- Disable `debugMode` in production
+- Use Web Workers for background processing
 
 ## References
 
-- **DeepLSD**: [Learning to Detect Semantic Boundaries](https://github.com/cvlab-epfl/DeepLSD)
 - **LSD Algorithm**: [Line Segment Detector](http://www.ipol.im/pub/art/2012/gjmr-lsd/)
-- **Zhang-Suen Thinning**: [Character Recognition Systems](https://dl.acm.org/doi/10.1145/357994.358023)
-- **U-Net**: [Convolutional Networks for Biomedical Image Segmentation](https://arxiv.org/abs/1505.04597)
+- **Canny Edge Detection**: [A Computational Approach to Edge Detection](https://ieeexplore.ieee.org/document/4767851)
+- **Hough Transform**: [Use of the Hough Transformation to Detect Lines and Curves in Pictures](https://dl.acm.org/doi/10.1145/361237.361242)
 
 ## License
 

@@ -197,9 +197,10 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Edge magnitude - nonzero: ${edgeNonZero}/${edges.length}, max: ${edgeMax.toFixed(3)}`);
   
-  // Threshold edges
+  // Threshold edges - use higher threshold to reduce noise
+  // Increase minScore to filter out weak edges from interior fixtures
   const binary = new Uint8Array(width * height);
-  const threshold = minScore;
+  const threshold = Math.max(minScore, 0.5); // Minimum 0.5 to filter interior details
   for (let i = 0; i < edges.length; i++) {
     binary[i] = edges[i] > threshold ? 1 : 0;
   }
@@ -223,7 +224,9 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
       
       // Filter by orientation if enabled
       if (orientationConstraint) {
-        const orientation = line.getOrientation(angleTolerance);
+        // Use stricter tolerance for orientation (5 degrees instead of 15)
+        const strictTolerance = Math.PI / 36; // 5 degrees
+        const orientation = line.getOrientation(strictTolerance);
         if (orientation === 'diagonal') continue;
       }
       

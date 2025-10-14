@@ -16,7 +16,6 @@ import { dataUrlToImage } from './imageLoader';
 export const testWallDetection = async (imageDataUrl, options = {}) => {
   const {
     minWallLength = 50,
-    useCNN = false,
     thresholdMethod = 'adaptive',
     orientationConstraints = true,
     fillGaps = true,
@@ -27,10 +26,9 @@ export const testWallDetection = async (imageDataUrl, options = {}) => {
     showDebugInfo = true
   } = options;
 
-  console.log('=== Hybrid Wall Detection Test Started ===');
+  console.log('=== Classical Wall Detection Test Started ===');
   console.log('Options:', { 
     minWallLength, 
-    useCNN,
     thresholdMethod,
     orientationConstraints,
     fillGaps,
@@ -43,7 +41,6 @@ export const testWallDetection = async (imageDataUrl, options = {}) => {
   // Run wall detection with debug mode
   const wallData = await detectWalls(imageDataUrl, {
     minWallLength,
-    useCNN,
     thresholdMethod,
     orientationConstraints,
     fillGaps,

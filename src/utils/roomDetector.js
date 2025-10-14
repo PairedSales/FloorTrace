@@ -1,7 +1,6 @@
 import Tesseract from 'tesseract.js';
 import { dataUrlToImage, imageToCanvas } from './imageLoader';
-import { detectLines, findRoomBox } from './lineDetector';
-import { findRoomMorphological, findRoomByLines } from './morphologicalRoomDetector';
+import { detectLines } from './lineDetector';
 import { detectWalls, findRoomFromWalls } from './wallDetector';
 
 /**
@@ -141,51 +140,38 @@ export const detectRoom = async (imageDataUrl) => {
     
     console.log(`Found dimension: ${firstDimension.width} x ${firstDimension.height} ft`);
     
-    // Try wall-based room detection first using NEW HYBRID SYSTEM (most accurate)
+    // Use hybrid wall detection system to find room boundaries
     let roomOverlay = null;
     if (dimensionBBox) {
       console.log('Finding room box using hybrid wall detection system...');
       try {
         const wallData = await detectWalls(imageDataUrl, {
           minWallLength: 50, // Lower threshold for room detection to catch smaller walls
-          thresholdMethod: 'adaptive', // Use adaptive thresholding
-          orientationConstraints: true, // Only H/V walls
-          fillGaps: true, // Bridge gaps from doors/windows
+          thresholdMethod: 'adaptive',
+          orientationConstraints: true,
+          fillGaps: true,
           maxGapLength: 100,
           debugMode: false
         });
+        
         roomOverlay = findRoomFromWalls(wallData, dimensionBBox);
+        
         if (roomOverlay) {
-          console.log('Hybrid wall-based room detection successful');
+          console.log('✅ Hybrid wall-based room detection successful');
+        } else {
+          console.log('⚠ Wall detection did not find a valid room, using fallback');
+          // Simple fallback: create a box around the dimension text
+          const padding = 50;
+          roomOverlay = {
+            x1: Math.max(0, dimensionBBox.x - padding),
+            y1: Math.max(0, dimensionBBox.y - padding),
+            x2: Math.min(img.width, dimensionBBox.x + dimensionBBox.width + padding),
+            y2: Math.min(img.height, dimensionBBox.y + dimensionBBox.height + padding)
+          };
         }
       } catch (error) {
-        console.error('Hybrid wall-based room detection error:', error);
-      }
-    }
-    
-    // Fallback 1: Use morphological room detection
-    if (!roomOverlay && dimensionBBox) {
-      console.log('Wall-based detection failed, trying morphological detection...');
-      roomOverlay = await findRoomMorphological(imageDataUrl, dimensionBBox);
-    }
-    
-    // Fallback 2: Try line-based detection
-    if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
-      console.log('Morphological detection failed, trying line-based detection...');
-      roomOverlay = await findRoomByLines(imageDataUrl, dimensionBBox, lineData.horizontal, lineData.vertical);
-    }
-    
-    // Fallback 3: Try legacy line detection
-    if (!roomOverlay && dimensionBBox && lineData.horizontal.length > 0 && lineData.vertical.length > 0) {
-      console.log('Line-based detection failed, trying legacy method...');
-      roomOverlay = findRoomBox(dimensionBBox, lineData.horizontal, lineData.vertical);
-    }
-    
-    // Fallback 3: Create a box around the dimension text
-    if (!roomOverlay) {
-      console.log('All detection methods failed, using fallback room box');
-      if (dimensionBBox) {
-        // Create a box around the dimension text
+        console.error('Error in wall-based room detection:', error);
+        // Fallback on error
         const padding = 50;
         roomOverlay = {
           x1: Math.max(0, dimensionBBox.x - padding),
@@ -193,15 +179,16 @@ export const detectRoom = async (imageDataUrl) => {
           x2: Math.min(img.width, dimensionBBox.x + dimensionBBox.width + padding),
           y2: Math.min(img.height, dimensionBBox.y + dimensionBBox.height + padding)
         };
-      } else {
-        // Default to center
-        roomOverlay = {
-          x1: img.width * 0.25,
-          y1: img.height * 0.25,
-          x2: img.width * 0.75,
-          y2: img.height * 0.75
-        };
       }
+    } else {
+      // No dimension bbox, use default center position
+      console.log('No dimension bbox, using default center position');
+      roomOverlay = {
+        x1: img.width * 0.25,
+        y1: img.height * 0.25,
+        x2: img.width * 0.75,
+        y2: img.height * 0.75
+      };
     }
     
     return {

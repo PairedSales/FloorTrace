@@ -1,125 +1,13 @@
 /**
- * CNN-Based Wall Segmentation Module
+ * Classical Wall Segmentation Module
  * 
- * Implements DeepLSD-style wall detection using a convolutional neural network
- * to generate wall likelihood maps and attraction fields.
- * 
- * This module can:
- * 1. Use a pre-trained model for wall segmentation
- * 2. Generate wall likelihood maps (pixel-level probability)
- * 3. Create attraction fields (gradient-based line guidance)
- * 4. Provide semantic filtering to ignore furniture, text, etc.
+ * Generates wall likelihood maps using classical image processing techniques.
+ * Converts preprocessed binary images to likelihood maps for line detection.
  */
-
-import * as tf from '@tensorflow/tfjs';
-
-let wallSegmentationModel = null;
-
-/**
- * Load or create wall segmentation model
- * @param {string} modelPath - Optional path to pre-trained model
- * @returns {Promise<tf.LayersModel>}
- */
-export const loadWallSegmentationModel = async (modelPath = null) => {
-  if (wallSegmentationModel) {
-    return wallSegmentationModel;
-  }
-  
-  if (modelPath) {
-    console.log('Loading pre-trained wall segmentation model...');
-    try {
-      wallSegmentationModel = await tf.loadLayersModel(modelPath);
-      console.log('Wall segmentation model loaded successfully');
-      return wallSegmentationModel;
-    } catch (error) {
-      console.warn('Could not load pre-trained model, using lightweight architecture:', error);
-    }
-  }
-  
-  // Create lightweight U-Net style architecture for wall segmentation
-  console.log('Creating lightweight wall segmentation model...');
-  wallSegmentationModel = createLightweightSegmentationModel();
-  
-  return wallSegmentationModel;
-};
-
-/**
- * Create a lightweight U-Net style model for wall segmentation
- * This is a simplified architecture optimized for browser performance
- */
-const createLightweightSegmentationModel = () => {
-  const inputShape = [256, 256, 1]; // Grayscale input
-  
-  const input = tf.input({ shape: inputShape });
-  
-  // Encoder (downsampling path)
-  let x = tf.layers.conv2d({
-    filters: 16,
-    kernelSize: 3,
-    padding: 'same',
-    activation: 'relu'
-  }).apply(input);
-  const enc1 = x;
-  
-  x = tf.layers.maxPooling2d({ poolSize: 2 }).apply(x);
-  
-  x = tf.layers.conv2d({
-    filters: 32,
-    kernelSize: 3,
-    padding: 'same',
-    activation: 'relu'
-  }).apply(x);
-  const enc2 = x;
-  
-  x = tf.layers.maxPooling2d({ poolSize: 2 }).apply(x);
-  
-  // Bottleneck
-  x = tf.layers.conv2d({
-    filters: 64,
-    kernelSize: 3,
-    padding: 'same',
-    activation: 'relu'
-  }).apply(x);
-  
-  // Decoder (upsampling path)
-  x = tf.layers.upSampling2d({ size: [2, 2] }).apply(x);
-  x = tf.layers.concatenate().apply([x, enc2]);
-  x = tf.layers.conv2d({
-    filters: 32,
-    kernelSize: 3,
-    padding: 'same',
-    activation: 'relu'
-  }).apply(x);
-  
-  x = tf.layers.upSampling2d({ size: [2, 2] }).apply(x);
-  x = tf.layers.concatenate().apply([x, enc1]);
-  x = tf.layers.conv2d({
-    filters: 16,
-    kernelSize: 3,
-    padding: 'same',
-    activation: 'relu'
-  }).apply(x);
-  
-  // Output: wall likelihood map (sigmoid activation for [0, 1] range)
-  const output = tf.layers.conv2d({
-    filters: 1,
-    kernelSize: 1,
-    padding: 'same',
-    activation: 'sigmoid'
-  }).apply(x);
-  
-  const model = tf.model({ inputs: input, outputs: output });
-  
-  console.log('Lightweight segmentation model created');
-  model.summary();
-  
-  return model;
-};
 
 /**
  * Generate wall likelihood map using classical heuristics
- * This is a fallback when no trained model is available
- * @param {Uint8Array} binary - Binary image
+ * @param {Uint8Array} binary - Binary image (1 = wall, 0 = background)
  * @param {number} width - Image width
  * @param {number} height - Image height
  * @returns {Float32Array} Wall likelihood map [0-1]
@@ -134,20 +22,56 @@ export const generateClassicalLikelihoodMap = (binary, width, height) => {
   }
   console.log(`DEBUG: Binary image - ${wallPixels}/${binary.length} wall pixels (${(100*wallPixels/binary.length).toFixed(1)}%)`);
   
-  // SIMPLIFIED APPROACH: Just convert binary to float likelihood
-  // The preprocessing already did morphological operations to clean up the image
-  // The edge detection will find the wall edges from this
-  const likelihood = new Float32Array(width * height);
-  
+  // Convert binary to float
+  const baseLikelihood = new Float32Array(width * height);
   for (let i = 0; i < binary.length; i++) {
-    likelihood[i] = binary[i]; // 1.0 for walls, 0.0 for background
+    baseLikelihood[i] = binary[i];
   }
   
-  console.log(`DEBUG: Created likelihood map from binary image (${wallPixels} pixels with score 1.0)`);
+  // Apply moderate gaussian blur to create gradient probabilities
+  // This creates a soft falloff from walls (1.0) to background (0.0)
+  const blurred = gaussianBlur(baseLikelihood, width, height, 1.5);
   
-  // Minimal blur to smooth edges for chain tracing (0.3σ = 1x1 kernel)
-  // Too much blur (1.5) loses thin walls, no blur (0) crashes edge tracer
-  return gaussianBlur(likelihood, width, height, 0.3);
+  // Enhance using gradient magnitude (edge strength)
+  const likelihood = new Float32Array(width * height);
+  
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      
+      // Sobel gradient magnitude
+      const gx = (
+        -blurred[idx - width - 1] - 2 * blurred[idx - 1] - blurred[idx + width - 1] +
+        blurred[idx - width + 1] + 2 * blurred[idx + 1] + blurred[idx + width + 1]
+      ) / 8;
+      
+      const gy = (
+        -blurred[idx - width - 1] - 2 * blurred[idx - width] - blurred[idx - width + 1] +
+        blurred[idx + width - 1] + 2 * blurred[idx + width] + blurred[idx + width + 1]
+      ) / 8;
+      
+      const gradMag = Math.sqrt(gx * gx + gy * gy);
+      
+      // Combine: base likelihood boosted by edge strength
+      // Areas with high gradient = likely wall edges
+      likelihood[idx] = Math.min(1.0, blurred[idx] * 0.7 + gradMag * 3.0);
+    }
+  }
+  
+  // Calculate statistics
+  let nonZero = 0;
+  let maxVal = 0;
+  let minVal = 1;
+  for (let i = 0; i < likelihood.length; i++) {
+    if (likelihood[i] > 0.01) nonZero++;
+    if (likelihood[i] > maxVal) maxVal = likelihood[i];
+    if (likelihood[i] < minVal && likelihood[i] > 0) minVal = likelihood[i];
+  }
+  
+  console.log(`DEBUG: Likelihood map - ${nonZero}/${likelihood.length} nonzero pixels`);
+  console.log(`DEBUG: Value range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
+  
+  return likelihood;
 };
 
 /**
@@ -239,78 +163,19 @@ export const generateAttractionField = (likelihood, width, height) => {
 };
 
 /**
- * Apply CNN-based wall segmentation
+ * Generate wall segmentation using classical image processing
  * @param {Uint8Array} grayscale - Grayscale image
  * @param {number} width - Image width
  * @param {number} height - Image height
- * @param {Object} options - Segmentation options
  * @returns {Promise<Float32Array>} Wall likelihood map
  */
-export const segmentWalls = async (grayscale, width, height, options = {}) => {
-  const {
-    useModel = false,
-    modelPath = null,
-    useFallback = true
-  } = options;
-  
-  if (useModel) {
-    try {
-      const model = await loadWallSegmentationModel(modelPath);
-      
-      // Prepare input tensor (resize to model input size)
-      const inputTensor = tf.tidy(() => {
-        let tensor = tf.tensor3d(grayscale, [height, width, 1]);
-        tensor = tf.image.resizeBilinear(tensor, [256, 256]);
-        tensor = tf.div(tensor, 255); // Normalize to [0, 1]
-        return tensor.expandDims(0); // Add batch dimension
-      });
-      
-      // Run inference
-      console.log('Running CNN inference...');
-      const output = model.predict(inputTensor);
-      
-      // Get likelihood map
-      const likelihoodArray = await output.squeeze([0, 3]).array();
-      inputTensor.dispose();
-      output.dispose();
-      
-      // Resize back to original size
-      const resizedTensor = tf.tidy(() => {
-        const tensor = tf.tensor2d(likelihoodArray);
-        return tf.image.resizeBilinear(tensor, [height, width]);
-      });
-      
-      const likelihood = await resizedTensor.data();
-      resizedTensor.dispose();
-      
-      return new Float32Array(likelihood);
-    } catch (error) {
-      console.warn('CNN inference failed:', error);
-      if (!useFallback) {
-        throw error;
-      }
-    }
+export const segmentWalls = async (grayscale, width, height) => {
+  // Convert grayscale to binary
+  const binary = new Uint8Array(grayscale.length);
+  for (let i = 0; i < grayscale.length; i++) {
+    binary[i] = grayscale[i] < 128 ? 1 : 0;
   }
   
-  // Fallback to classical heuristics
-  if (useFallback) {
-    // First convert to binary for classical method
-    const binary = new Uint8Array(grayscale.length);
-    for (let i = 0; i < grayscale.length; i++) {
-      binary[i] = grayscale[i] < 128 ? 1 : 0;
-    }
-    return generateClassicalLikelihoodMap(binary, width, height);
-  }
-  
-  throw new Error('Wall segmentation failed and fallback is disabled');
-};
-
-/**
- * Cleanup TensorFlow resources
- */
-export const cleanup = () => {
-  if (wallSegmentationModel) {
-    wallSegmentationModel.dispose();
-    wallSegmentationModel = null;
-  }
+  // Generate likelihood map using classical method
+  return generateClassicalLikelihoodMap(binary, width, height);
 };

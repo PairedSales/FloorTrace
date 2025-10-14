@@ -13,7 +13,7 @@ import { detectWalls } from './wallDetector';
  * @param {number} wallThickness - Estimated wall thickness in pixels
  * @returns {Array} Interior edge vertices
  */
-const calculateInteriorEdge = (exteriorWalls, perimeter, wallThickness = 10) => {
+export const calculateInteriorEdge = (exteriorWalls, perimeter, wallThickness = 10) => {
   if (!perimeter || !perimeter.vertices || perimeter.vertices.length < 3) {
     return null;
   }
@@ -50,7 +50,7 @@ const calculateInteriorEdge = (exteriorWalls, perimeter, wallThickness = 10) => 
  * @param {number} wallThickness - Estimated wall thickness in pixels
  * @returns {Array} Exterior edge vertices
  */
-const calculateExteriorEdge = (exteriorWalls, perimeter, wallThickness = 10) => {
+export const calculateExteriorEdge = (exteriorWalls, perimeter, wallThickness = 10) => {
   if (!perimeter || !perimeter.vertices || perimeter.vertices.length < 3) {
     return null;
   }

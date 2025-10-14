@@ -23,6 +23,7 @@ function App() {
   const [lineData, setLineData] = useState(null); // Store line detection data (legacy)
   const [wallData, setWallData] = useState(null); // Store hybrid wall detection data
   const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
+  const [isLoadingWallData, setIsLoadingWallData] = useState(false); // Track wall data loading state
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
@@ -710,6 +711,7 @@ function App() {
         return;
       }
 
+      setIsLoadingWallData(true);
       try {
         console.log('Auto-detecting walls using HYBRID system for snapping...');
         const { detectWalls } = await import('./utils/wallDetector');
@@ -786,6 +788,8 @@ function App() {
         } catch (fallbackError) {
           console.error('Fallback snapping detection also failed:', fallbackError);
         }
+      } finally {
+        setIsLoadingWallData(false);
       }
     };
 
@@ -901,6 +905,7 @@ function App() {
         onRemovePerimeterVertex={handleRemovePerimeterVertex}
         onUndoRedo={handleUndoRedo}
         ocrFailed={ocrFailed}
+        isLoadingWallData={isLoadingWallData}
       />
     );
   }
@@ -1018,6 +1023,16 @@ function App() {
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
           onUndoRedo={handleUndoRedo}
         />
+
+        {/* Wall Data Loading Overlay */}
+        {isLoadingWallData && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 shadow-lg flex items-center space-x-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-700"></div>
+              <div className="text-slate-700 font-medium">Loading wall data...</div>
+            </div>
+          </div>
+        )}
 
         {/* Sidebar overlay (flush to edges) */}
         <div ref={sidebarRef} className="absolute top-0 left-0 z-10 m-0">

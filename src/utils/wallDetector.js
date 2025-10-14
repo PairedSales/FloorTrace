@@ -1,23 +1,21 @@
 import { dataUrlToImage, imageToCanvas } from './imageLoader';
-import { preprocessImage, otsuThreshold } from './imagePreprocessor';
-import { segmentWalls, generateAttractionField } from './wallSegmentation';
+import { preprocessImage } from './imagePreprocessor';
+import { segmentWalls } from './wallSegmentation';
 import { detectLineSegments, mergeCollinearSegments } from './lineRefinement';
-import { extractCenterlineFromDistance } from './wallCenterline';
-import { fillGapsInSegments, morphologicalGapBridging } from './gapFilling';
+import { fillGapsInSegments } from './gapFilling';
 import { postProcessSegments } from './wallPostProcessing';
 
 /**
- * Hybrid Deep Learning + Classical Wall Detection System
+ * Classical Wall Detection System
  * 
- * This system detects walls in floor plan images using a hybrid approach:
+ * This system detects walls in floor plan images using classical image processing:
  * 1. Preprocessing: Adaptive thresholding, morphological operations, noise removal
- * 2. CNN-based segmentation: Generate wall likelihood maps (with classical fallback)
- * 3. Classical line detection: Extract line segments from likelihood maps
- * 4. Wall centerline extraction: Handle thick walls and double lines
- * 5. Gap filling: Bridge gaps from doors/windows using morphological closing
- * 6. Post-processing: Orientation constraints, filtering, snapping, quantization
- * 7. Classification: Separate exterior from interior walls
- * 8. Perimeter building: Connect exterior walls to form complete perimeter
+ * 2. Wall segmentation: Generate wall likelihood maps from binary images
+ * 3. Line detection: Extract line segments from likelihood maps
+ * 4. Segment merging: Merge collinear segments into continuous walls
+ * 5. Gap filling: Bridge gaps from doors/windows
+ * 6. Post-processing: Orientation constraints, filtering, snapping, classification
+ * 7. Perimeter building: Connect exterior walls to form complete perimeter
  */
 
 /**
@@ -65,7 +63,7 @@ export class WallSegment {
 }
 
 /**
- * Main wall detection function using hybrid approach
+ * Main wall detection function using classical image processing
  * @param {string|HTMLImageElement} imageSource - Image data URL or image element
  * @param {Object} options - Detection options
  * @returns {Object} Detected walls and metadata
@@ -73,8 +71,6 @@ export class WallSegment {
 export const detectWalls = async (imageSource, options = {}) => {
   const {
     minWallLength = 50,
-    useCNN = false,              // Use CNN-based segmentation (experimental)
-    cnnModelPath = null,         // Path to pre-trained model
     thresholdMethod = 'adaptive', // 'global', 'adaptive', or 'otsu'
     orientationConstraints = true, // Only horizontal/vertical walls
     fillGaps = true,             // Bridge gaps from doors/windows
@@ -108,17 +104,12 @@ export const detectWalls = async (imageSource, options = {}) => {
       closingKernelSize: 9 // Increased from 5 to better connect dashed lines
     });
 
-    // STEP 2: CNN-based segmentation (or classical fallback)
+    // STEP 2: Classical wall segmentation
     console.log('\n--- Step 2: Wall Segmentation ---');
     const likelihood = await segmentWalls(
       preprocessed.grayscale,
       width,
-      height,
-      {
-        useModel: useCNN,
-        modelPath: cnnModelPath,
-        useFallback: true
-      }
+      height
     );
 
     // STEP 3: Line detection and refinement

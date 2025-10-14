@@ -2,14 +2,14 @@
  * Wall Detection Deep Testing Suite - Main Test Runner
  */
 
-import { dataUrlToImage, imageToCanvas } from './src/utils/imageLoader.js';
-import { preprocessImage } from './src/utils/imagePreprocessor.js';
-import { segmentWalls } from './src/utils/wallSegmentation.js';
-import { detectLineSegments, mergeCollinearSegments } from './src/utils/lineRefinement.js';
-import { fillGapsInSegments } from './src/utils/gapFilling.js';
-import { postProcessSegments } from './src/utils/wallPostProcessing.js';
-import { detectWalls, findRoomFromWalls } from './src/utils/wallDetector.js';
-import { detectAllDimensions } from './src/utils/roomDetector.js';
+import { dataUrlToImage, imageToCanvas } from '../src/utils/imageLoader.js';
+import { preprocessImage } from '../src/utils/imagePreprocessor.js';
+import { segmentWalls } from '../src/utils/wallSegmentation.js';
+import { detectLineSegments, mergeCollinearSegments } from '../src/utils/lineRefinement.js';
+import { fillGapsInSegments } from '../src/utils/gapFilling.js';
+import { postProcessSegments } from '../src/utils/wallPostProcessing.js';
+import { detectWalls, findRoomFromWalls } from '../src/utils/wallDetector.js';
+import { detectAllDimensions } from '../src/utils/roomDetector.js';
 import {
   TestSuiteResult,
   TestStepResult,
@@ -17,7 +17,7 @@ import {
   Validators,
   MetricsCalculators,
   TestLogger
-} from './src/utils/wallTestUtilities.js';
+} from '../src/utils/wallTestUtilities.js';
 import {
   visualizeGrayscale,
   visualizeBinary,
@@ -27,14 +27,14 @@ import {
   visualizeExteriorInterior,
   visualizePerimeter,
   visualizeRoomFinding
-} from './src/utils/wallTestVisualizations.js';
+} from '../src/utils/wallTestVisualizations.js';
 
 let currentTestResults = null;
 const logger = new TestLogger();
 
 // Load test image
 async function loadTestImage() {
-  const response = await fetch('./ExampleFloorplan.png');
+  const response = await fetch('../ExampleFloorplan.png');
   const blob = await response.blob();
   return new Promise((resolve) => {
     const reader = new FileReader();
