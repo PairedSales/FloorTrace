@@ -30,9 +30,13 @@ export const generateClassicalLikelihoodMap = (binary, width, height) => {
   
   // Apply moderate gaussian blur to create gradient probabilities
   // This creates a soft falloff from walls (1.0) to background (0.0)
-  const blurred = gaussianBlur(baseLikelihood, width, height, 1.5);
+  const blurred = gaussianBlur(baseLikelihood, width, height, 2.0);
   
-  // Enhance using gradient magnitude (edge strength)
+  // Calculate distance transform to find wall centerlines
+  // This gives higher values at the CENTER of thick walls
+  const distanceTransform = computeDistanceTransform(binary, width, height);
+  
+  // Enhance using gradient magnitude (edge strength) but keep wall regions strong
   const likelihood = new Float32Array(width * height);
   
   for (let y = 1; y < height - 1; y++) {
@@ -52,9 +56,17 @@ export const generateClassicalLikelihoodMap = (binary, width, height) => {
       
       const gradMag = Math.sqrt(gx * gx + gy * gy);
       
-      // Combine: base likelihood boosted by edge strength
-      // Areas with high gradient = likely wall edges
-      likelihood[idx] = Math.min(1.0, blurred[idx] * 0.7 + gradMag * 3.0);
+      // Use distance transform to enhance wall interiors (helps distinguish from noise)
+      // But prioritize edges since we want wall boundaries
+      const interiorBoost = distanceTransform[idx] > 2 ? 0.2 : 0;
+      
+      // Combine: edges (gradient) + wall regions (blurred) + interior boost
+      // Priority: edges > wall regions > interior
+      likelihood[idx] = Math.min(1.0, 
+        gradMag * 2.0 +              // Edge strength - primary signal for wall boundaries
+        blurred[idx] * 0.5 +         // Base wall presence
+        interiorBoost                // Slight boost for thick wall interiors
+      );
     }
   }
   
@@ -72,6 +84,57 @@ export const generateClassicalLikelihoodMap = (binary, width, height) => {
   console.log(`DEBUG: Value range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
   
   return likelihood;
+};
+
+/**
+ * Compute distance transform using chamfer distance
+ * Returns distance from each wall pixel to nearest background pixel
+ * Higher values = centerline of thick walls
+ */
+const computeDistanceTransform = (binary, width, height) => {
+  const dist = new Float32Array(width * height);
+  const INF = 9999;
+  
+  // Initialize distances
+  for (let i = 0; i < binary.length; i++) {
+    dist[i] = binary[i] === 1 ? INF : 0;
+  }
+  
+  // Forward pass (top-left to bottom-right)
+  for (let y = 1; y < height; y++) {
+    for (let x = 1; x < width; x++) {
+      const idx = y * width + x;
+      if (binary[idx] === 1) {
+        const d = Math.min(
+          dist[idx],
+          dist[idx - 1] + 1,           // left
+          dist[idx - width] + 1,       // top
+          dist[idx - width - 1] + 1.4, // top-left diagonal
+          dist[idx - width + 1] + 1.4  // top-right diagonal
+        );
+        dist[idx] = d;
+      }
+    }
+  }
+  
+  // Backward pass (bottom-right to top-left)
+  for (let y = height - 2; y >= 0; y--) {
+    for (let x = width - 2; x >= 0; x--) {
+      const idx = y * width + x;
+      if (binary[idx] === 1) {
+        const d = Math.min(
+          dist[idx],
+          dist[idx + 1] + 1,           // right
+          dist[idx + width] + 1,       // bottom
+          dist[idx + width + 1] + 1.4, // bottom-right diagonal
+          dist[idx + width - 1] + 1.4  // bottom-left diagonal
+        );
+        dist[idx] = d;
+      }
+    }
+  }
+  
+  return dist;
 };
 
 /**

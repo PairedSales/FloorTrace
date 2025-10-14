@@ -179,14 +179,14 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Likelihood map - nonzero: ${nonZero}/${likelihood.length}, range: [${minVal.toFixed(3)}, ${maxVal.toFixed(3)}]`);
   
-  // Apply edge detection to find wall boundaries
-  // Use Sobel operator to detect edges in the likelihood map
+  // Apply edge detection to find wall boundaries (edges)
+  // This detects both inner and outer edges of thick walls
   const { magnitude, direction } = detectEdges(likelihood, width, height);
   
   // Apply non-maximum suppression to thin edges
   const edges = nonMaximumSuppression(magnitude, direction, width, height);
   
-  console.log(`DEBUG: Using edge detection approach`);
+  console.log(`DEBUG: Using edge detection approach for wall boundaries`);
   
   // DEBUG: Check edge magnitude
   let edgeNonZero = 0;
@@ -197,16 +197,16 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
   }
   console.log(`DEBUG: Edge magnitude - nonzero: ${edgeNonZero}/${edges.length}, max: ${edgeMax.toFixed(3)}`);
   
-  // Threshold edges - use higher threshold to reduce noise
-  // Increase minScore to filter out weak edges from interior fixtures
+  // Threshold edges - very low threshold to catch dashed/interrupted walls
   const binary = new Uint8Array(width * height);
-  const threshold = Math.max(minScore, 0.5); // Minimum 0.5 to filter interior details
+  const threshold = Math.max(minScore * 0.6, 0.2); // Very low threshold for dashed patterns
   for (let i = 0; i < edges.length; i++) {
     binary[i] = edges[i] > threshold ? 1 : 0;
   }
   
-  // Find connected edge chains
-  const chains = findEdgeChains(binary, direction, width, height, maxGap);
+  // Find connected edge chains with larger gap tolerance for dashed walls
+  const gapTolerance = Math.max(maxGap, 15); // At least 15px gap tolerance
+  const chains = findEdgeChains(binary, direction, width, height, gapTolerance);
   
   console.log(`Found ${chains.length} edge chains`);
   
@@ -222,13 +222,8 @@ export const detectLineSegments = (likelihood, width, height, options = {}) => {
     
     if (line && line.length >= minLength) {
       
-      // Filter by orientation if enabled
-      if (orientationConstraint) {
-        // Use stricter tolerance for orientation (5 degrees instead of 15)
-        const strictTolerance = Math.PI / 36; // 5 degrees
-        const orientation = line.getOrientation(strictTolerance);
-        if (orientation === 'diagonal') continue;
-      }
+      // Skip orientation filtering - floor plans can have diagonal walls
+      // The post-processing stage will handle orientation constraints if needed
       
       // Calculate average likelihood along line
       const avgLikelihood = calculateLineLikelihood(likelihood, width, height, line);
@@ -283,9 +278,8 @@ const traceEdgeChain = (binary, direction, visited, width, height, startX, start
     visited[idx] = 1;
     chain.push({ x, y });
     
-    // Look for neighbors along the edge direction
-    const angle = direction[idx];
-    const neighbors = getEdgeNeighbors(x, y, angle, maxGap);
+    // Look for neighbors (8-connected)
+    const neighbors = getEdgeNeighbors(x, y);
     
     for (const { x: nx, y: ny } of neighbors) {
       if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
@@ -303,7 +297,7 @@ const traceEdgeChain = (binary, direction, visited, width, height, startX, start
 /**
  * Get neighbors along edge direction
  */
-const getEdgeNeighbors = (x, y, angle, maxGap) => {
+const getEdgeNeighbors = (x, y) => {
   const neighbors = [];
   
   // Only check 8-connected immediate neighbors for skeleton pixels

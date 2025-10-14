@@ -119,15 +119,15 @@ export const detectWalls = async (imageSource, options = {}) => {
       minScore: 0.2,
       maxGap: 10,
       orientationConstraint: orientationConstraints,
-      angleTolerance: Math.PI / 12
+      angleTolerance: Math.PI / 4 // 45 degrees - allow diagonal walls in floor plans
     });
 
-    // STEP 4: Merge collinear segments
+    // STEP 4: Merge collinear segments (aggressive for dashed walls)
     console.log('\n--- Step 4: Merging Collinear Segments ---');
     segments = mergeCollinearSegments(segments, {
-      maxDistance: 15,
-      maxGap: 30,
-      angleTolerance: 0.15
+      maxDistance: 20,  // Increased to catch thicker dashed patterns
+      maxGap: 50,       // Increased to bridge larger gaps in dashed walls
+      angleTolerance: 0.2  // Slightly more tolerant for imperfect alignment
     });
 
     // STEP 5: Gap filling
@@ -144,14 +144,14 @@ export const detectWalls = async (imageSource, options = {}) => {
     console.log('\n--- Step 6: Post-Processing ---');
     const processed = postProcessSegments(segments, width, height, {
       minLength: minWallLength,
-      enforceOrientation: orientationConstraints,
-      allowedOrientations: ['horizontal', 'vertical'],
-      angleTolerance: Math.PI / 12,
+      enforceOrientation: false,  // Don't filter by orientation - allow diagonal walls
+      allowedOrientations: ['horizontal', 'vertical', 'diagonal'],
+      angleTolerance: Math.PI / 4,
       removeIsolated: false, // Disabled - too aggressive, removes valid walls
       connectionThreshold: 25,
-      snapGrid: true,
+      snapGrid: false,      // Disabled - user wants raw detection without snapping
       gridSize: 5,
-      snapOrientation: true,
+      snapOrientation: false,  // Disabled - don't snap angles
       removeDups: true,
       duplicateThreshold: 10,
       applyConstraints: false, // Disabled to avoid over-filtering

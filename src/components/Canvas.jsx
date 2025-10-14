@@ -1,14 +1,6 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-import {
-  extractSnapPointsFromTopology,
-  findBestSnapPoint,
-  applySecondaryAlignment,
-  SNAP_TO_CORNER_DISTANCE,
-  SNAP_TO_EDGE_DISTANCE,
-  SECONDARY_ALIGNMENT_DISTANCE
-} from '../utils/topologySnappingHelper';
 
 const Canvas = forwardRef(({
   image,
@@ -62,69 +54,13 @@ const Canvas = forwardRef(({
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
-  const visualSnapPositionRef = useRef(null); // Stores the visual snap position during drag (like .NET's _visualSnapPosition)
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
   const [touchStartPos, setTouchStartPos] = useState(null);
   const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
   const touchMoveThreshold = 10; // pixels to distinguish tap from drag
-  const longPressDelay = 500; // milliseconds for long press
-  
-  // Track Control key state to disable snapping
-  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
-
-  // Extract snap data from topology (corners and edges)
-  const snapData = useMemo(() => {
-    // Try to get topology data from perimeter or room overlay
-    const topologyData = perimeterOverlay?.topologyData || roomOverlay?.topologyData;
-    
-    if (topologyData) {
-      const { corners, edges } = extractSnapPointsFromTopology(topologyData);
-      console.log(`Topology snapping: ${corners.length} corners, ${edges.length} edges`);
-      return { corners, edges };
-    }
-    
-    // Fallback to corner points if no topology data
-    const corners = cornerPoints || [];
-    if (corners.length > 0) {
-      console.log(`Fallback snapping: Using ${corners.length} corner points`);
-    } else {
-      console.log('Snapping: No snap data available');
-    }
-    
-    return { corners, edges: [] };
-  }, [perimeterOverlay, roomOverlay, cornerPoints]);
-  
-  // Extract line positions for room overlay edge snapping (backward compatibility)
-  const { horizontalLines, verticalLines } = useMemo(() => {
-    const hLines = lineData?.horizontal ? lineData.horizontal.map(line => line.center) : [];
-    const vLines = lineData?.vertical ? lineData.vertical.map(line => line.center) : [];
-    return { horizontalLines: hLines, verticalLines: vLines };
-  }, [lineData]);
-  
-  // Listen for Control key press/release to disable snapping
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Control' || e.key === 'Meta') {
-        setIsCtrlPressed(true);
-      }
-    };
-    
-    const handleKeyUp = (e) => {
-      if (e.key === 'Control' || e.key === 'Meta') {
-        setIsCtrlPressed(false);
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+  const longPressDelay = 500; // milliseconds for long press;
 
   // Fit to window function
   const fitToWindow = () => {
@@ -305,35 +241,20 @@ const Canvas = forwardRef(({
     setDraggingVertex(index);
   };
 
-  // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseMove
+  // Vertex drag handler - no snapping
   const handleVertexDrag = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index || lineToolActive || drawAreaActive) return;
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
-    const snappedPoint = findBestSnapPoint(canvasPos, snapData, {
-      cornerDistance: SNAP_TO_CORNER_DISTANCE,
-      edgeDistance: SNAP_TO_EDGE_DISTANCE,
-      disableSnapping: isCtrlPressed
-    });
-    
-    // Use snapped position if available, otherwise use raw position
-    const visualPoint = snappedPoint || canvasPos;
-    
-    // Store the snap position for use in MouseUp (drag end)
-    visualSnapPositionRef.current = snappedPoint;
-    
-    // Update only the visual elements, not the actual data
-    // In .NET this updates Canvas.SetLeft/SetTop and polygon.Points
-    // In React-Konva, we update the state which re-renders, but mark saveAction=false
+    // Update vertex position directly without snapping
     let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = { x: visualPoint.x, y: visualPoint.y };
+    newVertices[index] = { x: canvasPos.x, y: canvasPos.y };
     
     onPerimeterUpdate(newVertices, false); // Don't save action during drag
   };
 
-  // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseUp
+  // Vertex drag end handler - no snapping
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     
@@ -343,40 +264,18 @@ const Canvas = forwardRef(({
         i === index ? lastDragStartPosRef.current : v
       ) : null;
     
-    // Get current position from visual snap or current vertex position
+    // Get current position (already updated during drag)
     const currentVertex = perimeterOverlay.vertices[index];
     
-    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
-    const snappedPoint = findBestSnapPoint(currentVertex, snapData, {
-      cornerDistance: SNAP_TO_CORNER_DISTANCE,
-      edgeDistance: SNAP_TO_EDGE_DISTANCE,
-      disableSnapping: isCtrlPressed
-    });
-    
-    // Use snapped position if available, otherwise use raw position
-    const finalPoint = snappedPoint || currentVertex;
-    
-    // Now update the actual data point
+    // Update final position without snapping
     let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = finalPoint;
+    newVertices[index] = currentVertex;
     
-    // Apply secondary alignment to nearby vertices if snapped
-    if (snappedPoint) {
-      applySecondaryAlignment(
-        newVertices,
-        index,
-        finalPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-    }
-    
-    // Re-render to show final position and any aligned vertices
-    // Notify that perimeter changed
-    onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
+    // Save action for undo
+    onPerimeterUpdate(newVertices, true, previousVertices);
     
     // Clean up
     setDraggingVertex(null);
-    visualSnapPositionRef.current = null;
   };
 
   // Delete perimeter vertex (for mobile)
@@ -436,16 +335,6 @@ const Canvas = forwardRef(({
     const clickPoint = getCanvasCoordinates(stage);
     if (!clickPoint) return;
     
-    // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
-    const snappedPoint = findBestSnapPoint(clickPoint, snapData, {
-      cornerDistance: SNAP_TO_CORNER_DISTANCE,
-      edgeDistance: SNAP_TO_EDGE_DISTANCE,
-      disableSnapping: isCtrlPressed
-    });
-    
-    // Use snapped position if available, otherwise use raw position
-    const finalPoint = snappedPoint || clickPoint;
-    
     // Find the closest edge to insert the new vertex
     const vertices = perimeterOverlay.vertices;
     let closestEdgeIndex = 0;
@@ -464,42 +353,11 @@ const Canvas = forwardRef(({
       }
     }
     
-    // Insert the new vertex after the closest edge start
+    // Insert the new vertex without snapping
     let newVertices = [...vertices];
-    newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-    
-    // Apply secondary alignment to nearby vertices if snapped
-    if (snappedPoint) {
-      applySecondaryAlignment(
-        newVertices,
-        closestEdgeIndex + 1,
-        finalPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-    }
+    newVertices.splice(closestEdgeIndex + 1, 0, clickPoint);
     
     onPerimeterUpdate(newVertices, true); // Save action for undo
-  };
-
-  // Helper function to snap a value to the nearest line within threshold
-  const snapToNearestLine = (value, lines, threshold) => {
-    // Disable snapping if Control key is pressed
-    if (isCtrlPressed || !lines || lines.length === 0) {
-      return null;
-    }
-    
-    let nearestLine = null;
-    let minDistance = Number.MAX_VALUE;
-    
-    for (const line of lines) {
-      const distance = Math.abs(line - value);
-      if (distance < minDistance && distance <= threshold) {
-        minDistance = distance;
-        nearestLine = line;
-      }
-    }
-    
-    return nearestLine;
   };
 
   // Helper function to calculate distance from point to line segment
@@ -568,43 +426,22 @@ const Canvas = forwardRef(({
       return;
     }
     
-    // Handle room corner dragging with snapping
+    // Handle room corner dragging without snapping
     if (draggingRoomCorner && roomOverlay) {
-      const snapThreshold = 5.0; // pixels, matching .NET implementation
       const newOverlay = { ...roomOverlay };
       
       if (draggingRoomCorner === 'tl') {
-        // Snap left edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap top edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        // Snap right edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap top edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        // Snap left edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap bottom edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
+        newOverlay.x1 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        // Snap right edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap bottom edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
+        newOverlay.x2 = mousePoint.x;
+        newOverlay.y2 = mousePoint.y;
       }
       
       onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
@@ -742,17 +579,8 @@ const Canvas = forwardRef(({
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
         
-        // Apply topology-based snapping to corners and edges (unless Ctrl is pressed)
-        const snappedPoint = findBestSnapPoint(clickPoint, snapData, {
-          cornerDistance: SNAP_TO_CORNER_DISTANCE,
-          edgeDistance: SNAP_TO_EDGE_DISTANCE,
-          disableSnapping: isCtrlPressed
-        });
-        
-        // Use snapped position if available, otherwise use raw position
-        const finalPoint = snappedPoint || clickPoint;
-        
-        onAddPerimeterVertex(finalPoint);
+        // Add vertex without snapping
+        onAddPerimeterVertex(clickPoint);
         return;
       }
       
@@ -876,17 +704,7 @@ const Canvas = forwardRef(({
     if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
         perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
       const timer = setTimeout(() => {
-        // Apply topology-based snapping to corners and edges (Ctrl check not needed - touch has no Ctrl key)
-        const snappedPoint = findBestSnapPoint(canvasPos, snapData, {
-          cornerDistance: SNAP_TO_CORNER_DISTANCE,
-          edgeDistance: SNAP_TO_EDGE_DISTANCE,
-          disableSnapping: false
-        });
-        
-        // Use snapped position if available, otherwise use raw position
-        const finalPoint = snappedPoint || canvasPos;
-        
-        // Add vertex at touch position
+        // Add vertex at touch position without snapping
         const vertices = perimeterOverlay.vertices;
         let closestEdgeIndex = 0;
         let minDistance = Infinity;
@@ -903,17 +721,7 @@ const Canvas = forwardRef(({
         }
         
         let newVertices = [...vertices];
-        newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-        
-        // Apply secondary alignment to nearby vertices if snapped
-        if (snappedPoint) {
-          applySecondaryAlignment(
-            newVertices,
-            closestEdgeIndex + 1,
-            finalPoint,
-            SECONDARY_ALIGNMENT_DISTANCE
-          );
-        }
+        newVertices.splice(closestEdgeIndex + 1, 0, canvasPos);
         
         onPerimeterUpdate(newVertices);
         
@@ -1073,13 +881,7 @@ const Canvas = forwardRef(({
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: isCtrlPressed ? 'crosshair' : 'default' }}>
-      {/* Snapping disabled indicator */}
-      {isCtrlPressed && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-yellow-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 font-semibold pointer-events-none">
-          🔓 Snapping Disabled (Ctrl)
-        </div>
-      )}
+    <div ref={containerRef} className="absolute inset-0 bg-white">{/* Snapping removed */}
       
       {!image && !isProcessing && !isMobile && (
         <div className="absolute inset-0 flex items-center justify-center">
