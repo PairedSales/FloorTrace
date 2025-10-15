@@ -311,6 +311,10 @@ export const detectThickWalls = (binary, width, height, options = {}) => {
   const solidWalls = [];
   const possiblyThin = [];
   
+  // Debug: Track rejection reasons
+  const rejections = { tooShort: 0, tooThin: 0, tooThick: 0, lowAspect: 0 };
+  let debugCount = 0;
+  
   for (const comp of components) {
     const bbox = comp.boundingBox;
     const width_c = bbox.x2 - bbox.x1;
@@ -320,6 +324,12 @@ export const detectThickWalls = (binary, width, height, options = {}) => {
     const length = isHorizontal ? width_c : height_c;
     const thickness = isHorizontal ? height_c : width_c;
     const aspectRatio = length / Math.max(thickness, 1);
+    
+    // Debug: Print first 5 large components
+    if (debugCount < 5 && (length > 200 || thickness > 50)) {
+      console.log(`DEBUG Component: L=${length.toFixed(0)} T=${thickness.toFixed(0)} AR=${aspectRatio.toFixed(1)} Pixels=${comp.pixels.length}`);
+      debugCount++;
+    }
     
     // Solid thick wall
     if (length >= minWallLength && 
@@ -331,12 +341,22 @@ export const detectThickWalls = (binary, width, height, options = {}) => {
       const wall = new ThickWall(comp.pixels, centerline, isHorizontal);
       solidWalls.push(wall);
     }
-    // Store thin lines for parallel pair detection
-    else if (thickness >= 1 && thickness <= 3 && length >= minWallLength) {
-      const centerline = calculateCenterline(comp.pixels, bbox, isHorizontal);
-      possiblyThin.push({ bbox, centerline, isHorizontal, pixels: comp.pixels });
+    // Track rejections
+    else {
+      if (length < minWallLength) rejections.tooShort++;
+      else if (thickness < minThickness) rejections.tooThin++;
+      else if (thickness > maxThickness) rejections.tooThick++;
+      else if (aspectRatio < minAspectRatio) rejections.lowAspect++;
+      
+      // Store thin lines for parallel pair detection
+      if (thickness >= 1 && thickness <= 3 && length >= minWallLength) {
+        const centerline = calculateCenterline(comp.pixels, bbox, isHorizontal);
+        possiblyThin.push({ bbox, centerline, isHorizontal, pixels: comp.pixels });
+      }
     }
   }
+  
+  console.log(`DEBUG Rejections: tooShort=${rejections.tooShort} tooThin=${rejections.tooThin} tooThick=${rejections.tooThick} lowAspect=${rejections.lowAspect}`);
   
   console.log(`Found ${solidWalls.length} solid thick walls`);
   

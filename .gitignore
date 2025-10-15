@@ -23,6 +23,4 @@ dist-ssr
 *.sln
 *.sw?
 
-# Test output directories
-tests/test visualizations/
-tests/thick_wall_test/
+
