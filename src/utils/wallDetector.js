@@ -1,9 +1,9 @@
-import { dataUrlToImage, imageToCanvas } from './imageLoader';
-import { preprocessImage } from './imagePreprocessor';
-import { segmentWalls } from './wallSegmentation';
-import { detectLineSegments, mergeCollinearSegments } from './lineRefinement';
-import { fillGapsInSegments } from './gapFilling';
-import { postProcessSegments } from './wallPostProcessing';
+import { dataUrlToImage, imageToCanvas } from './imageLoader.js';
+import { preprocessImage } from './imagePreprocessor.js';
+import { segmentWalls } from './wallSegmentation.js';
+import { detectLineSegments, mergeCollinearSegments } from './lineRefinement.js';
+import { fillGapsInSegments } from './gapFilling.js';
+import { postProcessSegments } from './wallPostProcessing.js';
 
 /**
  * Classical Wall Detection System
@@ -86,7 +86,7 @@ export const detectWalls = async (imageSource, options = {}) => {
     const img = typeof imageSource === 'string' 
       ? await dataUrlToImage(imageSource) 
       : imageSource;
-    const canvas = imageToCanvas(img);
+    const canvas = await imageToCanvas(img);
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
     const height = canvas.height;
@@ -193,7 +193,7 @@ export const detectWalls = async (imageSource, options = {}) => {
         preprocessed,
         likelihood,
         lineSegments: processed.all,
-        visualizations: createDebugVisualizations(result, width, height)
+        visualizations: await createDebugVisualizations(result, width, height)
       };
     }
 
@@ -909,20 +909,26 @@ export const findRoomFromWalls = (wallData, dimensionBBox) => {
 /**
  * Create debug visualizations
  */
-const createDebugVisualizations = (wallData, width, height) => {
+const createDebugVisualizations = async (wallData, width, height) => {
   return {
-    allWallsCanvas: visualizeWalls(wallData.allWalls, width, height, 'all'),
-    exteriorWallsCanvas: visualizeWalls(wallData.exterior, width, height, 'exterior'),
-    interiorWallsCanvas: visualizeWalls(wallData.interior, width, height, 'interior'),
-    perimeterCanvas: visualizePerimeter(wallData.perimeter, width, height)
+    allWallsCanvas: await visualizeWalls(wallData.allWalls, width, height, 'all'),
+    exteriorWallsCanvas: await visualizeWalls(wallData.exterior, width, height, 'exterior'),
+    interiorWallsCanvas: await visualizeWalls(wallData.interior, width, height, 'interior'),
+    perimeterCanvas: await visualizePerimeter(wallData.perimeter, width, height)
   };
 };
 
 /**
  * Visualize walls on a canvas
  */
-const visualizeWalls = (walls, width, height, type) => {
-  const canvas = document.createElement('canvas');
+const visualizeWalls = async (walls, width, height, type) => {
+  let canvas;
+  if (typeof document === 'undefined') {
+    const { createCanvas } = await import('@napi-rs/canvas');
+    canvas = createCanvas(width, height);
+  } else {
+    canvas = document.createElement('canvas');
+  }
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
@@ -951,10 +957,16 @@ const visualizeWalls = (walls, width, height, type) => {
 /**
  * Visualize perimeter on a canvas
  */
-const visualizePerimeter = (perimeter, width, height) => {
+const visualizePerimeter = async (perimeter, width, height) => {
   if (!perimeter || !perimeter.vertices) return null;
 
-  const canvas = document.createElement('canvas');
+  let canvas;
+  if (typeof document === 'undefined') {
+    const { createCanvas } = await import('@napi-rs/canvas');
+    canvas = createCanvas(width, height);
+  } else {
+    canvas = document.createElement('canvas');
+  }
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');

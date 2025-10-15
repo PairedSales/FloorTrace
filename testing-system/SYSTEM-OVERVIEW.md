@@ -22,7 +22,6 @@ This comprehensive testing system allows you to:
 - **`EXPERIMENT-LOG-TEMPLATE.md`** - Template for documenting experiments
 
 ### Utilities
-- **`run-test.bat`** - Windows batch script to run tests easily
 - **`.gitignore`** - Excludes test results from version control
 
 ## 🔄 Workflow
@@ -32,7 +31,7 @@ This comprehensive testing system allows you to:
    └─> Modify parameters you want to test
    
 2. Run test
-   └─> node run-test.js (or double-click run-test.bat)
+   └─> node run-test.js
    
 3. Analyze results
    └─> Open test-results/[timestamp]/report.html
@@ -223,7 +222,6 @@ When you find a good configuration, save the timestamp folder and document why i
 - **Node.js** 14+ 
 - **npm** 
 - **canvas** package (for image processing)
-- **Windows** (for .bat script) or any OS with Node.js
 
 ## 📚 Related Documentation
 

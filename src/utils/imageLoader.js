@@ -60,11 +60,22 @@ export const dataUrlToImage = (dataUrl) => {
 };
 
 // Convert Image to Canvas for processing
-export const imageToCanvas = (img) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-  return canvas;
+export const imageToCanvas = async (img) => {
+  // Check if we're in Node.js environment
+  if (typeof document === 'undefined') {
+    // Node.js environment - use @napi-rs/canvas
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return canvas;
+  } else {
+    // Browser environment
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return canvas;
+  }
 };
