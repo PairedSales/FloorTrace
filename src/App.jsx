@@ -3,8 +3,6 @@ import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
 import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
-import { detectRoom, detectAllDimensions } from './utils/topologyRoomDetector';
-import { tracePerimeter, switchPerimeterEdge } from './utils/topologyPerimeterTracer';
 import { calculateArea } from './utils/areaCalculator';
 import FloorTraceLogo from './assets/logo.svg';
 
@@ -20,10 +18,6 @@ function App() {
   const [detectedDimensions, setDetectedDimensions] = useState([]);
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true); // Default to interior edge
-  const [lineData, setLineData] = useState(null); // Store line detection data (legacy)
-  const [wallData, setWallData] = useState(null); // Store hybrid wall detection data
-  const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
-  const [isLoadingWallData, setIsLoadingWallData] = useState(false); // Track wall data loading state
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
@@ -42,7 +36,7 @@ function App() {
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
 
-  // Reset overlays (keeps wallData - only clears when new image loaded)
+  // Reset overlays
   const resetOverlays = useCallback(() => {
     setRoomOverlay(null);
     setPerimeterOverlay(null);
@@ -51,7 +45,6 @@ function App() {
     setScale(1);
     setDetectedDimensions([]);
     setMode('normal');
-    // Note: lineData and wallData are NOT cleared here - they persist with the image
     setManualEntryMode(false);
     setOcrFailed(false);
     setLineToolActive(false);
@@ -102,99 +95,14 @@ function App() {
     }
   }, [resetOverlays]);
 
-  // Handle find room
+  // Handle find room - WALL DETECTION REMOVED
   const handleFindRoom = async () => {
-    if (!image) {
-      alert('Please load an image first');
-      return;
-    }
-    
-    setIsProcessing(true);
-    try {
-      const result = await detectRoom(image);
-      if (result) {
-        setRoomOverlay(result.overlay);
-        setRoomDimensions(result.dimensions);
-        updateScale(result.dimensions, result.overlay);
-        
-        // Store line data for perimeter detection
-        if (result.lineData) {
-          setLineData(result.lineData);
-          console.log('Line data stored for perimeter detection');
-        }
-        
-        // Auto-switch unit based on detected format
-        if (result.detectedFormat) {
-          console.log('Find Room - Detected format:', result.detectedFormat, 'Current unit:', unit);
-          // If current unit doesn't match detected format, switch it
-          if (unit !== result.detectedFormat) {
-            console.log(`Find Room - Auto-switching unit from ${unit} to ${result.detectedFormat}`);
-            setUnit(result.detectedFormat);
-            console.log('Find Room - setUnit called with:', result.detectedFormat);
-          } else {
-            console.log('Find Room - Unit already matches, no switch needed');
-          }
-        } else {
-          console.log('Find Room - No format detected');
-        }
-      } else {
-        alert('Could not detect room dimensions. Try Manual Mode.');
-      }
-    } catch (error) {
-      console.error('Error detecting room:', error);
-      alert('Error detecting room. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
+    alert('Find Room feature requires wall detection system. Please use Manual Mode.');
   };
 
-  // Handle trace perimeter using TOPOLOGY-GUIDED wall detection system
+  // Handle trace perimeter - WALL DETECTION REMOVED
   const handleTracePerimeter = async () => {
-    if (!image) {
-      alert('Please load an image first');
-      return;
-    }
-    
-    setIsProcessing(true);
-    try {
-      // Use new topology-guided perimeter tracer with interior/exterior edge option
-      const result = await tracePerimeter(image, useInteriorWalls, wallData);
-      
-      if (result) {
-        // Store the result with topology data and edge switching capabilities
-        setPerimeterOverlay({
-          vertices: result.vertices,
-          centerlineVertices: result.centerlineVertices,
-          walls: result.walls,
-          area: result.area,
-          wallThickness: result.wallThickness,
-          edgeType: result.edgeType,
-          topologyData: result.topologyData
-        });
-        
-        // Store wall data from topology for future use
-        if (result.topologyData && result.topologyData.walls) {
-          setWallData(result.topologyData);
-        }
-        
-        // Only calculate area if we have both room overlay and scale
-        if (roomOverlay && (scale > 1 || (roomDimensions.width && roomDimensions.height))) {
-          const calculatedArea = calculateArea(result.vertices, scale);
-          setArea(calculatedArea);
-        } else {
-          setArea(0);
-        }
-        
-        console.log(`✅ Perimeter traced using topology-guided wall analysis (${useInteriorWalls ? 'interior' : 'exterior'} edge)`);
-      } else {
-        alert('Could not detect perimeter. Try adjusting the room overlay or use Manual Mode.');
-      }
-    } catch (error) {
-      console.error('Error tracing perimeter:', error);
-      alert('Error during perimeter tracing.');
-    } finally {
-      setIsProcessing(false);
-    }
+    alert('Find Perimeter feature requires wall detection system. Please use Manual Mode to draw perimeter.');
   };
 
   // Handle manual mode
@@ -228,83 +136,28 @@ function App() {
       setIsProcessing(true);
       setMode('manual');
       setManualEntryMode(false);
-      setOcrFailed(false);
+      setOcrFailed(true);
       
-      try {
-        // Use topology-guided room detector
-        const result = await detectAllDimensions(image);
+      // Wall detection removed - automatically create 200x200 room overlay at center
+      const img = new Image();
+      img.onload = () => {
+        const centerX = img.width / 2;
+        const centerY = img.height / 2;
         
-        // Handle new return format (object with dimensions and detectedFormat)
-        const dimensions = result.dimensions || result || [];
-        const detectedFormat = result.detectedFormat;
-        
-        console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
-        
-        console.log('Manual Mode - Dimensions received:', dimensions.length);
-        setDetectedDimensions(dimensions);
-        
-        if (dimensions.length === 0) {
-          // OCR failed - automatically create 200x200 room overlay at center
-          setOcrFailed(true);
-          
-          // Get image dimensions to center the overlay
-          const img = new Image();
-          img.onload = () => {
-            const centerX = img.width / 2;
-            const centerY = img.height / 2;
-            
-            // Create 200x200 room overlay at center
-            const newRoomOverlay = {
-              x1: centerX - 100,
-              y1: centerY - 100,
-              x2: centerX + 100,
-              y2: centerY + 100
-            };
-            
-            setRoomOverlay(newRoomOverlay);
-            setPerimeterVertices([]);
-            setMode('normal');
-          };
-          img.src = image;
-        } else {
-          // OCR succeeded - clear the failed flag
-          setOcrFailed(false);
-          // Auto-switch unit based on detected format
-          if (detectedFormat && unit !== detectedFormat) {
-            console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
-            setUnit(detectedFormat);
-            console.log('Manual Mode - setUnit called with:', detectedFormat);
-          } else {
-            console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
-          }
-        }
-      } catch (error) {
-        console.error('Error detecting dimensions:', error);
-        // OCR failed - automatically create 200x200 room overlay at center
-        setOcrFailed(true);
-        
-        // Get image dimensions to center the overlay
-        const img = new Image();
-        img.onload = () => {
-          const centerX = img.width / 2;
-          const centerY = img.height / 2;
-          
-          // Create 200x200 room overlay at center
-          const newRoomOverlay = {
-            x1: centerX - 100,
-            y1: centerY - 100,
-            x2: centerX + 100,
-            y2: centerY + 100
-          };
-          
-          setRoomOverlay(newRoomOverlay);
-          setPerimeterVertices([]);
-          setMode('normal');
+        // Create 200x200 room overlay at center
+        const newRoomOverlay = {
+          x1: centerX - 100,
+          y1: centerY - 100,
+          x2: centerX + 100,
+          y2: centerY + 100
         };
-        img.src = image;
-      } finally {
+        
+        setRoomOverlay(newRoomOverlay);
+        setPerimeterVertices([]);
+        setMode('normal');
         setIsProcessing(false);
-      }
+      };
+      img.src = image;
     }
   };
 
@@ -314,69 +167,11 @@ function App() {
     setDetectedDimensions([]); // Clear detected dimensions
   };
 
-  // Handle interior/exterior wall toggle - Switches perimeter edge without redetection
+  // Handle interior/exterior wall toggle - WALL DETECTION REMOVED
   const handleInteriorWallToggle = async (e) => {
     const newValue = e.target.checked;
-    
-    // If perimeter exists, switch the edge
-    if (perimeterOverlay && perimeterOverlay.centerlineVertices && perimeterOverlay.wallThickness) {
-      const confirmed = window.confirm(
-        `Switch perimeter to ${newValue ? 'interior' : 'exterior'} edge of walls?`
-      );
-      if (!confirmed) {
-        return;
-      }
-      
-      // Use fast edge switching (no redetection needed) with topology system
-      setIsProcessing(true);
-      try {
-        const result = switchPerimeterEdge(perimeterOverlay, newValue);
-        
-        if (result) {
-          setPerimeterOverlay(result);
-          
-          // Recalculate area if room overlay exists
-          if (roomOverlay) {
-            const calculatedArea = calculateArea(result.vertices, scale);
-            setArea(calculatedArea);
-          } else {
-            setArea(0);
-          }
-          
-          console.log(`✅ Switched perimeter to ${newValue ? 'interior' : 'exterior'} edge`);
-        } else {
-          // Fallback: Full redetection if edge switching fails
-          console.log('Edge switching failed, performing full redetection...');
-          const detectResult = await tracePerimeter(image, newValue, wallData);
-          
-          if (detectResult) {
-            setPerimeterOverlay({
-              vertices: detectResult.vertices,
-              centerlineVertices: detectResult.centerlineVertices,
-              walls: detectResult.walls,
-              area: detectResult.area,
-              wallThickness: detectResult.wallThickness,
-              edgeType: detectResult.edgeType,
-              topologyData: detectResult.topologyData
-            });
-            
-            if (roomOverlay) {
-              const calculatedArea = calculateArea(detectResult.vertices, scale);
-              setArea(calculatedArea);
-            } else {
-              setArea(0);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error switching perimeter edge:', error);
-        alert('Error repositioning perimeter.');
-      } finally {
-        setIsProcessing(false);
-      }
-    }
-    
     setUseInteriorWalls(newValue);
+    // Wall detection removed - this toggle no longer has functionality
   };
 
   // Handle fit to window
@@ -700,101 +495,6 @@ function App() {
     loadExampleImage();
   }, []);
 
-  // Automatically detect walls using HYBRID SYSTEM and calculate intersections for snapping support
-  // Enhanced version using the new hybrid wall detection system
-  useEffect(() => {
-    const detectWallsForSnapping = async () => {
-      if (!image) {
-        setCornerPoints([]);
-        setLineData(null);
-        setWallData(null);
-        return;
-      }
-
-      setIsLoadingWallData(true);
-      try {
-        console.log('Auto-detecting walls using HYBRID system for snapping...');
-        const { detectWalls } = await import('./utils/wallDetector');
-        const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
-        
-        // Use hybrid wall detection system
-        const walls = await detectWalls(image, {
-          minWallLength: 50,
-          thresholdMethod: 'adaptive',
-          orientationConstraints: true,
-          fillGaps: false, // Don't fill gaps for snapping - we want exact wall positions
-          debugMode: false
-        });
-        
-        console.log(`Detected ${walls.horizontal.length} horizontal and ${walls.vertical.length} vertical walls (hybrid system)`);
-        
-        // Store wall data for perimeter detection
-        setWallData(walls);
-        
-        // Extract wall positions for snapping
-        // For horizontal walls, use the Y-coordinate (top or center)
-        // For vertical walls, use the X-coordinate (left or center)
-        const horizontalWallLines = walls.horizontal.map(wall => {
-          // Use center Y coordinate of the wall
-          return (wall.boundingBox.y1 + wall.boundingBox.y2) / 2;
-        });
-        
-        const verticalWallLines = walls.vertical.map(wall => {
-          // Use center X coordinate of the wall
-          return (wall.boundingBox.x1 + wall.boundingBox.x2) / 2;
-        });
-        
-        // Generate ALL intersection points from crossing horizontal and vertical walls
-        const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
-        
-        console.log(`Generated ${intersectionPoints.length} intersection points for snapping (hybrid system)`);
-        console.log(`  From ${horizontalWallLines.length} horizontal walls × ${verticalWallLines.length} vertical walls`);
-        
-        setCornerPoints(intersectionPoints);
-        
-        // Also store legacy line data for backward compatibility
-        setLineData({
-          horizontal: walls.horizontal.map(wall => ({
-            center: (wall.boundingBox.y1 + wall.boundingBox.y2) / 2,
-            start: wall.boundingBox.x1,
-            end: wall.boundingBox.x2
-          })),
-          vertical: walls.vertical.map(wall => ({
-            center: (wall.boundingBox.x1 + wall.boundingBox.x2) / 2,
-            start: wall.boundingBox.y1,
-            end: wall.boundingBox.y2
-          }))
-        });
-      } catch (error) {
-        console.error('Error detecting walls for snapping:', error);
-        // Fallback to legacy line detection
-        try {
-          console.log('Falling back to legacy line detection for snapping...');
-          const { dataUrlToImage } = await import('./utils/imageLoader');
-          const { detectLines } = await import('./utils/lineDetector');
-          const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
-          
-          const img = await dataUrlToImage(image);
-          const lines = detectLines(img);
-          
-          setLineData(lines);
-          
-          const horizontalWallLines = lines.horizontal.map(line => line.center);
-          const verticalWallLines = lines.vertical.map(line => line.center);
-          const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
-          
-          setCornerPoints(intersectionPoints);
-          console.log(`Legacy detection: ${intersectionPoints.length} snap points`);
-        } catch (fallbackError) {
-          console.error('Fallback snapping detection also failed:', fallbackError);
-        }
-      } finally {
-        setIsLoadingWallData(false);
-      }
-    };
-
-    detectWallsForSnapping();
-  }, [image]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -881,8 +581,6 @@ function App() {
         customShape={customShape}
         setCustomShape={setCustomShape}
         area={area}
-        lineData={lineData}
-        cornerPoints={cornerPoints}
         mobileSheetOpen={mobileSheetOpen}
         setMobileSheetOpen={setMobileSheetOpen}
         fileInputRef={fileInputRef}
@@ -905,7 +603,6 @@ function App() {
         onRemovePerimeterVertex={handleRemovePerimeterVertex}
         onUndoRedo={handleUndoRedo}
         ocrFailed={ocrFailed}
-        isLoadingWallData={isLoadingWallData}
       />
     );
   }
@@ -1016,23 +713,11 @@ function App() {
           customShape={customShape}
           onCustomShapeUpdate={setCustomShape}
           isMobile={false}
-          lineData={lineData}
-          cornerPoints={cornerPoints}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
           onUndoRedo={handleUndoRedo}
         />
-
-        {/* Wall Data Loading Overlay */}
-        {isLoadingWallData && (
-          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 shadow-lg flex items-center space-x-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-700"></div>
-              <div className="text-slate-700 font-medium">Loading wall data...</div>
-            </div>
-          </div>
-        )}
 
         {/* Sidebar overlay (flush to edges) */}
         <div ref={sidebarRef} className="absolute top-0 left-0 z-10 m-0">
