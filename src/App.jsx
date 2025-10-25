@@ -70,9 +70,13 @@ function App() {
     const file = event.target.files[0];
     if (file) {
       try {
+        // Clear existing image before loading new one to ensure state change
+        setImage(null);
+        // Clear overlays as well
+        resetOverlays();
+
         const loadedImage = await loadImageFromFile(file);
         setImage(loadedImage);
-        resetOverlays();
       } catch (error) {
         console.error('Error loading image:', error);
         alert('Failed to load image. Please try again.');
@@ -88,10 +92,14 @@ function App() {
   // Handle clipboard paste
   const handlePasteImage = useCallback(async () => {
     try {
+      // Clear existing image before loading new one to ensure state change
+      setImage(null);
+      // Clear overlays as well
+      resetOverlays();
+
       const loadedImage = await loadImageFromClipboard();
       if (loadedImage) {
         setImage(loadedImage);
-        resetOverlays();
       }
     } catch (error) {
       console.error('Error pasting image:', error);

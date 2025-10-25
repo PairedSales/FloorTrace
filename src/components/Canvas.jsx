@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
 import {
@@ -92,11 +92,18 @@ const Canvas = forwardRef(({
   }, [lineData, cornerPoints]);
 
   // Fit to window function
-  const fitToWindow = () => {
+  const fitToWindow = useCallback(() => {
     if (!imageObj || !containerRef.current) return;
 
     const containerWidth = containerRef.current.offsetWidth;
     const containerHeight = containerRef.current.offsetHeight;
+
+    // Ensure we have valid container dimensions
+    if (containerWidth <= 0 || containerHeight <= 0) {
+      console.warn('Invalid container dimensions for fit to window');
+      return;
+    }
+
     const imgWidth = imageObj.width;
     const imgHeight = imageObj.height;
 
@@ -104,20 +111,23 @@ const Canvas = forwardRef(({
     const scaleY = containerHeight / imgHeight;
     const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
 
-    scaleRef.current = newScale;
-    setScale(newScale);
-    
+    // Ensure scale is reasonable
+    const clampedScale = Math.max(0.1, Math.min(5, newScale));
+
+    scaleRef.current = clampedScale;
+    setScale(clampedScale);
+
     // Center the stage
     if (stageRef.current) {
       const stage = stageRef.current;
-      stage.scale({ x: newScale, y: newScale });
+      stage.scale({ x: clampedScale, y: clampedScale });
       stage.position({
-        x: (containerWidth - imgWidth * newScale) / 2,
-        y: (containerHeight - imgHeight * newScale) / 2
+        x: (containerWidth - imgWidth * clampedScale) / 2,
+        y: (containerHeight - imgHeight * clampedScale) / 2
       });
       stage.batchDraw();
     }
-  };
+  }, [imageObj]);
 
   // Load image
   useEffect(() => {
@@ -131,41 +141,61 @@ const Canvas = forwardRef(({
     const img = new window.Image();
     img.onload = () => {
       setImageObj(img);
-      // Fit to window before displaying
+
+      // Use requestAnimationFrame to ensure DOM is ready
       requestAnimationFrame(() => {
+        // Double check that container is available and has dimensions
         if (containerRef.current && img) {
           const containerWidth = containerRef.current.offsetWidth;
           const containerHeight = containerRef.current.offsetHeight;
-          const imgWidth = img.width;
-          const imgHeight = img.height;
 
-          const scaleX = containerWidth / imgWidth;
-          const scaleY = containerHeight / imgHeight;
-          const newScale = Math.min(scaleX, scaleY) * 0.9;
+          // Ensure we have valid container dimensions
+          if (containerWidth > 0 && containerHeight > 0) {
+            const imgWidth = img.width;
+            const imgHeight = img.height;
 
-          scaleRef.current = newScale;
-          setScale(newScale);
-          
-          if (stageRef.current) {
-            const stage = stageRef.current;
-            stage.scale({ x: newScale, y: newScale });
-            stage.position({
-              x: (containerWidth - imgWidth * newScale) / 2,
-              y: (containerHeight - imgHeight * newScale) / 2
-            });
-            stage.batchDraw();
+            const scaleX = containerWidth / imgWidth;
+            const scaleY = containerHeight / imgHeight;
+            const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
+
+            // Ensure scale is reasonable
+            const clampedScale = Math.max(0.1, Math.min(5, newScale));
+
+            scaleRef.current = clampedScale;
+            setScale(clampedScale);
+
+            if (stageRef.current) {
+              const stage = stageRef.current;
+              stage.scale({ x: clampedScale, y: clampedScale });
+              stage.position({
+                x: (containerWidth - imgWidth * clampedScale) / 2,
+                y: (containerHeight - imgHeight * clampedScale) / 2
+              });
+              stage.batchDraw();
+            }
           }
-          
-          // Now show the image after it's fitted
-          setIsImageReady(true);
         }
+
+        // Show the image after processing
+        setIsImageReady(true);
       });
+    };
+    img.onerror = () => {
+      console.error('Failed to load image');
+      setIsImageReady(false);
     };
     img.src = image;
   }, [image]);
+  useEffect(() => {
+    if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
+      // Small delay to ensure the layout is stable
+      const timeoutId = setTimeout(() => {
+        fitToWindow();
+      }, 100);
 
-
-  // Update container dimensions (robust for absolute/flex layouts)
+      return () => clearTimeout(timeoutId);
+    }
+  }, [dimensions, imageObj, fitToWindow]);
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
