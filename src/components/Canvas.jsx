@@ -1,12 +1,21 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-import {
-  findNearestIntersection,
-  applySecondaryAlignment,
-  SNAP_TO_INTERSECTION_DISTANCE,
-  SECONDARY_ALIGNMENT_DISTANCE
-} from '../utils/snappingHelper';
+// Stub implementations for snapping functions (utilities don't exist yet)
+// eslint-disable-next-line no-unused-vars
+const findNearestIntersection = (_point, _snapPoints, _threshold) => {
+  // Snapping disabled until utilities are implemented
+  return null;
+};
+
+// eslint-disable-next-line no-unused-vars
+const applySecondaryAlignment = (_vertices, _index, _finalPoint, _threshold) => {
+  // Secondary alignment disabled until utilities are implemented
+  return _vertices;
+};
+
+const SNAP_TO_INTERSECTION_DISTANCE = 10;
+const SECONDARY_ALIGNMENT_DISTANCE = 20;
 
 const Canvas = forwardRef(({
   image,

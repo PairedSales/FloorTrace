@@ -32,7 +32,6 @@ const MobileUI = forwardRef(({
   fileInputRef,
   handleFileUpload,
   handleFindRoom,
-  handleTracePerimeter,
   handleManualMode,
   handleFitToWindow,
   roomDimensions,
@@ -360,7 +359,7 @@ const MobileUI = forwardRef(({
                 </button>
                 
                 <button
-                  onClick={() => { handleTracePerimeter(); setMobileSheetOpen(false); }}
+                  onClick={() => { alert('Automatic perimeter tracing feature coming soon! Please use Manual Mode for now.'); setMobileSheetOpen(false); }}
                   className="w-full px-4 py-3 text-sm font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors shadow-sm disabled:opacity-40 disabled:bg-slate-300"
                   disabled={isProcessing}
                 >

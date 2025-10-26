@@ -3,7 +3,6 @@ import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
 import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
-import { detectRoom } from './utils/roomDetector';
 import { calculateArea } from './utils/areaCalculator';
 import FloorTraceLogo from './assets/logo.svg';
 
@@ -107,91 +106,14 @@ function App() {
     }
   }, [resetOverlays]);
 
-  // Handle find room
+  // Handle find room - disabled until automatic detection is rewritten
   const handleFindRoom = async () => {
-    if (!image) {
-      alert('Please load an image first');
-      return;
-    }
-    
-    setIsProcessing(true);
-    try {
-      const result = await detectRoom(image);
-      if (result) {
-        setRoomOverlay(result.overlay);
-        setRoomDimensions(result.dimensions);
-        updateScale(result.dimensions, result.overlay);
-        
-        // Store line data for perimeter detection
-        if (result.lineData) {
-          setLineData(result.lineData);
-          console.log('Line data stored for perimeter detection');
-        }
-        
-        // Auto-switch unit based on detected format
-        if (result.detectedFormat) {
-          console.log('Find Room - Detected format:', result.detectedFormat, 'Current unit:', unit);
-          // If current unit doesn't match detected format, switch it
-          if (unit !== result.detectedFormat) {
-            console.log(`Find Room - Auto-switching unit from ${unit} to ${result.detectedFormat}`);
-            setUnit(result.detectedFormat);
-            console.log('Find Room - setUnit called with:', result.detectedFormat);
-          } else {
-            console.log('Find Room - Unit already matches, no switch needed');
-          }
-        } else {
-          console.log('Find Room - No format detected');
-        }
-      } else {
-        alert('Could not detect room dimensions. Try Manual Mode.');
-      }
-    } catch (error) {
-      console.error('Error detecting room:', error);
-      alert('Error detecting room. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
+    alert('Automatic room detection feature coming soon! Please use Manual Mode for now.');
   };
 
-  // Handle trace perimeter
+  // Handle trace perimeter - placeholder for future implementation
   const handleTracePerimeter = async () => {
-    if (!image) {
-      alert('Please load an image first');
-      return;
-    }
-    
-    setIsProcessing(true);
-    try {
-      // Import the new perimeter detector
-      const { detectPerimeter } = await import('./utils/perimeterDetector');
-      
-      // Use existing line data if available, otherwise detect lines
-      const result = await detectPerimeter(image, useInteriorWalls, lineData);
-      
-      if (result) {
-        setPerimeterOverlay({ vertices: result.vertices });
-        
-        // Only calculate area if we have both room overlay and scale
-        if (roomOverlay && (scale > 1 || (roomDimensions.width && roomDimensions.height))) {
-          const calculatedArea = calculateArea(result.vertices, scale);
-          setArea(calculatedArea);
-        } else {
-          setArea(0);
-        }
-        
-        // Store line data if we didn't have it before
-        if (result.lineData && !lineData) {
-          setLineData(result.lineData);
-        }
-      } else {
-        alert('Could not detect perimeter. Try adjusting the room overlay or use Manual Mode.');
-      }
-    } catch (error) {
-      console.error('Error tracing perimeter:', error);
-      alert('Error during perimeter tracing.');
-    } finally {
-      setIsProcessing(false);
-    }
+    alert('Automatic perimeter tracing feature coming soon! Please use Manual Mode for now.');
   };
 
   // Handle manual mode
@@ -228,7 +150,7 @@ function App() {
       setOcrFailed(false);
       
       try {
-        const { detectAllDimensions } = await import('./utils/roomDetector');
+        const { detectAllDimensions } = await import('./utils/DimensionsOCR');
         const result = await detectAllDimensions(image);
         
         // Handle new return format (object with dimensions and detectedFormat)
@@ -311,44 +233,11 @@ function App() {
     setDetectedDimensions([]); // Clear detected dimensions
   };
 
-  // Handle interior/exterior wall toggle
-  const handleInteriorWallToggle = async (e) => {
+  // Handle interior/exterior wall toggle - placeholder for future implementation
+  const handleInteriorWallToggle = (e) => {
     const newValue = e.target.checked;
-    
-    // If perimeter exists, confirm before changing
-    if (perimeterOverlay) {
-      const confirmed = window.confirm(
-        'Changing wall detection will reposition the perimeter vertices. Are you sure?'
-      );
-      if (!confirmed) {
-        return;
-      }
-      
-      // Redetect perimeter with new setting
-      setIsProcessing(true);
-      try {
-        const { detectPerimeter } = await import('./utils/perimeterDetector');
-        const result = await detectPerimeter(image, newValue, lineData);
-        
-        if (result) {
-          setPerimeterOverlay({ vertices: result.vertices });
-          // Only calculate area if room overlay exists
-          if (roomOverlay) {
-            const calculatedArea = calculateArea(result.vertices, scale);
-            setArea(calculatedArea);
-          } else {
-            setArea(0);
-          }
-        }
-      } catch (error) {
-        console.error('Error redetecting perimeter:', error);
-        alert('Error repositioning perimeter.');
-      } finally {
-        setIsProcessing(false);
-      }
-    }
-    
     setUseInteriorWalls(newValue);
+    // TODO: Re-implement perimeter detection when automatic tracing is restored
   };
 
   // Handle fit to window
@@ -673,7 +562,7 @@ function App() {
   }, []);
 
   // Automatically detect lines and calculate intersections when image is loaded for snapping support
-  // Line-by-line port from .NET: MainWindow.xaml.cs lines 416-419 and SetWallLines
+  // DISABLED: Line detection utilities (lineDetector, snappingHelper) don't exist yet
   useEffect(() => {
     const detectLinesForSnapping = async () => {
       if (!image) {
@@ -682,38 +571,10 @@ function App() {
         return;
       }
 
-      try {
-        console.log('Auto-detecting wall lines and intersections for snapping...');
-        const { dataUrlToImage } = await import('./utils/imageLoader');
-        const { detectLines } = await import('./utils/lineDetector');
-        const { findAllIntersectionPoints } = await import('./utils/snappingHelper');
-        
-        const img = await dataUrlToImage(image);
-        
-        // Detect lines
-        const lines = detectLines(img);
-        console.log(`Detected ${lines.horizontal.length} horizontal and ${lines.vertical.length} vertical lines`);
-        
-        setLineData(lines);
-        
-        // Extract center positions of lines (matching .NET's HorizontalWallLines and VerticalWallLines)
-        // HorizontalWallLines = List of Y-coordinates for horizontal lines
-        // VerticalWallLines = List of X-coordinates for vertical lines
-        const horizontalWallLines = lines.horizontal.map(line => line.center);
-        const verticalWallLines = lines.vertical.map(line => line.center);
-        
-        // Generate ALL intersection points from crossing horizontal and vertical lines
-        // This matches .NET's SetWallLines -> FindAllIntersectionPoints
-        const intersectionPoints = findAllIntersectionPoints(horizontalWallLines, verticalWallLines);
-        
-        console.log(`Generated ${intersectionPoints.length} intersection points for snapping`);
-        console.log(`  From ${horizontalWallLines.length} horizontal lines x ${verticalWallLines.length} vertical lines`);
-        
-        setCornerPoints(intersectionPoints);
-      } catch (error) {
-        console.error('Error detecting lines for snapping:', error);
-        // Don't alert user - snapping will just not work
-      }
+      // TODO: Re-implement when line detection utilities are available
+      console.log('Line detection for snapping disabled until utilities are rewritten');
+      setCornerPoints([]);
+      setLineData(null);
     };
 
     detectLinesForSnapping();
@@ -811,7 +672,6 @@ function App() {
         fileInputRef={fileInputRef}
         handleFileUpload={handleFileUpload}
         handleFindRoom={handleFindRoom}
-        handleTracePerimeter={handleTracePerimeter}
         handleManualMode={handleManualMode}
         handleFitToWindow={handleFitToWindow}
         roomDimensions={roomDimensions}
