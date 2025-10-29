@@ -394,13 +394,20 @@ function App() {
     });
     
     setPerimeterVertices(newVertices);
-    
-    // If we have 3 vertices, create the perimeter overlay
-    if (newVertices.length === 3) {
+
+    // Update the perimeter overlay in real-time
+    if (newVertices.length > 0) {
       setPerimeterOverlay({ vertices: newVertices });
-      // Only calculate area if room overlay exists
+    }
+
+  };
+
+  // Handle closing the perimeter
+  const handleClosePerimeter = () => {
+    if (perimeterVertices && perimeterVertices.length > 2) {
+      setPerimeterOverlay({ vertices: perimeterVertices });
       if (roomOverlay) {
-        const calculatedArea = calculateArea(newVertices, scale);
+        const calculatedArea = calculateArea(perimeterVertices, scale);
         setArea(calculatedArea);
       } else {
         setArea(0);
@@ -802,6 +809,7 @@ function App() {
           cornerPoints={cornerPoints}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
+          onClosePerimeter={handleClosePerimeter}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
           onUndoRedo={handleUndoRedo}
         />

@@ -43,6 +43,7 @@ const Canvas = forwardRef(({
   cornerPoints,
   perimeterVertices,
   onAddPerimeterVertex,
+  onClosePerimeter, // New prop to handle closing the shape
   onUndoRedo
 }, ref) => {
   const stageRef = useRef(null);
@@ -755,6 +756,22 @@ const Canvas = forwardRef(({
         // Use snapped position if available, otherwise use raw position
         const finalPoint = snappedPoint || clickPoint;
         
+        // Check if clicking on the first vertex to close the shape
+        if (perimeterVertices && perimeterVertices.length > 2) {
+          const firstVertex = perimeterVertices[0];
+          const dx = finalPoint.x - firstVertex.x;
+          const dy = finalPoint.y - firstVertex.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < 10 / scaleRef.current) {
+            // Close the shape
+            if (onClosePerimeter) {
+              onClosePerimeter();
+            }
+            return;
+          }
+        }
+
         onAddPerimeterVertex(finalPoint);
         return;
       }

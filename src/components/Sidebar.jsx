@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { formatDimensionInput } from '../utils/unitConverter';
+import InchesInput from './InchesInput';
 
 const Sidebar = ({ 
   roomDimensions, 
@@ -34,92 +35,51 @@ const Sidebar = ({
   }, [roomDimensions, unit, editingField]);
 
   const handleDimensionChange = (field, value) => {
-    // Allow free-form typing with minimal validation
     if (unit === 'decimal') {
-      // Allow numbers and one decimal point
       const decimalPattern = /^[\d.]*$/;
-      if (!decimalPattern.test(value)) {
-        return;
+      if (decimalPattern.test(value)) {
+        setDisplayValues(prev => ({ ...prev, [field]: value }));
       }
     } else {
-      // For inches mode, allow numbers and space
-      const inchesPattern = /^[\d\s]*$/;
-      if (!inchesPattern.test(value)) {
-        return;
+      const newDimensions = { ...localDimensions, [field]: value };
+      setLocalDimensions(newDimensions);
+      if (onDimensionsChange) {
+        onDimensionsChange(newDimensions);
       }
     }
-    
-    // Update display value immediately (for typing feedback)
-    setDisplayValues(prev => ({ ...prev, [field]: value }));
   };
 
   const handleFocus = (field) => {
     setEditingField(field);
-    // Store original value for potential cancel
-    setOriginalValues(prev => ({ ...prev, [field]: displayValues[field] }));
-    // Clear the field for quick entry
-    setDisplayValues(prev => ({ ...prev, [field]: '' }));
+    if (unit === 'decimal') {
+      setOriginalValues(prev => ({ ...prev, [field]: displayValues[field] }));
+      setDisplayValues(prev => ({ ...prev, [field]: '' }));
+    }
   };
 
   const handleBlur = (field) => {
-    const value = displayValues[field].trim();
-    
-    // If field is empty, restore original value (user cancelled)
-    if (!value) {
-      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
-      setEditingField(null);
-      return;
-    }
-    
-    // Parse the input
-    let parsedValue = null;
-    
     if (unit === 'decimal') {
-      // Parse decimal input, round to 1 decimal place
+      const value = displayValues[field].trim();
+      if (!value) {
+        setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
+        setEditingField(null);
+        return;
+      }
+
       const numValue = parseFloat(value);
-      if (!isNaN(numValue)) {
-        parsedValue = Math.round(numValue * 10) / 10; // Round to 1 decimal
-      }
-    } else {
-      // Parse inches mode: "12 5" means 12 feet 5 inches
-      const parts = value.trim().split(/\s+/);
-      if (parts.length === 1) {
-        // Just feet
-        const feet = parseInt(parts[0]);
-        if (!isNaN(feet)) {
-          parsedValue = feet;
+      if (!isNaN(numValue) && numValue > 0) {
+        const parsedValue = Math.round(numValue * 10) / 10;
+        const newDimensions = { ...localDimensions, [field]: parsedValue.toString() };
+        setLocalDimensions(newDimensions);
+        if (onDimensionsChange) {
+          onDimensionsChange(newDimensions);
         }
-      } else if (parts.length >= 2) {
-        // Feet and inches
-        const feet = parseInt(parts[0]) || 0;
-        let inches = parseInt(parts[1]) || 0;
-        // Clamp inches to 0-11
-        inches = Math.max(0, Math.min(11, inches));
-        parsedValue = feet + inches / 12;
+        const formatted = formatDimensionInput(parsedValue, unit);
+        setDisplayValues(prev => ({ ...prev, [field]: `${formatted} ft` }));
+      } else {
+        setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
       }
     }
-    
-    // If we got a valid value, update the dimension
-    if (parsedValue !== null && parsedValue > 0) {
-      const newDimensions = { 
-        ...localDimensions, 
-        [field]: parsedValue.toString() 
-      };
-      setLocalDimensions(newDimensions);
-      
-      if (onDimensionsChange) {
-        onDimensionsChange(newDimensions);
-      }
-      
-      // Format and display the value
-      const formatted = formatDimensionInput(parsedValue, unit);
-      const finalValue = unit === 'decimal' ? `${formatted} ft` : formatted;
-      setDisplayValues(prev => ({ ...prev, [field]: finalValue }));
-    } else {
-      // Invalid input, restore original value
-      setDisplayValues(prev => ({ ...prev, [field]: originalValues[field] }));
-    }
-    
     setEditingField(null);
   };
 
@@ -157,27 +117,45 @@ const Sidebar = ({
         <div className="flex gap-3">
           <div>
             <label className="block text-xs text-slate-600 mb-1">Width</label>
-            <input
-              type="text"
-              value={displayValues.width}
-              onChange={(e) => handleDimensionChange('width', e.target.value)}
-              onFocus={() => handleFocus('width')}
-              onBlur={() => handleBlur('width')}
-              className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
-              placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
-            />
+            {unit === 'inches' ? (
+              <InchesInput
+                value={localDimensions.width}
+                onChange={(val) => handleDimensionChange('width', val)}
+                onFocus={() => handleFocus('width')}
+                onBlur={() => handleBlur('width')}
+              />
+            ) : (
+              <input
+                type="text"
+                value={displayValues.width}
+                onChange={(e) => handleDimensionChange('width', e.target.value)}
+                onFocus={() => handleFocus('width')}
+                onBlur={() => handleBlur('width')}
+                className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
+                placeholder="0.0 ft"
+              />
+            )}
           </div>
           <div>
             <label className="block text-xs text-slate-600 mb-1">Height</label>
-            <input
-              type="text"
-              value={displayValues.height}
-              onChange={(e) => handleDimensionChange('height', e.target.value)}
-              onFocus={() => handleFocus('height')}
-              onBlur={() => handleBlur('height')}
-              className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
-              placeholder={unit === 'decimal' ? '0.0 ft' : "0' 0\""}
-            />
+            {unit === 'inches' ? (
+              <InchesInput
+                value={localDimensions.height}
+                onChange={(val) => handleDimensionChange('height', val)}
+                onFocus={() => handleFocus('height')}
+                onBlur={() => handleBlur('height')}
+              />
+            ) : (
+              <input
+                type="text"
+                value={displayValues.height}
+                onChange={(e) => handleDimensionChange('height', e.target.value)}
+                onFocus={() => handleFocus('height')}
+                onBlur={() => handleBlur('height')}
+                className="w-24 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white text-sm"
+                placeholder="0.0 ft"
+              />
+            )}
           </div>
         </div>
 
