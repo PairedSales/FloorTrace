@@ -29,11 +29,14 @@ function App() {
   const isMobile = useMemo(() => /Android|iPhone/i.test(navigator.userAgent), []);
   const [sidebarHeight, setSidebarHeight] = useState(0);
   const [lineToolActive, setLineToolActive] = useState(false);
-  const [measurementLine, setMeasurementLine] = useState(null); // { start: {x, y}, end: {x, y} }
+  const [measurementLines, setMeasurementLines] = useState([]); // Array of { start, end }
+  const [currentMeasurementLine, setCurrentMeasurementLine] = useState(null); // The line currently being drawn
   const [drawAreaActive, setDrawAreaActive] = useState(false);
-  const [customShape, setCustomShape] = useState(null); // { vertices: [{x, y}], closed: boolean }
+  const [customShapes, setCustomShapes] = useState([]); // Array of { vertices, closed, area }
+  const [currentCustomShape, setCurrentCustomShape] = useState(null); // The shape currently being drawn
   const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
   const [lastAction, setLastAction] = useState(null); // Track last action for undo/redo
+  const [notification, setNotification] = useState({ show: false, message: '' });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -51,9 +54,11 @@ function App() {
     setManualEntryMode(false);
     setOcrFailed(false);
     setLineToolActive(false);
-    setMeasurementLine(null);
+    setMeasurementLines([]);
+    setCurrentMeasurementLine(null);
     setDrawAreaActive(false);
-    setCustomShape(null);
+    setCustomShapes([]);
+    setCurrentCustomShape(null);
     setPerimeterVertices(null);
     setLastAction(null);
   }, []);
@@ -65,7 +70,7 @@ function App() {
   };
 
   // Handle file upload
-  const handleFileUpload = async (event) => {
+  const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
     if (file) {
       try {
@@ -76,6 +81,7 @@ function App() {
 
         const loadedImage = await loadImageFromFile(file);
         setImage(loadedImage);
+        handleManualMode(loadedImage); // Automatically enter manual mode
       } catch (error) {
         console.error('Error loading image:', error);
         alert('Failed to load image. Please try again.');
@@ -86,7 +92,7 @@ function App() {
         }
       }
     }
-  };
+  }, [resetOverlays, handleManualMode]);
 
   // Handle clipboard paste
   const handlePasteImage = useCallback(async () => {
@@ -99,12 +105,13 @@ function App() {
       const loadedImage = await loadImageFromClipboard();
       if (loadedImage) {
         setImage(loadedImage);
+        handleManualMode(loadedImage); // Automatically enter manual mode
       }
     } catch (error) {
       console.error('Error pasting image:', error);
       alert('Failed to paste image. Make sure an image is copied to your clipboard.');
     }
-  }, [resetOverlays]);
+  }, [resetOverlays, handleManualMode]);
 
   // Handle find room - disabled until automatic detection is rewritten
   const handleFindRoom = async () => {
@@ -113,11 +120,12 @@ function App() {
 
   // Handle trace perimeter - placeholder for future implementation
   const handleTracePerimeter = async () => {
-    alert('Automatic perimeter tracing feature coming soon! Please use Manual Mode for now.');
+    setNotification({ show: true, message: 'Coming Soon' });
+    setTimeout(() => setNotification({ show: false, message: '' }), 2000);
   };
 
   // Handle manual mode
-  const handleManualMode = async () => {
+  const handleManualMode = useCallback(async (imgSrc = image) => {
     if (mode === 'manual') {
       // Exiting manual mode
       setMode('normal');
@@ -139,7 +147,7 @@ function App() {
         setArea(0);
       }
       
-      if (!image) {
+      if (!imgSrc) {
         alert('Please load an image first');
         return;
       }
@@ -151,7 +159,7 @@ function App() {
       
       try {
         const { detectAllDimensions } = await import('./utils/DimensionsOCR');
-        const result = await detectAllDimensions(image);
+        const result = await detectAllDimensions(imgSrc);
         
         // Handle new return format (object with dimensions and detectedFormat)
         const dimensions = result.dimensions || result || [];
@@ -165,13 +173,15 @@ function App() {
         if (dimensions.length === 0) {
           // OCR failed - automatically create 200x200 room overlay at center
           setOcrFailed(true);
-          
+          setNotification({ show: true, message: 'No dimensions found. Please enter manually.' });
+          setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+
           // Get image dimensions to center the overlay
           const img = new Image();
           img.onload = () => {
             const centerX = img.width / 2;
             const centerY = img.height / 2;
-            
+
             // Create 200x200 room overlay at center
             const newRoomOverlay = {
               x1: centerX - 100,
@@ -179,12 +189,12 @@ function App() {
               x2: centerX + 100,
               y2: centerY + 100
             };
-            
+
             setRoomOverlay(newRoomOverlay);
             setPerimeterVertices([]);
             setMode('normal');
           };
-          img.src = image;
+          img.src = imgSrc;
         } else {
           // OCR succeeded - clear the failed flag
           setOcrFailed(false);
@@ -201,13 +211,15 @@ function App() {
         console.error('Error detecting dimensions:', error);
         // OCR failed - automatically create 200x200 room overlay at center
         setOcrFailed(true);
-        
+        setNotification({ show: true, message: 'Error detecting dimensions. Please enter manually.' });
+        setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+
         // Get image dimensions to center the overlay
         const img = new Image();
         img.onload = () => {
           const centerX = img.width / 2;
           const centerY = img.height / 2;
-          
+
           // Create 200x200 room overlay at center
           const newRoomOverlay = {
             x1: centerX - 100,
@@ -215,17 +227,17 @@ function App() {
             x2: centerX + 100,
             y2: centerY + 100
           };
-          
+
           setRoomOverlay(newRoomOverlay);
           setPerimeterVertices([]);
           setMode('normal');
         };
-        img.src = image;
+        img.src = imgSrc;
       } finally {
         setIsProcessing(false);
       }
     }
-  };
+  }, [image, mode, roomOverlay, perimeterOverlay, unit]);
 
   // Handle manual dimension entry button click
   const handleEnterManually = () => {
@@ -254,10 +266,9 @@ function App() {
     if (newState) {
       // Deactivate draw area tool when line tool is activated
       setDrawAreaActive(false);
-      setCustomShape(null);
-    }
-    if (!newState) {
-      setMeasurementLine(null);
+      setCurrentCustomShape(null); // Stop drawing custom shape
+    } else {
+      setCurrentMeasurementLine(null); // Stop drawing line
     }
   };
 
@@ -268,53 +279,55 @@ function App() {
     if (newState) {
       // Deactivate line tool when draw area tool is activated
       setLineToolActive(false);
-      setMeasurementLine(null);
+      setCurrentMeasurementLine(null); // Stop drawing line
+    } else {
+      setCurrentCustomShape(null); // Stop drawing custom shape
     }
-    if (!newState) {
-      setCustomShape(null);
-    }
+  };
+
+  // Clear all lines and custom shapes
+  const handleClearTools = () => {
+    setMeasurementLines([]);
+    setCurrentMeasurementLine(null);
+    setCustomShapes([]);
+    setCurrentCustomShape(null);
   };
 
   // Handle save image (screenshot entire app)
   const handleSaveImage = async () => {
     try {
-      // Use html2canvas to capture the entire app
       const html2canvas = (await import('html2canvas')).default;
-      
-      // Get the root element
-      const appElement = document.getElementById('root');
+      const appElement = document.getElementById('app-container');
       if (!appElement) {
         alert('Could not capture screenshot');
         return;
       }
-      
-      // Capture the screenshot
+
       const canvas = await html2canvas(appElement, {
         backgroundColor: '#ffffff',
-        scale: 2, // Higher quality
+        scale: 2,
         logging: false,
-        useCORS: true
+        useCORS: true,
+        // Ensure all elements are rendered
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        windowWidth: document.documentElement.offsetWidth,
+        windowHeight: document.documentElement.offsetHeight,
       });
-      
-      // Convert to WebP blob
+
       canvas.toBlob((blob) => {
         if (!blob) {
           alert('Failed to create image');
           return;
         }
-        
-        // Create download link
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
         link.download = `floortrace-${timestamp}.webp`;
         link.href = url;
         link.click();
-        
-        // Clean up
         URL.revokeObjectURL(url);
       }, 'image/webp', 0.95);
-      
     } catch (error) {
       console.error('Error saving screenshot:', error);
       alert('Error saving screenshot. Please try again.');
@@ -452,7 +465,7 @@ function App() {
           updateRoomOverlay(lastAction.previousState, false);
           break;
         case 'updateCustomShape':
-          setCustomShape(lastAction.previousState);
+          setCustomShapes(lastAction.previousState);
           break;
       }
       setLastAction({ ...lastAction, isUndone: true });
@@ -472,7 +485,7 @@ function App() {
           updateRoomOverlay(lastAction.currentState, false);
           break;
         case 'updateCustomShape':
-          setCustomShape(lastAction.currentState);
+          setCustomShapes(lastAction.currentState);
           break;
       }
       setLastAction({ ...lastAction, isUndone: false });
@@ -666,11 +679,15 @@ function App() {
         handleCanvasClick={handleCanvasClick}
         unit={unit}
         lineToolActive={lineToolActive}
-        measurementLine={measurementLine}
-        setMeasurementLine={setMeasurementLine}
+        measurementLines={measurementLines}
+        currentMeasurementLine={currentMeasurementLine}
+        onMeasurementLineUpdate={setCurrentMeasurementLine}
+        onAddMeasurementLine={(line) => setMeasurementLines(prev => [...prev, line])}
         drawAreaActive={drawAreaActive}
-        customShape={customShape}
-        setCustomShape={setCustomShape}
+        customShapes={customShapes}
+        currentCustomShape={currentCustomShape}
+        onCustomShapeUpdate={setCurrentCustomShape}
+        onAddCustomShape={(shape) => setCustomShapes(prev => [...prev, shape])}
         area={area}
         lineData={lineData}
         cornerPoints={cornerPoints}
@@ -701,7 +718,7 @@ function App() {
 
   // Desktop UI
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div id="app-container" className="flex flex-col h-screen bg-white">
       {/* Title Bar */}
       <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
         <div 
@@ -738,14 +755,11 @@ function App() {
         
         {/* Center Group */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleFindRoom}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={!image || isProcessing}
-          >
-            Find Room
-          </button>
-          
+          {/* Add other tools here later */}
+        </div>
+        
+        {/* Right Group */}
+        <div className="flex items-center gap-3">
           <button
             onClick={handleTracePerimeter}
             className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
@@ -753,22 +767,6 @@ function App() {
           >
             Find Perimeter
           </button>
-          
-          <button
-            onClick={handleManualMode}
-            className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 ${
-              mode === 'manual' 
-                ? 'bg-slate-700 text-white hover:bg-slate-600' 
-                : 'text-slate-700 bg-white hover:bg-slate-700 hover:text-white disabled:hover:bg-white disabled:hover:text-slate-700'
-            }`}
-            disabled={!image || isProcessing}
-          >
-            Manual Mode
-          </button>
-        </div>
-        
-        {/* Right Group */}
-        <div className="flex items-center gap-3">
           <button
             onClick={handleFitToWindow}
             className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
@@ -776,6 +774,16 @@ function App() {
           >
             Fit to Window
           </button>
+
+          {/* Conditionally render Clear button */}
+          {(measurementLines.length > 0 || customShapes.length > 0 || currentMeasurementLine || currentCustomShape) && (
+            <button
+              onClick={handleClearTools}
+              className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-red-500 hover:text-white rounded-md transition-colors duration-200 shadow-sm"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -799,11 +807,15 @@ function App() {
           onCanvasClick={handleCanvasClick}
           unit={unit}
           lineToolActive={lineToolActive}
-          measurementLine={measurementLine}
-          onMeasurementLineUpdate={setMeasurementLine}
+          measurementLines={measurementLines}
+          currentMeasurementLine={currentMeasurementLine}
+          onMeasurementLineUpdate={setCurrentMeasurementLine}
+          onAddMeasurementLine={(line) => setMeasurementLines(prev => [...prev, line])}
           drawAreaActive={drawAreaActive}
-          customShape={customShape}
-          onCustomShapeUpdate={setCustomShape}
+          customShapes={customShapes}
+          currentCustomShape={currentCustomShape}
+          onCustomShapeUpdate={setCurrentCustomShape}
+          onAddCustomShape={(shape) => setCustomShapes(prev => [...prev, shape])}
           isMobile={false}
           lineData={lineData}
           cornerPoints={cornerPoints}
@@ -836,6 +848,13 @@ function App() {
             ocrFailed={ocrFailed}
           />
         </div>
+
+        {/* Notification Popup */}
+        {notification.show && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-md shadow-lg animate-fade-in-out">
+            {notification.message}
+          </div>
+        )}
 
         {/* Area Display Box - positioned to the right of sidebar */}
         <div className="absolute top-0 left-64 z-10 m-0">

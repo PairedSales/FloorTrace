@@ -33,11 +33,15 @@ const Canvas = forwardRef(({
   onCanvasClick,
   unit,
   lineToolActive,
-  measurementLine,
+  measurementLines,
+  currentMeasurementLine,
   onMeasurementLineUpdate,
+  onAddMeasurementLine,
   drawAreaActive,
-  customShape,
+  customShapes,
+  currentCustomShape,
   onCustomShapeUpdate,
+  onAddCustomShape,
   isMobile,
   lineData,
   cornerPoints,
@@ -57,7 +61,7 @@ const Canvas = forwardRef(({
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
-  const [draggingCustomVertex, setDraggingCustomVertex] = useState(null);
+  const [draggingCustomVertex, setDraggingCustomVertex] = useState(null); // { shapeIndex, vertexIndex }
   const [currentMousePos, setCurrentMousePos] = useState(null);
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
@@ -393,41 +397,56 @@ const Canvas = forwardRef(({
   };
 
   // Handle custom shape vertex dragging
-  const handleCustomVertexDragStart = (index) => {
-    if (!customShape || !customShape.closed) return;
-    setDraggingCustomVertex(index);
+  const handleCustomVertexDragStart = (shapeIndex, vertexIndex) => {
+    if (!customShapes[shapeIndex] || !customShapes[shapeIndex].closed) return;
+    setDraggingCustomVertex({ shapeIndex, vertexIndex });
   };
 
-  const handleCustomVertexDrag = (index, e) => {
-    if (!customShape || draggingCustomVertex !== index) return;
+  const handleCustomVertexDrag = (e) => {
+    if (!draggingCustomVertex) return;
+    const { shapeIndex, vertexIndex } = draggingCustomVertex;
+
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
-    
-    const newVertices = [...customShape.vertices];
-    newVertices[index] = canvasPos;
-    onCustomShapeUpdate({ vertices: newVertices, closed: true });
+
+    const newShapes = [...customShapes];
+    const newVertices = [...newShapes[shapeIndex].vertices];
+    newVertices[vertexIndex] = canvasPos;
+    newShapes[shapeIndex] = { ...newShapes[shapeIndex], vertices: newVertices };
+    // This should be a new prop, like onUpdateCustomShapes
+    // For now, let's assume onAddCustomShape can handle updates by replacing the whole array
   };
 
-  const handleCustomVertexDragEnd = (index) => {
-    if (!customShape || draggingCustomVertex !== index) return;
+  const handleCustomVertexDragEnd = () => {
     setDraggingCustomVertex(null);
   };
 
   // Handle double-click to close custom shape or add perimeter vertex
   const handleStageDoubleClick = (e) => {
     // IMPORTANT: Only respond to LEFT double-click (button 0)
-    // Right double-click should do nothing
     if (e.evt && e.evt.button !== 0) return;
-    
-    // Draw area tool - close the shape
-    if (drawAreaActive && customShape && !customShape.closed && customShape.vertices.length >= 3) {
-      onCustomShapeUpdate({
-        vertices: customShape.vertices,
-        closed: true
-      });
+
+    // Line tool: a double click finishes the line
+    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start) {
+      const stage = e.target.getStage();
+      if (!stage) return;
+      const finalPoint = getCanvasCoordinates(stage);
+      if (!finalPoint) return;
+
+      const newLine = { start: currentMeasurementLine.start, end: finalPoint };
+      onAddMeasurementLine(newLine);
+      onMeasurementLineUpdate(null); // Reset for next line
       return;
     }
-    
+
+    // Draw area tool - close the shape
+    if (drawAreaActive && currentCustomShape && !currentCustomShape.closed && currentCustomShape.vertices.length >= 3) {
+      const finalShape = { ...currentCustomShape, closed: true };
+      onAddCustomShape(finalShape);
+      onCustomShapeUpdate(null); // Reset for next shape
+      return;
+    }
+
     // Perimeter tool - add vertex (only when no tools are active)
     if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive) return;
     
@@ -616,11 +635,16 @@ const Canvas = forwardRef(({
     }
     
     // Line tool preview
-    if (lineToolActive && measurementLine && measurementLine.start && onMeasurementLineUpdate) {
+    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start && onMeasurementLineUpdate) {
       onMeasurementLineUpdate({
-        start: measurementLine.start,
+        start: currentMeasurementLine.start,
         end: mousePoint
       });
+    }
+
+    // Custom shape preview
+    if (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) {
+      setCurrentMousePos(mousePoint);
     }
   };
   
@@ -710,8 +734,11 @@ const Canvas = forwardRef(({
     }, 300); // 300ms window for double-click detection
     
     // If this is a double-click, let the double-click handler deal with it
-    if (clickCountRef.current === 2) {
+    if (clickCountRef.current >= 2) {
+      // We are handling double click separately in handleStageDoubleClick
+      // so we just reset and return here to avoid single click logic firing.
       clickCountRef.current = 0;
+      clearTimeout(clickTimeoutRef.current);
       return;
     }
     
@@ -780,38 +807,48 @@ const Canvas = forwardRef(({
       if (lineToolActive && onMeasurementLineUpdate) {
         const stage = e.target.getStage();
         if (!stage) return;
-        
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
-        
-        // If no start point, set it
-        if (!measurementLine || !measurementLine.start) {
+
+        if (!currentMeasurementLine) {
+          // Start a new line
           onMeasurementLineUpdate({ start: clickPoint, end: clickPoint });
+        } else {
+          // Finish the current line
+          const newLine = { start: currentMeasurementLine.start, end: clickPoint };
+          onAddMeasurementLine(newLine);
+          onMeasurementLineUpdate(null); // Reset for the next line
         }
-        // If we already have a start point, this is just updating the end point
-        // (the end point is continuously updated by mouse move)
         return;
       }
-      
-      // Draw area tool mode
+
+      // Draw area tool mode (functions like perimeter tracing)
       if (drawAreaActive && onCustomShapeUpdate) {
         const stage = e.target.getStage();
         if (!stage) return;
-        
         const clickPoint = getCanvasCoordinates(stage);
         if (!clickPoint) return;
-        
-        // Add vertex to the shape
-        if (!customShape || !customShape.vertices) {
-          // Start new shape
+
+        if (!currentCustomShape) {
+          // Start a new shape
           onCustomShapeUpdate({ vertices: [clickPoint], closed: false });
-        } else if (!customShape.closed) {
-          // Add vertex to existing shape
-          onCustomShapeUpdate({
-            vertices: [...customShape.vertices, clickPoint],
-            closed: false
-          });
+        } else {
+          // Check if closing the shape by clicking the first vertex
+          const firstVertex = currentCustomShape.vertices[0];
+          const distance = Math.sqrt(Math.pow(clickPoint.x - firstVertex.x, 2) + Math.pow(clickPoint.y - firstVertex.y, 2));
+
+          if (currentCustomShape.vertices.length > 2 && distance < 10 / scaleRef.current) {
+            // Close the shape
+            const finalShape = { ...currentCustomShape, closed: true };
+            onAddCustomShape(finalShape);
+            onCustomShapeUpdate(null); // Reset for next shape
+          } else {
+            // Add a new vertex
+            const newVertices = [...currentCustomShape.vertices, clickPoint];
+            onCustomShapeUpdate({ ...currentCustomShape, vertices: newVertices });
+          }
         }
+        return;
       }
     }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
@@ -1092,6 +1129,28 @@ const Canvas = forwardRef(({
     }
   };
 
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      // Close perimeter on Enter key
+      if (perimeterVertices && perimeterVertices.length > 2 && onClosePerimeter) {
+        onClosePerimeter();
+      }
+      // Close custom shape on Enter key
+      else if (drawAreaActive && currentCustomShape && !currentCustomShape.closed && currentCustomShape.vertices.length >= 2) {
+        const finalShape = { ...currentCustomShape, closed: true };
+        onAddCustomShape(finalShape);
+        onCustomShapeUpdate(null); // Reset for next shape
+      }
+    }
+  }, [perimeterVertices, onClosePerimeter, drawAreaActive, currentCustomShape, onAddCustomShape, onCustomShapeUpdate]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+
   return (
     <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
       {!image && !isProcessing && !isMobile && (
@@ -1329,6 +1388,8 @@ const Canvas = forwardRef(({
                     <Text
                       x={dim.bbox.x}
                       y={dim.bbox.y + dim.bbox.height + 5 / scale}
+                      width={dim.bbox.width}
+                      align="center"
                       text={`${formatLength(dim.width, unit)} x ${formatLength(dim.height, unit)}`}
                       fontSize={14 / scale}
                       fill="#8b5cf6"
@@ -1336,15 +1397,6 @@ const Canvas = forwardRef(({
                     />
                   </React.Fragment>
                 ))}
-                {/* Instructions */}
-                <Text
-                  x={10}
-                  y={10}
-                  text="Click on a room dimension to select it"
-                  fontSize={16 / scale}
-                  fill="#8b5cf6"
-                  fontStyle="bold"
-                />
               </>
             )}
             
@@ -1421,205 +1473,86 @@ const Canvas = forwardRef(({
             )}
             
             {/* Measurement Line Tool */}
-            {lineToolActive && measurementLine && measurementLine.start && measurementLine.end && (
-              <>
-                {/* The measurement line */}
-                <Line
-                  points={[
-                    measurementLine.start.x,
-                    measurementLine.start.y,
-                    measurementLine.end.x,
-                    measurementLine.end.y
-                  ]}
-                  stroke="#0ea5e9"
-                  strokeWidth={3 / scale}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                
-                {/* Start point circle */}
-                <Circle
-                  x={measurementLine.start.x}
-                  y={measurementLine.start.y}
-                  radius={6 / scale}
-                  fill="#0ea5e9"
-                  stroke="#fff"
-                  strokeWidth={2 / scale}
-                />
-                
-                {/* End point circle */}
-                <Circle
-                  x={measurementLine.end.x}
-                  y={measurementLine.end.y}
-                  radius={6 / scale}
-                  fill="#0ea5e9"
-                  stroke="#fff"
-                  strokeWidth={2 / scale}
-                />
-                
-                {/* Length label */}
-                {(() => {
-                  // Calculate line length in pixels
-                  const dx = measurementLine.end.x - measurementLine.start.x;
-                  const dy = measurementLine.end.y - measurementLine.start.y;
-                  const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-                  
-                  // Convert to feet using pixelsPerFoot scale
-                  const lengthInFeet = lengthInPixels * pixelsPerFoot;
-                  
-                  // Format based on unit preference
-                  const formattedLength = formatLength(lengthInFeet, unit);
-                  
-                  // Calculate midpoint for label placement
-                  const midX = (measurementLine.start.x + measurementLine.end.x) / 2;
-                  const midY = (measurementLine.start.y + measurementLine.end.y) / 2;
-                  
-                  // Calculate offset perpendicular to the line
-                  const angle = Math.atan2(dy, dx);
-                  const offsetDistance = 20 / scale;
-                  const offsetX = Math.sin(angle) * offsetDistance;
-                  const offsetY = -Math.cos(angle) * offsetDistance;
-                  
-                  // Dynamic width based on text length
-                  const labelWidth = Math.max(60, formattedLength.length * 7) / scale;
-                  
-                  return (
-                    <React.Fragment>
-                      {/* Label background */}
-                      <Rect
-                        x={midX + offsetX - labelWidth / 2}
-                        y={midY + offsetY - 13 / scale}
-                        width={labelWidth}
-                        height={26 / scale}
-                        fill="rgba(59, 130, 246, 0.95)"
-                        strokeWidth={0}
-                        cornerRadius={6 / scale}
-                      />
-                      {/* Label text */}
-                      <Text
-                        x={midX + offsetX}
-                        y={midY + offsetY}
-                        text={formattedLength}
-                        fontSize={12 / scale}
-                        fill="#ffffff"
-                        fontFamily="Inter, system-ui, sans-serif"
-                        fontStyle="600"
-                        align="center"
-                        verticalAlign="middle"
-                        offsetX={labelWidth / 2}
-                        offsetY={6.5 / scale}
-                      />
-                    </React.Fragment>
-                  );
-                })()}
-              </>
+            {lineToolActive && measurementLines && measurementLines.length > 0 && (
+              <Layer>
+                {measurementLines.map((line, index) => (
+                  <React.Fragment key={`line-${index}`}>
+                    <Line
+                      points={[line.start.x, line.start.y, line.end.x, line.end.y]}
+                      stroke="#ff00ff"
+                      strokeWidth={2 / scale}
+                    />
+                    <Text
+                      x={(line.start.x + line.end.x) / 2 + 5 / scale}
+                      y={(line.start.y + line.end.y) / 2}
+                      text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
+                      fontSize={12 / scale}
+                      fill="#ff00ff"
+                      fontStyle="bold"
+                      shadowColor="black"
+                      shadowBlur={1}
+                      shadowOffsetX={1 / scale}
+                      shadowOffsetY={1 / scale}
+                    />
+                  </React.Fragment>
+                ))}
+              </Layer>
             )}
             
             {/* Custom Shape (Draw Area Tool) */}
-            {drawAreaActive && customShape && customShape.vertices && customShape.vertices.length > 0 && (
-              <>
-                {/* Preview line from last vertex to mouse (when not closed) */}
-                {!customShape.closed && currentMousePos && customShape.vertices.length > 0 && (
-                  <Line
-                    points={[
-                      customShape.vertices[customShape.vertices.length - 1].x,
-                      customShape.vertices[customShape.vertices.length - 1].y,
-                      currentMousePos.x,
-                      currentMousePos.y
-                    ]}
-                    stroke="#ec4899"
-                    strokeWidth={2 / scale}
-                    dash={[10 / scale, 5 / scale]}
-                    lineCap="round"
-                  />
-                )}
-                
-                {/* The custom shape */}
+            {drawAreaActive && customShapes && customShapes.length > 0 && (
+              <Layer>
+                {customShapes.map((shape, shapeIndex) => (
+                  <React.Fragment key={`shape-${shapeIndex}`}>
+                    <Line
+                      points={shape.vertices.flatMap(v => [v.x, v.y])}
+                      closed={shape.closed}
+                      fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
+                      stroke="#00ff00"
+                      strokeWidth={2 / scale}
+                    />
+                    {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
+                      <Circle
+                        key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
+                        x={vertex.x}
+                        y={vertex.y}
+                        radius={5 / scale}
+                        fill="#00ff00"
+                        stroke="#000000"
+                        strokeWidth={1 / scale}
+                        draggable
+                        onDragStart={() => handleCustomVertexDragStart(shapeIndex, vertexIndex)}
+                        onDragMove={handleCustomVertexDrag}
+                        onDragEnd={handleCustomVertexDragEnd}
+                      />
+                    ))}
+                  </React.Fragment>
+                ))}
+              </Layer>
+            )}
+            
+            {/* Custom Shape (Draw Area Tool) Preview */}
+            {drawAreaActive && currentCustomShape && currentMousePos && (
+              <Layer>
                 <Line
-                  points={customShape.vertices.flatMap(v => [v.x, v.y])}
-                  stroke="#ec4899"
-                  strokeWidth={3 / scale}
-                  closed={customShape.closed}
-                  fill={customShape.closed ? "rgba(236, 72, 153, 0.15)" : undefined}
-                  lineCap="round"
-                  lineJoin="round"
+                  points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
+                  closed={false}
+                  stroke="#00ff00"
+                  strokeWidth={2 / scale}
+                  dash={[6 / scale, 3 / scale]}
                 />
-                
-                {/* Vertices */}
-                {customShape.vertices.map((vertex, i) => (
+                {currentCustomShape.vertices.map((vertex, index) => (
                   <Circle
-                    key={i}
+                    key={`current-shape-vertex-${index}`}
                     x={vertex.x}
                     y={vertex.y}
                     radius={5 / scale}
-                    fill="#ec4899"
-                    stroke="#fff"
-                    strokeWidth={1.5 / scale}
-                    draggable={customShape.closed}
-                    onDragStart={() => handleCustomVertexDragStart(i)}
-                    onDragMove={(e) => handleCustomVertexDrag(i, e)}
-                    onDragEnd={() => handleCustomVertexDragEnd(i)}
+                    fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
+                    stroke="#000000"
+                    strokeWidth={1 / scale}
                   />
                 ))}
-                
-                {/* Area label - only when shape is closed or has at least 3 vertices */}
-                {customShape.vertices.length >= 3 && pixelsPerFoot && (() => {
-                  // Calculate area using shoelace formula
-                  let area = 0;
-                  const vertices = customShape.vertices;
-                  for (let i = 0; i < vertices.length; i++) {
-                    const j = (i + 1) % vertices.length;
-                    area += vertices[i].x * vertices[j].y;
-                    area -= vertices[j].x * vertices[i].y;
-                  }
-                  area = Math.abs(area / 2);
-                  
-                  // Convert from pixels² to feet²
-                  const areaInFeet = area * (pixelsPerFoot * pixelsPerFoot);
-                  
-                  // Calculate centroid for label placement
-                  let centroidX = 0;
-                  let centroidY = 0;
-                  for (let i = 0; i < vertices.length; i++) {
-                    centroidX += vertices[i].x;
-                    centroidY += vertices[i].y;
-                  }
-                  centroidX /= vertices.length;
-                  centroidY /= vertices.length;
-                  
-                  const areaText = `${Math.round(areaInFeet).toLocaleString()} ft²`;
-                  const labelWidth = Math.max(80, areaText.length * 8) / scale;
-                  
-                  return (
-                    <React.Fragment>
-                      {/* Label background */}
-                      <Rect
-                        x={centroidX - labelWidth / 2}
-                        y={centroidY - 16 / scale}
-                        width={labelWidth}
-                        height={32 / scale}
-                        fill="rgba(245, 158, 11, 0.95)"
-                        strokeWidth={0}
-                        cornerRadius={8 / scale}
-                      />
-                      {/* Label text */}
-                      <Text
-                        x={centroidX}
-                        y={centroidY}
-                        text={areaText}
-                        fontSize={14 / scale}
-                        fill="#ffffff"
-                        fontFamily="Inter, system-ui, sans-serif"
-                        fontStyle="700"
-                        align="center"
-                        verticalAlign="middle"
-                        offsetX={labelWidth / 2}
-                        offsetY={8 / scale}
-                      />
-                    </React.Fragment>
-                  );
-                })()}
-              </>
+              </Layer>
             )}
           </Layer>
         </Stage>

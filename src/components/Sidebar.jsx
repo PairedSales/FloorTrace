@@ -5,9 +5,7 @@ import InchesInput from './InchesInput';
 const Sidebar = ({ 
   roomDimensions, 
   onDimensionsChange, 
-  mode, 
-  manualEntryMode,
-  detectedDimensions,
+  mode,
   unit,
   onUnitChange,
   isProcessing,
@@ -159,14 +157,6 @@ const Sidebar = ({
           </div>
         </div>
 
-        {/* Instructions for manual mode - OCR succeeded */}
-        {mode === 'manual' && !manualEntryMode && detectedDimensions && detectedDimensions.length > 0 && (
-          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-xs text-blue-800 font-medium">
-              Click on a detected room dimension.
-            </p>
-          </div>
-        )}
         
         {/* Instructions for manual mode - OCR failed */}
         {mode === 'manual' && ocrFailed && !isProcessing && (
