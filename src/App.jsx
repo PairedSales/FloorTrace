@@ -69,61 +69,6 @@ function App() {
     resetOverlays();
   };
 
-  // Handle file upload
-  const handleFileUpload = useCallback(async (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      try {
-        // Clear existing image before loading new one to ensure state change
-        setImage(null);
-        // Clear overlays as well
-        resetOverlays();
-
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        handleManualMode(loadedImage); // Automatically enter manual mode
-      } catch (error) {
-        console.error('Error loading image:', error);
-        alert('Failed to load image. Please try again.');
-      } finally {
-        // Reset file input so the same file can be selected again
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-      }
-    }
-  }, [resetOverlays, handleManualMode]);
-
-  // Handle clipboard paste
-  const handlePasteImage = useCallback(async () => {
-    try {
-      // Clear existing image before loading new one to ensure state change
-      setImage(null);
-      // Clear overlays as well
-      resetOverlays();
-
-      const loadedImage = await loadImageFromClipboard();
-      if (loadedImage) {
-        setImage(loadedImage);
-        handleManualMode(loadedImage); // Automatically enter manual mode
-      }
-    } catch (error) {
-      console.error('Error pasting image:', error);
-      alert('Failed to paste image. Make sure an image is copied to your clipboard.');
-    }
-  }, [resetOverlays, handleManualMode]);
-
-  // Handle find room - disabled until automatic detection is rewritten
-  const handleFindRoom = async () => {
-    alert('Automatic room detection feature coming soon! Please use Manual Mode for now.');
-  };
-
-  // Handle trace perimeter - placeholder for future implementation
-  const handleTracePerimeter = async () => {
-    setNotification({ show: true, message: 'Coming Soon' });
-    setTimeout(() => setNotification({ show: false, message: '' }), 2000);
-  };
-
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image) => {
     if (mode === 'manual') {
@@ -238,6 +183,61 @@ function App() {
       }
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit]);
+
+  // Handle file upload
+  const handleFileUpload = useCallback(async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        // Clear existing image before loading new one to ensure state change
+        setImage(null);
+        // Clear overlays as well
+        resetOverlays();
+
+        const loadedImage = await loadImageFromFile(file);
+        setImage(loadedImage);
+        handleManualMode(loadedImage); // Automatically enter manual mode
+      } catch (error) {
+        console.error('Error loading image:', error);
+        alert('Failed to load image. Please try again.');
+      } finally {
+        // Reset file input so the same file can be selected again
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }
+    }
+  }, [resetOverlays, handleManualMode]);
+
+  // Handle clipboard paste
+  const handlePasteImage = useCallback(async () => {
+    try {
+      // Clear existing image before loading new one to ensure state change
+      setImage(null);
+      // Clear overlays as well
+      resetOverlays();
+
+      const loadedImage = await loadImageFromClipboard();
+      if (loadedImage) {
+        setImage(loadedImage);
+        handleManualMode(loadedImage); // Automatically enter manual mode
+      }
+    } catch (error) {
+      console.error('Error pasting image:', error);
+      alert('Failed to paste image. Make sure an image is copied to your clipboard.');
+    }
+  }, [resetOverlays, handleManualMode]);
+
+  // Handle find room - disabled until automatic detection is rewritten
+  const handleFindRoom = async () => {
+    alert('Automatic room detection feature coming soon! Please use Manual Mode for now.');
+  };
+
+  // Handle trace perimeter - placeholder for future implementation
+  const handleTracePerimeter = async () => {
+    setNotification({ show: true, message: 'Coming Soon' });
+    setTimeout(() => setNotification({ show: false, message: '' }), 2000);
+  };
 
   // Handle manual dimension entry button click
   const handleEnterManually = () => {
