@@ -57,7 +57,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
         onFocus={onFocus}
         onBlur={onBlur}
         onKeyDown={(e) => handleKeyDown(e, 'feet')}
-        className="w-full outline-none bg-transparent"
+        className="w-8 text-right outline-none bg-transparent"
         placeholder="0"
       />
       <span>'</span>
@@ -69,7 +69,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
         onFocus={onFocus}
         onBlur={onBlur}
         onKeyDown={(e) => handleKeyDown(e, 'inches')}
-        className="w-full outline-none bg-transparent"
+        className="w-8 text-right outline-none bg-transparent"
         placeholder="0"
       />
       <span>"</span>
