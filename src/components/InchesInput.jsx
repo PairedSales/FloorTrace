@@ -48,31 +48,36 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   };
 
   return (
-    <div className="flex items-center gap-1 w-24 px-3 py-2 border border-slate-300 rounded-md bg-white text-sm focus-within:ring-2 focus-within:ring-slate-500 focus-within:border-transparent">
-      <input
-        ref={feetRef}
-        type="text"
-        value={feet}
-        onChange={handleFeetChange}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        onKeyDown={(e) => handleKeyDown(e, 'feet')}
-        className="w-8 text-center outline-none bg-transparent"
-        placeholder="0"
-      />
-      <span>'</span>
-      <input
-        ref={inchesRef}
-        type="text"
-        value={inches}
-        onChange={handleInchesChange}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        onKeyDown={(e) => handleKeyDown(e, 'inches')}
-        className="w-8 text-center outline-none bg-transparent"
-        placeholder="0"
-      />
-      <span>"</span>
+    <div 
+      className="flex items-center justify-center w-24 px-3 py-2 border border-slate-300 rounded-md bg-white text-sm focus-within:ring-2 focus-within:ring-slate-500 focus-within:border-transparent"
+      onClick={() => feetRef.current && feetRef.current.focus()}
+    >
+      <div className="flex items-center text-slate-400">
+        <input
+          ref={feetRef}
+          type="text"
+          value={feet}
+          onChange={handleFeetChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          onKeyDown={(e) => handleKeyDown(e, 'feet')}
+          className="w-5 text-right outline-none bg-transparent text-slate-800 placeholder-slate-400"
+          placeholder="0"
+        />
+        <span>'</span>
+        <input
+          ref={inchesRef}
+          type="text"
+          value={inches}
+          onChange={handleInchesChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          onKeyDown={(e) => handleKeyDown(e, 'inches')}
+          className="w-5 text-right outline-none bg-transparent text-slate-800 placeholder-slate-400"
+          placeholder="0"
+        />
+        <span>"</span>
+      </div>
     </div>
   );
 };
