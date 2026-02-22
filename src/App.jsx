@@ -35,11 +35,57 @@ function App() {
   const [customShapes, setCustomShapes] = useState([]); // Array of { vertices, closed, area }
   const [currentCustomShape, setCurrentCustomShape] = useState(null); // The shape currently being drawn
   const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
-  const [lastAction, setLastAction] = useState(null); // Track last action for undo/redo
   const [notification, setNotification] = useState({ show: false, message: '' });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const sidebarRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const appStateRef = useRef({});
+
+  const cloneSnapshot = (value) => {
+    if (typeof structuredClone === 'function') {
+      return structuredClone(value);
+    }
+    return JSON.parse(JSON.stringify(value));
+  };
+
+  const createSnapshot = useCallback(() => cloneSnapshot(appStateRef.current), []);
+
+  const pushUndoState = useCallback(() => {
+    if (!image) return;
+    undoStackRef.current.push(createSnapshot());
+    if (undoStackRef.current.length > 100) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+  }, [createSnapshot, image]);
+
+  const clearHistory = useCallback(() => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+  }, []);
+
+  const applySnapshot = useCallback((snapshot) => {
+    setRoomOverlay(snapshot.roomOverlay);
+    setPerimeterOverlay(snapshot.perimeterOverlay);
+    setRoomDimensions(snapshot.roomDimensions);
+    setArea(snapshot.area);
+    setScale(snapshot.scale);
+    setMode(snapshot.mode);
+    setManualEntryMode(snapshot.manualEntryMode);
+    setOcrFailed(snapshot.ocrFailed);
+    setLineToolActive(snapshot.lineToolActive);
+    setMeasurementLines(snapshot.measurementLines);
+    setCurrentMeasurementLine(snapshot.currentMeasurementLine);
+    setDrawAreaActive(snapshot.drawAreaActive);
+    setCustomShapes(snapshot.customShapes);
+    setCurrentCustomShape(snapshot.currentCustomShape);
+    setPerimeterVertices(snapshot.perimeterVertices);
+    setShowSideLengths(snapshot.showSideLengths);
+    setUseInteriorWalls(snapshot.useInteriorWalls);
+    setUnit(snapshot.unit);
+  }, []);
 
   // Reset overlays
   const resetOverlays = useCallback(() => {
@@ -60,14 +106,30 @@ function App() {
     setCustomShapes([]);
     setCurrentCustomShape(null);
     setPerimeterVertices(null);
-    setLastAction(null);
-  }, []);
+    clearHistory();
+  }, [clearHistory]);
 
   // Reset entire application
   const handleRestart = () => {
     setImage(null);
     resetOverlays();
   };
+
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return false;
+    const previousSnapshot = undoStackRef.current.pop();
+    redoStackRef.current.push(createSnapshot());
+    applySnapshot(previousSnapshot);
+    return true;
+  }, [applySnapshot, createSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return false;
+    const nextSnapshot = redoStackRef.current.pop();
+    undoStackRef.current.push(createSnapshot());
+    applySnapshot(nextSnapshot);
+    return true;
+  }, [applySnapshot, createSnapshot]);
 
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image) => {
@@ -261,6 +323,7 @@ function App() {
 
   // Toggle line tool
   const handleLineToolToggle = () => {
+    pushUndoState();
     const newState = !lineToolActive;
     setLineToolActive(newState);
     if (newState) {
@@ -274,6 +337,7 @@ function App() {
 
   // Toggle draw area tool
   const handleDrawAreaToggle = () => {
+    pushUndoState();
     const newState = !drawAreaActive;
     setDrawAreaActive(newState);
     if (newState) {
@@ -287,6 +351,7 @@ function App() {
 
   // Clear all lines and custom shapes
   const handleClearTools = () => {
+    pushUndoState();
     setMeasurementLines([]);
     setCurrentMeasurementLine(null);
     setCustomShapes([]);
@@ -359,15 +424,8 @@ function App() {
   };
 
   // Update room overlay position
-  const updateRoomOverlay = (overlay, saveAction = true, previousState = null) => {
-    if (saveAction && roomOverlay) {
-      setLastAction({
-        type: 'updateRoom',
-        previousState: previousState || roomOverlay,
-        currentState: overlay,
-        isUndone: false
-      });
-    }
+  const updateRoomOverlay = (overlay, saveAction = true) => {
+    if (saveAction) pushUndoState();
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
       updateScale(roomDimensions, overlay);
@@ -375,17 +433,9 @@ function App() {
   };
 
   // Update perimeter vertices
-  const updatePerimeterVertices = (vertices, saveAction = true, previousState = null) => {
-    if (saveAction && perimeterOverlay && perimeterOverlay.vertices) {
-      setLastAction({
-        type: 'updatePerimeter',
-        previousState: previousState ? [...previousState] : [...perimeterOverlay.vertices],
-        currentState: [...vertices],
-        isUndone: false
-      });
-    }
+  const updatePerimeterVertices = (vertices, saveAction = true) => {
+    if (saveAction) pushUndoState();
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
-    // Only calculate area if room overlay exists
     if (roomOverlay) {
       const calculatedArea = calculateArea(vertices, scale);
       setArea(calculatedArea);
@@ -396,16 +446,8 @@ function App() {
 
   // Handle adding perimeter vertex in manual mode
   const handleAddPerimeterVertex = (vertex) => {
+    pushUndoState();
     const newVertices = [...perimeterVertices, vertex];
-    
-    // Save action for undo
-    setLastAction({
-      type: 'addVertex',
-      previousState: [...perimeterVertices],
-      currentState: newVertices,
-      isUndone: false
-    });
-    
     setPerimeterVertices(newVertices);
 
     // Update the perimeter overlay in real-time
@@ -418,6 +460,7 @@ function App() {
   // Handle closing the perimeter
   const handleClosePerimeter = () => {
     if (perimeterVertices && perimeterVertices.length > 2) {
+      pushUndoState();
       setPerimeterOverlay({ vertices: perimeterVertices });
       if (roomOverlay) {
         const calculatedArea = calculateArea(perimeterVertices, scale);
@@ -432,66 +475,10 @@ function App() {
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = () => {
     if (perimeterVertices && perimeterVertices.length > 0) {
+      pushUndoState();
       const newVertices = perimeterVertices.slice(0, -1);
-      setLastAction({
-        type: 'removeVertex',
-        previousState: [...perimeterVertices],
-        currentState: newVertices,
-        isUndone: false
-      });
       setPerimeterVertices(newVertices);
     }
-  };
-  
-  // Handle undo/redo with right-click
-  const handleUndoRedo = () => {
-    if (!lastAction) return false;
-    
-    const isCurrentlyUndone = lastAction.isUndone;
-    
-    if (!isCurrentlyUndone) {
-      // Perform undo - revert to previous state
-      switch (lastAction.type) {
-        case 'addVertex':
-        case 'removeVertex':
-          setPerimeterVertices(lastAction.previousState);
-          break;
-        case 'updatePerimeter':
-          // Use the update function with saveAction=false to avoid creating new action
-          updatePerimeterVertices(lastAction.previousState, false);
-          break;
-        case 'updateRoom':
-          // Use the update function with saveAction=false to avoid creating new action
-          updateRoomOverlay(lastAction.previousState, false);
-          break;
-        case 'updateCustomShape':
-          setCustomShapes(lastAction.previousState);
-          break;
-      }
-      setLastAction({ ...lastAction, isUndone: true });
-    } else {
-      // Perform redo - apply current state
-      switch (lastAction.type) {
-        case 'addVertex':
-        case 'removeVertex':
-          setPerimeterVertices(lastAction.currentState);
-          break;
-        case 'updatePerimeter':
-          // Use the update function with saveAction=false to avoid creating new action
-          updatePerimeterVertices(lastAction.currentState, false);
-          break;
-        case 'updateRoom':
-          // Use the update function with saveAction=false to avoid creating new action
-          updateRoomOverlay(lastAction.currentState, false);
-          break;
-        case 'updateCustomShape':
-          setCustomShapes(lastAction.currentState);
-          break;
-      }
-      setLastAction({ ...lastAction, isUndone: false });
-    }
-    
-    return true;
   };
 
   // Handle dimension selection in manual mode
@@ -600,11 +587,36 @@ function App() {
     detectLinesForSnapping();
   }, [image]);
 
+  useEffect(() => {
+    appStateRef.current = {
+      roomOverlay,
+      perimeterOverlay,
+      roomDimensions,
+      area,
+      scale,
+      mode,
+      manualEntryMode,
+      ocrFailed,
+      lineToolActive,
+      measurementLines,
+      currentMeasurementLine,
+      drawAreaActive,
+      customShapes,
+      currentCustomShape,
+      perimeterVertices,
+      showSideLengths,
+      useInteriorWalls,
+      unit
+    };
+  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, showSideLengths, useInteriorWalls, unit]);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey) {
-        switch (e.key) {
+        const key = e.key.toLowerCase();
+
+        switch (key) {
           case 'v':
             e.preventDefault();
             handlePasteImage();
@@ -613,13 +625,25 @@ function App() {
             e.preventDefault();
             fileInputRef.current?.click();
             break;
+          case 'z':
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleRedo();
+            } else {
+              handleUndo();
+            }
+            break;
+          case 'y':
+            e.preventDefault();
+            handleRedo();
+            break;
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePasteImage]);
+  }, [handlePasteImage, handleRedo, handleUndo]);
 
   // Disable right-click context menu unless text is selected
   useEffect(() => {
@@ -682,12 +706,12 @@ function App() {
         measurementLines={measurementLines}
         currentMeasurementLine={currentMeasurementLine}
         onMeasurementLineUpdate={setCurrentMeasurementLine}
-        onAddMeasurementLine={(line) => setMeasurementLines(prev => [...prev, line])}
+        onAddMeasurementLine={(line) => { pushUndoState(); setMeasurementLines(prev => [...prev, line]); }}
         drawAreaActive={drawAreaActive}
         customShapes={customShapes}
         currentCustomShape={currentCustomShape}
         onCustomShapeUpdate={setCurrentCustomShape}
-        onAddCustomShape={(shape) => setCustomShapes(prev => [...prev, shape])}
+        onAddCustomShape={(shape) => { pushUndoState(); setCustomShapes(prev => [...prev, shape]); }}
         area={area}
         lineData={lineData}
         cornerPoints={cornerPoints}
@@ -710,7 +734,7 @@ function App() {
         perimeterVertices={perimeterVertices}
         onAddPerimeterVertex={handleAddPerimeterVertex}
         onRemovePerimeterVertex={handleRemovePerimeterVertex}
-        onUndoRedo={handleUndoRedo}
+        onUndoRedo={handleUndo}
         ocrFailed={ocrFailed}
       />
     );
@@ -810,12 +834,12 @@ function App() {
           measurementLines={measurementLines}
           currentMeasurementLine={currentMeasurementLine}
           onMeasurementLineUpdate={setCurrentMeasurementLine}
-          onAddMeasurementLine={(line) => setMeasurementLines(prev => [...prev, line])}
+          onAddMeasurementLine={(line) => { pushUndoState(); setMeasurementLines(prev => [...prev, line]); }}
           drawAreaActive={drawAreaActive}
           customShapes={customShapes}
           currentCustomShape={currentCustomShape}
           onCustomShapeUpdate={setCurrentCustomShape}
-          onAddCustomShape={(shape) => setCustomShapes(prev => [...prev, shape])}
+          onAddCustomShape={(shape) => { pushUndoState(); setCustomShapes(prev => [...prev, shape]); }}
           isMobile={false}
           lineData={lineData}
           cornerPoints={cornerPoints}
@@ -823,7 +847,8 @@ function App() {
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onClosePerimeter={handleClosePerimeter}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
-          onUndoRedo={handleUndoRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
         />
 
         {/* Sidebar overlay (flush to edges) */}

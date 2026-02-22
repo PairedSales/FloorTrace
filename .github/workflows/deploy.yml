@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+      - main
+      - work
   workflow_dispatch:  # Allows manual trigger from Actions tab
 
 permissions:
