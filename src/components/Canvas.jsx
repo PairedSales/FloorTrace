@@ -48,7 +48,8 @@ const Canvas = forwardRef(({
   perimeterVertices,
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
-  onUndoRedo
+  onUndo,
+  onRedo
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -67,8 +68,6 @@ const Canvas = forwardRef(({
   const zoomTimeoutRef = useRef(null);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
-  const rightClickTimeoutRef = useRef(null);
-  const rightClickCountRef = useRef(0);
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
   const lastDragStartPosRef = useRef(null); // Track starting position before drag
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
@@ -853,39 +852,23 @@ const Canvas = forwardRef(({
     }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
   
-  // Handle right click for undo/redo functionality - ONLY undo/redo, nothing else
+  // Handle right click for undo/redo functionality.
+  // Right-click = undo, Ctrl+right-click (or Cmd+right-click) = redo.
   const handleStageContextMenu = (e) => {
-    // ALWAYS prevent default context menu
     e.evt.preventDefault();
-    
-    // Increment right-click count
-    rightClickCountRef.current += 1;
-    
-    // Clear any existing timeout
-    if (rightClickTimeoutRef.current) {
-      clearTimeout(rightClickTimeoutRef.current);
-    }
-    
-    // Set a timeout to reset right-click count
-    rightClickTimeoutRef.current = setTimeout(() => {
-      rightClickCountRef.current = 0;
-    }, 300); // 300ms window for double right-click detection
-    
-    // If this is a double right-click, do nothing
-    if (rightClickCountRef.current === 2) {
-      rightClickCountRef.current = 0;
+
+    const isRedoShortcut = e.evt.ctrlKey || e.evt.metaKey;
+
+    if (isRedoShortcut) {
+      if (onRedo) {
+        onRedo();
+      }
       return;
     }
-    
-    // Wait a bit to see if a second right-click comes
-    setTimeout(() => {
-      if (rightClickCountRef.current !== 1) return; // A double right-click happened, skip
-      
-      // Single right-click - ONLY perform undo/redo (works anywhere, including on vertices)
-      if (onUndoRedo) {
-        onUndoRedo();
-      }
-    }, 50); // Wait 50ms to distinguish single from double right-click
+
+    if (onUndo) {
+      onUndo();
+    }
   };
   
 
@@ -1419,7 +1402,7 @@ const Canvas = forwardRef(({
                 <Text
                   x={10}
                   y={10}
-                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click to undo`}
+                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click undo / Ctrl+Right-click redo`}
                   fontSize={16 / scale}
                   fill="#f59e0b"
                   fontStyle="bold"
