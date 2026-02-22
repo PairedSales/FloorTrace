@@ -68,6 +68,7 @@ const Canvas = forwardRef(({
   const zoomTimeoutRef = useRef(null);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
+  const rightClickTimeoutRef = useRef(null);
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
   const lastDragStartPosRef = useRef(null); // Track starting position before drag
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
@@ -853,22 +854,25 @@ const Canvas = forwardRef(({
   };
   
   // Handle right click for undo/redo functionality.
-  // Right-click = undo, Ctrl+right-click (or Cmd+right-click) = redo.
+  // Single right-click = undo, double right-click = redo.
   const handleStageContextMenu = (e) => {
     e.evt.preventDefault();
 
-    const isRedoShortcut = e.evt.ctrlKey || e.evt.metaKey;
-
-    if (isRedoShortcut) {
+    if (rightClickTimeoutRef.current) {
+      clearTimeout(rightClickTimeoutRef.current);
+      rightClickTimeoutRef.current = null;
       if (onRedo) {
         onRedo();
       }
       return;
     }
 
-    if (onUndo) {
-      onUndo();
-    }
+    rightClickTimeoutRef.current = setTimeout(() => {
+      if (onUndo) {
+        onUndo();
+      }
+      rightClickTimeoutRef.current = null;
+    }, 220);
   };
   
 
