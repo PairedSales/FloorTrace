@@ -1406,7 +1406,7 @@ const Canvas = forwardRef(({
                 <Text
                   x={10}
                   y={10}
-                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click to undo`}
+                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click undo / Ctrl+Right-click redo`}
                   fontSize={16 / scale}
                   fill="#f59e0b"
                   fontStyle="bold"
