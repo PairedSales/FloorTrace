@@ -614,7 +614,9 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey) {
-        switch (e.key) {
+        const key = e.key.toLowerCase();
+
+        switch (key) {
           case 'v':
             e.preventDefault();
             handlePasteImage();
