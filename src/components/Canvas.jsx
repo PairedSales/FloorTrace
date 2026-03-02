@@ -1,17 +1,42 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-// Stub implementations for snapping functions (utilities don't exist yet)
-// eslint-disable-next-line no-unused-vars
-const findNearestIntersection = (_point, _snapPoints, _threshold) => {
-  // Snapping disabled until utilities are implemented
-  return null;
+
+const findNearestIntersection = (point, points, threshold) => {
+  if (!point || !points?.length || threshold <= 0) return null;
+
+  let nearest = null;
+  let minDistanceSq = threshold * threshold;
+
+  for (const candidate of points) {
+    if (typeof candidate?.x !== 'number' || typeof candidate?.y !== 'number') continue;
+    const dx = candidate.x - point.x;
+    const dy = candidate.y - point.y;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq <= minDistanceSq) {
+      minDistanceSq = distanceSq;
+      nearest = candidate;
+    }
+  }
+
+  return nearest;
 };
 
-// eslint-disable-next-line no-unused-vars
-const applySecondaryAlignment = (_vertices, _index, _finalPoint, _threshold) => {
-  // Secondary alignment disabled until utilities are implemented
-  return _vertices;
+const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, threshold) => {
+  if (!vertices?.length || !snappedPoint || threshold <= 0) return vertices;
+
+  return vertices.map((vertex, index) => {
+    if (index === movedVertexIndex) return vertex;
+
+    const aligned = { ...vertex };
+    if (Math.abs(vertex.x - snappedPoint.x) <= threshold) {
+      aligned.x = snappedPoint.x;
+    }
+    if (Math.abs(vertex.y - snappedPoint.y) <= threshold) {
+      aligned.y = snappedPoint.y;
+    }
+    return aligned;
+  });
 };
 
 const SNAP_TO_INTERSECTION_DISTANCE = 10;
@@ -48,6 +73,7 @@ const Canvas = forwardRef(({
   perimeterVertices,
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
+  autoSnapEnabled,
   onUndo,
   onRedo
 }, ref) => {
@@ -321,11 +347,13 @@ const Canvas = forwardRef(({
     if (!canvasPos) return;
     
     // Apply snapping to intersection points for visual feedback
-    const snappedPoint = findNearestIntersection(
-      canvasPos,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    const snappedPoint = autoSnapEnabled
+      ? findNearestIntersection(
+        canvasPos,
+        snapPoints,
+        SNAP_TO_INTERSECTION_DISTANCE
+      )
+      : null;
     
     // Use snapped position if available, otherwise use raw position
     const visualPoint = snappedPoint || canvasPos;
@@ -356,11 +384,13 @@ const Canvas = forwardRef(({
     const currentVertex = perimeterOverlay.vertices[index];
     
     // Apply snapping to intersection points
-    const snappedPoint = findNearestIntersection(
-      currentVertex,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    const snappedPoint = autoSnapEnabled
+      ? findNearestIntersection(
+        currentVertex,
+        snapPoints,
+        SNAP_TO_INTERSECTION_DISTANCE
+      )
+      : null;
     
     // Use snapped position if available, otherwise use raw position
     const finalPoint = snappedPoint || currentVertex;
@@ -371,7 +401,7 @@ const Canvas = forwardRef(({
     
     // Apply secondary alignment to nearby vertices if snapped
     if (snappedPoint) {
-      applySecondaryAlignment(
+      newVertices = applySecondaryAlignment(
         newVertices,
         index,
         finalPoint,
@@ -461,11 +491,13 @@ const Canvas = forwardRef(({
     if (!clickPoint) return;
     
     // Apply snapping to corner points
-    const snappedPoint = findNearestIntersection(
-      clickPoint,
-      snapPoints,
-      SNAP_TO_INTERSECTION_DISTANCE
-    );
+    const snappedPoint = autoSnapEnabled
+      ? findNearestIntersection(
+        clickPoint,
+        snapPoints,
+        SNAP_TO_INTERSECTION_DISTANCE
+      )
+      : null;
     
     // Use snapped position if available, otherwise use raw position
     const finalPoint = snappedPoint || clickPoint;
@@ -494,7 +526,7 @@ const Canvas = forwardRef(({
     
     // Apply secondary alignment to nearby vertices if snapped
     if (snappedPoint) {
-      applySecondaryAlignment(
+      newVertices = applySecondaryAlignment(
         newVertices,
         closestEdgeIndex + 1,
         finalPoint,
@@ -598,35 +630,35 @@ const Canvas = forwardRef(({
       
       if (draggingRoomCorner === 'tl') {
         // Snap left edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         
         // Snap top edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
         // Snap right edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         
         // Snap top edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
         // Snap left edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         
         // Snap bottom edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
         // Snap right edge to vertical lines
-        const snappedX = snapToNearestLine(mousePoint.x, verticalLines, snapThreshold);
+        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         
         // Snap bottom edge to horizontal lines
-        const snappedY = snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold);
+        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
       
@@ -774,11 +806,13 @@ const Canvas = forwardRef(({
         if (!clickPoint) return;
         
         // Apply snapping to corner points
-        const snappedPoint = findNearestIntersection(
-          clickPoint,
-          snapPoints,
-          SNAP_TO_INTERSECTION_DISTANCE
-        );
+        const snappedPoint = autoSnapEnabled
+          ? findNearestIntersection(
+            clickPoint,
+            snapPoints,
+            SNAP_TO_INTERSECTION_DISTANCE
+          )
+          : null;
         
         // Use snapped position if available, otherwise use raw position
         const finalPoint = snappedPoint || clickPoint;
@@ -921,11 +955,13 @@ const Canvas = forwardRef(({
         perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
       const timer = setTimeout(() => {
         // Apply snapping to corner points
-        const snappedPoint = findNearestIntersection(
-          canvasPos,
-          snapPoints,
-          SNAP_TO_INTERSECTION_DISTANCE
-        );
+        const snappedPoint = autoSnapEnabled
+          ? findNearestIntersection(
+            canvasPos,
+            snapPoints,
+            SNAP_TO_INTERSECTION_DISTANCE
+          )
+          : null;
         
         // Use snapped position if available, otherwise use raw position
         const finalPoint = snappedPoint || canvasPos;
@@ -951,7 +987,7 @@ const Canvas = forwardRef(({
         
         // Apply secondary alignment to nearby vertices if snapped
         if (snappedPoint) {
-          applySecondaryAlignment(
+          newVertices = applySecondaryAlignment(
             newVertices,
             closestEdgeIndex + 1,
             finalPoint,
