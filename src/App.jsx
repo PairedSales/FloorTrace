@@ -18,6 +18,7 @@ function App() {
   const [detectedDimensions, setDetectedDimensions] = useState([]);
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
+  const [autoSnapEnabled, setAutoSnapEnabled] = useState(true);
   const [lineData, setLineData] = useState(null); // Store line detection data
   const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
@@ -84,6 +85,7 @@ function App() {
     setPerimeterVertices(snapshot.perimeterVertices);
     setShowSideLengths(snapshot.showSideLengths);
     setUseInteriorWalls(snapshot.useInteriorWalls);
+    setAutoSnapEnabled(snapshot.autoSnapEnabled ?? true);
     setUnit(snapshot.unit);
   }, []);
 
@@ -106,6 +108,7 @@ function App() {
     setCustomShapes([]);
     setCurrentCustomShape(null);
     setPerimeterVertices(null);
+    setAutoSnapEnabled(true);
     clearHistory();
   }, [clearHistory]);
 
@@ -606,9 +609,10 @@ function App() {
       perimeterVertices,
       showSideLengths,
       useInteriorWalls,
+      autoSnapEnabled,
       unit
     };
-  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, showSideLengths, useInteriorWalls, unit]);
+  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -730,6 +734,8 @@ function App() {
         setShowSideLengths={setShowSideLengths}
         useInteriorWalls={useInteriorWalls}
         handleInteriorWallToggle={handleInteriorWallToggle}
+        autoSnapEnabled={autoSnapEnabled}
+        setAutoSnapEnabled={setAutoSnapEnabled}
         handleRestart={handleRestart}
         perimeterVertices={perimeterVertices}
         onAddPerimeterVertex={handleAddPerimeterVertex}
@@ -846,6 +852,7 @@ function App() {
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onClosePerimeter={handleClosePerimeter}
+          autoSnapEnabled={autoSnapEnabled}
           onRemovePerimeterVertex={handleRemovePerimeterVertex}
           onUndo={handleUndo}
           onRedo={handleRedo}
@@ -950,6 +957,24 @@ function App() {
                       <span
                         className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
                           !useInteriorWalls ? 'translate-x-5' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+
+                  {/* Auto Snap Toggle */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-700">Auto Snap</span>
+                    <button
+                      onClick={() => setAutoSnapEnabled(!autoSnapEnabled)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                        autoSnapEnabled ? 'bg-slate-700' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
+                          autoSnapEnabled ? 'translate-x-5' : 'translate-x-0.5'
                         }`}
                       />
                     </button>
