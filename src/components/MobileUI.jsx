@@ -42,6 +42,8 @@ const MobileUI = forwardRef(({
   setShowSideLengths,
   useInteriorWalls,
   handleInteriorWallToggle,
+  autoSnapEnabled,
+  setAutoSnapEnabled,
   handleRestart,
   perimeterVertices,
   onAddPerimeterVertex,
@@ -238,6 +240,7 @@ const MobileUI = forwardRef(({
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={onAddPerimeterVertex}
           onRemovePerimeterVertex={onRemovePerimeterVertex}
+          autoSnapEnabled={autoSnapEnabled}
           onUndoRedo={onUndoRedo}
         />
 
@@ -461,6 +464,23 @@ const MobileUI = forwardRef(({
                     </button>
                   </div>
                 )}
+
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-700">Auto Snap</span>
+                  <button
+                    onClick={() => setAutoSnapEnabled(!autoSnapEnabled)}
+                    className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
+                      autoSnapEnabled ? 'bg-slate-700' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
+                        autoSnapEnabled ? 'translate-x-7' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           )}
