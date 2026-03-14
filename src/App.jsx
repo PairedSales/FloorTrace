@@ -6,6 +6,8 @@ import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import FloorTraceLogo from './assets/logo.svg';
 
+const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
+
 function App() {
   const [image, setImage] = useState(null);
   const [roomOverlay, setRoomOverlay] = useState(null);
@@ -43,6 +45,21 @@ function App() {
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   const appStateRef = useRef({});
+  const hasRestoredStateRef = useRef(false);
+
+  const clearAutosavedDraft = useCallback(() => {
+    localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+  }, []);
+
+  const saveAutosavedDraft = useCallback((snapshot) => {
+    try {
+      localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      console.error('Failed to autosave local draft:', error);
+      setNotification({ show: true, message: 'Autosave unavailable (storage full or blocked).' });
+      setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+    }
+  }, []);
 
   const cloneSnapshot = (value) => {
     if (typeof structuredClone === 'function') {
@@ -114,6 +131,7 @@ function App() {
 
   // Reset entire application
   const handleRestart = () => {
+    clearAutosavedDraft();
     setImage(null);
     resetOverlays();
   };
@@ -547,9 +565,47 @@ function App() {
     setMode('normal');
   };
 
-  // Auto-load example floorplan for testing (temporary)
+  // Restore locally autosaved data first, otherwise auto-load example floorplan for testing
   useEffect(() => {
-    const loadExampleImage = async () => {
+    const restoreOrLoadExampleImage = async () => {
+      try {
+        const savedStateRaw = localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY);
+        if (savedStateRaw) {
+          const savedState = JSON.parse(savedStateRaw);
+          if (savedState?.image) {
+            setImage(savedState.image);
+            setRoomOverlay(savedState.roomOverlay ?? null);
+            setPerimeterOverlay(savedState.perimeterOverlay ?? null);
+            setRoomDimensions(savedState.roomDimensions ?? { width: '', height: '' });
+            setArea(savedState.area ?? 0);
+            setScale(savedState.scale ?? 1);
+            setMode(savedState.mode ?? 'normal');
+            setIsProcessing(false);
+            setDetectedDimensions(savedState.detectedDimensions ?? []);
+            setShowSideLengths(savedState.showSideLengths ?? false);
+            setUseInteriorWalls(savedState.useInteriorWalls ?? true);
+            setAutoSnapEnabled(savedState.autoSnapEnabled ?? true);
+            setLineData(savedState.lineData ?? null);
+            setCornerPoints(savedState.cornerPoints ?? []);
+            setMobileSheetOpen(savedState.mobileSheetOpen ?? true);
+            setManualEntryMode(savedState.manualEntryMode ?? false);
+            setOcrFailed(savedState.ocrFailed ?? false);
+            setUnit(savedState.unit ?? 'decimal');
+            setLineToolActive(savedState.lineToolActive ?? false);
+            setMeasurementLines(savedState.measurementLines ?? []);
+            setCurrentMeasurementLine(savedState.currentMeasurementLine ?? null);
+            setDrawAreaActive(savedState.drawAreaActive ?? false);
+            setCustomShapes(savedState.customShapes ?? []);
+            setCurrentCustomShape(savedState.currentCustomShape ?? null);
+            setPerimeterVertices(savedState.perimeterVertices ?? null);
+            hasRestoredStateRef.current = true;
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to restore autosaved draft:', error);
+      }
+
       try {
         console.log('Loading ExampleFloorplan.png for testing...');
         const response = await fetch('./ExampleFloorplan.png');
@@ -561,14 +617,17 @@ function App() {
         // Use the existing file upload logic
         const loadedImage = await loadImageFromFile(file);
         setImage(loadedImage);
+        hasRestoredStateRef.current = true;
         console.log('ExampleFloorplan.png loaded successfully');
       } catch (error) {
         console.error('Failed to load example image:', error);
         // Don't show error to user for now - it's temporary testing code
+      } finally {
+        hasRestoredStateRef.current = true;
       }
     };
 
-    loadExampleImage();
+    restoreOrLoadExampleImage();
   }, []);
 
   // Automatically detect lines and calculate intersections when image is loaded for snapping support
@@ -613,6 +672,45 @@ function App() {
       unit
     };
   }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
+
+  // Autosave draft to local storage when working state changes.
+  useEffect(() => {
+    if (!hasRestoredStateRef.current) {
+      return;
+    }
+
+    if (!image) {
+      clearAutosavedDraft();
+      return;
+    }
+
+    saveAutosavedDraft({
+      image,
+      roomOverlay,
+      perimeterOverlay,
+      roomDimensions,
+      area,
+      scale,
+      mode,
+      detectedDimensions,
+      showSideLengths,
+      useInteriorWalls,
+      autoSnapEnabled,
+      lineData,
+      cornerPoints,
+      mobileSheetOpen,
+      manualEntryMode,
+      ocrFailed,
+      unit,
+      lineToolActive,
+      measurementLines,
+      currentMeasurementLine,
+      drawAreaActive,
+      customShapes,
+      currentCustomShape,
+      perimeterVertices
+    });
+  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, lineData, cornerPoints, mobileSheetOpen, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
