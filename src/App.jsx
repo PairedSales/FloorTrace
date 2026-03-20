@@ -3,6 +3,7 @@ import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
 import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
+import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
 import FloorTraceLogo from './assets/logo.svg';
 
@@ -645,7 +646,48 @@ function App() {
     restoreOrLoadExampleImage();
   }, []);
 
+  // Detect image corners and dominant wall lines for autosnapping.
+  useEffect(() => {
+    let cancelled = false;
 
+    const detectLinesForSnapping = async () => {
+      if (!image) {
+        setCornerPoints([]);
+        setLineData(null);
+        return;
+      }
+
+      try {
+        const detected = await detectSnappingFeatures(image);
+
+        if (cancelled) {
+          return;
+        }
+
+        setCornerPoints(detected.cornerPoints);
+        setLineData(detected.lineData);
+
+        console.log('Snapping detection complete', {
+          corners: detected.cornerPoints.length,
+          horizontalLines: detected.lineData?.horizontal?.length ?? 0,
+          verticalLines: detected.lineData?.vertical?.length ?? 0
+        });
+      } catch (error) {
+        console.error('Failed to detect snapping features:', error);
+
+        if (!cancelled) {
+          setCornerPoints([]);
+          setLineData(null);
+        }
+      }
+    };
+
+    detectLinesForSnapping();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [image]);
 
   useEffect(() => {
     appStateRef.current = {
