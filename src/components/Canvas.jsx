@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
+import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
 
 const findNearestIntersection = (point, points, threshold) => {
@@ -62,11 +62,13 @@ const Canvas = forwardRef(({
   currentMeasurementLine,
   onMeasurementLineUpdate,
   onAddMeasurementLine,
+  onMeasurementLinesChange,
   drawAreaActive,
   customShapes,
   currentCustomShape,
   onCustomShapeUpdate,
   onAddCustomShape,
+  onCustomShapesChange,
   isMobile,
   lineData,
   cornerPoints,
@@ -88,7 +90,8 @@ const Canvas = forwardRef(({
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
-  const [draggingCustomVertex, setDraggingCustomVertex] = useState(null); // { shapeIndex, vertexIndex }
+  const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
+  const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
@@ -108,6 +111,18 @@ const Canvas = forwardRef(({
   const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
   const touchMoveThreshold = 10; // pixels to distinguish tap from drag
   const longPressDelay = 500; // milliseconds for long press
+
+  useEffect(() => {
+    if (selectedMeasurementLineIndex !== null && selectedMeasurementLineIndex >= measurementLines.length) {
+      setSelectedMeasurementLineIndex(null);
+    }
+  }, [measurementLines, selectedMeasurementLineIndex]);
+
+  useEffect(() => {
+    if (selectedCustomShapeIndex !== null && selectedCustomShapeIndex >= customShapes.length) {
+      setSelectedCustomShapeIndex(null);
+    }
+  }, [customShapes, selectedCustomShapeIndex]);
 
   // Use corner points for snapping, extract lines for room overlay snapping
   const { horizontalLines, verticalLines, snapPoints } = useMemo(() => {
@@ -426,29 +441,60 @@ const Canvas = forwardRef(({
     setShowDeleteOption(null);
   };
 
-  // Handle custom shape vertex dragging
-  const handleCustomVertexDragStart = (shapeIndex, vertexIndex) => {
-    if (!customShapes[shapeIndex] || !customShapes[shapeIndex].closed) return;
-    setDraggingCustomVertex({ shapeIndex, vertexIndex });
+  const handleMeasurementLineSelect = (index, e) => {
+    e.cancelBubble = true;
+    setSelectedMeasurementLineIndex(index);
+    setSelectedCustomShapeIndex(null);
   };
 
-  const handleCustomVertexDrag = (e) => {
-    if (!draggingCustomVertex) return;
-    const { shapeIndex, vertexIndex } = draggingCustomVertex;
-
-    const canvasPos = getCanvasCoordinates(e.target.getStage());
-    if (!canvasPos) return;
-
-    const newShapes = [...customShapes];
-    const newVertices = [...newShapes[shapeIndex].vertices];
-    newVertices[vertexIndex] = canvasPos;
-    newShapes[shapeIndex] = { ...newShapes[shapeIndex], vertices: newVertices };
-    // This should be a new prop, like onUpdateCustomShapes
-    // For now, let's assume onAddCustomShape can handle updates by replacing the whole array
+  const handleCustomShapeSelect = (index, e) => {
+    e.cancelBubble = true;
+    setSelectedCustomShapeIndex(index);
+    setSelectedMeasurementLineIndex(null);
   };
 
-  const handleCustomVertexDragEnd = () => {
-    setDraggingCustomVertex(null);
+  const handleMeasurementLineDragEnd = (index, e) => {
+    if (!onMeasurementLinesChange) return;
+    e.cancelBubble = true;
+    const deltaX = e.target.x();
+    const deltaY = e.target.y();
+    if (!deltaX && !deltaY) return;
+
+    const nextLines = measurementLines.map((line, lineIndex) => (
+      lineIndex === index
+        ? {
+          ...line,
+          start: { x: line.start.x + deltaX, y: line.start.y + deltaY },
+          end: { x: line.end.x + deltaX, y: line.end.y + deltaY }
+        }
+        : line
+    ));
+
+    e.target.position({ x: 0, y: 0 });
+    onMeasurementLinesChange(nextLines);
+  };
+
+  const handleCustomShapeDragEnd = (index, e) => {
+    if (!onCustomShapesChange) return;
+    e.cancelBubble = true;
+    const deltaX = e.target.x();
+    const deltaY = e.target.y();
+    if (!deltaX && !deltaY) return;
+
+    const nextShapes = customShapes.map((shape, shapeIndex) => (
+      shapeIndex === index
+        ? {
+          ...shape,
+          vertices: shape.vertices.map((vertex) => ({
+            x: vertex.x + deltaX,
+            y: vertex.y + deltaY
+          }))
+        }
+        : shape
+    ));
+
+    e.target.position({ x: 0, y: 0 });
+    onCustomShapesChange(nextShapes);
   };
 
   // Handle double-click to close custom shape or add perimeter vertex
@@ -738,6 +784,14 @@ const Canvas = forwardRef(({
     if (isDraggingRef.current) {
       return;
     }
+
+    const target = e.target;
+    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')) {
+      return;
+    }
+
+    setSelectedMeasurementLineIndex(null);
+    setSelectedCustomShapeIndex(null);
     
     // Check if we're in a mode that needs single-click handling
     const needsSingleClickHandling = 
@@ -1153,6 +1207,31 @@ const Canvas = forwardRef(({
   };
 
   const handleKeyDown = useCallback((e) => {
+    const activeElement = document.activeElement;
+    const isTypingIntoField = activeElement && (
+      activeElement.tagName === 'INPUT' ||
+      activeElement.tagName === 'TEXTAREA' ||
+      activeElement.isContentEditable
+    );
+
+    if (isTypingIntoField) {
+      return;
+    }
+
+    if ((e.key === 'Delete' || e.key === 'Backspace')) {
+      if (selectedMeasurementLineIndex !== null && onMeasurementLinesChange) {
+        onMeasurementLinesChange(measurementLines.filter((_, index) => index !== selectedMeasurementLineIndex));
+        setSelectedMeasurementLineIndex(null);
+        return;
+      }
+
+      if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
+        onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
+        setSelectedCustomShapeIndex(null);
+      }
+      return;
+    }
+
     if (e.key === 'Enter') {
       // Close perimeter on Enter key
       if (perimeterVertices && perimeterVertices.length > 2 && onClosePerimeter) {
@@ -1165,7 +1244,20 @@ const Canvas = forwardRef(({
         onCustomShapeUpdate(null); // Reset for next shape
       }
     }
-  }, [perimeterVertices, onClosePerimeter, drawAreaActive, currentCustomShape, onAddCustomShape, onCustomShapeUpdate]);
+  }, [
+    perimeterVertices,
+    onClosePerimeter,
+    drawAreaActive,
+    currentCustomShape,
+    onAddCustomShape,
+    onCustomShapeUpdate,
+    selectedMeasurementLineIndex,
+    onMeasurementLinesChange,
+    measurementLines,
+    selectedCustomShapeIndex,
+    onCustomShapesChange,
+    customShapes
+  ]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -1203,7 +1295,7 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && draggingCustomVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
+          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
           onDragStart={handleStageDragStart}
           onDragEnd={handleStageDragEnd}
           onClick={handleStageClick}
@@ -1495,61 +1587,98 @@ const Canvas = forwardRef(({
               </>
             )}
             
-            {/* Measurement Line Tool */}
-            {lineToolActive && measurementLines && measurementLines.length > 0 && (
+            {/* Measurement Lines */}
+            {measurementLines && measurementLines.length > 0 && (
               <Layer>
                 {measurementLines.map((line, index) => (
-                  <React.Fragment key={`line-${index}`}>
+                  <Group
+                    key={`line-${index}`}
+                    x={0}
+                    y={0}
+                    draggable
+                    onClick={(e) => handleMeasurementLineSelect(index, e)}
+                    onTap={(e) => handleMeasurementLineSelect(index, e)}
+                    onDragStart={(e) => handleMeasurementLineSelect(index, e)}
+                    onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
+                  >
                     <Line
+                      name="measurement-line"
                       points={[line.start.x, line.start.y, line.end.x, line.end.y]}
-                      stroke="#ff00ff"
-                      strokeWidth={2 / scale}
+                      stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                      strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
+                      hitStrokeWidth={16 / scale}
                     />
                     <Text
+                      name="measurement-line"
                       x={(line.start.x + line.end.x) / 2 + 5 / scale}
                       y={(line.start.y + line.end.y) / 2}
                       text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
                       fontSize={12 / scale}
-                      fill="#ff00ff"
+                      fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
                       fontStyle="bold"
                       shadowColor="black"
                       shadowBlur={1}
                       shadowOffsetX={1 / scale}
                       shadowOffsetY={1 / scale}
                     />
-                  </React.Fragment>
+                  </Group>
                 ))}
               </Layer>
             )}
+
+            {/* Measurement Line Preview */}
+            {lineToolActive && currentMeasurementLine && (
+              <Layer>
+                <Line
+                  points={[
+                    currentMeasurementLine.start.x,
+                    currentMeasurementLine.start.y,
+                    currentMeasurementLine.end.x,
+                    currentMeasurementLine.end.y
+                  ]}
+                  stroke="#ff00ff"
+                  strokeWidth={2 / scale}
+                  dash={[6 / scale, 3 / scale]}
+                  opacity={0.7}
+                />
+              </Layer>
+            )}
             
-            {/* Custom Shape (Draw Area Tool) */}
-            {drawAreaActive && customShapes && customShapes.length > 0 && (
+            {/* Custom Areas */}
+            {customShapes && customShapes.length > 0 && (
               <Layer>
                 {customShapes.map((shape, shapeIndex) => (
-                  <React.Fragment key={`shape-${shapeIndex}`}>
+                  <Group
+                    key={`shape-${shapeIndex}`}
+                    x={0}
+                    y={0}
+                    draggable={shape.closed}
+                    onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                    onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                    onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                    onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
+                  >
                     <Line
+                      name="custom-shape"
                       points={shape.vertices.flatMap(v => [v.x, v.y])}
                       closed={shape.closed}
                       fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
-                      stroke="#00ff00"
-                      strokeWidth={2 / scale}
+                      stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                      strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
                     />
                     {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
                       <Circle
                         key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
+                        name="custom-shape"
                         x={vertex.x}
                         y={vertex.y}
                         radius={5 / scale}
-                        fill="#00ff00"
+                        fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
                         stroke="#000000"
                         strokeWidth={1 / scale}
-                        draggable
-                        onDragStart={() => handleCustomVertexDragStart(shapeIndex, vertexIndex)}
-                        onDragMove={handleCustomVertexDrag}
-                        onDragEnd={handleCustomVertexDragEnd}
                       />
                     ))}
-                  </React.Fragment>
+                  </Group>
                 ))}
               </Layer>
             )}
