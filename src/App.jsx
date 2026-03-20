@@ -1056,13 +1056,10 @@ function App() {
         {/* Options Panel - positioned to the right of area box, only visible when perimeter exists */}
         {perimeterOverlay && (
           <div className="absolute top-0 left-[28rem] z-10 m-0">
-            <div 
-              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-4 self-start"
-              style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
-            >
+            <div className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-52 flex flex-col gap-4 self-start">
               <div>
                 <h2 className="text-sm font-semibold text-slate-700 mb-3">Options</h2>
-                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-2.5">
+                <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-sm flex flex-col gap-3">
                   
                   {/* Show Side Lengths Toggle */}
                   <div className="flex items-center justify-between">
@@ -1124,7 +1121,7 @@ function App() {
 
         {/* Measurement Tool Buttons - positioned to the right of options panel, only visible when area is calculated */}
         {area > 0 && (
-          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 12rem + 0.625rem)' }}>
+          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 13rem + 0.625rem)' }}>
             {/* Line Tool Button */}
             <button
               onClick={handleLineToolToggle}
