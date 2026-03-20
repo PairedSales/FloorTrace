@@ -19,11 +19,17 @@ const MobileUI = forwardRef(({
   handleCanvasClick,
   unit,
   lineToolActive,
-  measurementLine,
-  setMeasurementLine,
+  measurementLines,
+  currentMeasurementLine,
+  onMeasurementLineUpdate,
+  onAddMeasurementLine,
+  onMeasurementLinesChange,
   drawAreaActive,
-  customShape,
-  setCustomShape,
+  customShapes,
+  currentCustomShape,
+  onCustomShapeUpdate,
+  onAddCustomShape,
+  onCustomShapesChange,
   area,
   lineData,
   cornerPoints,
@@ -229,11 +235,17 @@ const MobileUI = forwardRef(({
           onCanvasClick={handleCanvasClick}
           unit={unit}
           lineToolActive={lineToolActive}
-          measurementLine={measurementLine}
-          onMeasurementLineUpdate={setMeasurementLine}
+          measurementLines={measurementLines}
+          currentMeasurementLine={currentMeasurementLine}
+          onMeasurementLineUpdate={onMeasurementLineUpdate}
+          onAddMeasurementLine={onAddMeasurementLine}
+          onMeasurementLinesChange={onMeasurementLinesChange}
           drawAreaActive={drawAreaActive}
-          customShape={customShape}
-          onCustomShapeUpdate={setCustomShape}
+          customShapes={customShapes}
+          currentCustomShape={currentCustomShape}
+          onCustomShapeUpdate={onCustomShapeUpdate}
+          onAddCustomShape={onAddCustomShape}
+          onCustomShapesChange={onCustomShapesChange}
           isMobile={true}
           lineData={lineData}
           cornerPoints={cornerPoints}
