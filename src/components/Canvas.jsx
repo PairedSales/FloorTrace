@@ -1,7 +1,26 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-import { createImageSnapAnalyzer } from '../utils/imageSnapper';
+
+const findNearestIntersection = (point, points, threshold) => {
+  if (!point || !points?.length || threshold <= 0) return null;
+
+  let nearest = null;
+  let minDistanceSq = threshold * threshold;
+
+  for (const candidate of points) {
+    if (typeof candidate?.x !== 'number' || typeof candidate?.y !== 'number') continue;
+    const dx = candidate.x - point.x;
+    const dy = candidate.y - point.y;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq <= minDistanceSq) {
+      minDistanceSq = distanceSq;
+      nearest = candidate;
+    }
+  }
+
+  return nearest;
+};
 
 const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, threshold) => {
   if (!vertices?.length || !snappedPoint || threshold <= 0) return vertices;
