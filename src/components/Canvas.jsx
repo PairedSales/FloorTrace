@@ -1587,126 +1587,127 @@ const Canvas = forwardRef(({
               </>
             )}
             
-            {/* Measurement Lines */}
-            {measurementLines && measurementLines.length > 0 && (
-              <Layer>
-                {measurementLines.map((line, index) => (
-                  <Group
-                    key={`line-${index}`}
-                    x={0}
-                    y={0}
-                    draggable
-                    onClick={(e) => handleMeasurementLineSelect(index, e)}
-                    onTap={(e) => handleMeasurementLineSelect(index, e)}
-                    onDragStart={(e) => handleMeasurementLineSelect(index, e)}
-                    onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
-                  >
-                    <Line
-                      name="measurement-line"
-                      points={[line.start.x, line.start.y, line.end.x, line.end.y]}
-                      stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
-                      strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
-                      hitStrokeWidth={16 / scale}
-                    />
-                    <Text
-                      name="measurement-line"
-                      x={(line.start.x + line.end.x) / 2 + 5 / scale}
-                      y={(line.start.y + line.end.y) / 2}
-                      text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
-                      fontSize={12 / scale}
-                      fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
-                      fontStyle="bold"
-                      shadowColor="black"
-                      shadowBlur={1}
-                      shadowOffsetX={1 / scale}
-                      shadowOffsetY={1 / scale}
-                    />
-                  </Group>
-                ))}
-              </Layer>
-            )}
-
-            {/* Measurement Line Preview */}
-            {lineToolActive && currentMeasurementLine && (
-              <Layer>
-                <Line
-                  points={[
-                    currentMeasurementLine.start.x,
-                    currentMeasurementLine.start.y,
-                    currentMeasurementLine.end.x,
-                    currentMeasurementLine.end.y
-                  ]}
-                  stroke="#ff00ff"
-                  strokeWidth={2 / scale}
-                  dash={[6 / scale, 3 / scale]}
-                  opacity={0.7}
-                />
-              </Layer>
-            )}
-            
-            {/* Custom Areas */}
-            {customShapes && customShapes.length > 0 && (
-              <Layer>
-                {customShapes.map((shape, shapeIndex) => (
-                  <Group
-                    key={`shape-${shapeIndex}`}
-                    x={0}
-                    y={0}
-                    draggable={shape.closed}
-                    onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
-                  >
-                    <Line
-                      name="custom-shape"
-                      points={shape.vertices.flatMap(v => [v.x, v.y])}
-                      closed={shape.closed}
-                      fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
-                      stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
-                      strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
-                    />
-                    {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
-                      <Circle
-                        key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
-                        name="custom-shape"
-                        x={vertex.x}
-                        y={vertex.y}
-                        radius={5 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
-                        stroke="#000000"
-                        strokeWidth={1 / scale}
-                      />
-                    ))}
-                  </Group>
-                ))}
-              </Layer>
-            )}
-            
-            {/* Custom Shape (Draw Area Tool) Preview */}
-            {drawAreaActive && currentCustomShape && currentMousePos && (
-              <Layer>
-                <Line
-                  points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
-                  closed={false}
-                  stroke="#00ff00"
-                  strokeWidth={2 / scale}
-                  dash={[6 / scale, 3 / scale]}
-                />
-                {currentCustomShape.vertices.map((vertex, index) => (
-                  <Circle
-                    key={`current-shape-vertex-${index}`}
-                    x={vertex.x}
-                    y={vertex.y}
-                    radius={5 / scale}
-                    fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
-                    stroke="#000000"
-                    strokeWidth={1 / scale}
-                  />
-                ))}
-              </Layer>
-            )}
           </Layer>
+
+          {/* Measurement Lines */}
+          {measurementLines && measurementLines.length > 0 && (
+            <Layer>
+              {measurementLines.map((line, index) => (
+                <Group
+                  key={`line-${index}`}
+                  x={0}
+                  y={0}
+                  draggable
+                  onClick={(e) => handleMeasurementLineSelect(index, e)}
+                  onTap={(e) => handleMeasurementLineSelect(index, e)}
+                  onDragStart={(e) => handleMeasurementLineSelect(index, e)}
+                  onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
+                >
+                  <Line
+                    name="measurement-line"
+                    points={[line.start.x, line.start.y, line.end.x, line.end.y]}
+                    stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                    strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
+                    hitStrokeWidth={16 / scale}
+                  />
+                  <Text
+                    name="measurement-line"
+                    x={(line.start.x + line.end.x) / 2 + 5 / scale}
+                    y={(line.start.y + line.end.y) / 2}
+                    text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
+                    fontSize={12 / scale}
+                    fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                    fontStyle="bold"
+                    shadowColor="black"
+                    shadowBlur={1}
+                    shadowOffsetX={1 / scale}
+                    shadowOffsetY={1 / scale}
+                  />
+                </Group>
+              ))}
+            </Layer>
+          )}
+
+          {/* Measurement Line Preview */}
+          {lineToolActive && currentMeasurementLine && (
+            <Layer>
+              <Line
+                points={[
+                  currentMeasurementLine.start.x,
+                  currentMeasurementLine.start.y,
+                  currentMeasurementLine.end.x,
+                  currentMeasurementLine.end.y
+                ]}
+                stroke="#ff00ff"
+                strokeWidth={2 / scale}
+                dash={[6 / scale, 3 / scale]}
+                opacity={0.7}
+              />
+            </Layer>
+          )}
+          
+          {/* Custom Areas */}
+          {customShapes && customShapes.length > 0 && (
+            <Layer>
+              {customShapes.map((shape, shapeIndex) => (
+                <Group
+                  key={`shape-${shapeIndex}`}
+                  x={0}
+                  y={0}
+                  draggable={shape.closed}
+                  onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
+                >
+                  <Line
+                    name="custom-shape"
+                    points={shape.vertices.flatMap(v => [v.x, v.y])}
+                    closed={shape.closed}
+                    fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
+                    stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                    strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
+                  />
+                  {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
+                    <Circle
+                      key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
+                      name="custom-shape"
+                      x={vertex.x}
+                      y={vertex.y}
+                      radius={5 / scale}
+                      fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                      stroke="#000000"
+                      strokeWidth={1 / scale}
+                    />
+                  ))}
+                </Group>
+              ))}
+            </Layer>
+          )}
+          
+          {/* Custom Shape (Draw Area Tool) Preview */}
+          {drawAreaActive && currentCustomShape && currentMousePos && (
+            <Layer>
+              <Line
+                points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
+                closed={false}
+                stroke="#00ff00"
+                strokeWidth={2 / scale}
+                dash={[6 / scale, 3 / scale]}
+              />
+              {currentCustomShape.vertices.map((vertex, index) => (
+                <Circle
+                  key={`current-shape-vertex-${index}`}
+                  x={vertex.x}
+                  y={vertex.y}
+                  radius={5 / scale}
+                  fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
+                  stroke="#000000"
+                  strokeWidth={1 / scale}
+                />
+              ))}
+            </Layer>
+          )}
         </Stage>
       )}
     </div>
