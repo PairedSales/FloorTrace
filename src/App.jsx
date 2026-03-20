@@ -1057,19 +1057,19 @@ function App() {
         {perimeterOverlay && (
           <div className="absolute top-0 left-[28rem] z-10 m-0">
             <div 
-              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-56 flex flex-col gap-4 self-start"
+              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-4 self-start"
               style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
             >
               <div>
                 <h2 className="text-sm font-semibold text-slate-700 mb-3">Options</h2>
-                <div className="bg-white border border-slate-200 rounded-lg px-4 py-3.5 shadow-sm flex flex-col gap-2.5">
+                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-2.5">
                   
                   {/* Show Side Lengths Toggle */}
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex-1 pr-2 text-xs font-medium text-slate-700 whitespace-nowrap">Show Lengths</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-700">Show Lengths</span>
                     <button
                       onClick={() => setShowSideLengths(!showSideLengths)}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
                         showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
                       }`}
                     >
@@ -1082,11 +1082,11 @@ function App() {
                   </div>
 
                   {/* Exterior Walls Toggle */}
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex-1 pr-2 text-xs font-medium text-slate-700 whitespace-nowrap">Exterior Walls</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-700">Exterior Walls</span>
                     <button
                       onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
                         !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
                       }`}
                     >
@@ -1100,11 +1100,11 @@ function App() {
 
 
                   {/* Auto Snap Toggle */}
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex-1 pr-2 text-xs font-medium text-slate-700 whitespace-nowrap">Auto Snap</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-700">Auto Snap</span>
                     <button
                       onClick={() => setAutoSnapEnabled(!autoSnapEnabled)}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
                         autoSnapEnabled ? 'bg-slate-700' : 'bg-slate-300'
                       }`}
                     >
@@ -1124,7 +1124,7 @@ function App() {
 
         {/* Measurement Tool Buttons - positioned to the right of options panel, only visible when area is calculated */}
         {area > 0 && (
-          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 14rem + 0.625rem)' }}>
+          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 12rem + 0.625rem)' }}>
             {/* Line Tool Button */}
             <button
               onClick={handleLineToolToggle}
