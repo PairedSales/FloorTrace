@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
 
@@ -39,7 +39,8 @@ const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, thres
   });
 };
 
-const SNAP_TO_INTERSECTION_DISTANCE = 10;
+const VERTEX_SCAN_RADIUS = 15;
+const ROOM_EDGE_SCAN_RADIUS = 12;
 const SECONDARY_ALIGNMENT_DISTANCE = 20;
 
 const Canvas = forwardRef(({
@@ -70,8 +71,6 @@ const Canvas = forwardRef(({
   onAddCustomShape,
   onCustomShapesChange,
   isMobile,
-  lineData,
-  cornerPoints,
   perimeterVertices,
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
@@ -104,6 +103,7 @@ const Canvas = forwardRef(({
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   const visualSnapPositionRef = useRef(null); // Stores the visual snap position during drag (like .NET's _visualSnapPosition)
+  const imageSnapAnalyzerRef = useRef(null);
   
   // Mobile touch gesture state
   const [longPressTimer, setLongPressTimer] = useState(null);
@@ -124,27 +124,7 @@ const Canvas = forwardRef(({
     }
   }, [customShapes, selectedCustomShapeIndex]);
 
-  // Use corner points for snapping, extract lines for room overlay snapping
-  const { horizontalLines, verticalLines, snapPoints } = useMemo(() => {
-    // Extract line positions for room overlay edge snapping
-    const hLines = lineData?.horizontal ? lineData.horizontal.map(line => line.center) : [];
-    const vLines = lineData?.vertical ? lineData.vertical.map(line => line.center) : [];
-    
-    // Use corner points for vertex snapping
-    const corners = cornerPoints || [];
-    
-    if (corners.length > 0) {
-      console.log(`Snapping: Using ${corners.length} detected corner points`);
-    } else {
-      console.log('Snapping: No corner points available');
-    }
 
-    return {
-      horizontalLines: hLines,
-      verticalLines: vLines,
-      snapPoints: corners
-    };
-  }, [lineData, cornerPoints]);
 
   // Fit to window function
   const fitToWindow = useCallback(() => {
@@ -241,6 +221,111 @@ const Canvas = forwardRef(({
     };
     img.src = image;
   }, [image]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAnalyzer = async () => {
+      if (!image) {
+        imageSnapAnalyzerRef.current = null;
+        return;
+      }
+
+      try {
+        const analyzer = await createImageSnapAnalyzer(image);
+        if (!cancelled) {
+          imageSnapAnalyzerRef.current = analyzer;
+        }
+      } catch (error) {
+        console.error('Failed to prepare image snap analyzer:', error);
+        if (!cancelled) {
+          imageSnapAnalyzerRef.current = null;
+        }
+      }
+    };
+
+    loadAnalyzer();
+
+    return () => {
+      cancelled = true;
+      imageSnapAnalyzerRef.current = null;
+    };
+  }, [image]);
+
+  const findVertexSnapPoint = useCallback((point) => {
+    if (!autoSnapEnabled || !point) {
+      return null;
+    }
+
+    const analyzer = imageSnapAnalyzerRef.current;
+    if (!analyzer) {
+      return null;
+    }
+
+    const snappedPoint = analyzer.findVertexSnap(point, { searchRadius: VERTEX_SCAN_RADIUS });
+    if (!snappedPoint) {
+      return null;
+    }
+
+    const dx = snappedPoint.x - point.x;
+    const dy = snappedPoint.y - point.y;
+    const distance = Math.sqrt((dx * dx) + (dy * dy));
+    return distance <= VERTEX_SCAN_RADIUS ? snappedPoint : null;
+  }, [autoSnapEnabled]);
+
+  const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = ROOM_EDGE_SCAN_RADIUS) => {
+    if (!autoSnapEnabled) {
+      return null;
+    }
+
+    const analyzer = imageSnapAnalyzerRef.current;
+    if (!analyzer) {
+      return null;
+    }
+
+    return analyzer.findVerticalEdge(targetX, y1, y2, { searchRadius });
+  }, [autoSnapEnabled]);
+
+  const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = ROOM_EDGE_SCAN_RADIUS) => {
+    if (!autoSnapEnabled) {
+      return null;
+    }
+
+    const analyzer = imageSnapAnalyzerRef.current;
+    if (!analyzer) {
+      return null;
+    }
+
+    return analyzer.findHorizontalEdge(targetY, x1, x2, { searchRadius });
+  }, [autoSnapEnabled]);
+
+  const snapRoomOverlayPosition = useCallback((overlay) => {
+    const width = overlay.x2 - overlay.x1;
+    const height = overlay.y2 - overlay.y1;
+
+    const leftSnap = findVerticalSnap(overlay.x1, overlay.y1, overlay.y2);
+    const rightSnap = findVerticalSnap(overlay.x2, overlay.y1, overlay.y2);
+    const topSnap = findHorizontalSnap(overlay.y1, overlay.x1, overlay.x2);
+    const bottomSnap = findHorizontalSnap(overlay.y2, overlay.x1, overlay.x2);
+
+    const snapDeltaX = [
+      leftSnap !== null ? leftSnap - overlay.x1 : null,
+      rightSnap !== null ? rightSnap - overlay.x2 : null,
+    ].filter((value) => value !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
+
+    const snapDeltaY = [
+      topSnap !== null ? topSnap - overlay.y1 : null,
+      bottomSnap !== null ? bottomSnap - overlay.y2 : null,
+    ].filter((value) => value !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
+
+    return {
+      x1: overlay.x1 + snapDeltaX,
+      y1: overlay.y1 + snapDeltaY,
+      x2: overlay.x1 + snapDeltaX + width,
+      y2: overlay.y1 + snapDeltaY + height,
+    };
+  }, [findHorizontalSnap, findVerticalSnap]);
   useEffect(() => {
     if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
       // Small delay to ensure the layout is stable
@@ -363,11 +448,7 @@ const Canvas = forwardRef(({
     
     // Apply snapping to intersection points for visual feedback
     const snappedPoint = autoSnapEnabled
-      ? findNearestIntersection(
-        canvasPos,
-        snapPoints,
-        SNAP_TO_INTERSECTION_DISTANCE
-      )
+      ? findVertexSnapPoint(canvasPos)
       : null;
     
     // Use snapped position if available, otherwise use raw position
@@ -400,11 +481,7 @@ const Canvas = forwardRef(({
     
     // Apply snapping to intersection points
     const snappedPoint = autoSnapEnabled
-      ? findNearestIntersection(
-        currentVertex,
-        snapPoints,
-        SNAP_TO_INTERSECTION_DISTANCE
-      )
+      ? findVertexSnapPoint(currentVertex)
       : null;
     
     // Use snapped position if available, otherwise use raw position
@@ -538,11 +615,7 @@ const Canvas = forwardRef(({
     
     // Apply snapping to corner points
     const snappedPoint = autoSnapEnabled
-      ? findNearestIntersection(
-        clickPoint,
-        snapPoints,
-        SNAP_TO_INTERSECTION_DISTANCE
-      )
+      ? findVertexSnapPoint(clickPoint)
       : null;
     
     // Use snapped position if available, otherwise use raw position
@@ -583,25 +656,7 @@ const Canvas = forwardRef(({
     onPerimeterUpdate(newVertices, true); // Save action for undo
   };
 
-  // Helper function to snap a value to the nearest line within threshold
-  const snapToNearestLine = (value, lines, threshold) => {
-    if (!lines || lines.length === 0) {
-      return null;
-    }
-    
-    let nearestLine = null;
-    let minDistance = Number.MAX_VALUE;
-    
-    for (const line of lines) {
-      const distance = Math.abs(line - value);
-      if (distance < minDistance && distance <= threshold) {
-        minDistance = distance;
-        nearestLine = line;
-      }
-    }
-    
-    return nearestLine;
-  };
+
 
   // Helper function to calculate distance from point to line segment
   const pointToLineDistance = (point, lineStart, lineEnd) => {
@@ -652,59 +707,47 @@ const Canvas = forwardRef(({
       }
     }
     
-    // Handle room overlay dragging
+    // Handle room overlay dragging with live edge scans.
     if (draggingRoom && roomStart) {
       const deltaX = mousePoint.x - roomStart.x;
       const deltaY = mousePoint.y - roomStart.y;
       
-      const newOverlay = {
+      const movedOverlay = {
         x1: roomOverlay.x1 + deltaX,
         y1: roomOverlay.y1 + deltaY,
         x2: roomOverlay.x2 + deltaX,
         y2: roomOverlay.y2 + deltaY
       };
       
+      const newOverlay = autoSnapEnabled ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
       onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
       setRoomStart(mousePoint);
       return;
     }
     
-    // Handle room corner dragging with snapping
+    // Handle room corner dragging with local edge scans while resizing.
     if (draggingRoomCorner && roomOverlay) {
-      const snapThreshold = 5.0; // pixels, matching .NET implementation
       const newOverlay = { ...roomOverlay };
       
       if (draggingRoomCorner === 'tl') {
-        // Snap left edge to vertical lines
-        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
+        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y);
+        const snappedY = findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2);
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap top edge to horizontal lines
-        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        // Snap right edge to vertical lines
-        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
+        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y);
+        const snappedY = findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x);
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap top edge to horizontal lines
-        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        // Snap left edge to vertical lines
-        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
+        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y);
+        const snappedY = findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2);
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap bottom edge to horizontal lines
-        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        // Snap right edge to vertical lines
-        const snappedX = autoSnapEnabled ? snapToNearestLine(mousePoint.x, verticalLines, snapThreshold) : null;
+        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y);
+        const snappedY = findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x);
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        
-        // Snap bottom edge to horizontal lines
-        const snappedY = autoSnapEnabled ? snapToNearestLine(mousePoint.y, horizontalLines, snapThreshold) : null;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
       
@@ -861,11 +904,7 @@ const Canvas = forwardRef(({
         
         // Apply snapping to corner points
         const snappedPoint = autoSnapEnabled
-          ? findNearestIntersection(
-            clickPoint,
-            snapPoints,
-            SNAP_TO_INTERSECTION_DISTANCE
-          )
+          ? findVertexSnapPoint(clickPoint)
           : null;
         
         // Use snapped position if available, otherwise use raw position
@@ -1010,11 +1049,7 @@ const Canvas = forwardRef(({
       const timer = setTimeout(() => {
         // Apply snapping to corner points
         const snappedPoint = autoSnapEnabled
-          ? findNearestIntersection(
-            canvasPos,
-            snapPoints,
-            SNAP_TO_INTERSECTION_DISTANCE
-          )
+          ? findVertexSnapPoint(canvasPos)
           : null;
         
         // Use snapped position if available, otherwise use raw position

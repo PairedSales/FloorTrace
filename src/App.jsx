@@ -22,8 +22,6 @@ function App() {
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [autoSnapEnabled, setAutoSnapEnabled] = useState(true);
-  const [lineData, setLineData] = useState(null); // Store line detection data
-  const [cornerPoints, setCornerPoints] = useState([]); // Store detected corner points for snapping
   const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
@@ -116,7 +114,6 @@ function App() {
     setScale(1);
     setDetectedDimensions([]);
     setMode('normal');
-    setLineData(null);
     setManualEntryMode(false);
     setOcrFailed(false);
     setLineToolActive(false);
@@ -606,8 +603,6 @@ function App() {
             setShowSideLengths(savedState.showSideLengths ?? false);
             setUseInteriorWalls(savedState.useInteriorWalls ?? true);
             setAutoSnapEnabled(savedState.autoSnapEnabled ?? true);
-            setLineData(savedState.lineData ?? null);
-            setCornerPoints(savedState.cornerPoints ?? []);
             setMobileSheetOpen(savedState.mobileSheetOpen ?? true);
             setManualEntryMode(savedState.manualEntryMode ?? false);
             setOcrFailed(savedState.ocrFailed ?? false);
@@ -741,8 +736,6 @@ function App() {
       showSideLengths,
       useInteriorWalls,
       autoSnapEnabled,
-      lineData,
-      cornerPoints,
       mobileSheetOpen,
       manualEntryMode,
       ocrFailed,
@@ -755,7 +748,7 @@ function App() {
       currentCustomShape,
       perimeterVertices
     });
-  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, lineData, cornerPoints, mobileSheetOpen, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, mobileSheetOpen, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -862,8 +855,6 @@ function App() {
         onAddCustomShape={handleAddCustomShape}
         onCustomShapesChange={handleCustomShapesChange}
         area={area}
-        lineData={lineData}
-        cornerPoints={cornerPoints}
         mobileSheetOpen={mobileSheetOpen}
         setMobileSheetOpen={setMobileSheetOpen}
         fileInputRef={fileInputRef}
@@ -994,8 +985,6 @@ function App() {
           onAddCustomShape={handleAddCustomShape}
           onCustomShapesChange={handleCustomShapesChange}
           isMobile={false}
-          lineData={lineData}
-          cornerPoints={cornerPoints}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onClosePerimeter={handleClosePerimeter}
