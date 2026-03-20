@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
+import { calculateArea, getCentroid } from '../utils/areaCalculator';
 
 const findNearestIntersection = (point, points, threshold) => {
   if (!point || !points?.length || threshold <= 0) return null;
@@ -1295,7 +1296,7 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !lineToolActive && !drawAreaActive && !(roomOverlay && !perimeterOverlay)}
+          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !(roomOverlay && !perimeterOverlay)}
           onDragStart={handleStageDragStart}
           onDragEnd={handleStageDragEnd}
           onClick={handleStageClick}
@@ -1587,67 +1588,70 @@ const Canvas = forwardRef(({
               </>
             )}
             
-            {/* Measurement Lines */}
-            {measurementLines && measurementLines.length > 0 && (
-              <Layer>
-                {measurementLines.map((line, index) => (
-                  <Group
-                    key={`line-${index}`}
-                    x={0}
-                    y={0}
-                    draggable
-                    onClick={(e) => handleMeasurementLineSelect(index, e)}
-                    onTap={(e) => handleMeasurementLineSelect(index, e)}
-                    onDragStart={(e) => handleMeasurementLineSelect(index, e)}
-                    onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
-                  >
-                    <Line
-                      name="measurement-line"
-                      points={[line.start.x, line.start.y, line.end.x, line.end.y]}
-                      stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
-                      strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
-                      hitStrokeWidth={16 / scale}
-                    />
-                    <Text
-                      name="measurement-line"
-                      x={(line.start.x + line.end.x) / 2 + 5 / scale}
-                      y={(line.start.y + line.end.y) / 2}
-                      text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
-                      fontSize={12 / scale}
-                      fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
-                      fontStyle="bold"
-                      shadowColor="black"
-                      shadowBlur={1}
-                      shadowOffsetX={1 / scale}
-                      shadowOffsetY={1 / scale}
-                    />
-                  </Group>
-                ))}
-              </Layer>
-            )}
+          </Layer>
 
-            {/* Measurement Line Preview */}
-            {lineToolActive && currentMeasurementLine && (
-              <Layer>
-                <Line
-                  points={[
-                    currentMeasurementLine.start.x,
-                    currentMeasurementLine.start.y,
-                    currentMeasurementLine.end.x,
-                    currentMeasurementLine.end.y
-                  ]}
-                  stroke="#ff00ff"
-                  strokeWidth={2 / scale}
-                  dash={[6 / scale, 3 / scale]}
-                  opacity={0.7}
-                />
-              </Layer>
-            )}
-            
-            {/* Custom Areas */}
-            {customShapes && customShapes.length > 0 && (
-              <Layer>
-                {customShapes.map((shape, shapeIndex) => (
+          {/* Measurement Lines */}
+          {measurementLines && measurementLines.length > 0 && (
+            <Layer>
+              {measurementLines.map((line, index) => (
+                <Group
+                  key={`line-${index}`}
+                  x={0}
+                  y={0}
+                  draggable
+                  onClick={(e) => handleMeasurementLineSelect(index, e)}
+                  onTap={(e) => handleMeasurementLineSelect(index, e)}
+                  onDragStart={(e) => handleMeasurementLineSelect(index, e)}
+                  onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
+                >
+                  <Line
+                    name="measurement-line"
+                    points={[line.start.x, line.start.y, line.end.x, line.end.y]}
+                    stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                    strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
+                    hitStrokeWidth={16 / scale}
+                  />
+                  <Text
+                    name="measurement-line"
+                    x={(line.start.x + line.end.x) / 2 + 5 / scale}
+                    y={(line.start.y + line.end.y) / 2}
+                    text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
+                    fontSize={12 / scale}
+                    fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                    fontStyle="bold"
+                  />
+                </Group>
+              ))}
+            </Layer>
+          )}
+
+          {/* Measurement Line Preview */}
+          {lineToolActive && currentMeasurementLine && (
+            <Layer>
+              <Line
+                points={[
+                  currentMeasurementLine.start.x,
+                  currentMeasurementLine.start.y,
+                  currentMeasurementLine.end.x,
+                  currentMeasurementLine.end.y
+                ]}
+                stroke="#ff00ff"
+                strokeWidth={2 / scale}
+                dash={[6 / scale, 3 / scale]}
+                opacity={0.7}
+              />
+            </Layer>
+          )}
+          
+          {/* Custom Areas */}
+          {customShapes && customShapes.length > 0 && (
+            <Layer>
+              {customShapes.map((shape, shapeIndex) => {
+                const centroid = shape.closed ? getCentroid(shape.vertices) : null;
+                const shapeArea = shape.closed ? calculateArea(shape.vertices, pixelsPerFoot) : 0;
+                const areaText = `${Math.round(shapeArea).toLocaleString()} ft²`;
+
+                return (
                   <Group
                     key={`shape-${shapeIndex}`}
                     x={0}
@@ -1678,35 +1682,50 @@ const Canvas = forwardRef(({
                         strokeWidth={1 / scale}
                       />
                     ))}
+                    {shape.closed && centroid && (
+                      <Text
+                        name="custom-shape"
+                        x={centroid.x}
+                        y={centroid.y}
+                        text={areaText}
+                        fontSize={14 / scale}
+                        fill={selectedCustomShapeIndex === shapeIndex ? '#14532d' : '#166534'}
+                        fontStyle="bold"
+                        align="center"
+                        verticalAlign="middle"
+                        offsetX={(areaText.length * 4) / scale}
+                        offsetY={7 / scale}
+                      />
+                    )}
                   </Group>
-                ))}
-              </Layer>
-            )}
-            
-            {/* Custom Shape (Draw Area Tool) Preview */}
-            {drawAreaActive && currentCustomShape && currentMousePos && (
-              <Layer>
-                <Line
-                  points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
-                  closed={false}
-                  stroke="#00ff00"
-                  strokeWidth={2 / scale}
-                  dash={[6 / scale, 3 / scale]}
+                );
+              })}
+            </Layer>
+          )}
+          
+          {/* Custom Shape (Draw Area Tool) Preview */}
+          {drawAreaActive && currentCustomShape && currentMousePos && (
+            <Layer>
+              <Line
+                points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
+                closed={false}
+                stroke="#00ff00"
+                strokeWidth={2 / scale}
+                dash={[6 / scale, 3 / scale]}
+              />
+              {currentCustomShape.vertices.map((vertex, index) => (
+                <Circle
+                  key={`current-shape-vertex-${index}`}
+                  x={vertex.x}
+                  y={vertex.y}
+                  radius={5 / scale}
+                  fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
+                  stroke="#000000"
+                  strokeWidth={1 / scale}
                 />
-                {currentCustomShape.vertices.map((vertex, index) => (
-                  <Circle
-                    key={`current-shape-vertex-${index}`}
-                    x={vertex.x}
-                    y={vertex.y}
-                    radius={5 / scale}
-                    fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
-                    stroke="#000000"
-                    strokeWidth={1 / scale}
-                  />
-                ))}
-              </Layer>
-            )}
-          </Layer>
+              ))}
+            </Layer>
+          )}
         </Stage>
       )}
     </div>
