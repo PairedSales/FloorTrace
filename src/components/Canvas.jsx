@@ -1619,6 +1619,10 @@ const Canvas = forwardRef(({
                     fontSize={12 / scale}
                     fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
                     fontStyle="bold"
+                    shadowColor="black"
+                    shadowBlur={1}
+                    shadowOffsetX={1 / scale}
+                    shadowOffsetY={1 / scale}
                   />
                 </Group>
               ))}
@@ -1646,60 +1650,39 @@ const Canvas = forwardRef(({
           {/* Custom Areas */}
           {customShapes && customShapes.length > 0 && (
             <Layer>
-              {customShapes.map((shape, shapeIndex) => {
-                const centroid = shape.closed ? getCentroid(shape.vertices) : null;
-                const shapeArea = shape.closed ? calculateArea(shape.vertices, pixelsPerFoot) : 0;
-                const areaText = `${Math.round(shapeArea).toLocaleString()} ft²`;
-
-                return (
-                  <Group
-                    key={`shape-${shapeIndex}`}
-                    x={0}
-                    y={0}
-                    draggable={shape.closed}
-                    onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                    onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
-                  >
-                    <Line
+              {customShapes.map((shape, shapeIndex) => (
+                <Group
+                  key={`shape-${shapeIndex}`}
+                  x={0}
+                  y={0}
+                  draggable={shape.closed}
+                  onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
+                  onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
+                >
+                  <Line
+                    name="custom-shape"
+                    points={shape.vertices.flatMap(v => [v.x, v.y])}
+                    closed={shape.closed}
+                    fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
+                    stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                    strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
+                  />
+                  {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
+                    <Circle
+                      key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
                       name="custom-shape"
-                      points={shape.vertices.flatMap(v => [v.x, v.y])}
-                      closed={shape.closed}
-                      fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
-                      stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
-                      strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
+                      x={vertex.x}
+                      y={vertex.y}
+                      radius={5 / scale}
+                      fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                      stroke="#000000"
+                      strokeWidth={1 / scale}
                     />
-                    {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
-                      <Circle
-                        key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
-                        name="custom-shape"
-                        x={vertex.x}
-                        y={vertex.y}
-                        radius={5 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
-                        stroke="#000000"
-                        strokeWidth={1 / scale}
-                      />
-                    ))}
-                    {shape.closed && centroid && (
-                      <Text
-                        name="custom-shape"
-                        x={centroid.x}
-                        y={centroid.y}
-                        text={areaText}
-                        fontSize={14 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#14532d' : '#166534'}
-                        fontStyle="bold"
-                        align="center"
-                        verticalAlign="middle"
-                        offsetX={(areaText.length * 4) / scale}
-                        offsetY={7 / scale}
-                      />
-                    )}
-                  </Group>
-                );
-              })}
+                  ))}
+                </Group>
+              ))}
             </Layer>
           )}
           
