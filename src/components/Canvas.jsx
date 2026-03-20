@@ -1,7 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-import { calculateArea, getCentroid } from '../utils/areaCalculator';
 
 const findNearestIntersection = (point, points, threshold) => {
   if (!point || !points?.length || threshold <= 0) return null;
