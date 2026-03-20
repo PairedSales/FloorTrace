@@ -379,6 +379,26 @@ function App() {
     setCurrentCustomShape(null);
   };
 
+  const handleAddMeasurementLine = useCallback((line) => {
+    pushUndoState();
+    setMeasurementLines((prev) => [...prev, line]);
+  }, [pushUndoState]);
+
+  const handleMeasurementLinesChange = useCallback((nextLines) => {
+    pushUndoState();
+    setMeasurementLines(nextLines);
+  }, [pushUndoState]);
+
+  const handleAddCustomShape = useCallback((shape) => {
+    pushUndoState();
+    setCustomShapes((prev) => [...prev, shape]);
+  }, [pushUndoState]);
+
+  const handleCustomShapesChange = useCallback((nextShapes) => {
+    pushUndoState();
+    setCustomShapes(nextShapes);
+  }, [pushUndoState]);
+
   // Handle save image (screenshot entire app)
   const handleSaveImage = async () => {
     try {
@@ -808,12 +828,14 @@ function App() {
         measurementLines={measurementLines}
         currentMeasurementLine={currentMeasurementLine}
         onMeasurementLineUpdate={setCurrentMeasurementLine}
-        onAddMeasurementLine={(line) => { pushUndoState(); setMeasurementLines(prev => [...prev, line]); }}
+        onAddMeasurementLine={handleAddMeasurementLine}
+        onMeasurementLinesChange={handleMeasurementLinesChange}
         drawAreaActive={drawAreaActive}
         customShapes={customShapes}
         currentCustomShape={currentCustomShape}
         onCustomShapeUpdate={setCurrentCustomShape}
-        onAddCustomShape={(shape) => { pushUndoState(); setCustomShapes(prev => [...prev, shape]); }}
+        onAddCustomShape={handleAddCustomShape}
+        onCustomShapesChange={handleCustomShapesChange}
         area={area}
         lineData={lineData}
         cornerPoints={cornerPoints}
@@ -938,12 +960,14 @@ function App() {
           measurementLines={measurementLines}
           currentMeasurementLine={currentMeasurementLine}
           onMeasurementLineUpdate={setCurrentMeasurementLine}
-          onAddMeasurementLine={(line) => { pushUndoState(); setMeasurementLines(prev => [...prev, line]); }}
+          onAddMeasurementLine={handleAddMeasurementLine}
+          onMeasurementLinesChange={handleMeasurementLinesChange}
           drawAreaActive={drawAreaActive}
           customShapes={customShapes}
           currentCustomShape={currentCustomShape}
           onCustomShapeUpdate={setCurrentCustomShape}
-          onAddCustomShape={(shape) => { pushUndoState(); setCustomShapes(prev => [...prev, shape]); }}
+          onAddCustomShape={handleAddCustomShape}
+          onCustomShapesChange={handleCustomShapesChange}
           isMobile={false}
           lineData={lineData}
           cornerPoints={cornerPoints}
