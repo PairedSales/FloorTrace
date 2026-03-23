@@ -70,7 +70,6 @@ const Canvas = forwardRef(({
   onCustomShapeUpdate,
   onAddCustomShape,
   onCustomShapesChange,
-  isMobile,
   perimeterVertices,
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
@@ -104,13 +103,6 @@ const Canvas = forwardRef(({
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   const visualSnapPositionRef = useRef(null); // Stores the visual snap position during drag (like .NET's _visualSnapPosition)
   const imageSnapAnalyzerRef = useRef(null);
-  
-  // Mobile touch gesture state
-  const [longPressTimer, setLongPressTimer] = useState(null);
-  const [touchStartPos, setTouchStartPos] = useState(null);
-  const [showDeleteOption, setShowDeleteOption] = useState(null); // vertex index to show delete option
-  const touchMoveThreshold = 10; // pixels to distinguish tap from drag
-  const longPressDelay = 500; // milliseconds for long press
 
   useEffect(() => {
     if (selectedMeasurementLineIndex !== null && selectedMeasurementLineIndex >= measurementLines.length) {
@@ -508,14 +500,6 @@ const Canvas = forwardRef(({
     // Clean up
     setDraggingVertex(null);
     visualSnapPositionRef.current = null;
-  };
-
-  // Delete perimeter vertex (for mobile)
-  const deletePerimeterVertex = (index) => {
-    if (!perimeterOverlay || perimeterOverlay.vertices.length <= 3) return;
-    const newVertices = perimeterOverlay.vertices.filter((_, i) => i !== index);
-    onPerimeterUpdate(newVertices);
-    setShowDeleteOption(null);
   };
 
   const handleMeasurementLineSelect = (index, e) => {
@@ -1003,137 +987,9 @@ const Canvas = forwardRef(({
   };
   
 
-  // Mobile touch handlers
-  const handleTouchStart = (e) => {
-    if (!isMobile) return;
-    
-    const stage = e.target.getStage();
-    if (!stage) return;
-    
-    const canvasPos = getCanvasCoordinates(stage);
-    
-    setTouchStartPos(canvasPos);
-    
-    // Check if touching a vertex (for long press delete)
-    const targetType = e.target.getType();
-    
-    // Dismiss delete option if tapping elsewhere (not on delete button or vertex)
-    if (showDeleteOption !== null && targetType !== 'Circle' && targetType !== 'Text') {
-      setShowDeleteOption(null);
-      return;
-    }
-    
-    if (targetType === 'Circle' && perimeterOverlay) {
-      // Find which vertex was touched
-      const vertices = perimeterOverlay.vertices;
-      for (let i = 0; i < vertices.length; i++) {
-        const vertex = vertices[i];
-        const dx = canvasPos.x - vertex.x;
-        const dy = canvasPos.y - vertex.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance < 15 / scaleRef.current) {
-          // Start long press timer for delete
-          const timer = setTimeout(() => {
-            setShowDeleteOption(i);
-          }, longPressDelay);
-          setLongPressTimer(timer);
-          return;
-        }
-      }
-    }
-    
-    // Check if touching canvas/image for long press to add vertex
-    if ((targetType === 'Stage' || targetType === 'Image' || targetType === 'Line') && 
-        perimeterOverlay && !lineToolActive && !drawAreaActive && !manualEntryMode) {
-      const timer = setTimeout(() => {
-        // Apply snapping to corner points
-        const snappedPoint = autoSnapEnabled
-          ? findVertexSnapPoint(canvasPos)
-          : null;
-        
-        // Use snapped position if available, otherwise use raw position
-        const finalPoint = snappedPoint || canvasPos;
-        
-        // Add vertex at touch position
-        const vertices = perimeterOverlay.vertices;
-        let closestEdgeIndex = 0;
-        let minDistance = Infinity;
-        
-        for (let i = 0; i < vertices.length; i++) {
-          const v1 = vertices[i];
-          const v2 = vertices[(i + 1) % vertices.length];
-          const distance = pointToLineDistance(canvasPos, v1, v2);
-          
-          if (distance < minDistance) {
-            minDistance = distance;
-            closestEdgeIndex = i;
-          }
-        }
-        
-        let newVertices = [...vertices];
-        newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-        
-        // Apply secondary alignment to nearby vertices if snapped
-        if (snappedPoint) {
-          newVertices = applySecondaryAlignment(
-            newVertices,
-            closestEdgeIndex + 1,
-            finalPoint,
-            SECONDARY_ALIGNMENT_DISTANCE
-          );
-        }
-        
-        onPerimeterUpdate(newVertices);
-        
-        // Provide haptic feedback if available
-        if (navigator.vibrate) {
-          navigator.vibrate(50);
-        }
-      }, longPressDelay);
-      setLongPressTimer(timer);
-    }
-  };
-  
-  const handleTouchMove = (e) => {
-    if (!isMobile) return;
-    
-    const stage = e.target.getStage();
-    if (!stage) return;
-    
-    const canvasPos = getCanvasCoordinates(stage);
-    
-    // Cancel long press if moved too much
-    if (longPressTimer && touchStartPos) {
-      const dx = canvasPos.x - touchStartPos.x;
-      const dy = canvasPos.y - touchStartPos.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance > touchMoveThreshold / scaleRef.current) {
-        clearTimeout(longPressTimer);
-        setLongPressTimer(null);
-      }
-    }
-  };
-  
-  const handleTouchEnd = () => {
-    if (!isMobile) return;
-    
-    // Clear long press timer
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      setLongPressTimer(null);
-    }
-    
-    setTouchStartPos(null);
-  };
-  
   // Clean up timers on unmount
   useEffect(() => {
     return () => {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-      }
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
       }
@@ -1144,7 +1000,7 @@ const Canvas = forwardRef(({
         clearTimeout(rightClickTimeoutRef.current);
       }
     };
-  }, [longPressTimer]);
+  }, []);
 
   // Handle zoom
   const handleWheel = (e) => {
@@ -1303,7 +1159,7 @@ const Canvas = forwardRef(({
 
   return (
     <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
-      {!image && !isProcessing && !isMobile && (
+      {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <p className="text-xl text-slate-600 font-medium">
@@ -1340,9 +1196,6 @@ const Canvas = forwardRef(({
           onMouseUp={handleStageMouseUp}
           onDblClick={handleStageDoubleClick}
           onDblTap={handleStageDoubleClick}
-          onTouchStart={isMobile ? handleTouchStart : undefined}
-          onTouchMove={isMobile ? handleTouchMove : undefined}
-          onTouchEnd={isMobile ? handleTouchEnd : undefined}
           style={{ cursor: 'default' }}
         >
           <Layer>
@@ -1380,7 +1233,6 @@ const Canvas = forwardRef(({
                   strokeWidth={2 / scale}
                   fill="rgba(16, 185, 129, 0.15)"
                   onMouseDown={handleRoomMouseDown}
-                  onTouchStart={isMobile ? handleRoomMouseDown : undefined}
                 />
                 
                 {/* Room Corner Handles */}
@@ -1395,12 +1247,11 @@ const Canvas = forwardRef(({
                       key={i}
                       x={handle.x}
                       y={handle.y}
-                      radius={isMobile ? 10 / scale : 5 / scale}
+                      radius={5 / scale}
                       fill="#10b981"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
-                      onTouchStart={isMobile ? (e) => handleRoomCornerMouseDown(handle.corner, e) : undefined}
                     />
                   );
                 })}
@@ -1415,7 +1266,7 @@ const Canvas = forwardRef(({
                     <Circle
                       x={vertex.x}
                       y={vertex.y}
-                      radius={isMobile ? 10 / scale : 5 / scale}
+                      radius={5 / scale}
                       fill="#6366f1"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
@@ -1424,36 +1275,6 @@ const Canvas = forwardRef(({
                       onDragMove={(e) => handleVertexDrag(i, e)}
                       onDragEnd={() => handleVertexDragEnd(i)}
                     />
-                    
-                    {/* Delete button for mobile long press */}
-                    {isMobile && showDeleteOption === i && (
-                      <>
-                        <Circle
-                          x={vertex.x}
-                          y={vertex.y - 30 / scale}
-                          radius={15 / scale}
-                          fill="#ef4444"
-                          stroke="#fff"
-                          strokeWidth={2 / scale}
-                          onClick={() => deletePerimeterVertex(i)}
-                          onTap={() => deletePerimeterVertex(i)}
-                        />
-                        <Text
-                          x={vertex.x}
-                          y={vertex.y - 30 / scale}
-                          text="×"
-                          fontSize={20 / scale}
-                          fill="#fff"
-                          fontStyle="bold"
-                          align="center"
-                          verticalAlign="middle"
-                          offsetX={6 / scale}
-                          offsetY={10 / scale}
-                          onClick={() => deletePerimeterVertex(i)}
-                          onTap={() => deletePerimeterVertex(i)}
-                        />
-                      </>
-                    )}
                   </React.Fragment>
                 ))}
 
@@ -1581,7 +1402,7 @@ const Canvas = forwardRef(({
                     <Circle
                       x={vertex.x}
                       y={vertex.y}
-                      radius={isMobile ? 10 / scale : 5 / scale}
+                      radius={5 / scale}
                       fill="#f59e0b"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
