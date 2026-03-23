@@ -1,7 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Canvas from './components/Canvas';
 import Sidebar from './components/Sidebar';
-import MobileUI from './components/MobileUI';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
@@ -22,13 +21,10 @@ function App() {
   const [showSideLengths, setShowSideLengths] = useState(false);
   const [useInteriorWalls, setUseInteriorWalls] = useState(true);
   const [autoSnapEnabled, setAutoSnapEnabled] = useState(true);
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(true);
   const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
   
-  // Detect mobile device on mount (Android/iPhone only)
-  const isMobile = useMemo(() => /Android|iPhone/i.test(navigator.userAgent), []);
   const [sidebarHeight, setSidebarHeight] = useState(0);
   const [lineToolActive, setLineToolActive] = useState(false);
   const [measurementLines, setMeasurementLines] = useState([]); // Array of { start, end }
@@ -603,7 +599,6 @@ function App() {
             setShowSideLengths(savedState.showSideLengths ?? false);
             setUseInteriorWalls(savedState.useInteriorWalls ?? true);
             setAutoSnapEnabled(savedState.autoSnapEnabled ?? true);
-            setMobileSheetOpen(savedState.mobileSheetOpen ?? true);
             setManualEntryMode(savedState.manualEntryMode ?? false);
             setOcrFailed(savedState.ocrFailed ?? false);
             setUnit(savedState.unit ?? 'decimal');
@@ -736,7 +731,6 @@ function App() {
       showSideLengths,
       useInteriorWalls,
       autoSnapEnabled,
-      mobileSheetOpen,
       manualEntryMode,
       ocrFailed,
       unit,
@@ -748,7 +742,7 @@ function App() {
       currentCustomShape,
       perimeterVertices
     });
-  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, mobileSheetOpen, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -822,65 +816,6 @@ function App() {
       observer.disconnect();
     };
   }, [mode, ocrFailed, manualEntryMode, perimeterOverlay]);
-
-  // Render mobile UI if on mobile device
-  if (isMobile) {
-    return (
-      <MobileUI
-        ref={canvasRef}
-        image={image}
-        roomOverlay={roomOverlay}
-        perimeterOverlay={perimeterOverlay}
-        mode={mode}
-        updateRoomOverlay={updateRoomOverlay}
-        updatePerimeterVertices={updatePerimeterVertices}
-        isProcessing={isProcessing}
-        detectedDimensions={detectedDimensions}
-        handleDimensionSelect={handleDimensionSelect}
-        showSideLengths={showSideLengths}
-        scale={scale}
-        manualEntryMode={manualEntryMode}
-        handleCanvasClick={handleCanvasClick}
-        unit={unit}
-        lineToolActive={lineToolActive}
-        measurementLines={measurementLines}
-        currentMeasurementLine={currentMeasurementLine}
-        onMeasurementLineUpdate={setCurrentMeasurementLine}
-        onAddMeasurementLine={handleAddMeasurementLine}
-        onMeasurementLinesChange={handleMeasurementLinesChange}
-        drawAreaActive={drawAreaActive}
-        customShapes={customShapes}
-        currentCustomShape={currentCustomShape}
-        onCustomShapeUpdate={setCurrentCustomShape}
-        onAddCustomShape={handleAddCustomShape}
-        onCustomShapesChange={handleCustomShapesChange}
-        area={area}
-        mobileSheetOpen={mobileSheetOpen}
-        setMobileSheetOpen={setMobileSheetOpen}
-        fileInputRef={fileInputRef}
-        handleFileUpload={handleFileUpload}
-        handleFindRoom={handleFindRoom}
-        handleManualMode={handleManualMode}
-        handleFitToWindow={handleFitToWindow}
-        roomDimensions={roomDimensions}
-        setRoomDimensions={setRoomDimensions}
-        setUnit={setUnit}
-        handleLineToolToggle={handleLineToolToggle}
-        handleDrawAreaToggle={handleDrawAreaToggle}
-        setShowSideLengths={setShowSideLengths}
-        useInteriorWalls={useInteriorWalls}
-        handleInteriorWallToggle={handleInteriorWallToggle}
-        autoSnapEnabled={autoSnapEnabled}
-        setAutoSnapEnabled={setAutoSnapEnabled}
-        handleRestart={handleRestart}
-        perimeterVertices={perimeterVertices}
-        onAddPerimeterVertex={handleAddPerimeterVertex}
-        onRemovePerimeterVertex={handleRemovePerimeterVertex}
-        onUndoRedo={handleUndo}
-        ocrFailed={ocrFailed}
-      />
-    );
-  }
 
   // Desktop UI
   return (
@@ -984,7 +919,6 @@ function App() {
           onCustomShapeUpdate={setCurrentCustomShape}
           onAddCustomShape={handleAddCustomShape}
           onCustomShapesChange={handleCustomShapesChange}
-          isMobile={false}
           perimeterVertices={perimeterVertices}
           onAddPerimeterVertex={handleAddPerimeterVertex}
           onClosePerimeter={handleClosePerimeter}
