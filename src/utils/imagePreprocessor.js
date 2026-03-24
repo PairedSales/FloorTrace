@@ -357,6 +357,91 @@ const floodFill = (binary, visited, width, height, startX, startY) => {
 };
 
 /**
+ * Stretch contrast so the grayscale range maps to [0, 255].
+ * @param {Uint8Array} gray - Grayscale image
+ * @returns {Uint8Array} Contrast-stretched grayscale image
+ */
+export const contrastStretch = (gray) => {
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < gray.length; i++) {
+    if (gray[i] < min) min = gray[i];
+    if (gray[i] > max) max = gray[i];
+  }
+
+  if (max === min) return new Uint8Array(gray);
+
+  const range = max - min;
+  const result = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    result[i] = Math.round(((gray[i] - min) / range) * 255);
+  }
+  return result;
+};
+
+/**
+ * Apply a 3x3 unsharp-mask sharpen to an RGBA canvas ImageData (in-place).
+ * Returns the same ImageData reference for chaining.
+ * @param {ImageData} imageData - RGBA image data
+ * @param {number} amount - Sharpen strength (1.0 = moderate, 2.0 = strong)
+ * @returns {ImageData} The sharpened ImageData (same reference)
+ */
+export const sharpen = (imageData, amount = 1.0) => {
+  const { data, width, height } = imageData;
+  const copy = new Uint8ClampedArray(data);
+
+  const center = 1 + 4 * amount;
+  const edge = -amount;
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (y * width + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const val =
+          center * copy[idx + c] +
+          edge * copy[idx - 4 + c] +
+          edge * copy[idx + 4 + c] +
+          edge * copy[((y - 1) * width + x) * 4 + c] +
+          edge * copy[((y + 1) * width + x) * 4 + c];
+        data[idx + c] = Math.max(0, Math.min(255, Math.round(val)));
+      }
+    }
+  }
+
+  return imageData;
+};
+
+/**
+ * Convert a Uint8Array grayscale + Otsu-threshold to an RGBA canvas suitable for Tesseract.
+ * Pixels below threshold become black, above become white.
+ * @param {Uint8Array} gray - Grayscale values
+ * @param {number} width
+ * @param {number} height
+ * @param {number} threshold - 0-255 cutoff
+ * @returns {HTMLCanvasElement}
+ */
+export const grayToThresholdedCanvas = (gray, width, height, threshold) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const out = ctx.createImageData(width, height);
+  const d = out.data;
+
+  for (let i = 0; i < gray.length; i++) {
+    const v = gray[i] < threshold ? 0 : 255;
+    const j = i * 4;
+    d[j] = v;
+    d[j + 1] = v;
+    d[j + 2] = v;
+    d[j + 3] = 255;
+  }
+
+  ctx.putImageData(out, 0, 0);
+  return canvas;
+};
+
+/**
  * Full preprocessing pipeline
  * @param {ImageData} imageData - Input image
  * @param {Object} options - Preprocessing options
