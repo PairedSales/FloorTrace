@@ -105,7 +105,7 @@ const LeftPanel = ({
   const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
 
   return (
-    <div className="flex flex-col w-[264px] bg-chrome-800 border-r border-chrome-700 shrink-0 animate-slide-in-left overflow-y-auto">
+    <div className="flex flex-col w-[264px] bg-chrome-800 border-r border-chrome-700 shrink-0 animate-slide-in-left">
       {/* Panel header */}
       <div className="flex items-center justify-between px-3 h-9 border-b border-chrome-700/60 shrink-0">
         <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
