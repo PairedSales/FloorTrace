@@ -904,8 +904,7 @@ function App() {
         onRestart={handleRestart}
       />
 
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        <div className="shrink-0 self-start max-h-[calc(100vh-3rem)] overflow-y-auto overflow-x-hidden">
+      <div className="flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
         <LeftPanel
           roomDimensions={roomDimensions}
           onDimensionsChange={(dims) => {
@@ -934,9 +933,8 @@ function App() {
           debugDetection={debugDetection}
           onDebugDetectionChange={setDebugDetection}
         />
-        </div>
 
-        <div className="relative flex-1 overflow-hidden min-h-0">
+        <div className="relative flex-1 overflow-hidden">
           <Canvas
             ref={canvasRef}
             image={image}
