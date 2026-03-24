@@ -1,3 +1,78 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-chrome-900 text-slate-100 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  ::selection {
+    @apply bg-accent/30 text-white;
+  }
+
+  /* Dark scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-chrome-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-chrome-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+}
+
+@layer components {
+  /* Canvas grid background - subtle dots so white sketches don't blend */
+  .canvas-grid-bg {
+    background-color: #f8fafc;
+    background-image: radial-gradient(circle, #cbd5e1 0.5px, transparent 0.5px);
+    background-size: 20px 20px;
+  }
+
+  /* Panel section divider */
+  .panel-divider {
+    @apply border-t border-chrome-700/60 my-1;
+  }
+
+  /* Toolbar button base */
+  .toolbar-btn {
+    @apply flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
+           transition-all duration-200 cursor-pointer select-none
+           text-slate-300 hover:text-white hover:bg-chrome-700/70
+           focus:outline-none focus-visible:ring-1 focus-visible:ring-accent;
+  }
+  .toolbar-btn:disabled {
+    @apply opacity-35 cursor-not-allowed hover:bg-transparent hover:text-slate-300;
+  }
+  .toolbar-btn-active {
+    @apply bg-accent/15 text-accent hover:bg-accent/25 hover:text-accent;
+  }
+
+  /* Panel input */
+  .panel-input {
+    @apply w-full px-2.5 py-1.5 text-sm font-mono rounded-md
+           bg-chrome-900/80 border border-chrome-700 text-slate-100
+           placeholder-slate-500
+           focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent
+           transition-colors duration-150;
+  }
+
+  /* Toggle pill buttons */
+  .unit-pill {
+    @apply px-2.5 py-1 text-[11px] font-medium rounded-md
+           transition-colors duration-200 cursor-pointer select-none;
+  }
+  .unit-pill-active {
+    @apply bg-accent text-white;
+  }
+  .unit-pill-inactive {
+    @apply bg-chrome-900/60 text-slate-400 hover:text-slate-200 hover:bg-chrome-700/50;
+  }
+}
