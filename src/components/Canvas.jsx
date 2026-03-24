@@ -25,6 +25,53 @@ const VERTEX_SCAN_RADIUS = 15;
 const ROOM_EDGE_SCAN_RADIUS = 12;
 const SECONDARY_ALIGNMENT_DISTANCE = 20;
 
+/** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short. */
+const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
+  const dx = line.end.x - line.start.x;
+  const dy = line.end.y - line.start.y;
+  const lenPx = Math.sqrt(dx * dx + dy * dy);
+  const lengthFeet = lenPx * pixelsPerFoot;
+  const textStr = `${formatLength(lengthFeet, unit)}`;
+  const fontSize = 12 / scale;
+  const ux = lenPx > 1e-6 ? dx / lenPx : 1;
+  const uy = lenPx > 1e-6 ? dy / lenPx : 0;
+  const mx = (line.start.x + line.end.x) / 2;
+  const my = (line.start.y + line.end.y) / 2;
+  const nx = -uy;
+  const ny = ux;
+
+  const approxPad = 6 / scale;
+  const approxCharW = fontSize * 0.58;
+  const approxTextWidth = Math.max(textStr.length * approxCharW, fontSize * 2.5);
+  const approxTextHeight = fontSize * 1.25;
+
+  const extentAlongLine =
+    (approxTextWidth * Math.abs(ux) + approxTextHeight * Math.abs(uy)) / 2 + approxPad;
+  const maxHalfGap = Math.max(0, lenPx / 2 - 0.5 / scale);
+  const halfGap = Math.min(extentAlongLine, maxHalfGap);
+  const needsPerpendicularLift = maxHalfGap < extentAlongLine - 1e-3;
+  const halfExtentOnNormal =
+    (approxTextWidth / 2) * Math.abs(nx) + (approxTextHeight / 2) * Math.abs(ny);
+  const liftPerp = needsPerpendicularLift ? halfExtentOnNormal + 4 / scale : 0;
+
+  const labelX = mx + nx * liftPerp;
+  const labelY = my + ny * liftPerp;
+
+  const line1End = { x: mx - ux * halfGap, y: my - uy * halfGap };
+  const line2Start = { x: mx + ux * halfGap, y: my + uy * halfGap };
+
+  return {
+    textStr,
+    fontSize,
+    labelX,
+    labelY,
+    approxTextWidth,
+    approxTextHeight,
+    line1Points: [line.start.x, line.start.y, line1End.x, line1End.y],
+    line2Points: [line2Start.x, line2Start.y, line.end.x, line.end.y],
+  };
+};
+
 const Canvas = forwardRef(({
   image,
   roomOverlay,
@@ -1511,7 +1558,11 @@ const Canvas = forwardRef(({
           {/* Measurement Lines */}
           {measurementLines && measurementLines.length > 0 && (
             <Layer>
-              {measurementLines.map((line, index) => (
+              {measurementLines.map((line, index) => {
+                const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit);
+                const strokeColor = selectedMeasurementLineIndex === index ? '#FB923C' : '#F97316';
+                const strokeW = (selectedMeasurementLineIndex === index ? 3 : 2) / scale;
+                return (
                 <Group
                   key={`line-${index}`}
                   x={0}
@@ -1524,22 +1575,32 @@ const Canvas = forwardRef(({
                 >
                   <Line
                     name="measurement-line"
-                    points={[line.start.x, line.start.y, line.end.x, line.end.y]}
-                    stroke={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
-                    strokeWidth={(selectedMeasurementLineIndex === index ? 3 : 2) / scale}
+                    points={layout.line1Points}
+                    stroke={strokeColor}
+                    strokeWidth={strokeW}
+                    hitStrokeWidth={16 / scale}
+                  />
+                  <Line
+                    name="measurement-line"
+                    points={layout.line2Points}
+                    stroke={strokeColor}
+                    strokeWidth={strokeW}
                     hitStrokeWidth={16 / scale}
                   />
                   <Text
                     name="measurement-line"
-                    x={(line.start.x + line.end.x) / 2 + 5 / scale}
-                    y={(line.start.y + line.end.y) / 2}
-                    text={`${formatLength(Math.sqrt(Math.pow(line.end.x - line.start.x, 2) + Math.pow(line.end.y - line.start.y, 2)) * pixelsPerFoot, unit)}`}
-                    fontSize={12 / scale}
-                    fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
+                    x={layout.labelX}
+                    y={layout.labelY}
+                    text={layout.textStr}
+                    fontSize={layout.fontSize}
+                    fill={strokeColor}
                     fontStyle="bold"
+                    offsetX={layout.approxTextWidth / 2}
+                    offsetY={layout.approxTextHeight / 2}
                   />
                 </Group>
-              ))}
+                );
+              })}
             </Layer>
           )}
 
@@ -1553,7 +1614,7 @@ const Canvas = forwardRef(({
                   currentMeasurementLine.end.x,
                   currentMeasurementLine.end.y
                 ]}
-                stroke="#ff00ff"
+                stroke="#F97316"
                 strokeWidth={2 / scale}
                 dash={[6 / scale, 3 / scale]}
                 opacity={0.7}
@@ -1579,8 +1640,8 @@ const Canvas = forwardRef(({
                     name="custom-shape"
                     points={shape.vertices.flatMap(v => [v.x, v.y])}
                     closed={shape.closed}
-                    fill={shape.closed ? 'rgba(0, 255, 0, 0.3)' : 'transparent'}
-                    stroke={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                    fill={shape.closed ? 'rgba(14, 165, 233, 0.15)' : 'transparent'}
+                    stroke={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
                     strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
                   />
                   {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
@@ -1590,8 +1651,8 @@ const Canvas = forwardRef(({
                       x={vertex.x}
                       y={vertex.y}
                       radius={5 / scale}
-                      fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
-                      stroke="#000000"
+                      fill={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
+                      stroke="#0369A1"
                       strokeWidth={1 / scale}
                     />
                   ))}
@@ -1608,7 +1669,7 @@ const Canvas = forwardRef(({
                         y={centroid.y}
                         text={areaText}
                         fontSize={14 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                        fill={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
                         fontStyle="bold"
                         offsetX={0}
                         offsetY={0}
@@ -1633,7 +1694,7 @@ const Canvas = forwardRef(({
               <Line
                 points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
                 closed={false}
-                stroke="#00ff00"
+                stroke="#0EA5E9"
                 strokeWidth={2 / scale}
                 dash={[6 / scale, 3 / scale]}
               />
@@ -1643,8 +1704,8 @@ const Canvas = forwardRef(({
                   x={vertex.x}
                   y={vertex.y}
                   radius={5 / scale}
-                  fill={index === 0 ? '#00aaff' : '#00ff00'} // Highlight first vertex to indicate closing point
-                  stroke="#000000"
+                  fill={index === 0 ? '#F97316' : '#0EA5E9'} // Highlight first vertex to indicate closing point
+                  stroke="#0369A1"
                   strokeWidth={1 / scale}
                 />
               ))}
