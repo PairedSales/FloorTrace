@@ -1,0 +1,129 @@
+import { describe, expect, it } from 'vitest';
+import { estimateDominantOrientations } from '../orientation';
+import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../pipeline';
+
+const createBlankImageData = (width, height, value = 255) => {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+  return { width, height, data };
+};
+
+const drawPixel = (imageData, x, y, darkness = 0) => {
+  if (x < 0 || y < 0 || x >= imageData.width || y >= imageData.height) return;
+  const idx = (y * imageData.width + x) * 4;
+  imageData.data[idx] = darkness;
+  imageData.data[idx + 1] = darkness;
+  imageData.data[idx + 2] = darkness;
+  imageData.data[idx + 3] = 255;
+};
+
+const drawLine = (imageData, x0, y0, x1, y1, thickness = 3) => {
+  let x = Math.round(x0);
+  let y = Math.round(y0);
+  const tx = Math.round(x1);
+  const ty = Math.round(y1);
+  const dx = Math.abs(tx - x);
+  const sx = x < tx ? 1 : -1;
+  const dy = -Math.abs(ty - y);
+  const sy = y < ty ? 1 : -1;
+  let error = dx + dy;
+
+  while (true) {
+    for (let oy = -thickness; oy <= thickness; oy += 1) {
+      for (let ox = -thickness; ox <= thickness; ox += 1) {
+        drawPixel(imageData, x + ox, y + oy, 0);
+      }
+    }
+    if (x === tx && y === ty) break;
+    const e2 = 2 * error;
+    if (e2 >= dy) {
+      error += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      error += dx;
+      y += sy;
+    }
+  }
+};
+
+const polygonArea = (polygon) => {
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i];
+    const next = polygon[(i + 1) % polygon.length];
+    sum += current.x * next.y - next.x * current.y;
+  }
+  return Math.abs(sum) / 2;
+};
+
+describe('detection pipeline', () => {
+  it('detects dominant 45 and 60 degree orientations', () => {
+    const img = createBlankImageData(280, 240);
+    drawLine(img, 20, 200, 220, 0, 2); // ~45 deg
+    drawLine(img, 30, 220, 130, 45, 2); // ~60 deg
+
+    const gray = new Uint8ClampedArray(img.width * img.height);
+    for (let i = 0, j = 0; i < img.data.length; i += 4, j += 1) {
+      gray[j] = img.data[i];
+    }
+
+    const orientation = estimateDominantOrientations(gray, img.width, img.height, { topN: 6 });
+    expect(orientation.dominant.length).toBeGreaterThan(1);
+    expect(orientation.dominant.some((angle) => Math.abs(angle - 45) <= 15)).toBe(true);
+    expect(orientation.dominant.some((angle) => Math.abs(angle - 60) <= 15)).toBe(true);
+  });
+
+  it('extracts a room enclosure from a clicked point', () => {
+    const img = createBlankImageData(320, 220);
+    drawLine(img, 20, 20, 140, 20, 3);
+    drawLine(img, 20, 160, 140, 160, 3);
+    drawLine(img, 20, 20, 20, 160, 3);
+    drawLine(img, 140, 20, 140, 160, 3);
+    drawLine(img, 180, 30, 300, 30, 3);
+    drawLine(img, 180, 180, 300, 180, 3);
+    drawLine(img, 180, 30, 180, 180, 3);
+    drawLine(img, 300, 30, 300, 180, 3);
+
+    const room = detectRoomFromClickCore(
+      img,
+      { x: 80, y: 90 },
+      { wallMask: { closeRadius: 0, openRadius: 0 } }
+    );
+    expect(room).toBeTruthy();
+    expect(room.overlay.x1).toBeLessThanOrEqual(80);
+    expect(room.overlay.x2).toBeGreaterThanOrEqual(80);
+    expect(room.overlay.y1).toBeLessThanOrEqual(90);
+    expect(room.overlay.y2).toBeGreaterThanOrEqual(90);
+    expect(room.polygon.length).toBeGreaterThan(2);
+  });
+
+  it('traces both inner and outer boundaries and keeps outer >= inner', () => {
+    const img = createBlankImageData(340, 260);
+    drawLine(img, 20, 20, 320, 20, 4);
+    drawLine(img, 20, 240, 320, 240, 4);
+    drawLine(img, 20, 20, 20, 240, 4);
+    drawLine(img, 320, 20, 320, 240, 4);
+    drawLine(img, 20, 130, 320, 130, 3);
+    drawLine(img, 170, 20, 170, 240, 3);
+    drawLine(img, 40, 220, 260, 80, 2); // angled wall influence
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced).toBeTruthy();
+    expect(traced.inner || traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer?.polygon ?? traced.inner?.polygon;
+    const innerPoly = traced.inner?.polygon ?? traced.outer?.polygon;
+    expect(outerPoly.length).toBeGreaterThan(2);
+    expect(innerPoly.length).toBeGreaterThan(2);
+
+    const outerArea = polygonArea(outerPoly);
+    const innerArea = polygonArea(innerPoly);
+    expect(outerArea).toBeGreaterThanOrEqual(innerArea * 0.85);
+  });
+});

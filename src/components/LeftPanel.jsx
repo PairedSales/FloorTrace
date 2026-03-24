@@ -24,6 +24,8 @@ const LeftPanel = ({
   onLineToolToggle,
   drawAreaActive,
   onDrawAreaToggle,
+  debugDetection,
+  onDebugDetectionChange,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
@@ -213,6 +215,19 @@ const LeftPanel = ({
             <span className="text-accent/60 text-sm font-medium ml-1">ft²</span>
           </div>
         </div>
+      </section>
+
+      <div className="panel-divider mx-3" />
+
+      <section className="px-3 py-3">
+        <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
+          Detection
+        </h3>
+        <Toggle
+          label="Debug Overlays"
+          checked={debugDetection}
+          onChange={onDebugDetectionChange}
+        />
       </section>
 
       <div className="panel-divider mx-3" />
