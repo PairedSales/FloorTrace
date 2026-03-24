@@ -90,7 +90,7 @@ const LeftPanel = ({
 
   if (collapsed) {
     return (
-      <div className="flex flex-col items-center w-10 bg-chrome-800 border-r border-chrome-700 py-2 shrink-0 self-start max-h-full">
+      <div className="relative z-10 flex flex-col items-center w-10 shrink-0 self-start max-h-full border-r border-chrome-700/35 bg-chrome-900/55 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45">
         <button
           onClick={() => setCollapsed(false)}
           className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-chrome-700 transition-colors cursor-pointer"
@@ -105,9 +105,9 @@ const LeftPanel = ({
   const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
 
   return (
-    <div className="flex flex-col w-[264px] bg-chrome-800 border-r border-chrome-700 shrink-0 self-start max-h-full animate-slide-in-left overflow-y-auto">
+    <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700/35 bg-chrome-900/55 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 h-9 border-b border-chrome-700/60 shrink-0">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-chrome-700/50 px-3">
         <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
           Controls
         </span>
