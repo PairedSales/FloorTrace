@@ -3,7 +3,6 @@ import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
-import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
 import {
   detectRoomFromClick,
@@ -38,8 +37,6 @@ function App() {
   const [customShapes, setCustomShapes] = useState([]); // Array of { vertices, closed, area }
   const [currentCustomShape, setCurrentCustomShape] = useState(null); // The shape currently being drawn
   const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
-  const [cornerPoints, setCornerPoints] = useState([]);
-  const [lineData, setLineData] = useState(null);
   const [tracedBoundaries, setTracedBoundaries] = useState(null);
   const [debugDetection, setDebugDetection] = useState(false);
   const [detectionDebugData, setDetectionDebugData] = useState(null);
@@ -725,49 +722,6 @@ function App() {
     restoreOrLoadExampleImage();
   }, []);
 
-  // Detect image corners and dominant wall lines for autosnapping.
-  useEffect(() => {
-    let cancelled = false;
-
-    const detectLinesForSnapping = async () => {
-      if (!image) {
-        setCornerPoints([]);
-        setLineData(null);
-        return;
-      }
-
-      try {
-        const detected = await detectSnappingFeatures(image);
-
-        if (cancelled) {
-          return;
-        }
-
-        setCornerPoints(detected.cornerPoints);
-        setLineData(detected.lineData);
-
-        console.log('Snapping detection complete', {
-          corners: detected.cornerPoints.length,
-          horizontalLines: detected.lineData?.horizontal?.length ?? 0,
-          verticalLines: detected.lineData?.vertical?.length ?? 0
-        });
-      } catch (error) {
-        console.error('Failed to detect snapping features:', error);
-
-        if (!cancelled) {
-          setCornerPoints([]);
-          setLineData(null);
-        }
-      }
-    };
-
-    detectLinesForSnapping();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [image]);
-
   useEffect(() => {
     appStateRef.current = {
       roomOverlay,
@@ -967,8 +921,6 @@ function App() {
             onAddPerimeterVertex={handleAddPerimeterVertex}
             onClosePerimeter={handleClosePerimeter}
             autoSnapEnabled={autoSnapEnabled}
-            cornerPoints={cornerPoints}
-            lineData={lineData}
             debugDetection={debugDetection}
             detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
