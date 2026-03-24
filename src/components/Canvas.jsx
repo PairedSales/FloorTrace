@@ -4,27 +4,6 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
-const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, threshold) => {
-  if (!vertices?.length || !snappedPoint || threshold <= 0) return vertices;
-
-  return vertices.map((vertex, index) => {
-    if (index === movedVertexIndex) return vertex;
-
-    const aligned = { ...vertex };
-    if (Math.abs(vertex.x - snappedPoint.x) <= threshold) {
-      aligned.x = snappedPoint.x;
-    }
-    if (Math.abs(vertex.y - snappedPoint.y) <= threshold) {
-      aligned.y = snappedPoint.y;
-    }
-    return aligned;
-  });
-};
-
-const VERTEX_SCAN_RADIUS = 15;
-const ROOM_EDGE_SCAN_RADIUS = 12;
-const SECONDARY_ALIGNMENT_DISTANCE = 20;
-
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short. */
 const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
   const dx = line.end.x - line.start.x;
@@ -103,8 +82,6 @@ const Canvas = forwardRef(({
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
   autoSnapEnabled,
-  cornerPoints,
-  lineData,
   debugDetection,
   detectionDebugData,
   onUndo,
@@ -288,18 +265,10 @@ const Canvas = forwardRef(({
       return null;
     }
 
-    const snappedPoint = analyzer.findVertexSnap(point, { searchRadius: VERTEX_SCAN_RADIUS });
-    if (!snappedPoint) {
-      return null;
-    }
-
-    const dx = snappedPoint.x - point.x;
-    const dy = snappedPoint.y - point.y;
-    const distance = Math.sqrt((dx * dx) + (dy * dy));
-    return distance <= VERTEX_SCAN_RADIUS ? snappedPoint : null;
+    return analyzer.findCornerSnap(point);
   }, [autoSnapEnabled]);
 
-  const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = ROOM_EDGE_SCAN_RADIUS) => {
+  const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
@@ -309,10 +278,10 @@ const Canvas = forwardRef(({
       return null;
     }
 
-    return analyzer.findVerticalEdge(targetX, y1, y2, { searchRadius });
+    return analyzer.findVerticalWall(targetX, y1, y2, { searchRadius });
   }, [autoSnapEnabled]);
 
-  const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = ROOM_EDGE_SCAN_RADIUS) => {
+  const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
@@ -322,7 +291,7 @@ const Canvas = forwardRef(({
       return null;
     }
 
-    return analyzer.findHorizontalEdge(targetY, x1, x2, { searchRadius });
+    return analyzer.findHorizontalWall(targetY, x1, x2, { searchRadius });
   }, [autoSnapEnabled]);
 
   const snapRoomOverlayPosition = useCallback((overlay) => {
@@ -515,17 +484,7 @@ const Canvas = forwardRef(({
     // Now update the actual data point
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = finalPoint;
-    
-    // Apply secondary alignment to nearby vertices if snapped
-    if (snappedPoint) {
-      newVertices = applySecondaryAlignment(
-        newVertices,
-        index,
-        finalPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-    }
-    
+
     // Re-render to show final position and any aligned vertices
     // Notify that perimeter changed
     onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
@@ -657,19 +616,9 @@ const Canvas = forwardRef(({
     }
     
     // Insert the new vertex after the closest edge start
-    let newVertices = [...vertices];
+    const newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-    
-    // Apply secondary alignment to nearby vertices if snapped
-    if (snappedPoint) {
-      newVertices = applySecondaryAlignment(
-        newVertices,
-        closestEdgeIndex + 1,
-        finalPoint,
-        SECONDARY_ALIGNMENT_DISTANCE
-      );
-    }
-    
+
     onPerimeterUpdate(newVertices, true); // Save action for undo
   };
 
@@ -1253,39 +1202,6 @@ const Canvas = forwardRef(({
               />
             )}
 
-            {debugDetection && lineData && (
-              <>
-                {(lineData.horizontal ?? []).map((line, index) => (
-                  <Line
-                    key={`debug-h-${index}`}
-                    points={[line.start, line.y, line.end, line.y]}
-                    stroke="rgba(59, 130, 246, 0.55)"
-                    strokeWidth={1 / scale}
-                    listening={false}
-                  />
-                ))}
-                {(lineData.vertical ?? []).map((line, index) => (
-                  <Line
-                    key={`debug-v-${index}`}
-                    points={[line.x, line.start, line.x, line.end]}
-                    stroke="rgba(6, 182, 212, 0.55)"
-                    strokeWidth={1 / scale}
-                    listening={false}
-                  />
-                ))}
-                {(cornerPoints ?? []).slice(0, 600).map((point, index) => (
-                  <Circle
-                    key={`debug-c-${index}`}
-                    x={point.x}
-                    y={point.y}
-                    radius={2 / scale}
-                    fill="rgba(249, 115, 22, 0.8)"
-                    listening={false}
-                  />
-                ))}
-              </>
-            )}
-            
             {/* Perimeter Overlay - Line only (lowest z-index for overlays) */}
             {perimeterOverlay && perimeterOverlay.vertices && (
               <Line

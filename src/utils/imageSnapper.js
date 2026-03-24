@@ -1,13 +1,3 @@
-const DEFAULT_OPTIONS = {
-  downsampleMaxDimension: 1400,
-  darknessBias: 24,
-  minSegmentLength: 18,
-  maxBridgeGap: 3,
-  bandMergeTolerance: 3,
-  cornerSearchRadius: 6,
-  maxCorners: 4000,
-};
-
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const loadImageElement = (src) => new Promise((resolve, reject) => {
@@ -17,308 +7,234 @@ const loadImageElement = (src) => new Promise((resolve, reject) => {
   img.src = src;
 });
 
-const mergeBands = (segments, axisKey, options) => {
-  if (!segments.length) return [];
+const CORNER_BOX_HALF = 15; // 30x30 search
+const WALL_STRIP_HALF = 15; // 30 columns / rows
+const QUADRANT_OFFSET = 4;
+const MIN_CORNER_SCORE = 2.15;
+const WALL_DARK_RATIO = 0.4;
 
-  const sorted = [...segments].sort((a, b) => a[axisKey] - b[axisKey]);
-  const merged = [];
+/**
+ * @param {Uint8Array} isDark
+ * @param {number} width
+ * @param {number} height
+ */
+const regionDarkFraction = (isDark, width, height, x0, x1, y0, y1) => {
+  const xa = clamp(Math.min(x0, x1), 0, width - 1);
+  const xb = clamp(Math.max(x0, x1), 0, width - 1);
+  const ya = clamp(Math.min(y0, y1), 0, height - 1);
+  const yb = clamp(Math.max(y0, y1), 0, height - 1);
+  if (xb < xa || yb < ya) return null;
 
-  for (const segment of sorted) {
-    const previous = merged[merged.length - 1];
-    if (
-      previous &&
-      Math.abs(previous[axisKey] - segment[axisKey]) <= options.bandMergeTolerance &&
-      segment.start <= previous.end + options.maxBridgeGap
-    ) {
-      previous.end = Math.max(previous.end, segment.end);
-      previous.totalAxis += segment[axisKey];
-      previous.count += 1;
-      previous[axisKey] = previous.totalAxis / previous.count;
-      continue;
-    }
-
-    merged.push({
-      ...segment,
-      totalAxis: segment[axisKey],
-      count: 1,
-    });
-  }
-
-  return merged.map((entry) => ({
-    y: entry.y,
-    x: entry.x,
-    start: entry.start,
-    end: entry.end,
-    center: entry[axisKey],
-    thickness: entry.count,
-  }));
-};
-
-const collectSegments = (darkMask, width, height, orientation, options) => {
-  const segments = [];
-  const primaryLimit = orientation === 'horizontal' ? height : width;
-  const secondaryLimit = orientation === 'horizontal' ? width : height;
-
-  for (let primary = 0; primary < primaryLimit; primary += 1) {
-    let runStart = -1;
-    let gapCount = 0;
-
-    for (let secondary = 0; secondary < secondaryLimit; secondary += 1) {
-      const x = orientation === 'horizontal' ? secondary : primary;
-      const y = orientation === 'horizontal' ? primary : secondary;
-      const dark = darkMask[y * width + x] === 1;
-
-      if (dark) {
-        if (runStart < 0) runStart = secondary;
-        gapCount = 0;
-      } else if (runStart >= 0) {
-        gapCount += 1;
-        if (gapCount > options.maxBridgeGap) {
-          const runEnd = secondary - gapCount;
-          if (runEnd - runStart + 1 >= options.minSegmentLength) {
-            segments.push(
-              orientation === 'horizontal'
-                ? { y: primary, start: runStart, end: runEnd }
-                : { x: primary, start: runStart, end: runEnd }
-            );
-          }
-          runStart = -1;
-          gapCount = 0;
-        }
-      }
-    }
-
-    if (runStart >= 0) {
-      const runEnd = secondaryLimit - 1;
-      if (runEnd - runStart + 1 >= options.minSegmentLength) {
-        segments.push(
-          orientation === 'horizontal'
-            ? { y: primary, start: runStart, end: runEnd }
-            : { x: primary, start: runStart, end: runEnd }
-        );
-      }
+  let dark = 0;
+  const total = (xb - xa + 1) * (yb - ya + 1);
+  for (let y = ya; y <= yb; y += 1) {
+    const row = y * width;
+    for (let x = xa; x <= xb; x += 1) {
+      if (isDark[row + x]) dark += 1;
     }
   }
-
-  return mergeBands(segments, orientation === 'horizontal' ? 'y' : 'x', options);
+  return dark / total;
 };
 
-const hasDarkPixelNearby = (darkMask, width, height, x, y, radius) => {
-  for (let dy = -radius; dy <= radius; dy += 1) {
-    const py = y + dy;
-    if (py < 0 || py >= height) continue;
-    for (let dx = -radius; dx <= radius; dx += 1) {
-      const px = x + dx;
-      if (px < 0 || px >= width) continue;
-      if (darkMask[py * width + px]) {
-        return true;
-      }
-    }
+/**
+ * NW, NE, SW, SE dark fractions. Returns null if any quadrant has no pixels.
+ */
+const quadrantDarkFractions = (isDark, width, height, px, py, d) => {
+  const nw = regionDarkFraction(isDark, width, height, px - d, px - 1, py - d, py - 1);
+  const ne = regionDarkFraction(isDark, width, height, px + 1, px + d, py - d, py - 1);
+  const sw = regionDarkFraction(isDark, width, height, px - d, px - 1, py + 1, py + d);
+  const se = regionDarkFraction(isDark, width, height, px + 1, px + d, py + 1, py + d);
+  if (nw === null || ne === null || sw === null || se === null) return null;
+  return [nw, ne, sw, se];
+};
+
+const hasNeighborDark = (isDark, width, height, px, py) => {
+  const neighbors = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  for (const [dx, dy] of neighbors) {
+    const x = px + dx;
+    const y = py + dy;
+    if (x < 0 || x >= width || y < 0 || y >= height) continue;
+    if (isDark[y * width + x]) return true;
   }
   return false;
 };
 
-const dedupePoints = (points, tolerance) => {
-  const deduped = [];
-
-  for (const point of points) {
-    const duplicate = deduped.some((candidate) => (
-      Math.abs(candidate.x - point.x) <= tolerance &&
-      Math.abs(candidate.y - point.y) <= tolerance
-    ));
-
-    if (!duplicate) {
-      deduped.push(point);
-    }
+const cornerScoreFromQuadrants = (fracs) => {
+  let score = 0;
+  for (const f of fracs) {
+    score += f > 0.5 ? f : (1 - f);
   }
-
-  return deduped;
+  return score;
 };
 
-const detectCornersFromLines = (horizontalLines, verticalLines, darkMask, width, height, options) => {
-  const corners = [];
-
-  for (const horizontal of horizontalLines) {
-    for (const vertical of verticalLines) {
-      if (vertical.x < horizontal.start - options.cornerSearchRadius || vertical.x > horizontal.end + options.cornerSearchRadius) {
-        continue;
-      }
-      if (horizontal.y < vertical.start - options.cornerSearchRadius || horizontal.y > vertical.end + options.cornerSearchRadius) {
-        continue;
-      }
-
-      const x = Math.round(vertical.x);
-      const y = Math.round(horizontal.y);
-
-      if (!hasDarkPixelNearby(darkMask, width, height, x, y, options.cornerSearchRadius)) {
-        continue;
-      }
-
-      corners.push({ x, y });
-    }
-  }
-
-  return dedupePoints(corners, options.cornerSearchRadius);
-};
-
-export const detectSnappingFeatures = async (imageSrc, userOptions = {}) => {
+/**
+ * @param {string} imageSrc
+ * @returns {Promise<{ findCornerSnap: Function, findVerticalWall: Function, findHorizontalWall: Function }>}
+ */
+export const createImageSnapAnalyzer = async (imageSrc) => {
   if (!imageSrc) {
+    const noop = () => null;
     return {
-      cornerPoints: [],
-      lineData: { horizontal: [], vertical: [] },
+      findCornerSnap: noop,
+      findVerticalWall: noop,
+      findHorizontalWall: noop,
     };
   }
 
-  const options = { ...DEFAULT_OPTIONS, ...userOptions };
   const image = await loadImageElement(imageSrc);
-  const scale = image.width > options.downsampleMaxDimension || image.height > options.downsampleMaxDimension
-    ? Math.min(options.downsampleMaxDimension / image.width, options.downsampleMaxDimension / image.height)
-    : 1;
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
 
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0, width, height);
-
+  ctx.drawImage(image, 0, 0);
   const { data } = ctx.getImageData(0, 0, width, height);
-  const grayscale = new Uint8ClampedArray(width * height);
+
+  const grayscale = new Uint8Array(width * height);
   let sum = 0;
-  let min = 255;
-  let max = 0;
-
   for (let i = 0; i < grayscale.length; i += 1) {
-    const offset = i * 4;
-    const value = Math.round(
-      data[offset] * 0.299 +
-      data[offset + 1] * 0.587 +
-      data[offset + 2] * 0.114
+    const o = i * 4;
+    const v = Math.round(
+      data[o] * 0.299 +
+      data[o + 1] * 0.587 +
+      data[o + 2] * 0.114
     );
-
-    grayscale[i] = value;
-    sum += value;
-    if (value < min) min = value;
-    if (value > max) max = value;
+    grayscale[i] = v;
+    sum += v;
   }
 
   const mean = sum / grayscale.length;
-  const threshold = clamp(Math.min(mean - options.darknessBias, (mean + min) / 2), 35, 220);
-  const darkMask = new Uint8Array(width * height);
-
+  const threshold = clamp(mean - 24, 35, 220);
+  const isDark = new Uint8Array(width * height);
   for (let i = 0; i < grayscale.length; i += 1) {
-    darkMask[i] = grayscale[i] <= threshold ? 1 : 0;
+    isDark[i] = grayscale[i] <= threshold ? 1 : 0;
   }
 
-  const horizontal = collectSegments(darkMask, width, height, 'horizontal', options);
-  const vertical = collectSegments(darkMask, width, height, 'vertical', options);
-  const corners = detectCornersFromLines(horizontal, vertical, darkMask, width, height, options)
-    .slice(0, options.maxCorners);
+  const findCornerSnap = (point) => {
+    if (!point || width < 1 || height < 1) return null;
 
-  const inverseScale = 1 / scale;
-  const mapLine = (line, axis) => ({
-    ...line,
-    center: line.center * inverseScale,
-    start: line.start * inverseScale,
-    end: line.end * inverseScale,
-    ...(axis === 'horizontal' ? { y: line.y * inverseScale } : { x: line.x * inverseScale }),
-    thickness: line.thickness * inverseScale,
-  });
+    const cx = Math.round(point.x);
+    const cy = Math.round(point.y);
+    const x0 = clamp(cx - CORNER_BOX_HALF, 0, width - 1);
+    const y0 = clamp(cy - CORNER_BOX_HALF, 0, height - 1);
+    const x1 = clamp(cx + CORNER_BOX_HALF - 1, 0, width - 1);
+    const y1 = clamp(cy + CORNER_BOX_HALF - 1, 0, height - 1);
+
+    let best = null;
+    let bestDistSq = Number.POSITIVE_INFINITY;
+    let bestScore = -1;
+
+    for (let py = y0; py <= y1; py += 1) {
+      const row = py * width;
+      for (let px = x0; px <= x1; px += 1) {
+        const idx = row + px;
+        if (!isDark[idx] && !hasNeighborDark(isDark, width, height, px, py)) {
+          continue;
+        }
+
+        const fracs = quadrantDarkFractions(isDark, width, height, px, py, QUADRANT_OFFSET);
+        if (!fracs) continue;
+
+        const nDark = fracs.filter((f) => f > 0.5).length;
+        if (nDark !== 1 && nDark !== 3) continue;
+
+        const score = cornerScoreFromQuadrants(fracs);
+        if (score < MIN_CORNER_SCORE) continue;
+
+        const dx = px - point.x;
+        const dy = py - point.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (
+          distSq < bestDistSq ||
+          (distSq === bestDistSq && score > bestScore)
+        ) {
+          bestDistSq = distSq;
+          bestScore = score;
+          best = { x: px, y: py };
+        }
+      }
+    }
+
+    return best;
+  };
+
+  const findVerticalWall = (targetX, y1, y2, options = {}) => {
+    const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
+    const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
+
+    const yLo = clamp(Math.min(y1, y2), 0, height - 1);
+    const yHi = clamp(Math.max(y1, y2), 0, height - 1);
+    const span = Math.max(1, yHi - yLo + 1);
+
+    const xCenter = Math.round(targetX);
+    let bestX = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    let bestDensity = -1;
+
+    for (let dx = -halfStrip; dx <= halfStrip; dx += 1) {
+      const x = xCenter + dx;
+      if (x < 0 || x >= width) continue;
+
+      let dark = 0;
+      for (let y = yLo; y <= yHi; y += 1) {
+        if (isDark[y * width + x]) dark += 1;
+      }
+      const density = dark / span;
+      if (density < minRatio) continue;
+
+      const dist = Math.abs(x - targetX);
+      if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
+        bestDist = dist;
+        bestDensity = density;
+        bestX = x;
+      }
+    }
+
+    return bestX;
+  };
+
+  const findHorizontalWall = (targetY, x1, x2, options = {}) => {
+    const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
+    const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
+
+    const xLo = clamp(Math.min(x1, x2), 0, width - 1);
+    const xHi = clamp(Math.max(x1, x2), 0, width - 1);
+    const span = Math.max(1, xHi - xLo + 1);
+
+    const yCenter = Math.round(targetY);
+    let bestY = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    let bestDensity = -1;
+
+    for (let dy = -halfStrip; dy <= halfStrip; dy += 1) {
+      const y = yCenter + dy;
+      if (y < 0 || y >= height) continue;
+
+      const row = y * width;
+      let dark = 0;
+      for (let x = xLo; x <= xHi; x += 1) {
+        if (isDark[row + x]) dark += 1;
+      }
+      const density = dark / span;
+      if (density < minRatio) continue;
+
+      const dist = Math.abs(y - targetY);
+      if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
+        bestDist = dist;
+        bestDensity = density;
+        bestY = y;
+      }
+    }
+
+    return bestY;
+  };
 
   return {
-    cornerPoints: corners.map((point) => ({
-      x: point.x * inverseScale,
-      y: point.y * inverseScale,
-    })),
-    lineData: {
-      horizontal: horizontal.map((line) => mapLine(line, 'horizontal')),
-      vertical: vertical.map((line) => mapLine(line, 'vertical')),
-      threshold,
-      sampledSize: { width, height },
-      originalSize: { width: image.width, height: image.height },
-    },
-  };
-};
-
-const lineCoverageScore = (line, start, end) => {
-  const overlapStart = Math.max(line.start, start);
-  const overlapEnd = Math.min(line.end, end);
-  if (overlapEnd < overlapStart) return 0;
-  const overlap = overlapEnd - overlapStart;
-  const span = Math.max(1, end - start);
-  return overlap / span;
-};
-
-export const createImageSnapAnalyzer = async (imageSrc, userOptions = {}) => {
-  const { cornerPoints, lineData } = await detectSnappingFeatures(imageSrc, userOptions);
-  const horizontal = lineData?.horizontal ?? [];
-  const vertical = lineData?.vertical ?? [];
-
-  const findVertexSnap = (point, options = {}) => {
-    const searchRadius = options.searchRadius ?? 14;
-    const searchRadiusSq = searchRadius * searchRadius;
-    let best = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-
-    for (const corner of cornerPoints) {
-      const dx = corner.x - point.x;
-      const dy = corner.y - point.y;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq <= searchRadiusSq && distanceSq < bestDistance) {
-        best = corner;
-        bestDistance = distanceSq;
-      }
-    }
-
-    return best;
-  };
-
-  const findVerticalEdge = (targetX, y1, y2, options = {}) => {
-    const searchRadius = options.searchRadius ?? 12;
-    const start = Math.min(y1, y2);
-    const end = Math.max(y1, y2);
-    let best = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-
-    for (const line of vertical) {
-      const coverage = lineCoverageScore(line, start, end);
-      if (coverage < 0.45) continue;
-      const distance = Math.abs(line.x - targetX);
-      if (distance <= searchRadius && distance < bestDistance) {
-        best = line.x;
-        bestDistance = distance;
-      }
-    }
-
-    return best;
-  };
-
-  const findHorizontalEdge = (targetY, x1, x2, options = {}) => {
-    const searchRadius = options.searchRadius ?? 12;
-    const start = Math.min(x1, x2);
-    const end = Math.max(x1, x2);
-    let best = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-
-    for (const line of horizontal) {
-      const coverage = lineCoverageScore(line, start, end);
-      if (coverage < 0.45) continue;
-      const distance = Math.abs(line.y - targetY);
-      if (distance <= searchRadius && distance < bestDistance) {
-        best = line.y;
-        bestDistance = distance;
-      }
-    }
-
-    return best;
-  };
-
-  return {
-    cornerPoints,
-    lineData,
-    findVertexSnap,
-    findVerticalEdge,
-    findHorizontalEdge,
+    findCornerSnap,
+    findVerticalWall,
+    findHorizontalWall,
   };
 };
