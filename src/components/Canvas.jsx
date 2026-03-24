@@ -1044,7 +1044,9 @@ const Canvas = forwardRef(({
         x: newPos.x,
         y: newPos.y
       });
-      
+      // Keep React state in sync so stroke widths, labels, and hit targets match the stage scale
+      setScale(clampedScale);
+
       stage.batchDraw();
     });
   };
@@ -1325,38 +1327,50 @@ const Canvas = forwardRef(({
                   
                   // Calculate offset perpendicular to the line (for label positioning)
                   const angle = Math.atan2(dy, dx);
-                  const offsetDistance = 15 / scale; // Offset from the line
+                  const sideSign = i % 2 === 0 ? 1 : -1;
+                  const shortEdge = lengthInPixels < 48;
+                  const offsetDistance =
+                    sideSign * (shortEdge ? 12 / scale : 9 / scale);
                   const offsetX = Math.sin(angle) * offsetDistance;
                   const offsetY = -Math.cos(angle) * offsetDistance;
                   
-                  // Dynamic width based on text length
-                  const labelWidth = Math.max(56, formattedLength.length * 6.5) / scale;
-                  
+                  const padX = 4 / scale;
+                  const minW = 26 / scale;
+                  const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
+                  const idealFs = 9 / scale;
+                  const minFs = 6.25 / scale;
+                  const widthForFs = (fs) => formattedLength.length * fs * 0.55 + padX * 2;
+                  let fontSize = idealFs;
+                  if (widthForFs(fontSize) > maxWByEdge) {
+                    fontSize = Math.max(minFs, (maxWByEdge - padX * 2) / Math.max(0.5, formattedLength.length * 0.55));
+                  }
+                  const labelWidth = Math.min(Math.max(minW, widthForFs(fontSize)), maxWByEdge);
+                  const labelHeight = Math.max(13 / scale, fontSize * 1.35);
+                  const cornerR = 4 / scale;
+
                   return (
                     <React.Fragment key={`label-${i}`}>
-                      {/* Modern minimalist background */}
                       <Rect
                         x={midX + offsetX - labelWidth / 2}
-                        y={midY + offsetY - 11 / scale}
+                        y={midY + offsetY - labelHeight / 2}
                         width={labelWidth}
-                        height={22 / scale}
-                        fill="rgba(17, 24, 39, 0.95)"
+                        height={labelHeight}
+                        fill="rgba(17, 24, 39, 0.88)"
                         strokeWidth={0}
-                        cornerRadius={6 / scale}
+                        cornerRadius={cornerR}
                       />
-                      {/* Clean label text */}
                       <Text
                         x={midX + offsetX}
                         y={midY + offsetY}
                         text={formattedLength}
-                        fontSize={11 / scale}
+                        fontSize={fontSize}
                         fill="#ffffff"
                         fontFamily="Inter, system-ui, sans-serif"
                         fontStyle="500"
                         align="center"
                         verticalAlign="middle"
                         offsetX={labelWidth / 2}
-                        offsetY={5.5 / scale}
+                        offsetY={fontSize * 0.36}
                       />
                     </React.Fragment>
                   );

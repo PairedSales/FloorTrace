@@ -858,37 +858,8 @@ function App() {
         onRestart={handleRestart}
       />
 
-      <div className="flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
-        <LeftPanel
-          roomDimensions={roomDimensions}
-          onDimensionsChange={(dims) => {
-            setRoomDimensions(dims);
-            if (roomOverlay) {
-              updateScale(dims, roomOverlay);
-            }
-          }}
-          area={area}
-          mode={mode}
-          unit={unit}
-          onUnitChange={setUnit}
-          isProcessing={isProcessing}
-          ocrFailed={ocrFailed}
-          showSideLengths={showSideLengths}
-          onShowSideLengthsChange={setShowSideLengths}
-          useInteriorWalls={useInteriorWalls}
-          onInteriorWallToggle={handleInteriorWallToggle}
-          autoSnapEnabled={autoSnapEnabled}
-          onAutoSnapChange={setAutoSnapEnabled}
-          perimeterOverlay={perimeterOverlay}
-          lineToolActive={lineToolActive}
-          onLineToolToggle={handleLineToolToggle}
-          drawAreaActive={drawAreaActive}
-          onDrawAreaToggle={handleDrawAreaToggle}
-          debugDetection={debugDetection}
-          onDebugDetectionChange={setDebugDetection}
-        />
-
-        <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
+        <div className="absolute inset-0 z-0 min-h-0">
           <Canvas
             ref={canvasRef}
             image={image}
@@ -927,13 +898,44 @@ function App() {
             onUndo={handleUndo}
             onRedo={handleRedo}
           />
+        </div>
 
-          {notification.show && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in">
+        <LeftPanel
+          roomDimensions={roomDimensions}
+          onDimensionsChange={(dims) => {
+            setRoomDimensions(dims);
+            if (roomOverlay) {
+              updateScale(dims, roomOverlay);
+            }
+          }}
+          area={area}
+          mode={mode}
+          unit={unit}
+          onUnitChange={setUnit}
+          isProcessing={isProcessing}
+          ocrFailed={ocrFailed}
+          showSideLengths={showSideLengths}
+          onShowSideLengthsChange={setShowSideLengths}
+          useInteriorWalls={useInteriorWalls}
+          onInteriorWallToggle={handleInteriorWallToggle}
+          autoSnapEnabled={autoSnapEnabled}
+          onAutoSnapChange={setAutoSnapEnabled}
+          perimeterOverlay={perimeterOverlay}
+          lineToolActive={lineToolActive}
+          onLineToolToggle={handleLineToolToggle}
+          drawAreaActive={drawAreaActive}
+          onDrawAreaToggle={handleDrawAreaToggle}
+          debugDetection={debugDetection}
+          onDebugDetectionChange={setDebugDetection}
+        />
+
+        {notification.show && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in">
               {notification.message}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <input
