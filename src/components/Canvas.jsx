@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
+import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
 const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, threshold) => {
@@ -1536,10 +1537,6 @@ const Canvas = forwardRef(({
                     fontSize={12 / scale}
                     fill={selectedMeasurementLineIndex === index ? '#ff66ff' : '#ff00ff'}
                     fontStyle="bold"
-                    shadowColor="black"
-                    shadowBlur={1}
-                    shadowOffsetX={1 / scale}
-                    shadowOffsetY={1 / scale}
                   />
                 </Group>
               ))}
@@ -1598,6 +1595,33 @@ const Canvas = forwardRef(({
                       strokeWidth={1 / scale}
                     />
                   ))}
+                  {shape.closed && shape.vertices.length >= 3 && (() => {
+                    const centroid = getCentroid(shape.vertices);
+                    const areaValue = calculateArea(shape.vertices, pixelsPerFoot);
+                    const areaText = areaValue >= 1
+                      ? `${areaValue.toFixed(1)} sq ft`
+                      : `${(areaValue * 144).toFixed(0)} sq in`;
+                    return (
+                      <Text
+                        name="custom-shape"
+                        x={centroid.x}
+                        y={centroid.y}
+                        text={areaText}
+                        fontSize={14 / scale}
+                        fill={selectedCustomShapeIndex === shapeIndex ? '#5bff5b' : '#00ff00'}
+                        fontStyle="bold"
+                        offsetX={0}
+                        offsetY={0}
+                        align="center"
+                        ref={(node) => {
+                          if (node) {
+                            node.offsetX(node.width() / 2);
+                            node.offsetY(node.height() / 2);
+                          }
+                        }}
+                      />
+                    );
+                  })()}
                 </Group>
               ))}
             </Layer>
