@@ -1,416 +1,516 @@
 import Tesseract from 'tesseract.js';
-import { dataUrlToImage, imageToCanvas } from './imageLoader';
+import { dataUrlToImage } from './imageLoader';
+import {
+  toGrayscale,
+  otsuThreshold,
+  contrastStretch,
+  sharpen,
+  grayToThresholdedCanvas
+} from './imagePreprocessor';
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
+const TARGET_TEXT_HEIGHT = 36;
+const MIN_WORD_CONFIDENCE = 30;
 
-const OCR_REPLACEMENTS = [
-  [/\u00D7/g, 'x'], // multiplication sign
-  [/\b(?:by|BY)\b/g, 'x'],
-  [/\s+[Xx]\s+/g, ' x '],
-  [/([0-9])\s*[oO](?=\s*(?:ft|feet|['"]))/g, '$10'],
-  [/\b[oO](?=\d)/g, '0']
-];
+// ---------------------------------------------------------------------------
+// Image scaling – normalise so typical text is ~TARGET_TEXT_HEIGHT px tall
+// ---------------------------------------------------------------------------
 
-const FEET_INCHES_REGEX = /^(\d{1,3})\s*'\s*(?:(\d{1,2})\s*(?:"|''|in)?)?$/i;
+const estimateScaleFactor = (img) => {
+  const maxDim = Math.max(img.width, img.height);
+  if (maxDim <= 800) return 2.0;
+  if (maxDim <= 1600) return 1.5;
+  if (maxDim <= 3000) return 1.0;
+  return 3000 / maxDim;
+};
 
-const normalizeOcrText = (text) => {
-  let normalized = text || '';
+const scaleCanvas = (img, factor) => {
+  const w = Math.round(img.width * factor);
+  const h = Math.round(img.height * factor);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas;
+};
 
-  OCR_REPLACEMENTS.forEach(([pattern, replacement]) => {
-    normalized = normalized.replace(pattern, replacement);
+// ---------------------------------------------------------------------------
+// Preprocessing variants
+// ---------------------------------------------------------------------------
+
+const buildVariants = (img) => {
+  const factor = estimateScaleFactor(img);
+  const scaled = scaleCanvas(img, factor);
+  const ctx = scaled.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, scaled.width, scaled.height);
+  const gray = toGrayscale(imageData);
+  const stretched = contrastStretch(gray);
+  const otsu = otsuThreshold(stretched);
+
+  const variants = [];
+
+  // V1 – original (scaled)
+  variants.push({ name: 'original', canvas: scaled });
+
+  // V2 – Otsu thresholded
+  variants.push({
+    name: 'otsu',
+    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
   });
 
-  return normalized
-    .replace(/[|]/g, '1')
-    .replace(/[–—−]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // V3 – Otsu-light (threshold lowered → keeps lighter strokes)
+  const otsuLight = Math.max(0, otsu - 30);
+  variants.push({
+    name: 'otsu-light',
+    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsuLight)
+  });
+
+  // V4 – Otsu-dark (threshold raised → filters faint noise)
+  const otsuDark = Math.min(255, otsu + 30);
+  variants.push({
+    name: 'otsu-dark',
+    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsuDark)
+  });
+
+  // V5 – sharpened original
+  const sharpCanvas = document.createElement('canvas');
+  sharpCanvas.width = scaled.width;
+  sharpCanvas.height = scaled.height;
+  const sharpCtx = sharpCanvas.getContext('2d');
+  sharpCtx.drawImage(scaled, 0, 0);
+  const sharpData = sharpCtx.getImageData(0, 0, scaled.width, scaled.height);
+  sharpen(sharpData, 1.5);
+  sharpCtx.putImageData(sharpData, 0, 0);
+  variants.push({ name: 'sharpened', canvas: sharpCanvas });
+
+  return { variants, scaleFactor: factor };
 };
 
-const isReasonableDimension = (value) => {
-  return Number.isFinite(value) && value >= MIN_DIMENSION_FEET && value <= MAX_DIMENSION_FEET;
+// ---------------------------------------------------------------------------
+// OCR text normalisation
+// ---------------------------------------------------------------------------
+
+const normalizeOcrText = (text) => {
+  if (!text) return '';
+
+  let s = text;
+
+  // Unicode multiplications / separators
+  s = s.replace(/[\u00D7\u2715\u2716\u00D8]/g, 'x');
+  s = s.replace(/\b(?:by|BY|By)\b/g, 'x');
+
+  // Smart / curly quotes → straight
+  s = s.replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'");
+  s = s.replace(/[\u201C\u201D\u02DD]/g, '"');
+  s = s.replace(/''/g, '"');
+
+  // Common OCR char swaps near digits
+  s = s.replace(/([0-9])[lI|]/g, '$11');
+  s = s.replace(/[lI|]([0-9])/g, '1$1');
+  s = s.replace(/([0-9])[oO](?=\s|'|"|$)/g, '$10');
+  s = s.replace(/(?:^|\s)[oO]([0-9])/g, ' 0$1');
+  s = s.replace(/([0-9])[Ss]([0-9])/g, '$15$2');
+  s = s.replace(/([0-9])[Bb]([0-9])/g, '$18$2');
+  s = s.replace(/([0-9])[Zz]([0-9])/g, '$12$2');
+
+  // Pipes/brackets that look like 1
+  s = s.replace(/[|]/g, '1');
+
+  // Dashes
+  s = s.replace(/[\u2013\u2014\u2212]/g, '-');
+
+  // Collapse whitespace
+  s = s.replace(/\s+/g, ' ');
+
+  return s.trim();
 };
 
-const parseFeetInchesToken = (token) => {
-  const match = token.match(FEET_INCHES_REGEX);
-  if (!match) return null;
+// ---------------------------------------------------------------------------
+// Dimension parsing – flexible, handles mangled symbols
+// ---------------------------------------------------------------------------
 
-  const feet = parseInt(match[1], 10);
-  const inches = match[2] ? parseInt(match[2], 10) : 0;
-  if (inches >= 12) return null;
+const isReasonable = (v) => Number.isFinite(v) && v >= MIN_DIMENSION_FEET && v <= MAX_DIMENSION_FEET;
 
-  return feet + inches / 12;
-};
+const SEPARATOR = /\s*[xX\u00D7]\s*/;
 
-const parseDecimalToken = (token) => {
-  const cleaned = token
-    .replace(/,/g, '')
-    .replace(/\s*(?:ft|feet|inches|inch|in)\.?$/i, '')
-    .trim();
+const FEET_INCHES_FULL = /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/;
+const DECIMAL_TOKEN = /(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet|')?/i;
 
-  if (!cleaned) return null;
+const parseSingleToken = (token) => {
+  const t = token.trim();
 
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const splitDimensionParts = (text) => {
-  const separatorRegex = /\s*(?:x|×|by)\s*/i;
-  const match = text.match(separatorRegex);
-  if (!match) return null;
-
-  const splitIndex = match.index;
-  const separatorLength = match[0].length;
-
-  const left = text.slice(0, splitIndex).trim();
-  const right = text.slice(splitIndex + separatorLength).trim();
-  if (!left || !right) return null;
-
-  return { left, right };
-};
-
-const createImageVariants = (img) => {
-  const baseCanvas = imageToCanvas(img);
-  const highContrastCanvas = document.createElement('canvas');
-  highContrastCanvas.width = img.width;
-  highContrastCanvas.height = img.height;
-  const highContrastCtx = highContrastCanvas.getContext('2d');
-  highContrastCtx.drawImage(img, 0, 0);
-
-  const imageData = highContrastCtx.getImageData(0, 0, img.width, img.height);
-  const { data } = imageData;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const threshold = gray > 165 ? 255 : 0;
-    data[i] = threshold;
-    data[i + 1] = threshold;
-    data[i + 2] = threshold;
-  }
-
-  highContrastCtx.putImageData(imageData, 0, 0);
-
-  return [
-    { name: 'base', canvas: baseCanvas },
-    { name: 'high-contrast', canvas: highContrastCanvas }
-  ];
-};
-
-/**
- * Parse dimension text and extract width and height in feet
- * Supports multiple formats:
- * - 5' 10" x 6' 3"
- * - 3' - 7" x 12' - 0"
- * - 5.2 ft x 6.3 ft
- * - 21.3 feet x 11.1 feet
- * - 12 x 10 (assumed feet)
- * Returns format type: 'inches' for feet-inches format, 'decimal' for decimal feet
- */
-const parseDimensions = (text) => {
-  const normalized = normalizeOcrText(text);
-  const parts = splitDimensionParts(normalized);
-  if (!parts) return null;
-
-  const leftFeetInches = parseFeetInchesToken(parts.left);
-  const rightFeetInches = parseFeetInchesToken(parts.right);
-  if (leftFeetInches !== null && rightFeetInches !== null) {
-    if (isReasonableDimension(leftFeetInches) && isReasonableDimension(rightFeetInches)) {
-      return {
-        width: leftFeetInches,
-        height: rightFeetInches,
-        match: normalized,
-        format: 'inches'
-      };
-    }
-    return null;
-  }
-
-  const leftDecimal = parseDecimalToken(parts.left);
-  const rightDecimal = parseDecimalToken(parts.right);
-  if (leftDecimal !== null && rightDecimal !== null) {
-    if (isReasonableDimension(leftDecimal) && isReasonableDimension(rightDecimal)) {
-      return {
-        width: leftDecimal,
-        height: rightDecimal,
-        match: normalized,
-        format: 'decimal'
-      };
-    }
-    return null;
-  }
-
-  // Pattern 1: Feet and inches (e.g., 5' 10" x 6' 3" or 3' - 7" x 12' - 0")
-  const feetInchesPattern = /(\d+)\s*'\s*-?\s*(\d+)\s*"?\s*x\s*(\d+)\s*'\s*-?\s*(\d+)\s*"?/i;
-  const feetInchesMatch = normalized.match(feetInchesPattern);
-  if (feetInchesMatch) {
-    const width = parseInt(feetInchesMatch[1]) + parseInt(feetInchesMatch[2]) / 12;
-    const height = parseInt(feetInchesMatch[3]) + parseInt(feetInchesMatch[4]) / 12;
-    if (isReasonableDimension(width) && isReasonableDimension(height)) {
-      return { width, height, match: feetInchesMatch[0], format: 'inches' };
+  // Try feet-inches first: 12'5" , 12' 5" , 12'5 , etc.
+  const fi = t.match(/^(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?$/);
+  if (fi) {
+    const feet = parseInt(fi[1], 10);
+    const inches = parseInt(fi[2], 10);
+    if (inches < 12) {
+      const val = feet + inches / 12;
+      if (isReasonable(val)) return { value: val, format: 'inches' };
     }
   }
-  
-  // Pattern 2: Decimal feet with "ft" or "feet" (e.g., 5.2 ft x 6.3 ft)
-  const decimalFeetPattern = /(\d+(?:\.\d+)?)\s*(?:ft|feet)\s*x\s*(\d+(?:\.\d+)?)\s*(?:ft|feet)/i;
-  const decimalFeetMatch = normalized.match(decimalFeetPattern);
-  if (decimalFeetMatch) {
-    const width = parseFloat(decimalFeetMatch[1]);
-    const height = parseFloat(decimalFeetMatch[2]);
-    if (isReasonableDimension(width) && isReasonableDimension(height)) {
-      return { width, height, match: decimalFeetMatch[0], format: 'decimal' };
-    }
+
+  // Feet-only with tick mark: 12'
+  const feetOnly = t.match(/^(\d{1,3})\s*['']\s*$/);
+  if (feetOnly) {
+    const val = parseInt(feetOnly[1], 10);
+    if (isReasonable(val)) return { value: val, format: 'inches' };
   }
-  
-  // Pattern 3: Simple numbers with x (e.g., 12 x 10, assumed feet)
-  // Check if it has decimal points to determine format
-  const simplePattern = /(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i;
-  const simpleMatch = normalized.match(simplePattern);
-  if (simpleMatch) {
-    const width = parseFloat(simpleMatch[1]);
-    const height = parseFloat(simpleMatch[2]);
-    if (!isReasonableDimension(width) || !isReasonableDimension(height)) {
-      return null;
-    }
-    // If either number has a decimal point, assume decimal format
-    const hasDecimal = simpleMatch[1].includes('.') || simpleMatch[2].includes('.');
-    return { width, height, match: simpleMatch[0], format: hasDecimal ? 'decimal' : 'decimal' };
+
+  // Decimal feet: 12.5 ft, 12.5, etc.
+  const dec = t.match(/^(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)?\.?\s*$/i);
+  if (dec) {
+    const val = parseFloat(dec[1]);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
   }
-  
+
   return null;
 };
 
-// Get all detected dimensions for manual mode (only left-to-right reading order)
+const parseDimensionLine = (line) => {
+  const norm = normalizeOcrText(line);
+
+  // --- Strategy 1: explicit x/X separator --------------------------------
+  const sepMatch = norm.match(SEPARATOR);
+  if (sepMatch) {
+    const left = norm.slice(0, sepMatch.index).trim();
+    const right = norm.slice(sepMatch.index + sepMatch[0].length).trim();
+    if (left && right) {
+      const lp = parseSingleToken(left);
+      const rp = parseSingleToken(right);
+      if (lp && rp) {
+        return {
+          width: lp.value,
+          height: rp.value,
+          text: norm,
+          format: lp.format === 'inches' || rp.format === 'inches' ? 'inches' : 'decimal'
+        };
+      }
+    }
+  }
+
+  // --- Strategy 2: full-line regex for feet-inches with x -----------------
+  const fiFull = norm.match(
+    /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?\s*[xX]\s*(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/
+  );
+  if (fiFull) {
+    const w = parseInt(fiFull[1], 10) + parseInt(fiFull[2], 10) / 12;
+    const h = parseInt(fiFull[3], 10) + parseInt(fiFull[4], 10) / 12;
+    if (isReasonable(w) && isReasonable(h)) {
+      return { width: w, height: h, text: fiFull[0], format: 'inches' };
+    }
+  }
+
+  // --- Strategy 3: two bare numbers separated by x -----------------------
+  const bare = norm.match(/(\d{1,3}(?:\.\d+)?)\s*[xX]\s*(\d{1,3}(?:\.\d+)?)/);
+  if (bare) {
+    const w = parseFloat(bare[1]);
+    const h = parseFloat(bare[2]);
+    if (isReasonable(w) && isReasonable(h)) {
+      const fmt = bare[1].includes('.') || bare[2].includes('.') ? 'decimal' : 'decimal';
+      return { width: w, height: h, text: bare[0], format: fmt };
+    }
+  }
+
+  // --- Strategy 4: two feet-inches groups without explicit x separator ----
+  // e.g. "12'5\"  10'3\""
+  const twoFi = norm.match(
+    /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?\s{1,}\s*(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/
+  );
+  if (twoFi) {
+    const w = parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12;
+    const h = parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12;
+    if (isReasonable(w) && isReasonable(h)) {
+      return { width: w, height: h, text: twoFi[0], format: 'inches' };
+    }
+  }
+
+  // --- Strategy 5: decimal ft x decimal ft --------------------------------
+  const decFt = norm.match(
+    /(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)\s*[xX]?\s*(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)/i
+  );
+  if (decFt) {
+    const w = parseFloat(decFt[1]);
+    const h = parseFloat(decFt[2]);
+    if (isReasonable(w) && isReasonable(h)) {
+      return { width: w, height: h, text: decFt[0], format: 'decimal' };
+    }
+  }
+
+  return null;
+};
+
+// ---------------------------------------------------------------------------
+// Digit-first spatial detection
+// ---------------------------------------------------------------------------
+
+const collectLinesAndWords = (result) => {
+  const lines = [];
+  const words = [];
+  if (!result?.data?.blocks) return { lines, words };
+
+  for (const block of result.data.blocks) {
+    if (!block.paragraphs) continue;
+    for (const para of block.paragraphs) {
+      if (!para.lines) continue;
+      for (const line of para.lines) {
+        lines.push(line);
+        if (line.words) words.push(...line.words);
+      }
+    }
+  }
+  return { lines, words };
+};
+
+const buildDigitGroups = (words) => {
+  const groups = [];
+  for (const word of words) {
+    if (!word.text || !word.bbox) continue;
+    if (word.confidence < MIN_WORD_CONFIDENCE) continue;
+    const t = normalizeOcrText(word.text);
+    if (/\d/.test(t)) {
+      groups.push({
+        text: t,
+        bbox: word.bbox,
+        confidence: word.confidence
+      });
+    }
+  }
+  return groups;
+};
+
+const horizontalBand = (a, b) => {
+  const aCy = (a.bbox.y0 + a.bbox.y1) / 2;
+  const bCy = (b.bbox.y0 + b.bbox.y1) / 2;
+  const aH = a.bbox.y1 - a.bbox.y0;
+  const bH = b.bbox.y1 - b.bbox.y0;
+  const tolerance = Math.max(aH, bH) * 1.2;
+  return Math.abs(aCy - bCy) < tolerance;
+};
+
+const tryParsePairFromWords = (wordGroup) => {
+  const combined = wordGroup.map(w => w.text).join(' ');
+  return parseDimensionLine(combined);
+};
+
+const detectFromSpatialWords = (words) => {
+  const digits = buildDigitGroups(words);
+  if (digits.length < 2) return [];
+
+  const results = [];
+  const used = new Set();
+
+  for (let i = 0; i < digits.length; i++) {
+    if (used.has(i)) continue;
+
+    const band = [digits[i]];
+    const bandIndices = [i];
+
+    for (let j = i + 1; j < digits.length; j++) {
+      if (used.has(j)) continue;
+      if (!horizontalBand(digits[i], digits[j])) continue;
+
+      const gap = digits[j].bbox.x0 - digits[band.length - 1].bbox.x1;
+      const charW = (digits[i].bbox.x1 - digits[i].bbox.x0) / Math.max(digits[i].text.length, 1);
+      if (gap > charW * 30) continue;
+
+      band.push(digits[j]);
+      bandIndices.push(j);
+    }
+
+    if (band.length >= 2) {
+      const parsed = tryParsePairFromWords(band);
+      if (parsed) {
+        const minX = Math.min(...band.map(w => w.bbox.x0));
+        const minY = Math.min(...band.map(w => w.bbox.y0));
+        const maxX = Math.max(...band.map(w => w.bbox.x1));
+        const maxY = Math.max(...band.map(w => w.bbox.y1));
+        results.push({
+          ...parsed,
+          bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+          confidence: band.reduce((s, w) => s + w.confidence, 0) / band.length
+        });
+        bandIndices.forEach(idx => used.add(idx));
+      }
+    }
+  }
+
+  return results;
+};
+
+// ---------------------------------------------------------------------------
+// Line-level detection (traditional: parse each OCR line)
+// ---------------------------------------------------------------------------
+
+const detectFromLines = (lines) => {
+  const results = [];
+  const seen = new Set();
+
+  for (const line of lines) {
+    const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
+    const norm = normalizeOcrText(rawText);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+
+    const parsed = parseDimensionLine(norm);
+    if (!parsed) continue;
+
+    const bbox = line.bbox
+      ? { x: line.bbox.x0, y: line.bbox.y0, width: line.bbox.x1 - line.bbox.x0, height: line.bbox.y1 - line.bbox.y0 }
+      : null;
+
+    const avgConf = line.words
+      ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+      : 50;
+
+    results.push({ ...parsed, bbox, confidence: avgConf });
+  }
+
+  return results;
+};
+
+// ---------------------------------------------------------------------------
+// Deduplication: merge results with similar values and overlapping bboxes
+// ---------------------------------------------------------------------------
+
+const bboxOverlap = (a, b) => {
+  if (!a || !b) return false;
+  const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const overlapY = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  const overlapArea = overlapX * overlapY;
+  const aArea = a.width * a.height;
+  const bArea = b.width * b.height;
+  const minArea = Math.min(aArea, bArea);
+  return minArea > 0 && overlapArea / minArea > 0.3;
+};
+
+const valuesClose = (a, b, tolerance = 0.05) => {
+  const wDiff = Math.abs(a.width - b.width) / Math.max(a.width, 1);
+  const hDiff = Math.abs(a.height - b.height) / Math.max(a.height, 1);
+  return wDiff < tolerance && hDiff < tolerance;
+};
+
+const deduplicateResults = (results) => {
+  const sorted = [...results].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  const kept = [];
+
+  for (const r of sorted) {
+    const isDup = kept.some(k =>
+      valuesClose(k, r) && bboxOverlap(k.bbox, r.bbox)
+    );
+    if (!isDup) kept.push(r);
+  }
+
+  return kept;
+};
+
+// ---------------------------------------------------------------------------
+// Worker helpers
+// ---------------------------------------------------------------------------
+
+const createConfiguredWorker = async () => {
+  const worker = await Tesseract.createWorker('eng', 1);
+  return worker;
+};
+
+const recognizeVariants = async (worker, canvases) => {
+  const allLines = [];
+  const allWords = [];
+
+  for (const { canvas } of canvases) {
+    for (const psm of [Tesseract.PSM.SPARSE_TEXT, Tesseract.PSM.SINGLE_BLOCK]) {
+      await worker.setParameters({
+        tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+        tessedit_pageseg_mode: psm,
+        preserve_interword_spaces: '1'
+      });
+
+      const result = await worker.recognize(canvas, {}, { blocks: true });
+      const { lines, words } = collectLinesAndWords(result);
+      allLines.push(...lines);
+      allWords.push(...words);
+    }
+  }
+
+  return { lines: allLines, words: allWords };
+};
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
 export const detectAllDimensions = async (imageDataUrl) => {
   try {
     const img = await dataUrlToImage(imageDataUrl);
-    const imageVariants = createImageVariants(img);
-    
-    // Run OCR on the image using v6 worker API with optimizations
-    console.log('detectAllDimensions: Starting OCR with v6 worker API (optimized)...');
-    const worker = await Tesseract.createWorker('eng', 1, {
-      logger: (m) => console.log('OCR Progress:', m)
+    const { variants, scaleFactor } = buildVariants(img);
+
+    // Split variants across two parallel workers for speed
+    const mid = Math.ceil(variants.length / 2);
+    const batch1 = variants.slice(0, mid);
+    const batch2 = variants.slice(mid);
+
+    const [worker1, worker2] = await Promise.all([
+      createConfiguredWorker(),
+      createConfiguredWorker()
+    ]);
+
+    const [r1, r2] = await Promise.all([
+      recognizeVariants(worker1, batch1),
+      recognizeVariants(worker2, batch2)
+    ]);
+
+    await Promise.all([worker1.terminate(), worker2.terminate()]);
+
+    const allLines = [...r1.lines, ...r2.lines];
+    const allWords = [...r1.words, ...r2.words];
+
+    // Two detection strategies run in parallel, then merged
+    const lineResults = detectFromLines(allLines);
+    const spatialResults = detectFromSpatialWords(allWords);
+
+    const merged = [...lineResults, ...spatialResults];
+    const deduped = deduplicateResults(merged);
+
+    // Scale bboxes back to original image coordinates
+    const dimensions = deduped.map(d => {
+      let bbox = d.bbox;
+      if (bbox && scaleFactor !== 1) {
+        bbox = {
+          x: bbox.x / scaleFactor,
+          y: bbox.y / scaleFactor,
+          width: bbox.width / scaleFactor,
+          height: bbox.height / scaleFactor
+        };
+      }
+
+      if (!bbox) {
+        const idx = deduped.indexOf(d);
+        bbox = {
+          x: img.width / 2 - 100,
+          y: img.height * 0.3 + idx * 80,
+          width: 200,
+          height: 50
+        };
+      }
+
+      return {
+        width: d.width,
+        height: d.height,
+        text: d.text,
+        bbox,
+        format: d.format
+      };
     });
-    
-    const collectWordsFromResult = (result) => {
-      const collectedWords = [];
-      if (!result.data.blocks) return collectedWords;
 
-      for (const block of result.data.blocks) {
-        if (!block.paragraphs) continue;
-        for (const paragraph of block.paragraphs) {
-          if (!paragraph.lines) continue;
-          for (const line of paragraph.lines) {
-            if (!line.words) continue;
-            collectedWords.push(...line.words);
-          }
-        }
-      }
+    const detectedFormat = dimensions.length > 0 ? dimensions[0].format : null;
 
-      return collectedWords;
-    };
-
-    const aggregatedLines = [];
-    const aggregatedWords = [];
-
-    for (const variant of imageVariants) {
-      for (const pageSegMode of [Tesseract.PSM.AUTO, Tesseract.PSM.SINGLE_BLOCK]) {
-        await worker.setParameters({
-          tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
-          tessedit_pageseg_mode: pageSegMode,
-          preserve_interword_spaces: '1'
-        });
-
-        const result = await worker.recognize(variant.canvas, {}, { blocks: true });
-
-        const textLines = result.data.text
-          .split('\n')
-          .map((line) => normalizeOcrText(line))
-          .filter(Boolean);
-
-        aggregatedLines.push(...textLines);
-        aggregatedWords.push(...collectWordsFromResult(result));
-      }
-    }
-    await worker.terminate();
-    
-    console.log('detectAllDimensions: OCR complete');
-    
-    console.log('detectAllDimensions: Total lines:', aggregatedLines.length);
-    
-    const dimensions = [];
-    let detectedFormat = null; // Track the first detected format
-    
-    // Get words array for bounding box lookup
-    // In Tesseract.js v6, words are nested: blocks → paragraphs → lines → words
-    const words = aggregatedWords;
-    console.log('detectAllDimensions: Words extracted:', words.length);
-    
-    // Log first few words for debugging
-    if (words.length > 0) {
-      console.log('detectAllDimensions: Sample words:', words.slice(0, 5).map(w => ({
-        text: w.text,
-        bbox: w.bbox
-      })));
-    } else {
-      console.warn('detectAllDimensions: No words found! Check if blocks output is enabled.');
-    }
-    
-    // Track which words have been used across all dimensions
-    const globalUsedWordIndices = new Set();
-    
-    const processedLineSet = new Set();
-    for (const line of aggregatedLines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
-      if (processedLineSet.has(trimmedLine)) continue;
-      processedLineSet.add(trimmedLine);
-      
-      console.log(`detectAllDimensions: Testing line: "${trimmedLine}"`);
-      const parsed = parseDimensions(trimmedLine);
-      
-      if (parsed) {
-        console.log(`detectAllDimensions: ✓ Found dimension: ${parsed.width} x ${parsed.height} (${parsed.format})`);
-        
-        // Store the first detected format
-        if (!detectedFormat) {
-          detectedFormat = parsed.format;
-        }
-        
-        // Find the bounding box for this dimension in the OCR result
-        let dimensionBBox = null;
-        
-        // Extract numeric tokens from the dimension text for precise matching
-        // For "13' 5\" x 12' 11\"", extract the numbers: 13, 5, 12, 11
-        const numericTokens = parsed.match.match(/\d+/g) || [];
-        console.log(`detectAllDimensions: Looking for numeric tokens:`, numericTokens);
-        
-        // First pass: find words that contain these specific numbers
-        const matchingWords = [];
-        
-        for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
-          const word = words[wordIndex];
-          if (!word.text || !word.bbox) continue;
-          
-          // Skip words that have already been used by previous dimensions
-          if (globalUsedWordIndices.has(wordIndex)) continue;
-          
-          const wordText = word.text.trim();
-          if (wordText.length === 0) continue;
-          
-          // Check if this word contains any of our numeric tokens
-          const containsNumber = numericTokens.some(num => wordText.includes(num));
-          
-          if (containsNumber) {
-            matchingWords.push({ word, index: wordIndex });
-            console.log(`detectAllDimensions: Matched word "${wordText}" at (${Math.round(word.bbox.x0)}, ${Math.round(word.bbox.y0)})`);
-          }
-        }
-        
-        // Second pass: find the cluster of words that are close together
-        // This prevents matching words from different parts of the image
-        if (matchingWords.length > 0) {
-          // Start with the first matching word
-          let clusterWords = [matchingWords[0]];
-          
-          // Add words that are spatially close (within 100 pixels vertically, 300 pixels horizontally)
-          const maxVerticalDistance = 100;
-          const maxHorizontalDistance = 300;
-          
-          for (let i = 1; i < matchingWords.length; i++) {
-            const { word } = matchingWords[i];
-            const wordCenterX = (word.bbox.x0 + word.bbox.x1) / 2;
-            const wordCenterY = (word.bbox.y0 + word.bbox.y1) / 2;
-            
-            // Check if this word is close to any word in the cluster
-            let isClose = false;
-            for (const clusterItem of clusterWords) {
-              const clusterWord = clusterItem.word;
-              const clusterCenterX = (clusterWord.bbox.x0 + clusterWord.bbox.x1) / 2;
-              const clusterCenterY = (clusterWord.bbox.y0 + clusterWord.bbox.y1) / 2;
-              
-              const verticalDist = Math.abs(wordCenterY - clusterCenterY);
-              const horizontalDist = Math.abs(wordCenterX - clusterCenterX);
-              
-              if (verticalDist <= maxVerticalDistance && horizontalDist <= maxHorizontalDistance) {
-                isClose = true;
-                break;
-              }
-            }
-            
-            if (isClose) {
-              clusterWords.push(matchingWords[i]);
-            }
-          }
-          
-          // Build bbox from clustered words only and mark them as used
-          for (const { word, index } of clusterWords) {
-            // Mark this word as used globally
-            globalUsedWordIndices.add(index);
-            
-            if (!dimensionBBox) {
-              dimensionBBox = {
-                x: word.bbox.x0,
-                y: word.bbox.y0,
-                width: word.bbox.x1 - word.bbox.x0,
-                height: word.bbox.y1 - word.bbox.y0
-              };
-            } else {
-              // Expand bbox to include this word
-              const minX = Math.min(dimensionBBox.x, word.bbox.x0);
-              const minY = Math.min(dimensionBBox.y, word.bbox.y0);
-              const maxX = Math.max(dimensionBBox.x + dimensionBBox.width, word.bbox.x1);
-              const maxY = Math.max(dimensionBBox.y + dimensionBBox.height, word.bbox.y1);
-              dimensionBBox = {
-                x: minX,
-                y: minY,
-                width: maxX - minX,
-                height: maxY - minY
-              };
-            }
-          }
-        }
-        
-        // If we couldn't find a bbox, create a fallback synthetic one
-        if (!dimensionBBox) {
-          console.log(`detectAllDimensions: ⚠ No bbox found for "${parsed.match}"`);
-          console.log(`detectAllDimensions: Numeric tokens to match:`, numericTokens);
-          console.log(`detectAllDimensions: Matching words found:`, matchingWords.length);
-          console.log(`detectAllDimensions: Available word texts:`, words.slice(0, 10).map(w => w.text));
-          console.log(`detectAllDimensions: Creating synthetic bbox`);
-          const imageWidth = img.width;
-          const imageHeight = img.height;
-          const dimensionIndex = dimensions.length;
-          
-          dimensionBBox = {
-            x: imageWidth / 2 - 100,
-            y: imageHeight * 0.3 + (dimensionIndex * 80),
-            width: 200,
-            height: 50
-          };
-        } else {
-          console.log(`detectAllDimensions: ✓ Found bbox at (${Math.round(dimensionBBox.x)}, ${Math.round(dimensionBBox.y)}), size: ${Math.round(dimensionBBox.width)}x${Math.round(dimensionBBox.height)}`);
-          console.log(`detectAllDimensions: Image dimensions: ${img.width}x${img.height}`);
-          console.log(`detectAllDimensions: Bbox relative position: ${(dimensionBBox.x / img.width * 100).toFixed(1)}% x, ${(dimensionBBox.y / img.height * 100).toFixed(1)}% y`);
-        }
-        
-        dimensions.push({
-          width: parsed.width,
-          height: parsed.height,
-          text: parsed.match,
-          bbox: dimensionBBox,
-          format: parsed.format
-        });
-      } else {
-        console.log(`detectAllDimensions: ✗ No dimension pattern matched`);
-      }
-    }
-    
-    console.log(`detectAllDimensions: Found ${dimensions.length} dimensions for manual mode`);
-    console.log(`detectAllDimensions: Detected format: ${detectedFormat}`);
     return { dimensions, detectedFormat };
   } catch (error) {
-    console.error('Error detecting all dimensions:', error);
+    console.error('DimensionsOCR error:', error);
     return { dimensions: [], detectedFormat: null };
   }
 };
