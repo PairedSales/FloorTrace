@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
-import StatusBar from './components/StatusBar';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
@@ -984,13 +983,6 @@ function App() {
           )}
         </div>
       </div>
-
-      <StatusBar
-        area={area}
-        unit={unit}
-        lineToolActive={lineToolActive}
-        drawAreaActive={drawAreaActive}
-      />
 
       <input
         ref={fileInputRef}
