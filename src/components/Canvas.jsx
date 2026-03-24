@@ -1158,23 +1158,35 @@ const Canvas = forwardRef(({
   }, [handleKeyDown]);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-white" style={{ cursor: 'default' }}>
+    <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-xl text-slate-600 font-medium">
-              Paste or Load a Sketch Image to Get Started
+          <div className="text-center max-w-sm">
+            <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-slate-200/80 flex items-center justify-center">
+              <svg className="w-7 h-7 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+                <path d="M15 3v18" />
+                <path d="M3 9h18" />
+                <path d="M3 15h18" />
+              </svg>
+            </div>
+            <p className="text-base font-semibold text-slate-500 mb-1">
+              No floor plan loaded
+            </p>
+            <p className="text-sm text-slate-400">
+              Paste an image <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-200 rounded text-slate-500">Ctrl+V</kbd> or open a file <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-200 rounded text-slate-500">Ctrl+O</kbd>
             </p>
           </div>
         </div>
       )}
-      
+
       {isProcessing && (
-        <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center z-10">
-          <div className="bg-white rounded-lg p-4 shadow-lg">
+        <div className="absolute inset-0 bg-chrome-900/60 backdrop-blur-sm flex items-center justify-center z-10">
+          <div className="bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3.5 shadow-xl">
             <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-700"></div>
-              <span className="text-slate-700 font-medium">Processing...</span>
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
+              <span className="text-sm text-slate-200 font-medium">Processing image&hellip;</span>
             </div>
           </div>
         </div>

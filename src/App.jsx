@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Canvas from './components/Canvas';
-import Sidebar from './components/Sidebar';
+import Toolbar from './components/Toolbar';
+import LeftPanel from './components/LeftPanel';
+import StatusBar from './components/StatusBar';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
-import FloorTraceLogo from './assets/logo.svg';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 
@@ -25,7 +26,6 @@ function App() {
   const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
   const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
   
-  const [sidebarHeight, setSidebarHeight] = useState(0);
   const [lineToolActive, setLineToolActive] = useState(false);
   const [measurementLines, setMeasurementLines] = useState([]); // Array of { start, end }
   const [currentMeasurementLine, setCurrentMeasurementLine] = useState(null); // The line currently being drawn
@@ -36,7 +36,6 @@ function App() {
   const [notification, setNotification] = useState({ show: false, message: '' });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
-  const sidebarRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   const appStateRef = useRef({});
@@ -305,28 +304,14 @@ function App() {
     }
   }, [resetOverlays, handleManualMode]);
 
-  // Handle find room - disabled until automatic detection is rewritten
-  const handleFindRoom = async () => {
-    alert('Automatic room detection feature coming soon! Please use Manual Mode for now.');
-  };
-
   // Handle trace perimeter - placeholder for future implementation
   const handleTracePerimeter = async () => {
     setNotification({ show: true, message: 'Coming Soon' });
     setTimeout(() => setNotification({ show: false, message: '' }), 2000);
   };
 
-  // Handle manual dimension entry button click
-  const handleEnterManually = () => {
-    setManualEntryMode(true);
-    setDetectedDimensions([]); // Clear detected dimensions
-  };
-
-  // Handle interior/exterior wall toggle - placeholder for future implementation
-  const handleInteriorWallToggle = (e) => {
-    const newValue = e.target.checked;
-    setUseInteriorWalls(newValue);
-    // TODO: Re-implement perimeter detection when automatic tracing is restored
+  const handleInteriorWallToggle = (value) => {
+    setUseInteriorWalls(value);
   };
 
   // Handle fit to window
@@ -794,312 +779,105 @@ function App() {
     return () => window.removeEventListener('contextmenu', handleContextMenu);
   }, []);
 
-  // Match Area box height to Sidebar height
-  useEffect(() => {
-    const updateHeight = () => {
-      if (sidebarRef.current) {
-        setSidebarHeight(sidebarRef.current.offsetHeight);
-      }
-    };
-
-    updateHeight();
-    window.addEventListener('resize', updateHeight);
-    
-    // Use MutationObserver to detect content changes in sidebar
-    const observer = new MutationObserver(updateHeight);
-    if (sidebarRef.current) {
-      observer.observe(sidebarRef.current, { childList: true, subtree: true });
-    }
-
-    return () => {
-      window.removeEventListener('resize', updateHeight);
-      observer.disconnect();
-    };
-  }, [mode, ocrFailed, manualEntryMode, perimeterOverlay]);
-
   // Desktop UI
   return (
-    <div id="app-container" className="flex flex-col h-screen bg-white">
-      {/* Title Bar */}
-      <header className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-600 px-6 py-3 shadow-sm">
-        <div 
-          className="flex items-center gap-3 hover:opacity-80 transition-opacity w-fit cursor-pointer select-none"
-          onClick={handleRestart}
-          title="Restart FloorTrace"
-        >
-          <img src={FloorTraceLogo} alt="FloorTrace Logo" className="w-8 h-8" />
-          <h1 className="text-xl font-semibold text-white tracking-tight">FloorTrace</h1>
-        </div>
-      </header>
+    <div id="app-container" className="flex flex-col h-screen bg-chrome-900">
+      <Toolbar
+        image={image}
+        isProcessing={isProcessing}
+        measurementLines={measurementLines}
+        customShapes={customShapes}
+        currentMeasurementLine={currentMeasurementLine}
+        currentCustomShape={currentCustomShape}
+        onFileOpen={() => fileInputRef.current?.click()}
+        onSaveImage={handleSaveImage}
+        onTracePerimeter={handleTracePerimeter}
+        onFitToWindow={handleFitToWindow}
+        onClearTools={handleClearTools}
+        onRestart={handleRestart}
+      />
 
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 px-6 py-4 bg-slate-50 border-b border-slate-200 flex-wrap">
-        
-        {/* Left Group */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={isProcessing}
-          >
-            Load Image
-          </button>
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        <LeftPanel
+          roomDimensions={roomDimensions}
+          onDimensionsChange={(dims) => {
+            setRoomDimensions(dims);
+            if (roomOverlay) {
+              updateScale(dims, roomOverlay);
+            }
+          }}
+          area={area}
+          mode={mode}
+          unit={unit}
+          onUnitChange={setUnit}
+          isProcessing={isProcessing}
+          ocrFailed={ocrFailed}
+          showSideLengths={showSideLengths}
+          onShowSideLengthsChange={setShowSideLengths}
+          useInteriorWalls={useInteriorWalls}
+          onInteriorWallToggle={handleInteriorWallToggle}
+          autoSnapEnabled={autoSnapEnabled}
+          onAutoSnapChange={setAutoSnapEnabled}
+          perimeterOverlay={perimeterOverlay}
+          lineToolActive={lineToolActive}
+          onLineToolToggle={handleLineToolToggle}
+          drawAreaActive={drawAreaActive}
+          onDrawAreaToggle={handleDrawAreaToggle}
+        />
 
-          <button
-            onClick={handleSaveImage}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={!image}
-          >
-            Save Image
-          </button>
-        </div>
-        
-        {/* Center Group */}
-        <div className="flex items-center gap-3">
-          {/* Add other tools here later */}
-        </div>
-        
-        {/* Right Group */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleTracePerimeter}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={!image || isProcessing}
-          >
-            Find Perimeter
-          </button>
-          <button
-            onClick={handleFitToWindow}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-slate-700 hover:text-white rounded-md transition-colors duration-200 shadow-sm disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-700"
-            disabled={!image}
-          >
-            Fit to Window
-          </button>
+        <div className="relative flex-1 overflow-hidden">
+          <Canvas
+            ref={canvasRef}
+            image={image}
+            roomOverlay={roomOverlay}
+            perimeterOverlay={perimeterOverlay}
+            mode={mode}
+            onRoomOverlayUpdate={updateRoomOverlay}
+            onPerimeterUpdate={updatePerimeterVertices}
+            isProcessing={isProcessing}
+            detectedDimensions={detectedDimensions}
+            onDimensionSelect={handleDimensionSelect}
+            showSideLengths={showSideLengths}
+            pixelsPerFoot={scale}
+            manualEntryMode={manualEntryMode}
+            onCanvasClick={handleCanvasClick}
+            unit={unit}
+            lineToolActive={lineToolActive}
+            measurementLines={measurementLines}
+            currentMeasurementLine={currentMeasurementLine}
+            onMeasurementLineUpdate={setCurrentMeasurementLine}
+            onAddMeasurementLine={handleAddMeasurementLine}
+            onMeasurementLinesChange={handleMeasurementLinesChange}
+            drawAreaActive={drawAreaActive}
+            customShapes={customShapes}
+            currentCustomShape={currentCustomShape}
+            onCustomShapeUpdate={setCurrentCustomShape}
+            onAddCustomShape={handleAddCustomShape}
+            onCustomShapesChange={handleCustomShapesChange}
+            perimeterVertices={perimeterVertices}
+            onAddPerimeterVertex={handleAddPerimeterVertex}
+            onClosePerimeter={handleClosePerimeter}
+            autoSnapEnabled={autoSnapEnabled}
+            onRemovePerimeterVertex={handleRemovePerimeterVertex}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+          />
 
-          {/* Conditionally render Clear button */}
-          {(measurementLines.length > 0 || customShapes.length > 0 || currentMeasurementLine || currentCustomShape) && (
-            <button
-              onClick={handleClearTools}
-              className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-white hover:bg-red-500 hover:text-white rounded-md transition-colors duration-200 shadow-sm"
-            >
-              Clear
-            </button>
+          {notification.show && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in">
+              {notification.message}
+            </div>
           )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="relative flex-1 overflow-hidden min-h-0">
-        {/* Canvas fills all available space */}
-        <Canvas
-          ref={canvasRef}
-          image={image}
-          roomOverlay={roomOverlay}
-          perimeterOverlay={perimeterOverlay}
-          mode={mode}
-          onRoomOverlayUpdate={updateRoomOverlay}
-          onPerimeterUpdate={updatePerimeterVertices}
-          isProcessing={isProcessing}
-          detectedDimensions={detectedDimensions}
-          onDimensionSelect={handleDimensionSelect}
-          showSideLengths={showSideLengths}
-          pixelsPerFoot={scale}
-          manualEntryMode={manualEntryMode}
-          onCanvasClick={handleCanvasClick}
-          unit={unit}
-          lineToolActive={lineToolActive}
-          measurementLines={measurementLines}
-          currentMeasurementLine={currentMeasurementLine}
-          onMeasurementLineUpdate={setCurrentMeasurementLine}
-          onAddMeasurementLine={handleAddMeasurementLine}
-          onMeasurementLinesChange={handleMeasurementLinesChange}
-          drawAreaActive={drawAreaActive}
-          customShapes={customShapes}
-          currentCustomShape={currentCustomShape}
-          onCustomShapeUpdate={setCurrentCustomShape}
-          onAddCustomShape={handleAddCustomShape}
-          onCustomShapesChange={handleCustomShapesChange}
-          perimeterVertices={perimeterVertices}
-          onAddPerimeterVertex={handleAddPerimeterVertex}
-          onClosePerimeter={handleClosePerimeter}
-          autoSnapEnabled={autoSnapEnabled}
-          onRemovePerimeterVertex={handleRemovePerimeterVertex}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-        />
+      <StatusBar
+        area={area}
+        unit={unit}
+        lineToolActive={lineToolActive}
+        drawAreaActive={drawAreaActive}
+      />
 
-        {/* Sidebar overlay (flush to edges) */}
-        <div ref={sidebarRef} className="absolute top-0 left-0 z-10 m-0">
-          <Sidebar
-            roomDimensions={roomDimensions}
-            setRoomDimensions={setRoomDimensions}
-            area={area}
-            onDimensionsChange={(dims) => {
-              setRoomDimensions(dims);
-              if (roomOverlay) {
-                updateScale(dims, roomOverlay);
-              }
-            }}
-            mode={mode}
-            manualEntryMode={manualEntryMode}
-            detectedDimensions={detectedDimensions}
-            onEnterManually={handleEnterManually}
-            unit={unit}
-            onUnitChange={setUnit}
-            isProcessing={isProcessing}
-            ocrFailed={ocrFailed}
-          />
-        </div>
-
-        {/* Notification Popup */}
-        {notification.show && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-md shadow-lg animate-fade-in-out">
-            {notification.message}
-          </div>
-        )}
-
-        {/* Area Display Box - positioned to the right of sidebar */}
-        <div className="absolute top-0 left-64 z-10 m-0">
-          <div 
-            className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-6 self-start"
-            style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
-          >
-            <div>
-              <h2 className="text-sm font-semibold text-slate-700 mb-3">Area</h2>
-              <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-                <div 
-                  className="font-bold text-slate-800 whitespace-nowrap"
-                  style={{
-                    fontSize: (() => {
-                      const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
-                      const length = areaText.length;
-                      if (length <= 7) return '1.5rem'; // text-2xl (24px)
-                      if (length <= 9) return '1.25rem'; // text-xl (20px)
-                      if (length <= 11) return '1.125rem'; // text-lg (18px)
-                      return '1rem'; // text-base (16px)
-                    })()
-                  }}
-                >
-                  {area > 0 ? Math.round(area).toLocaleString() : '0'} ft²
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Options Panel - positioned to the right of area box, only visible when perimeter exists */}
-        {perimeterOverlay && (
-          <div className="absolute top-0 left-[28rem] z-10 m-0">
-            <div 
-              className="bg-slate-50 border-r border-b border-slate-200 p-4 shadow-sm w-48 flex flex-col gap-4 self-start"
-              style={{ height: sidebarHeight > 0 ? `${sidebarHeight}px` : 'auto' }}
-            >
-              <div>
-                <h2 className="text-sm font-semibold text-slate-700 mb-3">Options</h2>
-                <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex flex-col gap-2.5">
-                  
-                  {/* Show Side Lengths Toggle */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-700">Show Lengths</span>
-                    <button
-                      onClick={() => setShowSideLengths(!showSideLengths)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
-                        showSideLengths ? 'bg-slate-700' : 'bg-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
-                          showSideLengths ? 'translate-x-5' : 'translate-x-0.5'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Exterior Walls Toggle */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-700">Exterior Walls</span>
-                    <button
-                      onClick={() => handleInteriorWallToggle({ target: { checked: !useInteriorWalls } })}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
-                        !useInteriorWalls ? 'bg-slate-700' : 'bg-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
-                          !useInteriorWalls ? 'translate-x-5' : 'translate-x-0.5'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-
-                  {/* Auto Snap Toggle */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-700">Auto Snap</span>
-                    <button
-                      onClick={() => setAutoSnapEnabled(!autoSnapEnabled)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 ${
-                        autoSnapEnabled ? 'bg-slate-700' : 'bg-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${
-                          autoSnapEnabled ? 'translate-x-5' : 'translate-x-0.5'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Measurement Tool Buttons - positioned to the right of options panel, only visible when area is calculated */}
-        {area > 0 && (
-          <div className="absolute top-4 z-10 m-0 flex flex-col gap-2.5" style={{ left: 'calc(28rem + 12rem + 0.625rem)' }}>
-            {/* Line Tool Button */}
-            <button
-              onClick={handleLineToolToggle}
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
-                lineToolActive 
-                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 text-white shadow-md scale-105' 
-                  : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
-              }`}
-              title="Measure distances"
-            >
-              <svg className="w-6 h-6" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="6" y1="26" x2="26" y2="6" />
-                <circle cx="6" cy="26" r="3" fill="currentColor" stroke="none" />
-                <circle cx="26" cy="6" r="3" fill="currentColor" stroke="none" />
-              </svg>
-            </button>
-
-            {/* Draw Area Tool Button */}
-            <button
-              onClick={handleDrawAreaToggle}
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 shadow-sm ${
-                drawAreaActive 
-                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 text-white shadow-md scale-105' 
-                  : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 border border-slate-200'
-              }`}
-              title="Draw custom area"
-            >
-              <svg className="w-6 h-6" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 4 L28 11 L24 26 L8 26 L4 11 Z" />
-                <circle cx="16" cy="4" r="2.5" fill="currentColor" stroke="none" />
-                <circle cx="28" cy="11" r="2.5" fill="currentColor" stroke="none" />
-                <circle cx="24" cy="26" r="2.5" fill="currentColor" stroke="none" />
-                <circle cx="8" cy="26" r="2.5" fill="currentColor" stroke="none" />
-                <circle cx="4" cy="11" r="2.5" fill="currentColor" stroke="none" />
-              </svg>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"

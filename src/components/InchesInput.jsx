@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   const [feet, setFeet] = useState('');
@@ -48,11 +48,12 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   };
 
   return (
-    <div 
-      className="flex items-center justify-center w-24 px-3 py-2 border border-slate-300 rounded-md bg-white text-sm focus-within:ring-2 focus-within:ring-slate-500 focus-within:border-transparent"
-      onClick={() => feetRef.current && feetRef.current.focus()}
+    <div
+      className="flex items-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
+                 focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text"
+      onClick={() => feetRef.current?.focus()}
     >
-      <div className="flex items-center text-slate-400">
+      <div className="flex items-center text-slate-500 gap-0.5">
         <input
           ref={feetRef}
           type="text"
@@ -61,10 +62,10 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={onFocus}
           onBlur={onBlur}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
-          className="w-5 text-right outline-none bg-transparent text-slate-800 placeholder-slate-400"
+          className="w-5 text-right outline-none bg-transparent text-slate-100 placeholder-slate-600"
           placeholder="0"
         />
-        <span>'</span>
+        <span className="text-slate-500">&prime;</span>
         <input
           ref={inchesRef}
           type="text"
@@ -73,10 +74,10 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={onFocus}
           onBlur={onBlur}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
-          className="w-5 text-right outline-none bg-transparent text-slate-800 placeholder-slate-400"
+          className="w-5 text-right outline-none bg-transparent text-slate-100 placeholder-slate-600"
           placeholder="0"
         />
-        <span>"</span>
+        <span className="text-slate-500">&Prime;</span>
       </div>
     </div>
   );
