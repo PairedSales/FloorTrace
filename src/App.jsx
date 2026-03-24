@@ -6,6 +6,12 @@ import StatusBar from './components/StatusBar';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { detectSnappingFeatures } from './utils/imageSnapper';
 import { calculateArea } from './utils/areaCalculator';
+import {
+  detectRoomFromClick,
+  getBoundaryForMode,
+  traceFloorplanBoundary,
+  terminateDetectionWorker,
+} from './utils/detection';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 
@@ -33,6 +39,11 @@ function App() {
   const [customShapes, setCustomShapes] = useState([]); // Array of { vertices, closed, area }
   const [currentCustomShape, setCurrentCustomShape] = useState(null); // The shape currently being drawn
   const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
+  const [cornerPoints, setCornerPoints] = useState([]);
+  const [lineData, setLineData] = useState(null);
+  const [tracedBoundaries, setTracedBoundaries] = useState(null);
+  const [debugDetection, setDebugDetection] = useState(false);
+  const [detectionDebugData, setDetectionDebugData] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '' });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -94,6 +105,9 @@ function App() {
     setCustomShapes(snapshot.customShapes);
     setCurrentCustomShape(snapshot.currentCustomShape);
     setPerimeterVertices(snapshot.perimeterVertices);
+    setTracedBoundaries(snapshot.tracedBoundaries ?? null);
+    setDebugDetection(snapshot.debugDetection ?? false);
+    setDetectionDebugData(snapshot.detectionDebugData ?? null);
     setShowSideLengths(snapshot.showSideLengths);
     setUseInteriorWalls(snapshot.useInteriorWalls);
     setAutoSnapEnabled(snapshot.autoSnapEnabled ?? true);
@@ -118,6 +132,8 @@ function App() {
     setCustomShapes([]);
     setCurrentCustomShape(null);
     setPerimeterVertices(null);
+    setTracedBoundaries(null);
+    setDetectionDebugData(null);
     setAutoSnapEnabled(true);
     clearHistory();
   }, [clearHistory]);
@@ -304,14 +320,66 @@ function App() {
     }
   }, [resetOverlays, handleManualMode]);
 
-  // Handle trace perimeter - placeholder for future implementation
+  const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
+    const activeBoundary = getBoundaryForMode(boundaryResult, interiorMode);
+    if (!activeBoundary?.polygon?.length) {
+      return false;
+    }
+
+    const vertices = activeBoundary.polygon.map((point) => ({
+      x: point.x,
+      y: point.y,
+    }));
+    setPerimeterVertices(null);
+    setPerimeterOverlay({ vertices });
+    if (roomOverlay) {
+      setArea(calculateArea(vertices, scale));
+    }
+    return true;
+  }, [roomOverlay, scale]);
+
+  // Handle trace perimeter using the detection worker.
   const handleTracePerimeter = async () => {
-    setNotification({ show: true, message: 'Coming Soon' });
-    setTimeout(() => setNotification({ show: false, message: '' }), 2000);
+    if (!image) return;
+
+    setIsProcessing(true);
+    try {
+      const traced = await traceFloorplanBoundary(image, {
+        preprocess: { maxDimension: 1400 },
+      });
+
+      if (!traced) {
+        setNotification({ show: true, message: 'Unable to trace perimeter from this image.' });
+        setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+        return;
+      }
+
+      setTracedBoundaries(traced);
+      setDetectionDebugData(traced.debug ?? null);
+      const applied = applyTracedBoundary(traced, useInteriorWalls);
+
+      if (!applied) {
+        setNotification({ show: true, message: 'No valid perimeter detected.' });
+        setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+        return;
+      }
+
+      setNotification({ show: true, message: `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).` });
+      setTimeout(() => setNotification({ show: false, message: '' }), 2200);
+    } catch (error) {
+      console.error('Perimeter detection failed:', error);
+      setNotification({ show: true, message: 'Perimeter detection failed. Try another image region.' });
+      setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleInteriorWallToggle = (value) => {
     setUseInteriorWalls(value);
+    if (tracedBoundaries) {
+      applyTracedBoundary(tracedBoundaries, value);
+    }
   };
 
   // Handle fit to window
@@ -502,32 +570,45 @@ function App() {
   };
 
   // Handle dimension selection in manual mode
-  const handleDimensionSelect = (dimension) => {
+  const handleDimensionSelect = async (dimension) => {
     setRoomDimensions({ 
       width: dimension.width.toString(), 
       height: dimension.height.toString() 
     });
-    
-    // Create fixed-size 200x200 room overlay centered on dimension
+
     const centerX = dimension.bbox.x + dimension.bbox.width / 2;
     const centerY = dimension.bbox.y + dimension.bbox.height / 2;
-    const roomOverlay = {
+    let nextOverlay = {
       x1: centerX - 100,
       y1: centerY - 100,
       x2: centerX + 100,
-      y2: centerY + 100
+      y2: centerY + 100,
     };
-    
-    setRoomOverlay(roomOverlay);
+
+    try {
+      const roomResult = await detectRoomFromClick(image, { x: centerX, y: centerY }, {
+        preprocess: { maxDimension: 1300 },
+      });
+
+      if (roomResult?.overlay) {
+        nextOverlay = {
+          ...roomResult.overlay,
+          polygon: roomResult.polygon,
+          confidence: roomResult.confidence,
+        };
+        setDetectionDebugData(roomResult.debug ?? null);
+      }
+    } catch (error) {
+      console.error('Room enclosure detection failed:', error);
+    }
+
+    setRoomOverlay(nextOverlay);
     updateScale({ 
       width: dimension.width.toString(), 
       height: dimension.height.toString() 
-    }, roomOverlay);
-    
-    // Don't create perimeter overlay - user will click to add vertices
+    }, nextOverlay);
+
     setPerimeterVertices([]);
-    
-    // Exit manual mode after selection but stay in vertex placement mode
     setMode('normal');
     setDetectedDimensions([]);
     setManualEntryMode(false);
@@ -545,23 +626,39 @@ function App() {
       return;
     }
     
-    // Create fixed-size 200x200 room overlay centered on click
-    const roomOverlay = {
+    const fallbackOverlay = {
       x1: clickPoint.x - 100,
       y1: clickPoint.y - 100,
       x2: clickPoint.x + 100,
       y2: clickPoint.y + 100
     };
-    
-    setRoomOverlay(roomOverlay);
-    updateScale(roomDimensions, roomOverlay);
-    
-    // Don't create perimeter overlay - user will click to add vertices
-    setPerimeterVertices([]);
-    
-    // Exit manual entry mode
-    setManualEntryMode(false);
-    setMode('normal');
+
+    const placeOverlay = async () => {
+      let nextOverlay = fallbackOverlay;
+      try {
+        const roomResult = await detectRoomFromClick(image, clickPoint, {
+          preprocess: { maxDimension: 1300 },
+        });
+        if (roomResult?.overlay) {
+          nextOverlay = {
+            ...roomResult.overlay,
+            polygon: roomResult.polygon,
+            confidence: roomResult.confidence,
+          };
+          setDetectionDebugData(roomResult.debug ?? null);
+        }
+      } catch (error) {
+        console.error('Manual room detection fallback failed:', error);
+      }
+
+      setRoomOverlay(nextOverlay);
+      updateScale(roomDimensions, nextOverlay);
+      setPerimeterVertices([]);
+      setManualEntryMode(false);
+      setMode('normal');
+    };
+
+    placeOverlay();
   };
 
   // Restore locally autosaved data first, otherwise auto-load example floorplan for testing
@@ -594,6 +691,9 @@ function App() {
             setCustomShapes(savedState.customShapes ?? []);
             setCurrentCustomShape(savedState.currentCustomShape ?? null);
             setPerimeterVertices(savedState.perimeterVertices ?? null);
+            setTracedBoundaries(savedState.tracedBoundaries ?? null);
+            setDebugDetection(savedState.debugDetection ?? false);
+            setDetectionDebugData(savedState.detectionDebugData ?? null);
             hasRestoredStateRef.current = true;
             return;
           }
@@ -686,12 +786,15 @@ function App() {
       customShapes,
       currentCustomShape,
       perimeterVertices,
+      tracedBoundaries,
+      debugDetection,
+      detectionDebugData,
       showSideLengths,
       useInteriorWalls,
       autoSnapEnabled,
       unit
     };
-  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
+  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
 
   // Autosave draft to local storage when working state changes.
   useEffect(() => {
@@ -725,9 +828,14 @@ function App() {
       drawAreaActive,
       customShapes,
       currentCustomShape,
-      perimeterVertices
+      perimeterVertices,
+      tracedBoundaries,
+      debugDetection,
+      detectionDebugData
     });
-  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, clearAutosavedDraft, saveAutosavedDraft]);
+
+  useEffect(() => () => terminateDetectionWorker(), []);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -823,6 +931,8 @@ function App() {
           onLineToolToggle={handleLineToolToggle}
           drawAreaActive={drawAreaActive}
           onDrawAreaToggle={handleDrawAreaToggle}
+          debugDetection={debugDetection}
+          onDebugDetectionChange={setDebugDetection}
         />
 
         <div className="relative flex-1 overflow-hidden">
@@ -858,6 +968,10 @@ function App() {
             onAddPerimeterVertex={handleAddPerimeterVertex}
             onClosePerimeter={handleClosePerimeter}
             autoSnapEnabled={autoSnapEnabled}
+            cornerPoints={cornerPoints}
+            lineData={lineData}
+            debugDetection={debugDetection}
+            detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onUndo={handleUndo}
             onRedo={handleRedo}

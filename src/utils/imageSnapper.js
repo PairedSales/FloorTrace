@@ -240,3 +240,85 @@ export const detectSnappingFeatures = async (imageSrc, userOptions = {}) => {
     },
   };
 };
+
+const lineCoverageScore = (line, start, end) => {
+  const overlapStart = Math.max(line.start, start);
+  const overlapEnd = Math.min(line.end, end);
+  if (overlapEnd < overlapStart) return 0;
+  const overlap = overlapEnd - overlapStart;
+  const span = Math.max(1, end - start);
+  return overlap / span;
+};
+
+export const createImageSnapAnalyzer = async (imageSrc, userOptions = {}) => {
+  const { cornerPoints, lineData } = await detectSnappingFeatures(imageSrc, userOptions);
+  const horizontal = lineData?.horizontal ?? [];
+  const vertical = lineData?.vertical ?? [];
+
+  const findVertexSnap = (point, options = {}) => {
+    const searchRadius = options.searchRadius ?? 14;
+    const searchRadiusSq = searchRadius * searchRadius;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const corner of cornerPoints) {
+      const dx = corner.x - point.x;
+      const dy = corner.y - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq <= searchRadiusSq && distanceSq < bestDistance) {
+        best = corner;
+        bestDistance = distanceSq;
+      }
+    }
+
+    return best;
+  };
+
+  const findVerticalEdge = (targetX, y1, y2, options = {}) => {
+    const searchRadius = options.searchRadius ?? 12;
+    const start = Math.min(y1, y2);
+    const end = Math.max(y1, y2);
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const line of vertical) {
+      const coverage = lineCoverageScore(line, start, end);
+      if (coverage < 0.45) continue;
+      const distance = Math.abs(line.x - targetX);
+      if (distance <= searchRadius && distance < bestDistance) {
+        best = line.x;
+        bestDistance = distance;
+      }
+    }
+
+    return best;
+  };
+
+  const findHorizontalEdge = (targetY, x1, x2, options = {}) => {
+    const searchRadius = options.searchRadius ?? 12;
+    const start = Math.min(x1, x2);
+    const end = Math.max(x1, x2);
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const line of horizontal) {
+      const coverage = lineCoverageScore(line, start, end);
+      if (coverage < 0.45) continue;
+      const distance = Math.abs(line.y - targetY);
+      if (distance <= searchRadius && distance < bestDistance) {
+        best = line.y;
+        bestDistance = distance;
+      }
+    }
+
+    return best;
+  };
+
+  return {
+    cornerPoints,
+    lineData,
+    findVertexSnap,
+    findVerticalEdge,
+    findHorizontalEdge,
+  };
+};

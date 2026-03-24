@@ -1,26 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
 import { formatLength } from '../utils/unitConverter';
-
-const findNearestIntersection = (point, points, threshold) => {
-  if (!point || !points?.length || threshold <= 0) return null;
-
-  let nearest = null;
-  let minDistanceSq = threshold * threshold;
-
-  for (const candidate of points) {
-    if (typeof candidate?.x !== 'number' || typeof candidate?.y !== 'number') continue;
-    const dx = candidate.x - point.x;
-    const dy = candidate.y - point.y;
-    const distanceSq = dx * dx + dy * dy;
-    if (distanceSq <= minDistanceSq) {
-      minDistanceSq = distanceSq;
-      nearest = candidate;
-    }
-  }
-
-  return nearest;
-};
+import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
 const applySecondaryAlignment = (vertices, movedVertexIndex, snappedPoint, threshold) => {
   if (!vertices?.length || !snappedPoint || threshold <= 0) return vertices;
@@ -74,6 +55,10 @@ const Canvas = forwardRef(({
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
   autoSnapEnabled,
+  cornerPoints,
+  lineData,
+  debugDetection,
+  detectionDebugData,
   onUndo,
   onRedo
 }, ref) => {
@@ -1219,6 +1204,39 @@ const Canvas = forwardRef(({
                 y={0}
               />
             )}
+
+            {debugDetection && lineData && (
+              <>
+                {(lineData.horizontal ?? []).map((line, index) => (
+                  <Line
+                    key={`debug-h-${index}`}
+                    points={[line.start, line.y, line.end, line.y]}
+                    stroke="rgba(59, 130, 246, 0.55)"
+                    strokeWidth={1 / scale}
+                    listening={false}
+                  />
+                ))}
+                {(lineData.vertical ?? []).map((line, index) => (
+                  <Line
+                    key={`debug-v-${index}`}
+                    points={[line.x, line.start, line.x, line.end]}
+                    stroke="rgba(6, 182, 212, 0.55)"
+                    strokeWidth={1 / scale}
+                    listening={false}
+                  />
+                ))}
+                {(cornerPoints ?? []).slice(0, 600).map((point, index) => (
+                  <Circle
+                    key={`debug-c-${index}`}
+                    x={point.x}
+                    y={point.y}
+                    radius={2 / scale}
+                    fill="rgba(249, 115, 22, 0.8)"
+                    listening={false}
+                  />
+                ))}
+              </>
+            )}
             
             {/* Perimeter Overlay - Line only (lowest z-index for overlays) */}
             {perimeterOverlay && perimeterOverlay.vertices && (
@@ -1236,6 +1254,16 @@ const Canvas = forwardRef(({
             {/* Room Overlay - Render above perimeter line but below perimeter vertices */}
             {roomOverlay && (
               <>
+                {Array.isArray(roomOverlay.polygon) && roomOverlay.polygon.length > 2 && (
+                  <Line
+                    points={roomOverlay.polygon.flatMap((point) => [point.x, point.y])}
+                    closed
+                    stroke="rgba(16, 185, 129, 0.85)"
+                    strokeWidth={1.5 / scale}
+                    fill="rgba(16, 185, 129, 0.1)"
+                    listening={false}
+                  />
+                )}
                 <Rect
                   x={Math.min(roomOverlay.x1, roomOverlay.x2)}
                   y={Math.min(roomOverlay.y1, roomOverlay.y2)}
@@ -1267,7 +1295,29 @@ const Canvas = forwardRef(({
                     />
                   );
                 })}
+                {debugDetection && typeof roomOverlay.confidence === 'number' && (
+                  <Text
+                    x={Math.min(roomOverlay.x1, roomOverlay.x2)}
+                    y={Math.min(roomOverlay.y1, roomOverlay.y2) - 16 / scale}
+                    text={`Room confidence ${Math.round(roomOverlay.confidence * 100)}%`}
+                    fontSize={11 / scale}
+                    fill="#10b981"
+                    fontStyle="bold"
+                    listening={false}
+                  />
+                )}
               </>
+            )}
+
+            {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
+              <Text
+                x={10}
+                y={34}
+                text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
+                fontSize={12 / scale}
+                fill="#22d3ee"
+                listening={false}
+              />
             )}
             
             {/* Perimeter Vertices - Render last (highest z-index for interaction priority) */}
