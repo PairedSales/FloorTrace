@@ -126,4 +126,77 @@ describe('detection pipeline', () => {
     const innerArea = polygonArea(innerPoly);
     expect(outerArea).toBeGreaterThanOrEqual(innerArea * 0.85);
   });
+
+  it('preserves concave shapes for L-shaped floorplans', () => {
+    // Draw an L-shaped floorplan:
+    //   +--------+
+    //   |        |
+    //   |   +----+
+    //   |   |
+    //   +---+
+    const img = createBlankImageData(400, 300);
+    // Top edge
+    drawLine(img, 40, 30, 300, 30, 4);
+    // Right edge (upper part)
+    drawLine(img, 300, 30, 300, 130, 4);
+    // Step right (interior corner)
+    drawLine(img, 300, 130, 170, 130, 4);
+    // Step down
+    drawLine(img, 170, 130, 170, 250, 4);
+    // Bottom edge
+    drawLine(img, 170, 250, 40, 250, 4);
+    // Left edge
+    drawLine(img, 40, 250, 40, 30, 4);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+    expect(traced.outer.polygon.length).toBeGreaterThan(2);
+
+    const outerPoly = traced.outer.polygon;
+
+    // Verify the polygon is NOT convex (i.e., it preserves the L-shape concavity).
+    // The convex hull of the L-shape would be a rectangle from (40,30) to (300,250)
+    // with area ≈ 260*220 = 57,200. The actual L-shape area is smaller because the
+    // upper-right quadrant is missing.
+    const fullRectArea = 260 * 220;
+    const actualArea = polygonArea(outerPoly);
+
+    // L-shape area should be significantly less than full rectangle
+    // The cut-out is roughly 130*120 = 15,600, so L-shape ≈ 41,600
+    expect(actualArea).toBeLessThan(fullRectArea * 0.9);
+    expect(actualArea).toBeGreaterThan(fullRectArea * 0.4);
+  });
+
+  it('traces exterior boundary of a floorplan with open interior', () => {
+    // Simple rectangle with no interior walls
+    const img = createBlankImageData(260, 200);
+    drawLine(img, 30, 30, 230, 30, 3);
+    drawLine(img, 30, 170, 230, 170, 3);
+    drawLine(img, 30, 30, 30, 170, 3);
+    drawLine(img, 230, 30, 230, 170, 3);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const area = polygonArea(outerPoly);
+
+    // The enclosed rectangle is roughly 200x140 pixels
+    expect(area).toBeGreaterThan(100 * 100);
+    expect(area).toBeLessThan(260 * 200);
+
+    // The boundary should roughly contain the drawn rectangle
+    const xs = outerPoly.map((p) => p.x);
+    const ys = outerPoly.map((p) => p.y);
+    expect(Math.min(...xs)).toBeLessThanOrEqual(40);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(220);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(40);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(160);
+  });
 });
