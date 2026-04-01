@@ -565,12 +565,46 @@ function App() {
     }
   };
 
+  // Auto-trace exterior boundary after room overlay is placed.
+  const autoTraceExterior = async (overlayForScale, dims) => {
+    try {
+      const traced = await traceFloorplanBoundary(image, {
+        preprocess: { maxDimension: 1400 },
+      });
+      if (!traced) return;
+      setTracedBoundaries(traced);
+      setDetectionDebugData((prev) => ({ ...(prev ?? {}), ...(traced.debug ?? {}) }));
+
+      const activeBoundary = getBoundaryForMode(traced, useInteriorWalls);
+      if (!activeBoundary?.polygon?.length) return;
+
+      const vertices = activeBoundary.polygon.map((p) => ({ x: p.x, y: p.y }));
+      setPerimeterVertices(null);
+      setPerimeterOverlay({ vertices });
+
+      // Calculate area now that we have both room overlay and perimeter
+      const dimW = parseFloat(dims.width);
+      const dimH = parseFloat(dims.height);
+      const oW = Math.abs(overlayForScale.x2 - overlayForScale.x1);
+      const oH = Math.abs(overlayForScale.y2 - overlayForScale.y1);
+      const autoScale = Math.min(dimW, dimH) / Math.min(oW, oH);
+      setArea(calculateArea(vertices, autoScale));
+
+      setNotification({ show: true, message: `Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).` });
+      setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+    } catch (error) {
+      console.error('Auto exterior tracing failed:', error);
+      // Non-fatal — user can still trace manually
+    }
+  };
+
   // Handle dimension selection in manual mode
   const handleDimensionSelect = async (dimension) => {
-    setRoomDimensions({ 
-      width: dimension.width.toString(), 
-      height: dimension.height.toString() 
-    });
+    const dims = {
+      width: dimension.width.toString(),
+      height: dimension.height.toString(),
+    };
+    setRoomDimensions(dims);
 
     const centerX = dimension.bbox.x + dimension.bbox.width / 2;
     const centerY = dimension.bbox.y + dimension.bbox.height / 2;
@@ -599,15 +633,15 @@ function App() {
     }
 
     setRoomOverlay(nextOverlay);
-    updateScale({ 
-      width: dimension.width.toString(), 
-      height: dimension.height.toString() 
-    }, nextOverlay);
+    updateScale(dims, nextOverlay);
 
-    setPerimeterVertices([]);
+    setPerimeterVertices(null);
     setMode('normal');
     setDetectedDimensions([]);
     setManualEntryMode(false);
+
+    // Automatically detect exterior boundary after room overlay is placed.
+    autoTraceExterior(nextOverlay, dims);
   };
 
   // Handle canvas click for manual overlay placement
@@ -649,9 +683,12 @@ function App() {
 
       setRoomOverlay(nextOverlay);
       updateScale(roomDimensions, nextOverlay);
-      setPerimeterVertices([]);
+      setPerimeterVertices(null);
       setManualEntryMode(false);
       setMode('normal');
+
+      // Automatically detect exterior boundary after manual overlay placement.
+      autoTraceExterior(nextOverlay, roomDimensions);
     };
 
     placeOverlay();
