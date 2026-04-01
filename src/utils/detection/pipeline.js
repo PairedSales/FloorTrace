@@ -340,8 +340,9 @@ const buildEdgeScanFootprint = (wallMask, width, height, bounds, gapTol) => {
   const footprint = new Uint8Array(width * height);
   const { topY, bottomY, leftX, rightX } = bounds;
 
+  // Row-by-row scan: fill between first and last wall pixel per row.
+  // This correctly captures horizontal exterior walls.
   for (let y = topY; y <= bottomY; y += 1) {
-    // Find first and last wall pixel in this row between leftX and rightX
     let first = -1;
     let last = -1;
     for (let x = leftX; x <= rightX; x += 1) {
@@ -350,9 +351,28 @@ const buildEdgeScanFootprint = (wallMask, width, height, bounds, gapTol) => {
         last = x;
       }
     }
-    // Fill between first and last wall pixel (interior is part of the footprint)
     if (first >= 0 && last - first > gapTol) {
       for (let x = first; x <= last; x += 1) {
+        footprint[y * width + x] = 1;
+      }
+    }
+  }
+
+  // Column-by-column scan: fill between first and last wall pixel per column.
+  // This correctly captures vertical exterior walls (e.g. an irregular right
+  // wall whose outer vertical line has gaps between cross-segments, causing the
+  // row-only pass to miss the exterior extent of those rows).
+  for (let x = leftX; x <= rightX; x += 1) {
+    let first = -1;
+    let last = -1;
+    for (let y = topY; y <= bottomY; y += 1) {
+      if (wallMask[y * width + x]) {
+        if (first < 0) first = y;
+        last = y;
+      }
+    }
+    if (first >= 0 && last - first > gapTol) {
+      for (let y = first; y <= last; y += 1) {
         footprint[y * width + x] = 1;
       }
     }
