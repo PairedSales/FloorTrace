@@ -160,6 +160,9 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const outerResult = getLargestComponentPolygon(footprint, preprocess, orientation, options);
 
   // Inner boundary: erode the footprint inward to approximate the inner wall edge.
+  // Radius 2 (vs previous default of 1) because we now erode the solid footprint
+  // rather than the wall mask, and a larger offset produces a more visible
+  // inner/outer distinction.
   const innerFootprint = erode(footprint, preprocess.width, preprocess.height, options.innerErode ?? 2);
   const innerResult = getLargestComponentPolygon(innerFootprint, preprocess, orientation, options);
 

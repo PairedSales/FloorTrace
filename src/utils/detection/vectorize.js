@@ -221,6 +221,9 @@ export const mooreBoundaryTrace = (labels, width, height, componentId) => {
   const boundary = [{ x: startX, y: startY }];
   let cx = startX;
   let cy = startY;
+  // The start pixel is topmost-leftmost so the pixel above (N, index 6)
+  // is always outside the component.  We use this as the initial "came from"
+  // direction so the first clockwise scan begins at NE (index 7).
   let prevDir = 6;
 
   const maxIter = width * height * 2;
@@ -252,6 +255,8 @@ export const mooreBoundaryTrace = (labels, width, height, componentId) => {
   return boundary;
 };
 
+// Remove consecutive collinear points (same step direction).
+// Assumes integer pixel coordinates from the Moore boundary trace.
 const prefilterCollinear = (points) => {
   if (points.length < 3) return points;
   const result = [points[0]];
