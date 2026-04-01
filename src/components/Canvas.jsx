@@ -948,8 +948,14 @@ const Canvas = forwardRef(({
   
   // Handle right click for undo/redo functionality.
   // Single right-click = undo, double right-click = redo.
+  // Exception: if the line tool is active and a line is in progress, right-click cancels it.
   const handleStageContextMenu = (e) => {
     e.evt.preventDefault();
+
+    if (lineToolActive && currentMeasurementLine && onMeasurementLineUpdate) {
+      onMeasurementLineUpdate(null);
+      return;
+    }
 
     if (rightClickTimeoutRef.current) {
       clearTimeout(rightClickTimeoutRef.current);
