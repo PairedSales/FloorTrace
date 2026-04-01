@@ -239,4 +239,40 @@ describe('detection pipeline', () => {
     expect(Math.min(...ys)).toBeLessThanOrEqual(40);
     expect(Math.max(...ys)).toBeGreaterThanOrEqual(160);
   });
+
+  it('ignores text and logos outside the floorplan sketch', () => {
+    // Draw a floorplan with surrounding text/logo marks that should not
+    // affect the detected exterior boundary.
+    const W = 400;
+    const H = 350;
+    const img = createBlankImageData(W, H);
+
+    // Floorplan walls (rectangle from ~50,30 to ~350,200)
+    drawLine(img, 50, 30, 350, 30, 4);
+    drawLine(img, 50, 200, 350, 200, 4);
+    drawLine(img, 50, 30, 50, 200, 4);
+    drawLine(img, 350, 30, 350, 200, 4);
+
+    // Simulate text below the floorplan ("SIZES AND DIMENSIONS ARE APPROXIMATE")
+    drawLine(img, 30, 280, 370, 280, 1);
+
+    // Simulate a logo block in the bottom-right corner
+    drawLine(img, 280, 310, 370, 310, 2);
+    drawLine(img, 280, 330, 370, 330, 2);
+    drawLine(img, 280, 310, 280, 330, 2);
+    drawLine(img, 370, 310, 370, 330, 2);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const ys = outerPoly.map((p) => p.y);
+
+    // The bottom boundary should be near the bottom wall (y≈200),
+    // not extending to the text/logo area (y≈280+).
+    expect(Math.max(...ys)).toBeLessThan(250);
+  });
 });
