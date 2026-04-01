@@ -60,6 +60,19 @@ const getFloorplanFootprint = (wallMask, width, height) => {
   return footprint;
 };
 
+const keepLargestWallComponent = (wallMask, width, height) => {
+  const { labels, components } = labelConnectedComponents(wallMask, width, height, 1);
+  if (!components.length) return wallMask;
+  const largest = components.reduce((a, b) => (a.size > b.size ? a : b));
+  const cleaned = new Uint8Array(width * height);
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] === largest.id) {
+      cleaned[i] = 1;
+    }
+  }
+  return cleaned;
+};
+
 const pointInBounds = (point, width, height) => point.x >= 0 && point.y >= 0 && point.x < width && point.y < height;
 
 const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {}) => {
@@ -391,15 +404,20 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   const w = preprocess.width;
   const h = preprocess.height;
+
+  // Remove disconnected dark features (text, logos) outside the floorplan
+  // by keeping only the largest connected component of wall pixels.
+  const cleanedMask = keepLargestWallComponent(closedMask, w, h);
+
   const minSegLen = Math.floor(Math.min(w, h) * 0.15);
   const gapTol = options.gapTolerance ?? 8;
 
   // Try edge-inward scanning first — more robust against surrounding text/logos.
-  const edgeBounds = scanEdgeInward(closedMask, w, h, minSegLen, gapTol);
+  const edgeBounds = scanEdgeInward(cleanedMask, w, h, minSegLen, gapTol);
   let footprint;
 
   if (edgeBounds) {
-    footprint = buildEdgeScanFootprint(closedMask, w, h, edgeBounds, gapTol);
+    footprint = buildEdgeScanFootprint(cleanedMask, w, h, edgeBounds, gapTol);
     // Verify the footprint is non-trivial
     let fpSize = 0;
     for (let i = 0; i < footprint.length; i += 1) {
@@ -412,7 +430,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   // Fall back to the existing flood-fill from edges approach
   if (!footprint) {
-    footprint = getFloorplanFootprint(closedMask, w, h);
+    footprint = getFloorplanFootprint(cleanedMask, w, h);
   }
 
   // Outer boundary
