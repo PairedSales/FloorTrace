@@ -90,22 +90,31 @@ const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {})
 
 const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
   if (freeMask[cy * width + cx]) return { x: cx, y: cy };
+
+  const tryPixel = (px, py) => {
+    if (px >= 0 && py >= 0 && px < width && py < height && freeMask[py * width + px]) {
+      return { x: px, y: py };
+    }
+    return null;
+  };
+
+  // Search the perimeter of expanding squares around the click point.
   for (let r = 1; r <= maxRadius; r += 1) {
-    for (let dy = -r; dy <= r; dy += 1) {
-      for (let dx = -r; dx <= r; dx += 1) {
-        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (nx >= 0 && ny >= 0 && nx < width && ny < height && freeMask[ny * width + nx]) {
-          return { x: nx, y: ny };
-        }
-      }
+    // Top and bottom edges of the square
+    for (let dx = -r; dx <= r; dx += 1) {
+      const hit = tryPixel(cx + dx, cy - r) ?? tryPixel(cx + dx, cy + r);
+      if (hit) return hit;
+    }
+    // Left and right edges (excluding corners already checked)
+    for (let dy = -r + 1; dy < r; dy += 1) {
+      const hit = tryPixel(cx - r, cy + dy) ?? tryPixel(cx + r, cy + dy);
+      if (hit) return hit;
     }
   }
   return null;
 };
 
-const floodFillRegion = (freeMask, startX, startY, width, height) => {
+const floodFillBoundingBox = (freeMask, startX, startY, width, height) => {
   const visited = new Uint8Array(width * height);
   const startIdx = startY * width + startX;
   visited[startIdx] = 1;
@@ -126,10 +135,13 @@ const floodFillRegion = (freeMask, startX, startY, width, height) => {
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
 
-    if (x + 1 < width && !visited[idx + 1] && freeMask[idx + 1]) { visited[idx + 1] = 1; queue.push(idx + 1); }
-    if (x - 1 >= 0 && !visited[idx - 1] && freeMask[idx - 1]) { visited[idx - 1] = 1; queue.push(idx - 1); }
-    if (y + 1 < height && !visited[idx + width] && freeMask[idx + width]) { visited[idx + width] = 1; queue.push(idx + width); }
-    if (y - 1 >= 0 && !visited[idx - width] && freeMask[idx - width]) { visited[idx - width] = 1; queue.push(idx - width); }
+    const enqueue = (nIdx) => {
+      if (!visited[nIdx] && freeMask[nIdx]) { visited[nIdx] = 1; queue.push(nIdx); }
+    };
+    if (x + 1 < width) enqueue(idx + 1);
+    if (x - 1 >= 0) enqueue(idx - 1);
+    if (y + 1 < height) enqueue(idx + width);
+    if (y - 1 >= 0) enqueue(idx - width);
   }
 
   return { minX, minY, maxX, maxY, size: queue.length };
@@ -160,7 +172,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   if (!seed) return null;
 
   // Flood-fill from the seed to find the enclosed room region.
-  const region = floodFillRegion(freeMask, seed.x, seed.y, preprocess.width, preprocess.height);
+  const region = floodFillBoundingBox(freeMask, seed.x, seed.y, preprocess.width, preprocess.height);
 
   // Sanity-check: reject regions that are unreasonably large (>60% of image)
   // or tiny (<0.5% of image) — likely a detection failure.
@@ -370,7 +382,9 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     footprint = buildEdgeScanFootprint(closedMask, w, h, edgeBounds, gapTol);
     // Verify the footprint is non-trivial
     let fpSize = 0;
-    for (let i = 0; i < footprint.length; i += 1) { if (footprint[i]) fpSize += 1; }
+    for (let i = 0; i < footprint.length; i += 1) {
+      if (footprint[i]) fpSize += 1;
+    }
     if (fpSize < w * h * 0.02) {
       footprint = null; // too small, fall back
     }
