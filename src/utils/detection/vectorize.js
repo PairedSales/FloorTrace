@@ -171,8 +171,17 @@ export const snapPolygonAngles = (polygon, bins = []) => {
     const length = Math.sqrt(dx * dx + dy * dy);
     if (length < 1e-6) continue;
     const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    const snappedAngle = snapAngleToBins(angle, bins);
-    const rad = (snappedAngle * Math.PI) / 180;
+    const snappedOrientation = snapAngleToBins(angle, bins);
+    // snapAngleToBins returns an undirected orientation (0–180).  Pick the
+    // directed version (snappedOrientation or snappedOrientation + 180) that
+    // is closest to the original directed angle so edges are not reversed.
+    const orig360 = ((angle % 360) + 360) % 360;
+    const fwd = snappedOrientation;
+    const bwd = snappedOrientation + 180;
+    const fwdDelta = Math.min(Math.abs(orig360 - fwd), 360 - Math.abs(orig360 - fwd));
+    const bwdDelta = Math.min(Math.abs(orig360 - bwd), 360 - Math.abs(orig360 - bwd));
+    const finalAngle = fwdDelta <= bwdDelta ? fwd : bwd;
+    const rad = (finalAngle * Math.PI) / 180;
     snapped.push({
       x: prev.x + Math.cos(rad) * length,
       y: prev.y + Math.sin(rad) * length,
@@ -181,13 +190,90 @@ export const snapPolygonAngles = (polygon, bins = []) => {
   return snapped;
 };
 
+export const mooreBoundaryTrace = (labels, width, height, componentId) => {
+  let startX = -1;
+  let startY = -1;
+  for (let y = 0; y < height && startX < 0; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (labels[y * width + x] === componentId) {
+        startX = x;
+        startY = y;
+        break;
+      }
+    }
+  }
+
+  if (startX < 0) return [];
+
+  let hasNeighbor = false;
+  for (const [dx, dy] of neighbors8) {
+    const nx = startX + dx;
+    const ny = startY + dy;
+    if (inBounds(nx, ny, width, height) && labels[ny * width + nx] === componentId) {
+      hasNeighbor = true;
+      break;
+    }
+  }
+  if (!hasNeighbor) return [{ x: startX, y: startY }];
+
+  const isTarget = (x, y) => inBounds(x, y, width, height) && labels[y * width + x] === componentId;
+
+  const boundary = [{ x: startX, y: startY }];
+  let cx = startX;
+  let cy = startY;
+  let prevDir = 6;
+
+  const maxIter = width * height * 2;
+
+  for (let iter = 0; iter < maxIter; iter += 1) {
+    const scanStart = (prevDir + 1) % 8;
+    let found = false;
+
+    for (let i = 0; i < 8; i += 1) {
+      const d = (scanStart + i) % 8;
+      const nx = cx + neighbors8[d][0];
+      const ny = cy + neighbors8[d][1];
+
+      if (isTarget(nx, ny)) {
+        cx = nx;
+        cy = ny;
+        prevDir = (d + 4) % 8;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) break;
+    if (cx === startX && cy === startY) break;
+
+    boundary.push({ x: cx, y: cy });
+  }
+
+  return boundary;
+};
+
+const prefilterCollinear = (points) => {
+  if (points.length < 3) return points;
+  const result = [points[0]];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = result[result.length - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+    if (curr.x - prev.x !== next.x - curr.x || curr.y - prev.y !== next.y - curr.y) {
+      result.push(curr);
+    }
+  }
+  result.push(points[points.length - 1]);
+  return result;
+};
+
 export const componentToPolygon = (labels, width, height, componentId, options = {}) => {
-  const contour = contourForComponent(labels, width, height, componentId);
-  if (!contour.length) return [];
-  const hull = convexHull(contour);
-  if (hull.length < 3) return hull;
-  const closed = hull.concat(hull[0]);
+  const boundary = mooreBoundaryTrace(labels, width, height, componentId);
+  if (boundary.length < 3) return boundary;
+  const filtered = prefilterCollinear(boundary);
+  const closed = filtered.concat(filtered[0]);
   const simplified = simplifyRdp(closed, options.simplifyEpsilon ?? 2).slice(0, -1);
+  if (simplified.length < 3) return simplified;
   return options.angleBins?.length ? snapPolygonAngles(simplified, options.angleBins) : simplified;
 };
 

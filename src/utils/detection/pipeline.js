@@ -16,6 +16,50 @@ const invertMask = (mask) => {
   return out;
 };
 
+const floodFillFromEdges = (wallMask, width, height) => {
+  const visited = new Uint8Array(width * height);
+  const queue = [];
+
+  const tryEnqueue = (idx) => {
+    if (!visited[idx] && !wallMask[idx]) {
+      visited[idx] = 1;
+      queue.push(idx);
+    }
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    tryEnqueue(x);
+    tryEnqueue((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y += 1) {
+    tryEnqueue(y * width);
+    tryEnqueue(y * width + width - 1);
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head];
+    head += 1;
+    const x = idx % width;
+    const y = Math.floor(idx / width);
+    if (x + 1 < width) tryEnqueue(idx + 1);
+    if (x - 1 >= 0) tryEnqueue(idx - 1);
+    if (y + 1 < height) tryEnqueue(idx + width);
+    if (y - 1 >= 0) tryEnqueue(idx - width);
+  }
+
+  return visited;
+};
+
+const getFloorplanFootprint = (wallMask, width, height) => {
+  const exterior = floodFillFromEdges(wallMask, width, height);
+  const footprint = new Uint8Array(width * height);
+  for (let i = 0; i < footprint.length; i += 1) {
+    footprint[i] = exterior[i] ? 0 : 1;
+  }
+  return footprint;
+};
+
 const pointInBounds = (point, width, height) => point.x >= 0 && point.y >= 0 && point.x < width && point.y < height;
 
 const areaOfBounds = (bounds) => (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
@@ -107,14 +151,17 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const orientation = estimateDominantOrientations(preprocess.gray, preprocess.width, preprocess.height, options.orientation);
   const baseWallMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
 
-  // Outer boundary tracks the outer shell by slightly dilating walls.
-  const outerMask = dilate(baseWallMask, preprocess.width, preprocess.height, options.outerDilate ?? 2);
-  const outerResult = getLargestComponentPolygon(outerMask, preprocess, orientation, options);
+  // Close small wall gaps with dilation for robust footprint detection.
+  const closedMask = dilate(baseWallMask, preprocess.width, preprocess.height, options.outerDilate ?? 2);
 
-  // Inner boundary approximates inside-wall tracing by eroding walls, then contouring free space.
-  const innerWallMask = erode(baseWallMask, preprocess.width, preprocess.height, options.innerErode ?? 1);
-  const innerFreeMask = invertMask(innerWallMask);
-  const innerResult = getLargestComponentPolygon(innerFreeMask, preprocess, orientation, options);
+  // Outer boundary: flood-fill exterior from image edges, invert to get footprint,
+  // then trace the contour of the footprint.
+  const footprint = getFloorplanFootprint(closedMask, preprocess.width, preprocess.height);
+  const outerResult = getLargestComponentPolygon(footprint, preprocess, orientation, options);
+
+  // Inner boundary: erode the footprint inward to approximate the inner wall edge.
+  const innerFootprint = erode(footprint, preprocess.width, preprocess.height, options.innerErode ?? 2);
+  const innerResult = getLargestComponentPolygon(innerFootprint, preprocess, orientation, options);
 
   if (!outerResult && !innerResult) return null;
 
