@@ -4,23 +4,19 @@ import {
   toGrayscale,
   otsuThreshold,
   contrastStretch,
-  sharpen,
   grayToThresholdedCanvas
 } from './imagePreprocessor';
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
-const TARGET_TEXT_HEIGHT = 36;
 const MIN_WORD_CONFIDENCE = 30;
 
 // ---------------------------------------------------------------------------
-// Image scaling – normalise so typical text is ~TARGET_TEXT_HEIGHT px tall
+// Image scaling – only downscale images that are very large; never upscale
 // ---------------------------------------------------------------------------
 
 const estimateScaleFactor = (img) => {
   const maxDim = Math.max(img.width, img.height);
-  if (maxDim <= 800) return 2.0;
-  if (maxDim <= 1600) return 1.5;
   if (maxDim <= 3000) return 1.0;
   return 3000 / maxDim;
 };
@@ -53,39 +49,14 @@ const buildVariants = (img) => {
 
   const variants = [];
 
-  // V1 – original (scaled)
+  // V1 – original (scaled or unmodified)
   variants.push({ name: 'original', canvas: scaled });
 
-  // V2 – Otsu thresholded
+  // V2 – Otsu thresholded (handles varying contrast / lower-resolution scans)
   variants.push({
     name: 'otsu',
     canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
   });
-
-  // V3 – Otsu-light (threshold lowered → keeps lighter strokes)
-  const otsuLight = Math.max(0, otsu - 30);
-  variants.push({
-    name: 'otsu-light',
-    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsuLight)
-  });
-
-  // V4 – Otsu-dark (threshold raised → filters faint noise)
-  const otsuDark = Math.min(255, otsu + 30);
-  variants.push({
-    name: 'otsu-dark',
-    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsuDark)
-  });
-
-  // V5 – sharpened original
-  const sharpCanvas = document.createElement('canvas');
-  sharpCanvas.width = scaled.width;
-  sharpCanvas.height = scaled.height;
-  const sharpCtx = sharpCanvas.getContext('2d');
-  sharpCtx.drawImage(scaled, 0, 0);
-  const sharpData = sharpCtx.getImageData(0, 0, scaled.width, scaled.height);
-  sharpen(sharpData, 1.5);
-  sharpCtx.putImageData(sharpData, 0, 0);
-  variants.push({ name: 'sharpened', canvas: sharpCanvas });
 
   return { variants, scaleFactor: factor };
 };
@@ -421,19 +392,19 @@ const recognizeVariants = async (worker, canvases) => {
   const allLines = [];
   const allWords = [];
 
-  for (const { canvas } of canvases) {
-    for (const psm of [Tesseract.PSM.SPARSE_TEXT, Tesseract.PSM.SINGLE_BLOCK]) {
-      await worker.setParameters({
-        tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
-        tessedit_pageseg_mode: psm,
-        preserve_interword_spaces: '1'
-      });
+  // Text is always left-to-right; SPARSE_TEXT finds scattered dimension labels
+  // across the floor plan without imposing a block/column structure.
+  await worker.setParameters({
+    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1'
+  });
 
-      const result = await worker.recognize(canvas, {}, { blocks: true });
-      const { lines, words } = collectLinesAndWords(result);
-      allLines.push(...lines);
-      allWords.push(...words);
-    }
+  for (const { canvas } of canvases) {
+    const result = await worker.recognize(canvas, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    allLines.push(...lines);
+    allWords.push(...words);
   }
 
   return { lines: allLines, words: allWords };
@@ -448,25 +419,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const img = await dataUrlToImage(imageDataUrl);
     const { variants, scaleFactor } = buildVariants(img);
 
-    // Split variants across two parallel workers for speed
-    const mid = Math.ceil(variants.length / 2);
-    const batch1 = variants.slice(0, mid);
-    const batch2 = variants.slice(mid);
-
-    const [worker1, worker2] = await Promise.all([
-      createConfiguredWorker(),
-      createConfiguredWorker()
-    ]);
-
-    const [r1, r2] = await Promise.all([
-      recognizeVariants(worker1, batch1),
-      recognizeVariants(worker2, batch2)
-    ]);
-
-    await Promise.all([worker1.terminate(), worker2.terminate()]);
-
-    const allLines = [...r1.lines, ...r2.lines];
-    const allWords = [...r1.words, ...r2.words];
+    const worker = await createConfiguredWorker();
+    const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
+    await worker.terminate();
 
     // Two detection strategies run in parallel, then merged
     const lineResults = detectFromLines(allLines);
