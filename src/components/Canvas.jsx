@@ -789,6 +789,11 @@ const Canvas = forwardRef(({
 
   // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
+    // Only handle left-clicks (button 0) — right-clicks are handled by handleStageContextMenu
+    if (e.evt && e.evt.button !== 0) {
+      return;
+    }
+
     // Ignore clicks that occurred after a drag operation
     if (isDraggingRef.current) {
       return;
