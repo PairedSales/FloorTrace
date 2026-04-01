@@ -1141,6 +1141,47 @@ const Canvas = forwardRef(({
     };
   }, [handleKeyDown]);
 
+  const previewLineStyle = { stroke: '#F97316', strokeWidth: 2 / scale, dash: [6 / scale, 3 / scale], opacity: 0.7 };
+
+  const renderMeasurementLinePreview = () => {
+    if (!lineToolActive || !currentMeasurementLine) return null;
+    const dx = currentMeasurementLine.end.x - currentMeasurementLine.start.x;
+    const dy = currentMeasurementLine.end.y - currentMeasurementLine.start.y;
+    const lenPx = Math.sqrt(dx * dx + dy * dy);
+    const showLabel = lenPx > 1e-6 && pixelsPerFoot > 0;
+    if (!showLabel) {
+      return (
+        <Layer>
+          <Line
+            points={[
+              currentMeasurementLine.start.x, currentMeasurementLine.start.y,
+              currentMeasurementLine.end.x, currentMeasurementLine.end.y,
+            ]}
+            {...previewLineStyle}
+          />
+        </Layer>
+      );
+    }
+    const layout = getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit);
+    return (
+      <Layer>
+        <Line points={layout.line1Points} {...previewLineStyle} />
+        <Line points={layout.line2Points} {...previewLineStyle} />
+        <Text
+          x={layout.labelX}
+          y={layout.labelY}
+          text={layout.textStr}
+          fontSize={layout.fontSize}
+          fill="#F97316"
+          fontStyle="bold"
+          offsetX={layout.approxTextWidth / 2}
+          offsetY={layout.approxTextHeight / 2}
+          opacity={0.9}
+        />
+      </Layer>
+    );
+  };
+
   return (
     <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
@@ -1535,22 +1576,7 @@ const Canvas = forwardRef(({
           )}
 
           {/* Measurement Line Preview */}
-          {lineToolActive && currentMeasurementLine && (
-            <Layer>
-              <Line
-                points={[
-                  currentMeasurementLine.start.x,
-                  currentMeasurementLine.start.y,
-                  currentMeasurementLine.end.x,
-                  currentMeasurementLine.end.y
-                ]}
-                stroke="#F97316"
-                strokeWidth={2 / scale}
-                dash={[6 / scale, 3 / scale]}
-                opacity={0.7}
-              />
-            </Layer>
-          )}
+          {renderMeasurementLinePreview()}
           
           {/* Custom Areas */}
           {customShapes && customShapes.length > 0 && (
