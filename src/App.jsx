@@ -565,6 +565,23 @@ function App() {
     }
   };
 
+  // Delete a specific perimeter vertex by index (right-click on vertex)
+  const handleDeletePerimeterVertex = (index) => {
+    if (!perimeterOverlay?.vertices || perimeterOverlay.vertices.length <= 3) return;
+    updatePerimeterVertices(
+      perimeterOverlay.vertices.filter((_, i) => i !== index),
+      true
+    );
+  };
+
+  // Switch to manual outline drawing: clear the auto-detected perimeter and let the user draw fresh
+  const handleManualOutlineMode = () => {
+    pushUndoState();
+    setPerimeterOverlay(null);
+    setArea(0);
+    setPerimeterVertices([]); // activate manual vertex placement
+  };
+
   // Auto-trace exterior boundary after room overlay is placed.
   const autoTraceExterior = async (overlayForScale, dims) => {
     try {
@@ -932,6 +949,7 @@ function App() {
             debugDetection={debugDetection}
             detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
+            onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onUndo={handleUndo}
             onRedo={handleRedo}
           />
@@ -958,6 +976,8 @@ function App() {
           autoSnapEnabled={autoSnapEnabled}
           onAutoSnapChange={setAutoSnapEnabled}
           perimeterOverlay={perimeterOverlay}
+          hasAutoDetection={!!tracedBoundaries}
+          onManualMode={handleManualOutlineMode}
           lineToolActive={lineToolActive}
           onLineToolToggle={handleLineToolToggle}
           drawAreaActive={drawAreaActive}

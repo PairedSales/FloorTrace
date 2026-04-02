@@ -20,6 +20,8 @@ const LeftPanel = ({
   autoSnapEnabled,
   onAutoSnapChange,
   perimeterOverlay,
+  hasAutoDetection,
+  onManualMode,
   lineToolActive,
   onLineToolToggle,
   drawAreaActive,
@@ -254,6 +256,14 @@ const LeftPanel = ({
               checked={autoSnapEnabled}
               onChange={onAutoSnapChange}
             />
+            {hasAutoDetection && (
+              <button
+                onClick={onManualMode}
+                className="flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
+              >
+                Manual Mode
+              </button>
+            )}
           </section>
           <div className="panel-divider mx-3" />
         </>
