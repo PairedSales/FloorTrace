@@ -243,189 +243,365 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
 };
 
 /* ---------- Exterior Wall Tracing (Problem 2) ----------
- * Edge-inward scanning: scan from each image edge inward, detect long
- * segments of black (wall) pixels, filter short segments (text/logos),
- * extend detected wall lines, and build the exterior polygon.
- * Falls back to the existing flood-fill approach when edge scanning
- * does not produce a valid polygon.
+ * Robust exterior boundary detection using:
+ *   1. Connected component analysis to remove noise (text, logos)
+ *   2. Line detection (H/V run-length) to identify structural walls
+ *   3. Colinear segment merging for continuous wall lines
+ *   4. Flood-fill footprint extraction and polygon construction
+ *
+ * This algorithm does NOT rely on "first black pixel from edge" logic.
+ * It explicitly filters small components (text) and non-linear shapes
+ * (logos), then prioritizes long continuous lines as wall candidates.
  */
 
-const findLongSegments = (wallMask, scanLine, length, isHorizontal, width, minLen, gapTolerance) => {
-  const segments = [];
-  let segStart = -1;
-  let gapRun = 0;
+/**
+ * Step 1 — Connected component filtering.
+ * Identify all connected groups of wall pixels and remove:
+ *  • Text: small, fragmented clusters (area < 0.2% of image)
+ *  • Small non-structural shapes: components that don't span at least
+ *    8% of the shorter dimension in either direction
+ *  • Logos: compact, solid shapes (low aspect ratio + high solidity)
+ * Keep only components likely to be structural walls.
+ */
+const filterComponentsByStructure = (wallMask, width, height) => {
+  const labeled = labelConnectedComponents(wallMask, width, height, 1);
+  const { components, labels } = labeled;
+  if (!components.length) return wallMask;
 
-  for (let i = 0; i < length; i += 1) {
-    const idx = isHorizontal
-      ? scanLine * width + i
-      : i * width + scanLine;
-    const isWall = wallMask[idx];
+  const imageArea = width * height;
+  const minDim = Math.min(width, height);
+  const minArea = imageArea * 0.002;
+  const minSpan = minDim * 0.08;
 
-    if (isWall) {
-      if (segStart < 0) segStart = i;
-      gapRun = 0;
-    } else if (segStart >= 0) {
-      gapRun += 1;
-      if (gapRun > gapTolerance) {
-        const segEnd = i - gapRun;
-        if (segEnd - segStart + 1 >= minLen) {
-          segments.push({ start: segStart, end: segEnd });
-        }
-        segStart = -1;
+  const keptIds = new Set();
+
+  for (const comp of components) {
+    const bboxW = comp.bbox.maxX - comp.bbox.minX + 1;
+    const bboxH = comp.bbox.maxY - comp.bbox.minY + 1;
+
+    // Remove small fragments (text, stray dots).
+    if (comp.size < minArea) continue;
+
+    // Remove compact components that span very little in both dimensions.
+    if (bboxW < minSpan && bboxH < minSpan) continue;
+
+    // Remove compact solid shapes (logos): low aspect ratio + high fill
+    // ratio while still small relative to image.
+    const aspect = Math.max(bboxW, bboxH) / Math.max(1, Math.min(bboxW, bboxH));
+    const solidity = comp.size / (bboxW * bboxH);
+    if (aspect < 2.0 && solidity > 0.4 && comp.size < imageArea * 0.03) continue;
+
+    keptIds.add(comp.id);
+  }
+
+  // Safety: always keep the largest component.
+  if (keptIds.size === 0 && components.length > 0) {
+    keptIds.add(components.reduce((a, b) => (a.size > b.size ? a : b)).id);
+  }
+
+  const out = new Uint8Array(width * height);
+  for (let i = 0; i < labels.length; i += 1) {
+    if (keptIds.has(labels[i])) out[i] = 1;
+  }
+  return out;
+};
+
+/**
+ * Step 2 — Keep only the single largest connected component.
+ * After CC filtering, the remaining mask may still contain multiple
+ * disconnected groups.  The largest one is the main wall structure.
+ */
+const keepLargestComponent = (mask, width, height) => {
+  const labeled = labelConnectedComponents(mask, width, height, 1);
+  const { components, labels } = labeled;
+  if (!components.length) return mask;
+
+  const largest = components.reduce((a, b) => (a.size > b.size ? a : b));
+  const out = new Uint8Array(width * height);
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] === largest.id) out[i] = 1;
+  }
+  return out;
+};
+
+/**
+ * Step 3 — Detect long horizontal and vertical line segments.
+ * Scans every row (horizontal) and every column (vertical) of the mask,
+ * keeping only segments whose length ≥ minLen.  Small gaps (≤ gapTol px)
+ * within a segment are tolerated so that door openings and minor breaks
+ * do not split a wall into sub-threshold pieces.
+ */
+const detectAllLongSegments = (mask, width, height, minLen, gapTol) => {
+  const hSegments = [];
+  const vSegments = [];
+
+  // Horizontal: scan each row.
+  for (let y = 0; y < height; y += 1) {
+    let segStart = -1;
+    let gapRun = 0;
+    for (let x = 0; x < width; x += 1) {
+      if (mask[y * width + x]) {
+        if (segStart < 0) segStart = x;
         gapRun = 0;
+      } else if (segStart >= 0) {
+        gapRun += 1;
+        if (gapRun > gapTol) {
+          const segEnd = x - gapRun;
+          if (segEnd - segStart + 1 >= minLen) {
+            hSegments.push({ y, start: segStart, end: segEnd });
+          }
+          segStart = -1;
+          gapRun = 0;
+        }
+      }
+    }
+    if (segStart >= 0) {
+      const segEnd = width - 1 - gapRun;
+      if (segEnd - segStart + 1 >= minLen) {
+        hSegments.push({ y, start: segStart, end: segEnd });
       }
     }
   }
 
-  if (segStart >= 0) {
-    const segEnd = length - 1 - gapRun;
-    if (segEnd - segStart + 1 >= minLen) {
-      segments.push({ start: segStart, end: segEnd });
+  // Vertical: scan each column.
+  for (let x = 0; x < width; x += 1) {
+    let segStart = -1;
+    let gapRun = 0;
+    for (let y = 0; y < height; y += 1) {
+      if (mask[y * width + x]) {
+        if (segStart < 0) segStart = y;
+        gapRun = 0;
+      } else if (segStart >= 0) {
+        gapRun += 1;
+        if (gapRun > gapTol) {
+          const segEnd = y - gapRun;
+          if (segEnd - segStart + 1 >= minLen) {
+            vSegments.push({ x, start: segStart, end: segEnd });
+          }
+          segStart = -1;
+          gapRun = 0;
+        }
+      }
+    }
+    if (segStart >= 0) {
+      const segEnd = height - 1 - gapRun;
+      if (segEnd - segStart + 1 >= minLen) {
+        vSegments.push({ x, start: segStart, end: segEnd });
+      }
     }
   }
 
-  return segments;
+  return { hSegments, vSegments };
 };
 
-const scanEdgeInward = (wallMask, width, height, minSegLen, gapTol) => {
-  // Scan from each edge inward to find the first row/column containing
-  // a long wall segment.  Returns the four wall-line positions.
-  let topY = -1;
-  let bottomY = -1;
-  let leftX = -1;
-  let rightX = -1;
+/**
+ * Step 4 — Merge colinear and nearby segments.
+ * For horizontal segments on the same row, merge overlapping or
+ * nearly-touching ranges.  Analogous for vertical segments on the
+ * same column.  `fixedKey` is 'y' for horizontal, 'x' for vertical.
+ */
+const mergeSegmentList = (segments, fixedKey, gapTol) => {
+  if (!segments.length) return [];
+  const sorted = [...segments].sort(
+    (a, b) => a[fixedKey] - b[fixedKey] || a.start - b.start,
+  );
+  const merged = [];
+  let cur = { ...sorted[0] };
 
-  // From top edge downward
-  for (let y = 0; y < Math.floor(height * 0.5); y += 1) {
-    if (findLongSegments(wallMask, y, width, true, width, minSegLen, gapTol).length > 0) {
-      topY = y;
-      break;
+  for (let i = 1; i < sorted.length; i += 1) {
+    const seg = sorted[i];
+    if (seg[fixedKey] === cur[fixedKey] && seg.start <= cur.end + gapTol + 1) {
+      cur.end = Math.max(cur.end, seg.end);
+    } else {
+      merged.push(cur);
+      cur = { ...seg };
     }
   }
-
-  // From bottom edge upward
-  for (let y = height - 1; y >= Math.floor(height * 0.5); y -= 1) {
-    if (findLongSegments(wallMask, y, width, true, width, minSegLen, gapTol).length > 0) {
-      bottomY = y;
-      break;
-    }
-  }
-
-  // From left edge rightward
-  for (let x = 0; x < Math.floor(width * 0.5); x += 1) {
-    if (findLongSegments(wallMask, x, height, false, width, minSegLen, gapTol).length > 0) {
-      leftX = x;
-      break;
-    }
-  }
-
-  // From right edge leftward
-  for (let x = width - 1; x >= Math.floor(width * 0.5); x -= 1) {
-    if (findLongSegments(wallMask, x, height, false, width, minSegLen, gapTol).length > 0) {
-      rightX = x;
-      break;
-    }
-  }
-
-  if (topY < 0 || bottomY < 0 || leftX < 0 || rightX < 0) return null;
-  if (rightX - leftX < minSegLen || bottomY - topY < minSegLen) return null;
-
-  return { topY, bottomY, leftX, rightX };
+  merged.push(cur);
+  return merged;
 };
 
-const buildEdgeScanFootprint = (wallMask, width, height, bounds, gapTol) => {
-  // Within the bounding box from edge scanning, build a more precise
-  // footprint by scanning row-by-row and column-by-column, then combining
-  // both masks for robustness.
-  const footprint = new Uint8Array(width * height);
-  const { topY, bottomY, leftX, rightX } = bounds;
+/**
+ * Step 5 — Render detected segments back into a binary mask.
+ * Each segment is drawn with the given half-thickness so that the
+ * resulting lines form a solid barrier for the flood-fill step.
+ */
+const buildSegmentMask = (hSegments, vSegments, width, height, halfThickness) => {
+  const mask = new Uint8Array(width * height);
 
-  // Row-by-row scan: fill between first and last wall pixel per row.
-  // This correctly captures horizontal exterior walls.
-  for (let y = topY; y <= bottomY; y += 1) {
+  for (const seg of hSegments) {
+    for (let dy = -halfThickness; dy <= halfThickness; dy += 1) {
+      const py = seg.y + dy;
+      if (py < 0 || py >= height) continue;
+      for (let x = seg.start; x <= seg.end; x += 1) {
+        mask[py * width + x] = 1;
+      }
+    }
+  }
+
+  for (const seg of vSegments) {
+    for (let dx = -halfThickness; dx <= halfThickness; dx += 1) {
+      const px = seg.x + dx;
+      if (px < 0 || px >= width) continue;
+      for (let y = seg.start; y <= seg.end; y += 1) {
+        mask[y * width + px] = 1;
+      }
+    }
+  }
+
+  return mask;
+};
+/**
+ * Step 6 — Build footprint by filling between extreme wall positions.
+ * For each row, fill from the leftmost to the rightmost wall pixel.
+ * For each column, fill from the topmost to the bottommost wall pixel.
+ * Intersect both fills to preserve concavities (e.g. L-shapes).
+ * Unlike flood-fill, this is not affected by interior door openings.
+ */
+const buildFillBetweenFootprint = (mask, width, height, minSpan) => {
+  const rowFill = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
     let first = -1;
     let last = -1;
-    for (let x = leftX; x <= rightX; x += 1) {
-      if (wallMask[y * width + x]) {
+    for (let x = 0; x < width; x += 1) {
+      if (mask[y * width + x]) {
         if (first < 0) first = x;
         last = x;
       }
     }
-    if (first >= 0 && last - first > gapTol) {
+    if (first >= 0 && last - first > minSpan) {
       for (let x = first; x <= last; x += 1) {
-        footprint[y * width + x] = 1;
+        rowFill[y * width + x] = 1;
       }
     }
   }
 
-  // Column-by-column scan: fill between first and last wall pixel per column.
-  // This correctly captures vertical exterior walls (e.g. an irregular right
-  // wall whose outer vertical line has gaps between cross-segments, causing the
-  // row-only pass to miss the exterior extent of those rows).
-  for (let x = leftX; x <= rightX; x += 1) {
+  const colFill = new Uint8Array(width * height);
+  for (let x = 0; x < width; x += 1) {
     let first = -1;
     let last = -1;
-    for (let y = topY; y <= bottomY; y += 1) {
-      if (wallMask[y * width + x]) {
+    for (let y = 0; y < height; y += 1) {
+      if (mask[y * width + x]) {
         if (first < 0) first = y;
         last = y;
       }
     }
-    if (first >= 0 && last - first > gapTol) {
+    if (first >= 0 && last - first > minSpan) {
       for (let y = first; y <= last; y += 1) {
-        footprint[y * width + x] = 1;
+        colFill[y * width + x] = 1;
       }
     }
   }
 
+  const footprint = new Uint8Array(width * height);
+  for (let i = 0; i < footprint.length; i += 1) {
+    footprint[i] = rowFill[i] && colFill[i] ? 1 : 0;
+  }
   return footprint;
 };
 
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const preprocess = normalizeImageData(imageData, options.preprocess);
-  const orientation = estimateDominantOrientations(preprocess.gray, preprocess.width, preprocess.height, options.orientation);
-  const baseWallMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
-
-  // Close small wall gaps with dilation for robust footprint detection.
-  const closedMask = dilate(baseWallMask, preprocess.width, preprocess.height, options.outerDilate ?? 2);
+  const orientation = estimateDominantOrientations(
+    preprocess.gray, preprocess.width, preprocess.height, options.orientation,
+  );
+  const baseWallMask = prepareWallMask(
+    preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask,
+  );
 
   const w = preprocess.width;
   const h = preprocess.height;
-  const minSegLen = Math.floor(Math.min(w, h) * 0.15);
   const gapTol = options.gapTolerance ?? 8;
 
-  // Try edge-inward scanning first — more robust against surrounding text/logos.
-  const edgeBounds = scanEdgeInward(closedMask, w, h, minSegLen, gapTol);
-  let footprint;
+  /* --- Step 1: Connected component filtering (remove text & logos) ---
+   * Dilate before CC analysis so nearby wall segments connect across
+   * small gaps (doors, line breaks).  A generous radius is used so that
+   * fragmented exterior walls merge into sizeable components.
+   * Filter removes small fragments (text) and compact solid shapes
+   * (logos).  All remaining structural components are kept.             */
+  const ccDilateRadius = options.ccDilateRadius ?? 5;
+  const dilatedForCC = dilate(baseWallMask, w, h, ccDilateRadius);
+  const filteredMask = filterComponentsByStructure(dilatedForCC, w, h);
 
-  if (edgeBounds) {
-    footprint = buildEdgeScanFootprint(closedMask, w, h, edgeBounds, gapTol);
-    // Verify the footprint is non-trivial
-    let fpSize = 0;
-    for (let i = 0; i < footprint.length; i += 1) {
-      if (footprint[i]) fpSize += 1;
-    }
-    if (fpSize < w * h * 0.02) {
-      footprint = null; // too small, fall back
-    }
+  /* --- Step 2: Recover precise wall edges ---
+   * filteredMask is dilated; intersect with the original (non-dilated)
+   * base mask so that the line detection operates on true wall pixels.  */
+  const preciseMask = new Uint8Array(w * h);
+  for (let i = 0; i < preciseMask.length; i += 1) {
+    preciseMask[i] = baseWallMask[i] && filteredMask[i] ? 1 : 0;
   }
 
-  // Fall back to the existing flood-fill from edges approach
-  if (!footprint) {
-    footprint = getFloorplanFootprint(closedMask, w, h);
+  /* --- Step 3: Line detection — find long H/V segments ---
+   * Run-length analysis on every row and column.  Only segments whose
+   * length ≥ 15% of the shorter image dimension are kept (walls are
+   * long continuous lines; text produces only short runs).              */
+  const minSegLen = Math.max(
+    Math.floor(Math.min(w, h) * (options.minSegmentPct ?? 0.15)),
+    5,
+  );
+  const { hSegments, vSegments } = detectAllLongSegments(
+    preciseMask, w, h, minSegLen, gapTol,
+  );
+
+  /* --- Step 4: Merge colinear / nearby segments ---                   */
+  const mergedH = mergeSegmentList(hSegments, 'y', gapTol);
+  const mergedV = mergeSegmentList(vSegments, 'x', gapTol);
+
+  /* --- Step 5: Build structural mask from long segments ---
+   * Draw the merged segments with a small thickness, then combine
+   * with the original filtered wall pixels.  The segments provide
+   * clean, continuous wall lines while the original pixels preserve
+   * connectivity at corners and junctions.                              */
+  const lineHalf = options.lineThickness ?? 2;
+  const segmentMask = buildSegmentMask(mergedH, mergedV, w, h, lineHalf);
+
+  // Union: structural segments + original filtered wall pixels.
+  const combinedMask = new Uint8Array(w * h);
+  for (let i = 0; i < combinedMask.length; i += 1) {
+    combinedMask[i] = segmentMask[i] || preciseMask[i] ? 1 : 0;
   }
 
-  // Outer boundary
-  const outerResult = getLargestComponentPolygon(footprint, preprocess, orientation, options);
+  /* --- Step 6: Build footprint by filling between wall extremes ---
+   * For each row/column, fill between the leftmost/rightmost (or
+   * topmost/bottommost) wall pixel.  Intersecting both fills preserves
+   * concavities.  Unlike flood-fill, this is robust against interior
+   * door openings that would otherwise leak.
+   * Use the full base wall mask (not CC-filtered) so that thin
+   * exterior wall fragments at the building edges are included.         */
+  let footprint = buildFillBetweenFootprint(baseWallMask, w, h, gapTol);
+  let usedStructuralPath = true;
 
-  // Inner boundary: erode the footprint inward to approximate the inner wall edge.
+  // Verify footprint is non-trivial.
+  let fpSize = 0;
+  for (let i = 0; i < footprint.length; i += 1) {
+    if (footprint[i]) fpSize += 1;
+  }
+
+  if (fpSize < w * h * 0.02) {
+    // Fallback: use the base wall mask with dilation + flood-fill.
+    footprint = getFloorplanFootprint(
+      dilate(baseWallMask, w, h, options.outerDilate ?? 2), w, h,
+    );
+    usedStructuralPath = false;
+  }
+
+  /* --- Step 7: Extract outer and inner boundary polygons ---
+   * The largest connected component of the footprint gives the outer
+   * boundary.  Eroding the footprint approximates the inner wall edge.  */
+  const outerResult = getLargestComponentPolygon(
+    footprint, preprocess, orientation, options,
+  );
   const innerFootprint = erode(footprint, w, h, options.innerErode ?? 2);
-  const innerResult = getLargestComponentPolygon(innerFootprint, preprocess, orientation, options);
+  const innerResult = getLargestComponentPolygon(
+    innerFootprint, preprocess, orientation, options,
+  );
 
   if (!outerResult && !innerResult) return null;
 
-  const outerPolygon = outerResult ? mapPolygonFromNormalized(outerResult.polygon, preprocess.scale) : null;
-  const innerPolygon = innerResult ? mapPolygonFromNormalized(innerResult.polygon, preprocess.scale) : null;
+  const outerPolygon = outerResult
+    ? mapPolygonFromNormalized(outerResult.polygon, preprocess.scale) : null;
+  const innerPolygon = innerResult
+    ? mapPolygonFromNormalized(innerResult.polygon, preprocess.scale) : null;
   const outerBounds = outerPolygon ? polygonToBounds(outerPolygon) : null;
   const innerBounds = innerPolygon ? polygonToBounds(innerPolygon) : null;
 
@@ -450,10 +626,10 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     } : null,
     debug: {
       dominantAngles: orientation.dominant,
-      normalizedSize: { width: preprocess.width, height: preprocess.height },
+      normalizedSize: { width: w, height: h },
       hasOuter: Boolean(outerPolygon),
       hasInner: Boolean(innerPolygon),
-      usedEdgeScan: Boolean(edgeBounds),
+      usedEdgeScan: usedStructuralPath,
     },
   };
 };
