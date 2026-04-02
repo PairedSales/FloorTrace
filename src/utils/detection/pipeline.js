@@ -470,7 +470,21 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     if (footprint[i]) fpSize += 1;
   }
   if (fpSize < w * h * 0.01) {
-    return null;
+    return {
+      outer: null,
+      inner: null,
+      debug: {
+        normalizedSize: { width: w, height: h },
+        hasOuter: false,
+        hasInner: false,
+        algorithm: 'edge-inward-scanning',
+        thresholds: { minSegmentLength: minSegLen, minSegmentLengthPct: minSegLenPct, gapTolerance: gapTol },
+        segmentCounts: { horizontal: hSegCount, vertical: vSegCount, diagonal: diagSegCount },
+        footprintSize: fpSize,
+        footprintPct: Number((fpSize / (w * h) * 100).toFixed(1)),
+        rejected: 'footprint too small',
+      },
+    };
   }
 
   // Step 5: Extract outer polygon from footprint.
