@@ -70,7 +70,7 @@ const normalizeOcrText = (text) => {
 
   let s = text;
 
-  // Unicode multiplications / separators
+  // Unicode multiplications / separators → lowercase x
   s = s.replace(/[\u00D7\u2715\u2716\u00D8]/g, 'x');
   s = s.replace(/\b(?:by|BY|By)\b/g, 'x');
 
@@ -79,20 +79,30 @@ const normalizeOcrText = (text) => {
   s = s.replace(/[\u201C\u201D\u02DD]/g, '"');
   s = s.replace(/''/g, '"');
 
-  // Common OCR char swaps near digits
-  s = s.replace(/([0-9])[lI|]/g, '$11');
-  s = s.replace(/[lI|]([0-9])/g, '1$1');
-  s = s.replace(/([0-9])[oO](?=\s|'|"|$)/g, '$10');
-  s = s.replace(/(?:^|\s)[oO]([0-9])/g, ' 0$1');
-  s = s.replace(/([0-9])[Ss]([0-9])/g, '$15$2');
-  s = s.replace(/([0-9])[Bb]([0-9])/g, '$18$2');
-  s = s.replace(/([0-9])[Zz]([0-9])/g, '$12$2');
+  // Lowercase everything: normalises X→x, Ft→ft, IN→in, etc.
+  s = s.toLowerCase();
 
-  // Pipes/brackets that look like 1
-  s = s.replace(/[|]/g, '1');
+  // Common OCR char swaps near digits (applied after lowercase).
+  // Negative lookahead (?![a-z]) prevents swapping the 'i' in unit
+  // keywords like "in", "inch", "inches" or the 'l' in "left", etc.
+  s = s.replace(/([0-9])[li|](?![a-z])/g, '$11');
+  s = s.replace(/[li|](?![a-z])([0-9])/g, '1$1');
+  s = s.replace(/([0-9])o(?=\s|'|"|$)/g, '$10');
+  s = s.replace(/(?:^|\s)o([0-9])/g, ' 0$1');
+  s = s.replace(/([0-9])s([0-9])/g, '$15$2');
+  s = s.replace(/([0-9])b([0-9])/g, '$18$2');
+  s = s.replace(/([0-9])z([0-9])/g, '$12$2');
+
+  // Pipes that look like 1
+  s = s.replace(/\|/g, '1');
 
   // Dashes
   s = s.replace(/[\u2013\u2014\u2212]/g, '-');
+
+  // Ensure a space between a digit and a unit keyword so downstream
+  // regexes don't need to handle both "1.2ft" and "1.2 ft".
+  s = s.replace(/(\d)(ft|feet|in)\b/g, '$1 $2');
+  s = s.replace(/\b(ft|feet|in)(\d)/g, '$1 $2');
 
   // Collapse whitespace
   s = s.replace(/\s+/g, ' ');
@@ -106,36 +116,108 @@ const normalizeOcrText = (text) => {
 
 const isReasonable = (v) => Number.isFinite(v) && v >= MIN_DIMENSION_FEET && v <= MAX_DIMENSION_FEET;
 
-const SEPARATOR = /\s*[xX\u00D7]\s*/;
-
-const FEET_INCHES_FULL = /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/;
-const DECIMAL_TOKEN = /(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet|')?/i;
+// After normalizeOcrText the separator is always lowercase 'x'; keep [xX] as
+// a safety net in case parseSingleToken is called with un-normalised input.
+const SEPARATOR = /\s*[xX]\s*/;
 
 const parseSingleToken = (token) => {
-  const t = token.trim();
+  // Light normalisation so callers don't have to pre-normalise.
+  const t = normalizeOcrText(token);
 
-  // Try feet-inches first: 12'5" , 12' 5" , 12'5 , etc.
-  const fi = t.match(/^(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?$/);
-  if (fi) {
-    const feet = parseInt(fi[1], 10);
-    const inches = parseInt(fi[2], 10);
+  // ------------------------------------------------------------------
+  // Case A: feet + inches with apostrophe/tick  →  4'5"  10' 2"  12'5
+  // ------------------------------------------------------------------
+  const feetInches = t.match(/^(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?\s*$/);
+  if (feetInches) {
+    const feet = parseInt(feetInches[1], 10);
+    const inches = parseInt(feetInches[2], 10);
     if (inches < 12) {
       const val = feet + inches / 12;
       if (isReasonable(val)) return { value: val, format: 'inches' };
     }
   }
 
-  // Feet-only with tick mark: 12'
-  const feetOnly = t.match(/^(\d{1,3})\s*['']\s*$/);
+  // Case A: feet-only with tick  →  12'
+  const feetOnly = t.match(/^(\d{1,3})\s*'\s*$/);
   if (feetOnly) {
     const val = parseInt(feetOnly[1], 10);
     if (isReasonable(val)) return { value: val, format: 'inches' };
   }
 
-  // Decimal feet: 12.5 ft, 12.5, etc.
-  const dec = t.match(/^(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)?\.?\s*$/i);
-  if (dec) {
-    const val = parseFloat(dec[1]);
+  // ------------------------------------------------------------------
+  // Case B: decimal feet  →  1.2  1.2ft  12.75 ft  1.2'
+  // Requires a decimal point so it is unambiguous from bare integers.
+  // ------------------------------------------------------------------
+  const decimalFt = t.match(/^(\d{1,3}\.\d+)\s*(?:ft|feet|')?\s*$/);
+  if (decimalFt) {
+    const val = parseFloat(decimalFt[1]);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
+  }
+
+  // Case B: integer + explicit "ft" / "feet" keyword  →  12 ft  12ft
+  const intFt = t.match(/^(\d{1,3})\s*(?:ft|feet)\s*$/);
+  if (intFt) {
+    const val = parseInt(intFt[1], 10);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
+  }
+
+  // ------------------------------------------------------------------
+  // Case C: explicit ft/in keywords  →  1 ft 3 in  2 feet 6 in
+  // ------------------------------------------------------------------
+  const explicitFtIn = t.match(/^(\d{1,3})\s*(?:ft|feet)\s+(\d{1,2})\s*(?:in|inch|inches)?\s*$/);
+  if (explicitFtIn) {
+    const feet = parseInt(explicitFtIn[1], 10);
+    const inches = parseInt(explicitFtIn[2], 10);
+    if (inches < 12) {
+      const val = feet + inches / 12;
+      if (isReasonable(val)) return { value: val, format: 'inches' };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Case D: blurry / missing symbols – OCR could not read ' or "
+  //
+  // D1: space-separated pair  →  "10 2"  (was 10' 2")
+  //     Accept only when the second number is plausibly inches (< 12).
+  // ------------------------------------------------------------------
+  const spacedPair = t.match(/^(\d{1,3})\s+(\d{1,2})$/);
+  if (spacedPair) {
+    const a = parseInt(spacedPair[1], 10);
+    const b = parseInt(spacedPair[2], 10);
+    if (b < 12 && isReasonable(a + b / 12)) {
+      return { value: a + b / 12, format: 'inches' };
+    }
+  }
+
+  // D2: 3-4 digit bare integer  →  "102" (was 10'2"),  "134" (was 13'4")
+  //     Interpretation: leading digits = feet, trailing digit(s) = inches.
+  //     Try last-2 digits for 4-digit numbers first (e.g. 1210 → 12ft 10in).
+  const noisyOcr = t.match(/^(\d{3,4})$/);
+  if (noisyOcr) {
+    const num = noisyOcr[1];
+    if (num.length === 4) {
+      const lastTwo = parseInt(num.slice(-2), 10);
+      const ftPart = parseInt(num.slice(0, -2), 10);
+      if (lastTwo < 12 && isReasonable(ftPart + lastTwo / 12)) {
+        return { value: ftPart + lastTwo / 12, format: 'inches' };
+      }
+    }
+    const lastOne = parseInt(num.slice(-1), 10);
+    const ftPart = parseInt(num.slice(0, -1), 10);
+    if (lastOne < 12 && isReasonable(ftPart + lastOne / 12)) {
+      return { value: ftPart + lastOne / 12, format: 'inches' };
+    }
+    // Inches digit was ≥ 12 (e.g. "139") – fall back to plain feet.
+    const plain = parseInt(num, 10);
+    if (isReasonable(plain)) return { value: plain, format: 'decimal' };
+  }
+
+  // ------------------------------------------------------------------
+  // Plain 1-2 digit integer  →  12  10  (treat as whole feet)
+  // ------------------------------------------------------------------
+  const plainFt = t.match(/^(\d{1,2})$/);
+  if (plainFt) {
+    const val = parseInt(plainFt[1], 10);
     if (isReasonable(val)) return { value: val, format: 'decimal' };
   }
 
@@ -143,75 +225,65 @@ const parseSingleToken = (token) => {
 };
 
 const parseDimensionLine = (line) => {
+  const raw = line;
   const norm = normalizeOcrText(line);
+  console.log('[OCR] raw:', raw);
+  console.log('[OCR] normalized:', norm);
 
-  // --- Strategy 1: explicit x/X separator --------------------------------
+  // --- Strategy 1: split on x separator (handles both 'x' and 'X') -------
+  // normalizeOcrText already lowercases everything, so the separator is
+  // always 'x' at this point; [xX] is kept for safety.
   const sepMatch = norm.match(SEPARATOR);
   if (sepMatch) {
     const left = norm.slice(0, sepMatch.index).trim();
     const right = norm.slice(sepMatch.index + sepMatch[0].length).trim();
+    console.log('[OCR] split → left:', left, '| right:', right);
     if (left && right) {
       const lp = parseSingleToken(left);
       const rp = parseSingleToken(right);
+      console.log('[OCR] left format:', lp?.format, 'value:', lp?.value);
+      console.log('[OCR] right format:', rp?.format, 'value:', rp?.value);
       if (lp && rp) {
-        return {
+        const result = {
           width: lp.value,
           height: rp.value,
           text: norm,
           format: lp.format === 'inches' || rp.format === 'inches' ? 'inches' : 'decimal'
         };
+        console.log('[OCR] parsed → width:', result.width, 'height:', result.height, 'format:', result.format);
+        return result;
       }
     }
   }
 
-  // --- Strategy 2: full-line regex for feet-inches with x -----------------
-  const fiFull = norm.match(
-    /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?\s*[xX]\s*(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/
-  );
-  if (fiFull) {
-    const w = parseInt(fiFull[1], 10) + parseInt(fiFull[2], 10) / 12;
-    const h = parseInt(fiFull[3], 10) + parseInt(fiFull[4], 10) / 12;
-    if (isReasonable(w) && isReasonable(h)) {
-      return { width: w, height: h, text: fiFull[0], format: 'inches' };
-    }
-  }
-
-  // --- Strategy 3: two bare numbers separated by x -----------------------
-  const bare = norm.match(/(\d{1,3}(?:\.\d+)?)\s*[xX]\s*(\d{1,3}(?:\.\d+)?)/);
-  if (bare) {
-    const w = parseFloat(bare[1]);
-    const h = parseFloat(bare[2]);
-    if (isReasonable(w) && isReasonable(h)) {
-      const fmt = bare[1].includes('.') || bare[2].includes('.') ? 'decimal' : 'decimal';
-      return { width: w, height: h, text: bare[0], format: fmt };
-    }
-  }
-
-  // --- Strategy 4: two feet-inches groups without explicit x separator ----
-  // e.g. "12'5\"  10'3\""
+  // --- Strategy 2: two feet-inches groups without explicit x separator ----
+  // e.g. "12'5\"  10'3\""  — normalised quotes are straight ' and "
   const twoFi = norm.match(
-    /(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?\s{1,}\s*(\d{1,3})\s*['']\s*-?\s*(\d{1,2})\s*(?:["""]|'')?/
+    /(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?\s{1,}(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?/
   );
   if (twoFi) {
     const w = parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12;
     const h = parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12;
     if (isReasonable(w) && isReasonable(h)) {
+      console.log('[OCR] strategy 2 (two ft+in groups) → width:', w, 'height:', h);
       return { width: w, height: h, text: twoFi[0], format: 'inches' };
     }
   }
 
-  // --- Strategy 5: decimal ft x decimal ft --------------------------------
+  // --- Strategy 3: decimal ft … decimal ft (no x, both sides have "ft") --
   const decFt = norm.match(
-    /(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)\s*[xX]?\s*(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)/i
+    /(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)\s+(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)/
   );
   if (decFt) {
     const w = parseFloat(decFt[1]);
     const h = parseFloat(decFt[2]);
     if (isReasonable(w) && isReasonable(h)) {
+      console.log('[OCR] strategy 3 (decimal ft pairs) → width:', w, 'height:', h);
       return { width: w, height: h, text: decFt[0], format: 'decimal' };
     }
   }
 
+  console.log('[OCR] no parse for:', norm);
   return null;
 };
 
@@ -469,3 +541,6 @@ export const detectAllDimensions = async (imageDataUrl) => {
     return { dimensions: [], detectedFormat: null };
   }
 };
+
+// Exported for unit-testing the parsing layer without a live OCR engine.
+export { normalizeOcrText, parseSingleToken, parseDimensionLine };
