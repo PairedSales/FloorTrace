@@ -170,6 +170,46 @@ describe('detection pipeline', () => {
     expect(actualArea).toBeGreaterThan(fullRectArea * 0.4);
   });
 
+  it('traces exterior boundary when right wall has irregular double-line pattern', () => {
+    // Simulate a floorplan where the right exterior wall is drawn as two
+    // vertical lines connected by sparse horizontal cross-segments (the
+    // irregular "double-line" wall pattern visible in architectural drawings).
+    // The outer vertical line has gaps between each cross-segment, so the
+    // row-only scan cannot reach the outer extent in those gap rows — the
+    // column-by-column scan must bridge them.
+    const W = 400;
+    const H = 300;
+    const img = createBlankImageData(W, H);
+
+    // Plain top, bottom and left walls
+    drawLine(img, 30, 30, 340, 30, 3);
+    drawLine(img, 30, 260, 340, 260, 3);
+    drawLine(img, 30, 30, 30, 260, 3);
+
+    // Irregular right wall: outer vertical line, inner vertical line,
+    // and short horizontal cross-segments every 30px between them.
+    const wallOuterX = 340;
+    const wallInnerX = 320;
+    drawLine(img, wallOuterX, 30, wallOuterX, 260, 3);
+    drawLine(img, wallInnerX, 30, wallInnerX, 260, 3);
+    for (let y = 50; y < 260; y += 30) {
+      drawLine(img, wallInnerX, y, wallOuterX, y, 2);
+    }
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const xs = outerPoly.map((p) => p.x);
+
+    // The outer boundary must reach the outermost right wall line, not just
+    // the inner one (the pre-fix row-only scan stopped at wallInnerX).
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(wallOuterX - 5);
+  });
+
   it('traces exterior boundary of a floorplan with open interior', () => {
     // Simple rectangle with no interior walls
     const img = createBlankImageData(260, 200);
