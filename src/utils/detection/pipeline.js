@@ -1,6 +1,6 @@
 import { normalizeImageData, mapPointToNormalized } from './preprocess';
 import { estimateDominantOrientations } from './orientation';
-import { prepareWallMask, closeMask, erode, dilate } from './wallMask';
+import { prepareWallMask, closeMask, erode } from './wallMask';
 import {
   labelConnectedComponents,
   componentToPolygon,
@@ -14,50 +14,6 @@ const invertMask = (mask) => {
     out[i] = mask[i] ? 0 : 1;
   }
   return out;
-};
-
-const floodFillFromEdges = (wallMask, width, height) => {
-  const visited = new Uint8Array(width * height);
-  const queue = [];
-
-  const tryEnqueue = (idx) => {
-    if (!visited[idx] && !wallMask[idx]) {
-      visited[idx] = 1;
-      queue.push(idx);
-    }
-  };
-
-  for (let x = 0; x < width; x += 1) {
-    tryEnqueue(x);
-    tryEnqueue((height - 1) * width + x);
-  }
-  for (let y = 0; y < height; y += 1) {
-    tryEnqueue(y * width);
-    tryEnqueue(y * width + width - 1);
-  }
-
-  let head = 0;
-  while (head < queue.length) {
-    const idx = queue[head];
-    head += 1;
-    const x = idx % width;
-    const y = Math.floor(idx / width);
-    if (x + 1 < width) tryEnqueue(idx + 1);
-    if (x - 1 >= 0) tryEnqueue(idx - 1);
-    if (y + 1 < height) tryEnqueue(idx + width);
-    if (y - 1 >= 0) tryEnqueue(idx - width);
-  }
-
-  return visited;
-};
-
-const getFloorplanFootprint = (wallMask, width, height) => {
-  const exterior = floodFillFromEdges(wallMask, width, height);
-  const footprint = new Uint8Array(width * height);
-  for (let i = 0; i < footprint.length; i += 1) {
-    footprint[i] = exterior[i] ? 0 : 1;
-  }
-  return footprint;
 };
 
 const pointInBounds = (point, width, height) => point.x >= 0 && point.y >= 0 && point.x < width && point.y < height;
@@ -243,11 +199,15 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
 };
 
 /* ---------- Exterior Wall Tracing (Problem 2) ----------
- * Edge-inward scanning: scan from each image edge inward, detect long
- * segments of black (wall) pixels, filter short segments (text/logos),
- * extend detected wall lines, and build the exterior polygon.
- * Falls back to the existing flood-fill approach when edge scanning
- * does not produce a valid polygon.
+ * Edge-inward scanning algorithm:
+ * 1. Filter wall mask to keep only long H/V/diagonal segments (noise removal)
+ * 2. Build edge profiles by scanning inward from all four image edges
+ * 3. Construct footprint from the intersection of edge profiles
+ * 4. Extract polygon from footprint for area calculation
+ *
+ * This approach is simple and deterministic: exterior walls are the
+ * longest continuous features, so short text/logo segments are filtered
+ * out before profile construction.
  */
 
 const findLongSegments = (wallMask, scanLine, length, isHorizontal, width, minLen, gapTolerance) => {
@@ -287,72 +247,181 @@ const findLongSegments = (wallMask, scanLine, length, isHorizontal, width, minLe
   return segments;
 };
 
-const scanEdgeInward = (wallMask, width, height, minSegLen, gapTol) => {
-  // Scan from each edge inward to find the first row/column containing
-  // a long wall segment.  Returns the four wall-line positions.
-  let topY = -1;
-  let bottomY = -1;
-  let leftX = -1;
-  let rightX = -1;
+/**
+ * Scan a single diagonal line through the wall mask and return long segments.
+ * Walks from (startX, startY) stepping by (dx, dy) each iteration.
+ */
+const scanDiagonalLine = (wallMask, width, height, startX, startY, dx, dy, minLen, gapTol) => {
+  const segments = [];
+  let segStart = -1;
+  let gapRun = 0;
+  let x = startX;
+  let y = startY;
+  let i = 0;
 
-  // From top edge downward
-  for (let y = 0; y < Math.floor(height * 0.5); y += 1) {
-    if (findLongSegments(wallMask, y, width, true, width, minSegLen, gapTol).length > 0) {
-      topY = y;
-      break;
-    }
-  }
-
-  // From bottom edge upward
-  for (let y = height - 1; y >= Math.floor(height * 0.5); y -= 1) {
-    if (findLongSegments(wallMask, y, width, true, width, minSegLen, gapTol).length > 0) {
-      bottomY = y;
-      break;
-    }
-  }
-
-  // From left edge rightward
-  for (let x = 0; x < Math.floor(width * 0.5); x += 1) {
-    if (findLongSegments(wallMask, x, height, false, width, minSegLen, gapTol).length > 0) {
-      leftX = x;
-      break;
-    }
-  }
-
-  // From right edge leftward
-  for (let x = width - 1; x >= Math.floor(width * 0.5); x -= 1) {
-    if (findLongSegments(wallMask, x, height, false, width, minSegLen, gapTol).length > 0) {
-      rightX = x;
-      break;
-    }
-  }
-
-  if (topY < 0 || bottomY < 0 || leftX < 0 || rightX < 0) return null;
-  if (rightX - leftX < minSegLen || bottomY - topY < minSegLen) return null;
-
-  return { topY, bottomY, leftX, rightX };
-};
-
-const buildEdgeScanFootprint = (wallMask, width, height, bounds, gapTol) => {
-  // Within the bounding box from edge scanning, build a more precise
-  // footprint by scanning row-by-row and column-by-column, then combining
-  // both masks for robustness.
-  const footprint = new Uint8Array(width * height);
-  const { topY, bottomY, leftX, rightX } = bounds;
-
-  for (let y = topY; y <= bottomY; y += 1) {
-    // Find first and last wall pixel in this row between leftX and rightX
-    let first = -1;
-    let last = -1;
-    for (let x = leftX; x <= rightX; x += 1) {
-      if (wallMask[y * width + x]) {
-        if (first < 0) first = x;
-        last = x;
+  while (x >= 0 && x < width && y >= 0 && y < height) {
+    const isWall = wallMask[y * width + x];
+    if (isWall) {
+      if (segStart < 0) segStart = i;
+      gapRun = 0;
+    } else if (segStart >= 0) {
+      gapRun += 1;
+      if (gapRun > gapTol) {
+        const segEnd = i - gapRun;
+        if (segEnd - segStart + 1 >= minLen) {
+          segments.push({ start: segStart, end: segEnd });
+        }
+        segStart = -1;
+        gapRun = 0;
       }
     }
-    // Fill between first and last wall pixel (interior is part of the footprint)
-    if (first >= 0 && last - first > gapTol) {
-      for (let x = first; x <= last; x += 1) {
+    x += dx;
+    y += dy;
+    i += 1;
+  }
+
+  if (segStart >= 0) {
+    const segEnd = i - 1 - gapRun;
+    if (segEnd - segStart + 1 >= minLen) {
+      segments.push({ start: segStart, end: segEnd });
+    }
+  }
+
+  return segments;
+};
+
+/**
+ * Filter wall mask to keep only pixels belonging to long horizontal
+ * or vertical segments. Removes text, logos, and other short noise
+ * while preserving the long exterior wall structures.
+ */
+const filterToLongSegments = (wallMask, width, height, minLen, gapTol) => {
+  const filtered = new Uint8Array(width * height);
+  let hSegCount = 0;
+  let vSegCount = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const segs = findLongSegments(wallMask, y, width, true, width, minLen, gapTol);
+    hSegCount += segs.length;
+    for (const seg of segs) {
+      for (let x = seg.start; x <= seg.end; x += 1) {
+        filtered[y * width + x] = 1;
+      }
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    const segs = findLongSegments(wallMask, x, height, false, width, minLen, gapTol);
+    vSegCount += segs.length;
+    for (const seg of segs) {
+      for (let sy = seg.start; sy <= seg.end; sy += 1) {
+        filtered[sy * width + x] = 1;
+      }
+    }
+  }
+
+  return { filtered, hSegCount, vSegCount };
+};
+
+/**
+ * Filter wall mask to keep only pixels belonging to long 45-degree
+ * diagonal segments. Scans all diagonals in both directions (+1,+1)
+ * and (-1,+1).
+ */
+const filterDiagonalSegments = (wallMask, width, height, minLen, gapTol) => {
+  const filtered = new Uint8Array(width * height);
+  let diagSegCount = 0;
+
+  const markSegment = (sx, sy, ddx, ddy, seg) => {
+    let mx = sx + ddx * seg.start;
+    let my = sy + ddy * seg.start;
+    for (let j = seg.start; j <= seg.end; j += 1) {
+      if (mx >= 0 && mx < width && my >= 0 && my < height) {
+        filtered[my * width + mx] = 1;
+      }
+      mx += ddx;
+      my += ddy;
+    }
+  };
+
+  // Down-right diagonals (+1, +1)
+  for (let sx = 0; sx < width; sx += 1) {
+    const segs = scanDiagonalLine(wallMask, width, height, sx, 0, 1, 1, minLen, gapTol);
+    diagSegCount += segs.length;
+    for (const seg of segs) markSegment(sx, 0, 1, 1, seg);
+  }
+  for (let sy = 1; sy < height; sy += 1) {
+    const segs = scanDiagonalLine(wallMask, width, height, 0, sy, 1, 1, minLen, gapTol);
+    diagSegCount += segs.length;
+    for (const seg of segs) markSegment(0, sy, 1, 1, seg);
+  }
+
+  // Down-left diagonals (-1, +1)
+  for (let sx = 0; sx < width; sx += 1) {
+    const segs = scanDiagonalLine(wallMask, width, height, sx, 0, -1, 1, minLen, gapTol);
+    diagSegCount += segs.length;
+    for (const seg of segs) markSegment(sx, 0, -1, 1, seg);
+  }
+  for (let sy = 1; sy < height; sy += 1) {
+    const segs = scanDiagonalLine(wallMask, width, height, width - 1, sy, -1, 1, minLen, gapTol);
+    diagSegCount += segs.length;
+    for (const seg of segs) markSegment(width - 1, sy, -1, 1, seg);
+  }
+
+  return { filtered, diagSegCount };
+};
+
+/**
+ * Build edge profiles by scanning inward from each image edge.
+ * For each coordinate on the perpendicular axis, records the position
+ * of the first filtered wall pixel found when scanning inward.
+ */
+const buildEdgeProfiles = (filteredMask, width, height) => {
+  const topProfile = new Int32Array(width).fill(height);
+  const bottomProfile = new Int32Array(width).fill(-1);
+  const leftProfile = new Int32Array(height).fill(width);
+  const rightProfile = new Int32Array(height).fill(-1);
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      if (filteredMask[y * width + x]) { topProfile[x] = y; break; }
+    }
+    for (let y = height - 1; y >= 0; y -= 1) {
+      if (filteredMask[y * width + x]) { bottomProfile[x] = y; break; }
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (filteredMask[y * width + x]) { leftProfile[y] = x; break; }
+    }
+    for (let x = width - 1; x >= 0; x -= 1) {
+      if (filteredMask[y * width + x]) { rightProfile[y] = x; break; }
+    }
+  }
+
+  return { topProfile, bottomProfile, leftProfile, rightProfile };
+};
+
+/**
+ * Build a footprint mask from edge profiles. A pixel is inside the
+ * footprint if it lies between the wall hits from all four directions.
+ */
+const buildFootprintFromProfiles = (profiles, width, height) => {
+  const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
+  const footprint = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y += 1) {
+    if (leftProfile[y] >= width || rightProfile[y] < 0) continue;
+    for (let x = 0; x < width; x += 1) {
+      if (
+        topProfile[x] < height
+        && bottomProfile[x] >= 0
+        && y >= topProfile[x]
+        && y <= bottomProfile[x]
+        && x >= leftProfile[y]
+        && x <= rightProfile[y]
+      ) {
         footprint[y * width + x] = 1;
       }
     }
@@ -366,36 +435,45 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const orientation = estimateDominantOrientations(preprocess.gray, preprocess.width, preprocess.height, options.orientation);
   const baseWallMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
 
-  // Close small wall gaps with dilation for robust footprint detection.
-  const closedMask = dilate(baseWallMask, preprocess.width, preprocess.height, options.outerDilate ?? 2);
-
   const w = preprocess.width;
   const h = preprocess.height;
-  const minSegLen = Math.floor(Math.min(w, h) * 0.15);
+  const minDim = Math.min(w, h);
+  const minSegLenPct = options.minSegmentLengthPct ?? 0.15;
+  const minSegLen = Math.max(1, Math.floor(minDim * minSegLenPct));
   const gapTol = options.gapTolerance ?? 8;
 
-  // Try edge-inward scanning first — more robust against surrounding text/logos.
-  const edgeBounds = scanEdgeInward(closedMask, w, h, minSegLen, gapTol);
-  let footprint;
+  // Step 1: Filter wall mask — keep only long H/V segments (removes text/logos).
+  const { filtered: hvFiltered, hSegCount, vSegCount } = filterToLongSegments(
+    baseWallMask, w, h, minSegLen, gapTol,
+  );
 
-  if (edgeBounds) {
-    footprint = buildEdgeScanFootprint(closedMask, w, h, edgeBounds, gapTol);
-    // Verify the footprint is non-trivial
-    let fpSize = 0;
-    for (let i = 0; i < footprint.length; i += 1) {
-      if (footprint[i]) fpSize += 1;
-    }
-    if (fpSize < w * h * 0.02) {
-      footprint = null; // too small, fall back
-    }
+  // Step 2: Detect long 45-degree diagonal segments.
+  const { filtered: diagFiltered, diagSegCount } = filterDiagonalSegments(
+    baseWallMask, w, h, minSegLen, gapTol,
+  );
+
+  // Combine H/V and diagonal filtered masks.
+  const combinedFiltered = new Uint8Array(w * h);
+  for (let i = 0; i < combinedFiltered.length; i += 1) {
+    combinedFiltered[i] = hvFiltered[i] || diagFiltered[i] ? 1 : 0;
   }
 
-  // Fall back to the existing flood-fill from edges approach
-  if (!footprint) {
-    footprint = getFloorplanFootprint(closedMask, w, h);
+  // Step 3: Build edge profiles by scanning inward from each image edge.
+  const profiles = buildEdgeProfiles(combinedFiltered, w, h);
+
+  // Step 4: Construct footprint from profiles.
+  const footprint = buildFootprintFromProfiles(profiles, w, h);
+
+  // Verify the footprint is non-trivial.
+  let fpSize = 0;
+  for (let i = 0; i < footprint.length; i += 1) {
+    if (footprint[i]) fpSize += 1;
+  }
+  if (fpSize < w * h * 0.01) {
+    return null;
   }
 
-  // Outer boundary
+  // Step 5: Extract outer polygon from footprint.
   const outerResult = getLargestComponentPolygon(footprint, preprocess, orientation, options);
 
   // Inner boundary: erode the footprint inward to approximate the inner wall edge.
@@ -430,10 +508,22 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     } : null,
     debug: {
       dominantAngles: orientation.dominant,
-      normalizedSize: { width: preprocess.width, height: preprocess.height },
+      normalizedSize: { width: w, height: h },
       hasOuter: Boolean(outerPolygon),
       hasInner: Boolean(innerPolygon),
-      usedEdgeScan: Boolean(edgeBounds),
+      algorithm: 'edge-inward-scanning',
+      thresholds: {
+        minSegmentLength: minSegLen,
+        minSegmentLengthPct: minSegLenPct,
+        gapTolerance: gapTol,
+      },
+      segmentCounts: {
+        horizontal: hSegCount,
+        vertical: vSegCount,
+        diagonal: diagSegCount,
+      },
+      footprintSize: fpSize,
+      footprintPct: Number((fpSize / (w * h) * 100).toFixed(1)),
     },
   };
 };
