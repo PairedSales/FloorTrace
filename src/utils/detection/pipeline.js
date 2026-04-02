@@ -103,6 +103,15 @@ const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {})
  *   - minRoomSize:     min room area in pixels² (default 400)
  */
 
+// Room detection tuning constants
+const MIN_WALL_THICKNESS_PIXELS = 20;          // Absolute floor for wall thickness threshold
+const WALL_THICKNESS_IMAGE_RATIO = 0.06;       // Wall thickness as fraction of shorter dimension
+const HORIZONTAL_WALL_WIDTH_RATIO = 0.4;       // Horizontal wall must span this fraction of room width
+const MAX_ROOM_AREA_RATIO = 0.9;               // Reject rooms covering >90% of image area
+const MAX_SCAN_BAND = 3;                        // Max pixel band to check around scan line
+const MIN_SCAN_BAND = 1;                        // Min pixel band to check around scan line
+const SCAN_BAND_DIVISOR = 2;                    // Divide gap tolerance by this for scan band
+
 /**
  * Measure wall continuity in the perpendicular direction at (x, y).
  * For a vertical wall, measures how far the wall extends vertically.
@@ -158,7 +167,7 @@ const expandToFindWall = (wallMask, startX, startY, direction, width, height, op
     ? (isHorizontalScan ? width - 1 : height - 1)
     : 0;
   const fixedPos = isHorizontalScan ? startY : startX;
-  const scanBand = Math.min(3, Math.max(1, Math.floor(gapTolerance / 2)));
+  const scanBand = Math.min(MAX_SCAN_BAND, Math.max(MIN_SCAN_BAND, Math.floor(gapTolerance / SCAN_BAND_DIVISOR)));
   const wallsChecked = [];
 
   while (pos !== limit) {
@@ -258,7 +267,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   const h = preprocess.height;
   const gapTolerance = options.gapTolerance ?? 8;
   const minWallThickness = options.minWallThickness
-    ?? Math.max(20, Math.floor(Math.min(w, h) * 0.06));
+    ?? Math.max(MIN_WALL_THICKNESS_PIXELS, Math.floor(Math.min(w, h) * WALL_THICKNESS_IMAGE_RATIO));
   const minRoomSize = options.minRoomSize ?? 400;
   const expandOpts = { gapTolerance, minWallThickness };
 
@@ -270,7 +279,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // Horizontal room walls should span a significant portion of the room
   // width; text labels and dimension lines are shorter and get filtered.
   const detectedWidth = rightResult.position - leftResult.position;
-  const horzWallThreshold = Math.max(minWallThickness, Math.floor(detectedWidth * 0.4));
+  const horzWallThreshold = Math.max(minWallThickness, Math.floor(detectedWidth * HORIZONTAL_WALL_WIDTH_RATIO));
   const horzExpandOpts = { gapTolerance, minWallThickness: horzWallThreshold };
   const upResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'up', w, h, horzExpandOpts);
   const downResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'down', w, h, horzExpandOpts);
@@ -289,7 +298,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
 
   // Reject if too small (noise) or too large (detection failure).
   if (roomArea < minRoomSize) return null;
-  if (roomArea > imageArea * 0.9) return null;
+  if (roomArea > imageArea * MAX_ROOM_AREA_RATIO) return null;
 
   // Ensure seed point lies inside the rectangle.
   if (seed.x < left || seed.x > right || seed.y < top || seed.y > bottom) return null;
