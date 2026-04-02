@@ -8,10 +8,10 @@
  * ExampleFloorplan-Traced.png is used as a ground-truth reference for
  * the exterior boundary location (the traced outline).
  *
- * The detection algorithms (commit 62804bf):
- * - Room detection: morphological closing → flood-fill from click →
- *   bounding box; falls back to connected-component when region
- *   is >60% or <0.5% of image.
+ * The detection algorithms:
+ * - Room detection: morphological closing → expansion from click in
+ *   4 directions (left/right/up/down) until walls with sufficient
+ *   perpendicular continuity are found → axis-aligned rectangle.
  * - Exterior wall detection: edge-inward scanning (row + column) →
  *   buildEdgeScanFootprint; falls back to flood-fill-from-edges.
  */
@@ -257,10 +257,10 @@ describe('room detection (ExampleFloorplan.png)', () => {
     }
   }, 15000);
 
-  it.skipIf(!imagesAvailable)('clicking in the large open area falls back gracefully', () => {
-    // The large open area (1268, 627) is a very large connected region
-    // that exceeds 60% of the image, so the algorithm should fall back
-    // to connected-component approach.
+  it.skipIf(!imagesAvailable)('clicking in the large open area detects room walls', () => {
+    // The large open area (1268, 627) is a very large connected region.
+    // The expansion algorithm should still find walls and return a valid
+    // rectangular room.
     const room = detectRoomFromClickCore(exampleImage, { x: 1268, y: 627 });
     expect(room).toBeTruthy();
     expect(room.polygon.length).toBeGreaterThan(2);
