@@ -156,12 +156,13 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   const cx = Math.max(0, Math.min(w - 1, nPoint.x));
   const cy = Math.max(0, Math.min(h - 1, nPoint.y));
 
-  // Room walls are the longest continuous features in the image.
-  // Use a shorter minimum segment length than exterior detection since
-  // rooms can be small relative to the overall image.
+  // Room walls need shorter minimum segment length than exterior (rooms can be
+  // small relative to the overall image).  6% = typical room wall spans at least
+  // 6% of the smaller image dimension.
   const minDim = Math.min(w, h);
   const minSegLenPct = options.roomMinSegmentPct ?? 0.06;
   const minSegLen = Math.max(4, Math.floor(minDim * minSegLenPct));
+  // Gap tolerance: door openings are typically 5–12 pixels at normalized scale.
   const gapTol = options.roomGapTolerance ?? 8;
 
   const roomBounds = scanOutwardForRoom(baseWallMask, w, h, cx, cy, minSegLen, gapTol);
@@ -173,7 +174,8 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     const imageArea = w * h;
     const roomArea = roomW * roomH;
 
-    // Reject rooms that are unreasonably large (>60%) or tiny (<0.3%).
+    // Reject rooms >60% of image (likely leaked outside the floorplan)
+    // or <0.3% of image (likely detected noise instead of a real room).
     if (roomArea <= imageArea * 0.6 && roomArea >= imageArea * 0.003) {
       const polygon = [
         { x: leftX, y: topY },
@@ -200,7 +202,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   const roomWallMask = closeMask(preprocess.wallMask, w, h, roomCloseRadius);
   const freeMask = invertMask(roomWallMask);
 
-  // Find a free-space seed near the click point (handles clicks on wall/text).
+  // Search within 30px radius for free space (handles clicks on wall/text pixels).
   let seed = null;
   if (freeMask[cy * w + cx]) {
     seed = { x: cx, y: cy };
