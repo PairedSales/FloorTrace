@@ -81,12 +81,118 @@ const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {})
 };
 
 /* ---------- Room Detection (Problem 1) ----------
- * Expand from click point outward to find the enclosing room walls.
- * Uses aggressive morphological closing to bridge door-sized gaps,
- * then flood-fills from the click point and returns the axis-aligned
- * bounding box of the filled region.  If the click lands on a wall
- * pixel, we search nearby for a free-space seed.
+ * Expansion-based room detection: from the OCR/click point,
+ * expand outward in 4 directions (left, right, up, down) until
+ * rectangular room walls are found.
+ *
+ * Step 1: Preprocess – convert to binary wall mask and apply
+ *         morphological closing to bridge door/window gaps.
+ * Step 2: Start from the OCR/click location (find free-space seed
+ *         if the click lands on a wall pixel).
+ * Step 3: Expand outward in each direction, scanning for walls
+ *         with sufficient perpendicular continuity.
+ * Step 4: Handle wall gaps via the preprocessed image and
+ *         configurable gap tolerance.
+ * Step 5: Construct a rectangle from the four detected boundaries.
+ * Step 6: Validate the rectangle (minimum size, OCR point inside).
+ *
+ * Configurable parameters:
+ *   - roomCloseRadius: morphological closing radius (default 4)
+ *   - gapTolerance:    max gap in wall continuity (default 8)
+ *   - minWallThickness: min perpendicular wall extent (default 15)
+ *   - minRoomSize:     min room area in pixels² (default 400)
  */
+
+/**
+ * Measure wall continuity in the perpendicular direction at (x, y).
+ * For a vertical wall, measures how far the wall extends vertically.
+ * For a horizontal wall, measures how far the wall extends horizontally.
+ * Allows small gaps up to gapTolerance pixels.
+ */
+const measureWallContinuity = (wallMask, x, y, isVerticalWall, width, height, gapTolerance) => {
+  let count = 0;
+  let gap = 0;
+
+  if (isVerticalWall) {
+    for (let dy = 0; y - dy >= 0; dy += 1) {
+      if (wallMask[(y - dy) * width + x]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+    gap = 0;
+    for (let dy = 1; y + dy < height; dy += 1) {
+      if (wallMask[(y + dy) * width + x]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+  } else {
+    for (let dx = 0; x - dx >= 0; dx += 1) {
+      if (wallMask[y * width + (x - dx)]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+    gap = 0;
+    for (let dx = 1; x + dx < width; dx += 1) {
+      if (wallMask[y * width + (x + dx)]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+  }
+
+  return count;
+};
+
+/**
+ * Expand from (startX, startY) in the given direction until a wall
+ * with sufficient perpendicular continuity is found.
+ *
+ * Checks a small band of pixels around the scan line to handle
+ * cases where a door gap aligns with the scan row/column.
+ *
+ * Returns { position, continuity, wallsChecked }.
+ */
+const expandToFindWall = (wallMask, startX, startY, direction, width, height, options) => {
+  const { gapTolerance = 8, minWallThickness = 15 } = options;
+  const isHorizontalScan = direction === 'left' || direction === 'right';
+  const step = direction === 'left' || direction === 'up' ? -1 : 1;
+  const isVerticalWall = isHorizontalScan;
+
+  let pos = isHorizontalScan ? startX : startY;
+  const limit = step > 0
+    ? (isHorizontalScan ? width - 1 : height - 1)
+    : 0;
+  const fixedPos = isHorizontalScan ? startY : startX;
+  const scanBand = Math.min(3, Math.max(1, Math.floor(gapTolerance / 2)));
+  const wallsChecked = [];
+
+  while (pos !== limit) {
+    pos += step;
+
+    // Check a small band around the fixed position for wall pixels.
+    let wallX = -1;
+    let wallY = -1;
+    for (let d = -scanBand; d <= scanBand; d += 1) {
+      const fp = fixedPos + d;
+      if (fp < 0 || fp >= (isHorizontalScan ? height : width)) continue;
+      const idx = isHorizontalScan ? fp * width + pos : pos * width + fp;
+      if (wallMask[idx]) {
+        wallX = isHorizontalScan ? pos : fp;
+        wallY = isHorizontalScan ? fp : pos;
+        break;
+      }
+    }
+
+    if (wallX >= 0) {
+      const continuity = measureWallContinuity(
+        wallMask, wallX, wallY, isVerticalWall, width, height, gapTolerance,
+      );
+      wallsChecked.push({ pos, continuity });
+
+      if (continuity >= minWallThickness) {
+        return { position: pos, continuity, wallsChecked };
+      }
+    }
+  }
+
+  // Reached image boundary.
+  return { position: pos, continuity: 0, wallsChecked };
+};
 
 const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
   if (freeMask[cy * width + cx]) return { x: cx, y: cy };
@@ -114,44 +220,13 @@ const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
   return null;
 };
 
-const floodFillBoundingBox = (freeMask, startX, startY, width, height) => {
-  const visited = new Uint8Array(width * height);
-  const startIdx = startY * width + startX;
-  visited[startIdx] = 1;
-  const queue = [startIdx];
-  let minX = startX;
-  let maxX = startX;
-  let minY = startY;
-  let maxY = startY;
-  let head = 0;
-
-  while (head < queue.length) {
-    const idx = queue[head];
-    head += 1;
-    const x = idx % width;
-    const y = Math.floor(idx / width);
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-
-    const enqueue = (nIdx) => {
-      if (!visited[nIdx] && freeMask[nIdx]) { visited[nIdx] = 1; queue.push(nIdx); }
-    };
-    if (x + 1 < width) enqueue(idx + 1);
-    if (x - 1 >= 0) enqueue(idx - 1);
-    if (y + 1 < height) enqueue(idx + width);
-    if (y - 1 >= 0) enqueue(idx - width);
-  }
-
-  return { minX, minY, maxX, maxY, size: queue.length };
-};
-
 export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
+  // Step 1: Preprocess – binary wall mask + morphological closing.
   const preprocess = normalizeImageData(imageData, options.preprocess);
-  const orientation = estimateDominantOrientations(preprocess.gray, preprocess.width, preprocess.height, options.orientation);
+  const orientation = estimateDominantOrientations(
+    preprocess.gray, preprocess.width, preprocess.height, options.orientation,
+  );
 
-  // Use aggressive morphological closing to bridge door-sized gaps.
   const roomCloseRadius = options.roomCloseRadius ?? 4;
   const roomWallMask = closeMask(
     preprocess.wallMask,
@@ -161,71 +236,92 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   );
   const freeMask = invertMask(roomWallMask);
 
+  // Step 2: Map click/OCR point to normalized coordinates.
   const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
   const clampedPoint = {
     x: Math.max(0, Math.min(preprocess.width - 1, nPoint.x)),
     y: Math.max(0, Math.min(preprocess.height - 1, nPoint.y)),
   };
 
-  // Find a free-space seed near the click point (handles clicks on wall/text).
-  const seed = findFreeSpaceSeed(freeMask, clampedPoint.x, clampedPoint.y, preprocess.width, preprocess.height);
+  // Find free-space seed near the click point (handles clicks on wall/text).
+  const seed = findFreeSpaceSeed(
+    freeMask, clampedPoint.x, clampedPoint.y, preprocess.width, preprocess.height,
+  );
   if (!seed) return null;
 
-  // Flood-fill from the seed to find the enclosed room region.
-  const region = floodFillBoundingBox(freeMask, seed.x, seed.y, preprocess.width, preprocess.height);
+  // Step 3 & 4: Expand in 4 directions to find walls.
+  // Two-pass approach: find vertical walls first (reliable because horizontal
+  // text labels rarely masquerade as vertical walls), then use the detected
+  // room width to set a higher threshold for horizontal wall detection so
+  // text labels and dimension lines are filtered out.
+  const w = preprocess.width;
+  const h = preprocess.height;
+  const gapTolerance = options.gapTolerance ?? 8;
+  const minWallThickness = options.minWallThickness
+    ?? Math.max(20, Math.floor(Math.min(w, h) * 0.06));
+  const minRoomSize = options.minRoomSize ?? 400;
+  const expandOpts = { gapTolerance, minWallThickness };
 
-  // Sanity-check: reject regions that are unreasonably large (>60% of image)
-  // or tiny (<0.5% of image) — likely a detection failure.
-  const imageArea = preprocess.width * preprocess.height;
-  const regionArea = (region.maxX - region.minX + 1) * (region.maxY - region.minY + 1);
-  if (regionArea > imageArea * 0.6 || regionArea < imageArea * 0.005) {
-    // Fall back to the original connected-component approach with default wall mask.
-    const fallbackMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
-    const fallbackFree = invertMask(fallbackMask);
-    const labeled = labelConnectedComponents(fallbackFree, preprocess.width, preprocess.height, 1);
-    if (!labeled.components.length) return null;
+  // Pass 1: Find vertical walls (left/right).
+  const leftResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'left', w, h, expandOpts);
+  const rightResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'right', w, h, expandOpts);
 
-    const pointIndex = clampedPoint.y * preprocess.width + clampedPoint.x;
-    let targetId = labeled.labels[pointIndex];
-    if (targetId < 0) {
-      const cands = labeled.components.filter((c) => (c.bbox.maxX - c.bbox.minX + 1) * (c.bbox.maxY - c.bbox.minY + 1) > 400).sort((a, b) => b.size - a.size);
-      targetId = cands[0]?.id ?? -1;
-    }
-    if (targetId < 0) return null;
+  // Pass 2: Find horizontal walls (up/down) with an adaptive threshold.
+  // Horizontal room walls should span a significant portion of the room
+  // width; text labels and dimension lines are shorter and get filtered.
+  const detectedWidth = rightResult.position - leftResult.position;
+  const horzWallThreshold = Math.max(minWallThickness, Math.floor(detectedWidth * 0.4));
+  const horzExpandOpts = { gapTolerance, minWallThickness: horzWallThreshold };
+  const upResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'up', w, h, horzExpandOpts);
+  const downResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'down', w, h, horzExpandOpts);
 
-    let polygon = componentToPolygon(labeled.labels, preprocess.width, preprocess.height, targetId, {
-      simplifyEpsilon: options.simplifyEpsilon ?? 2.2,
-      angleBins: orientation.dominant,
-    });
-    if (!polygon.length) return null;
-    if (polygon.length < 4) {
-      polygon = componentToPolygon(labeled.labels, preprocess.width, preprocess.height, targetId, { simplifyEpsilon: 1.1, angleBins: orientation.dominant });
-    }
+  // Step 5: Construct room rectangle from the four boundaries.
+  const left = leftResult.position;
+  const right = rightResult.position;
+  const top = upResult.position;
+  const bottom = downResult.position;
 
-    const sel = labeled.components.find((c) => c.id === targetId);
-    const conf = Math.max(0.2, Math.min(0.98, sel ? sel.size / (imageArea * 0.2) : 0.2));
-    return normalizedRoomResult(polygon, preprocess, conf, {
-      normalizedSize: { width: preprocess.width, height: preprocess.height },
-      dominantAngles: orientation.dominant,
-      componentSize: sel?.size ?? 0,
-    });
-  }
+  // Step 6: Validate room.
+  const roomWidth = right - left + 1;
+  const roomHeight = bottom - top + 1;
+  const roomArea = roomWidth * roomHeight;
+  const imageArea = w * h;
 
-  // Build axis-aligned rectangle polygon from bounding box (rooms are always rectangular).
+  // Reject if too small (noise) or too large (detection failure).
+  if (roomArea < minRoomSize) return null;
+  if (roomArea > imageArea * 0.9) return null;
+
+  // Ensure seed point lies inside the rectangle.
+  if (seed.x < left || seed.x > right || seed.y < top || seed.y > bottom) return null;
+
   const polygon = [
-    { x: region.minX, y: region.minY },
-    { x: region.maxX, y: region.minY },
-    { x: region.maxX, y: region.maxY },
-    { x: region.minX, y: region.maxY },
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom },
   ];
 
-  const confidenceBase = Math.min(1, region.size / (imageArea * 0.2));
+  const confidenceBase = Math.min(1, roomArea / (imageArea * 0.2));
   const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
 
   return normalizedRoomResult(polygon, preprocess, confidence, {
-    normalizedSize: { width: preprocess.width, height: preprocess.height },
+    normalizedSize: { width: w, height: h },
     dominantAngles: orientation.dominant,
-    componentSize: region.size,
+    startPoint: { x: seed.x, y: seed.y },
+    expansionPaths: {
+      left: { position: left, continuity: leftResult.continuity },
+      right: { position: right, continuity: rightResult.continuity },
+      up: { position: top, continuity: upResult.continuity },
+      down: { position: bottom, continuity: downResult.continuity },
+    },
+    wallsDetected: {
+      left: leftResult.wallsChecked,
+      right: rightResult.wallsChecked,
+      up: upResult.wallsChecked,
+      down: downResult.wallsChecked,
+    },
+    roomBounds: { left, right, top, bottom },
+    roomArea,
   });
 };
 
