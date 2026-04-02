@@ -37,151 +37,240 @@ const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {})
 };
 
 /* ---------- Room Detection (Problem 1) ----------
- * Expand from click point outward to find the enclosing room walls.
- * Uses aggressive morphological closing to bridge door-sized gaps,
- * then flood-fills from the click point and returns the axis-aligned
- * bounding box of the filled region.  If the click lands on a wall
- * pixel, we search nearby for a free-space seed.
+ * Segment-based outward scanning: from the click/OCR text position,
+ * scan outward in all four directions to find long horizontal and
+ * vertical wall segments that form a rectangle.  Door gaps are
+ * tolerated via a configurable gap tolerance.
+ *
+ * The algorithm:
+ * 1. Scan upward from click point row-by-row to find the first row
+ *    with a long horizontal wall segment that spans the click x.
+ * 2. Repeat downward, leftward, and rightward.
+ * 3. The four wall positions define a rectangle.
+ * 4. Rooms are always rectangular per the problem constraints.
  */
 
-const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
-  if (freeMask[cy * width + cx]) return { x: cx, y: cy };
+/**
+ * Scan a single row/column of the wall mask for long wall segments.
+ * Returns segments that overlap the given cross-axis position.
+ */
+const findWallSegmentsCovering = (wallMask, scanLine, length, isHorizontal, width, minLen, gapTol, crossPos) => {
+  const segments = [];
+  let segStart = -1;
+  let gapRun = 0;
 
-  const tryPixel = (px, py) => {
-    if (px >= 0 && py >= 0 && px < width && py < height && freeMask[py * width + px]) {
-      return { x: px, y: py };
-    }
-    return null;
-  };
+  for (let i = 0; i < length; i += 1) {
+    const idx = isHorizontal
+      ? scanLine * width + i
+      : i * width + scanLine;
+    const isWall = wallMask[idx];
 
-  // Search the perimeter of expanding squares around the click point.
-  for (let r = 1; r <= maxRadius; r += 1) {
-    // Top and bottom edges of the square
-    for (let dx = -r; dx <= r; dx += 1) {
-      const hit = tryPixel(cx + dx, cy - r) ?? tryPixel(cx + dx, cy + r);
-      if (hit) return hit;
-    }
-    // Left and right edges (excluding corners already checked)
-    for (let dy = -r + 1; dy < r; dy += 1) {
-      const hit = tryPixel(cx - r, cy + dy) ?? tryPixel(cx + r, cy + dy);
-      if (hit) return hit;
+    if (isWall) {
+      if (segStart < 0) segStart = i;
+      gapRun = 0;
+    } else if (segStart >= 0) {
+      gapRun += 1;
+      if (gapRun > gapTol) {
+        const segEnd = i - gapRun;
+        if (segEnd - segStart + 1 >= minLen && segStart <= crossPos && segEnd >= crossPos) {
+          segments.push({ start: segStart, end: segEnd });
+        }
+        segStart = -1;
+        gapRun = 0;
+      }
     }
   }
-  return null;
+
+  if (segStart >= 0) {
+    const segEnd = length - 1 - gapRun;
+    if (segEnd - segStart + 1 >= minLen && segStart <= crossPos && segEnd >= crossPos) {
+      segments.push({ start: segStart, end: segEnd });
+    }
+  }
+
+  return segments;
 };
 
-const floodFillBoundingBox = (freeMask, startX, startY, width, height) => {
-  const visited = new Uint8Array(width * height);
-  const startIdx = startY * width + startX;
-  visited[startIdx] = 1;
-  const queue = [startIdx];
-  let minX = startX;
-  let maxX = startX;
-  let minY = startY;
-  let maxY = startY;
-  let head = 0;
+/**
+ * Scan outward from a center point in all four directions to find the
+ * first long wall segment in each direction.  Returns bounding
+ * rectangle {topY, bottomY, leftX, rightX} or null.
+ */
+const scanOutwardForRoom = (wallMask, width, height, cx, cy, minLen, gapTol) => {
+  let topY = -1;
+  let bottomY = -1;
+  let leftX = -1;
+  let rightX = -1;
 
-  while (head < queue.length) {
-    const idx = queue[head];
-    head += 1;
-    const x = idx % width;
-    const y = Math.floor(idx / width);
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-
-    const enqueue = (nIdx) => {
-      if (!visited[nIdx] && freeMask[nIdx]) { visited[nIdx] = 1; queue.push(nIdx); }
-    };
-    if (x + 1 < width) enqueue(idx + 1);
-    if (x - 1 >= 0) enqueue(idx - 1);
-    if (y + 1 < height) enqueue(idx + width);
-    if (y - 1 >= 0) enqueue(idx - width);
+  // Scan upward from cy to find the first row with a long horizontal segment covering cx
+  for (let y = cy; y >= 0; y -= 1) {
+    const segs = findWallSegmentsCovering(wallMask, y, width, true, width, minLen, gapTol, cx);
+    if (segs.length > 0) {
+      topY = y;
+      break;
+    }
   }
 
-  return { minX, minY, maxX, maxY, size: queue.length };
+  // Scan downward
+  for (let y = cy; y < height; y += 1) {
+    const segs = findWallSegmentsCovering(wallMask, y, width, true, width, minLen, gapTol, cx);
+    if (segs.length > 0) {
+      bottomY = y;
+      break;
+    }
+  }
+
+  // Scan leftward from cx to find the first column with a long vertical segment covering cy
+  for (let x = cx; x >= 0; x -= 1) {
+    const segs = findWallSegmentsCovering(wallMask, x, height, false, width, minLen, gapTol, cy);
+    if (segs.length > 0) {
+      leftX = x;
+      break;
+    }
+  }
+
+  // Scan rightward
+  for (let x = cx; x < width; x += 1) {
+    const segs = findWallSegmentsCovering(wallMask, x, height, false, width, minLen, gapTol, cy);
+    if (segs.length > 0) {
+      rightX = x;
+      break;
+    }
+  }
+
+  if (topY < 0 || bottomY < 0 || leftX < 0 || rightX < 0) return null;
+  if (rightX - leftX < 2 || bottomY - topY < 2) return null;
+
+  return { topY, bottomY, leftX, rightX };
 };
 
 export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
   const preprocess = normalizeImageData(imageData, options.preprocess);
   const orientation = estimateDominantOrientations(preprocess.gray, preprocess.width, preprocess.height, options.orientation);
+  const baseWallMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
 
-  // Use aggressive morphological closing to bridge door-sized gaps.
-  const roomCloseRadius = options.roomCloseRadius ?? 4;
-  const roomWallMask = closeMask(
-    preprocess.wallMask,
-    preprocess.width,
-    preprocess.height,
-    roomCloseRadius,
-  );
-  const freeMask = invertMask(roomWallMask);
+  const w = preprocess.width;
+  const h = preprocess.height;
 
   const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
-  const clampedPoint = {
-    x: Math.max(0, Math.min(preprocess.width - 1, nPoint.x)),
-    y: Math.max(0, Math.min(preprocess.height - 1, nPoint.y)),
-  };
+  const cx = Math.max(0, Math.min(w - 1, nPoint.x));
+  const cy = Math.max(0, Math.min(h - 1, nPoint.y));
+
+  // Room walls are the longest continuous features in the image.
+  // Use a shorter minimum segment length than exterior detection since
+  // rooms can be small relative to the overall image.
+  const minDim = Math.min(w, h);
+  const minSegLenPct = options.roomMinSegmentPct ?? 0.06;
+  const minSegLen = Math.max(4, Math.floor(minDim * minSegLenPct));
+  const gapTol = options.roomGapTolerance ?? 8;
+
+  const roomBounds = scanOutwardForRoom(baseWallMask, w, h, cx, cy, minSegLen, gapTol);
+
+  if (roomBounds) {
+    const { topY, bottomY, leftX, rightX } = roomBounds;
+    const roomW = rightX - leftX;
+    const roomH = bottomY - topY;
+    const imageArea = w * h;
+    const roomArea = roomW * roomH;
+
+    // Reject rooms that are unreasonably large (>60%) or tiny (<0.3%).
+    if (roomArea <= imageArea * 0.6 && roomArea >= imageArea * 0.003) {
+      const polygon = [
+        { x: leftX, y: topY },
+        { x: rightX, y: topY },
+        { x: rightX, y: bottomY },
+        { x: leftX, y: bottomY },
+      ];
+
+      const confidenceBase = Math.min(1, roomArea / (imageArea * 0.15));
+      const confidence = Math.max(0.3, Math.min(0.98, confidenceBase));
+
+      return normalizedRoomResult(polygon, preprocess, confidence, {
+        normalizedSize: { width: w, height: h },
+        dominantAngles: orientation.dominant,
+        algorithm: 'segment-scan',
+        roomBounds,
+        thresholds: { minSegmentLength: minSegLen, gapTolerance: gapTol },
+      });
+    }
+  }
+
+  // Fallback: use flood-fill with morphological closing to bridge door gaps.
+  const roomCloseRadius = options.roomCloseRadius ?? 4;
+  const roomWallMask = closeMask(preprocess.wallMask, w, h, roomCloseRadius);
+  const freeMask = invertMask(roomWallMask);
 
   // Find a free-space seed near the click point (handles clicks on wall/text).
-  const seed = findFreeSpaceSeed(freeMask, clampedPoint.x, clampedPoint.y, preprocess.width, preprocess.height);
+  let seed = null;
+  if (freeMask[cy * w + cx]) {
+    seed = { x: cx, y: cy };
+  } else {
+    for (let r = 1; r <= 30 && !seed; r += 1) {
+      for (let dx = -r; dx <= r && !seed; dx += 1) {
+        const px1 = cx + dx;
+        const py1 = cy - r;
+        const py2 = cy + r;
+        if (px1 >= 0 && px1 < w && py1 >= 0 && py1 < h && freeMask[py1 * w + px1]) seed = { x: px1, y: py1 };
+        if (!seed && px1 >= 0 && px1 < w && py2 >= 0 && py2 < h && freeMask[py2 * w + px1]) seed = { x: px1, y: py2 };
+      }
+      for (let dy = -r + 1; dy < r && !seed; dy += 1) {
+        const px1 = cx - r;
+        const px2 = cx + r;
+        const py1 = cy + dy;
+        if (px1 >= 0 && px1 < w && py1 >= 0 && py1 < h && freeMask[py1 * w + px1]) seed = { x: px1, y: py1 };
+        if (!seed && px2 >= 0 && px2 < w && py1 >= 0 && py1 < h && freeMask[py1 * w + px2]) seed = { x: px2, y: py1 };
+      }
+    }
+  }
   if (!seed) return null;
 
   // Flood-fill from the seed to find the enclosed room region.
-  const region = floodFillBoundingBox(freeMask, seed.x, seed.y, preprocess.width, preprocess.height);
-
-  // Sanity-check: reject regions that are unreasonably large (>60% of image)
-  // or tiny (<0.5% of image) — likely a detection failure.
-  const imageArea = preprocess.width * preprocess.height;
-  const regionArea = (region.maxX - region.minX + 1) * (region.maxY - region.minY + 1);
-  if (regionArea > imageArea * 0.6 || regionArea < imageArea * 0.005) {
-    // Fall back to the original connected-component approach with default wall mask.
-    const fallbackMask = prepareWallMask(preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask);
-    const fallbackFree = invertMask(fallbackMask);
-    const labeled = labelConnectedComponents(fallbackFree, preprocess.width, preprocess.height, 1);
-    if (!labeled.components.length) return null;
-
-    const pointIndex = clampedPoint.y * preprocess.width + clampedPoint.x;
-    let targetId = labeled.labels[pointIndex];
-    if (targetId < 0) {
-      const cands = labeled.components.filter((c) => (c.bbox.maxX - c.bbox.minX + 1) * (c.bbox.maxY - c.bbox.minY + 1) > 400).sort((a, b) => b.size - a.size);
-      targetId = cands[0]?.id ?? -1;
-    }
-    if (targetId < 0) return null;
-
-    let polygon = componentToPolygon(labeled.labels, preprocess.width, preprocess.height, targetId, {
-      simplifyEpsilon: options.simplifyEpsilon ?? 2.2,
-      angleBins: orientation.dominant,
-    });
-    if (!polygon.length) return null;
-    if (polygon.length < 4) {
-      polygon = componentToPolygon(labeled.labels, preprocess.width, preprocess.height, targetId, { simplifyEpsilon: 1.1, angleBins: orientation.dominant });
-    }
-
-    const sel = labeled.components.find((c) => c.id === targetId);
-    const conf = Math.max(0.2, Math.min(0.98, sel ? sel.size / (imageArea * 0.2) : 0.2));
-    return normalizedRoomResult(polygon, preprocess, conf, {
-      normalizedSize: { width: preprocess.width, height: preprocess.height },
-      dominantAngles: orientation.dominant,
-      componentSize: sel?.size ?? 0,
-    });
+  const visited = new Uint8Array(w * h);
+  const startIdx = seed.y * w + seed.x;
+  visited[startIdx] = 1;
+  const queue = [startIdx];
+  let minX = seed.x;
+  let maxX = seed.x;
+  let minY = seed.y;
+  let maxY = seed.y;
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head];
+    head += 1;
+    const x = idx % w;
+    const y = Math.floor(idx / w);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    const enqueue = (nIdx) => {
+      if (!visited[nIdx] && freeMask[nIdx]) { visited[nIdx] = 1; queue.push(nIdx); }
+    };
+    if (x + 1 < w) enqueue(idx + 1);
+    if (x - 1 >= 0) enqueue(idx - 1);
+    if (y + 1 < h) enqueue(idx + w);
+    if (y - 1 >= 0) enqueue(idx - w);
   }
 
-  // Build axis-aligned rectangle polygon from bounding box (rooms are always rectangular).
+  const imageArea = w * h;
+  const regionArea = (maxX - minX + 1) * (maxY - minY + 1);
+  if (regionArea > imageArea * 0.6 || regionArea < imageArea * 0.003) return null;
+
   const polygon = [
-    { x: region.minX, y: region.minY },
-    { x: region.maxX, y: region.minY },
-    { x: region.maxX, y: region.maxY },
-    { x: region.minX, y: region.maxY },
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
   ];
 
-  const confidenceBase = Math.min(1, region.size / (imageArea * 0.2));
+  const confidenceBase = Math.min(1, queue.length / (imageArea * 0.2));
   const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
 
   return normalizedRoomResult(polygon, preprocess, confidence, {
-    normalizedSize: { width: preprocess.width, height: preprocess.height },
+    normalizedSize: { width: w, height: h },
     dominantAngles: orientation.dominant,
-    componentSize: region.size,
+    algorithm: 'flood-fill-fallback',
+    componentSize: queue.length,
   });
 };
 
