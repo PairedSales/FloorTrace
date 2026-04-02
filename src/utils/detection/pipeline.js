@@ -256,87 +256,12 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
 };
 
 /* ---------- Exterior Wall Tracing (Problem 2) ----------
- * Edge-inward scanning: for every row and column, detect long segments
- * of wall pixels (≥ minSegLen with gap tolerance for doorways).  Only
- * pixels that belong to such long segments are retained — this removes
- * text, dimension labels, logos, and other short/irregular dark features.
- * The cleaned mask is then flood-filled from the image edges to
- * determine the exterior region; inverting gives the floorplan footprint.
+ * Simple approach: dilate wall mask to bridge small gaps, keep the
+ * largest connected component (removes text/logos), then flood-fill
+ * from image edges.  The floorplan is surrounded by whitespace so the
+ * fill covers the exterior; inverting gives the floorplan footprint.
+ * "Largest contour = exterior."
  */
-
-const findLongSegments = (wallMask, scanLine, length, isHorizontal, width, minLen, gapTolerance) => {
-  const segments = [];
-  let segStart = -1;
-  let gapRun = 0;
-
-  for (let i = 0; i < length; i += 1) {
-    const idx = isHorizontal
-      ? scanLine * width + i
-      : i * width + scanLine;
-    const isWall = wallMask[idx];
-
-    if (isWall) {
-      if (segStart < 0) segStart = i;
-      gapRun = 0;
-    } else if (segStart >= 0) {
-      gapRun += 1;
-      if (gapRun > gapTolerance) {
-        const segEnd = i - gapRun;
-        if (segEnd - segStart + 1 >= minLen) {
-          segments.push({ start: segStart, end: segEnd });
-        }
-        segStart = -1;
-        gapRun = 0;
-      }
-    }
-  }
-
-  if (segStart >= 0) {
-    const segEnd = length - 1 - gapRun;
-    if (segEnd - segStart + 1 >= minLen) {
-      segments.push({ start: segStart, end: segEnd });
-    }
-  }
-
-  return segments;
-};
-
-/**
- * Filter wall mask to keep only pixels that belong to long horizontal
- * or vertical segments.  Short dark features (text characters, dimension
- * labels, logos) are removed because they do not span the minimum
- * segment length.  Gap tolerance allows small interruptions within a
- * wall (e.g. door openings, dashed lines) without breaking the segment.
- */
-const filterToLongRuns = (wallMask, width, height, minRunLen, gapTol) => {
-  const result = new Uint8Array(width * height);
-
-  // Keep wall pixels in long horizontal runs.
-  for (let y = 0; y < height; y += 1) {
-    const segs = findLongSegments(wallMask, y, width, true, width, minRunLen, gapTol);
-    for (const seg of segs) {
-      for (let x = seg.start; x <= seg.end; x += 1) {
-        if (wallMask[y * width + x]) {
-          result[y * width + x] = 1;
-        }
-      }
-    }
-  }
-
-  // Keep wall pixels in long vertical runs.
-  for (let x = 0; x < width; x += 1) {
-    const segs = findLongSegments(wallMask, x, height, false, width, minRunLen, gapTol);
-    for (const seg of segs) {
-      for (let y = seg.start; y <= seg.end; y += 1) {
-        if (wallMask[y * width + x]) {
-          result[y * width + x] = 1;
-        }
-      }
-    }
-  }
-
-  return result;
-};
 
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const preprocess = normalizeImageData(imageData, options.preprocess);
@@ -346,36 +271,22 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const w = preprocess.width;
   const h = preprocess.height;
 
-  // Minimum segment length to qualify as a wall line (15% of shorter dimension).
-  const minSegLen = Math.floor(Math.min(w, h) * (options.minSegmentRatio ?? 0.15));
-  // Gap tolerance: small interruptions (doorways) within a wall segment.
-  const gapTol = options.gapTolerance ?? 8;
+  // Step 1: Dilate the wall mask to bridge small gaps (doorways, thin
+  // wall junctions).  This ensures the exterior walls form a continuous
+  // barrier for the subsequent flood fill.
+  const dilatedMask = dilate(baseWallMask, w, h, options.outerDilate ?? 2);
 
-  // --- Edge-inward scanning approach ---
-  //
-  // Step 1: Filter the wall mask to keep only pixels that are part of
-  // long horizontal or vertical segments.  This is equivalent to scanning
-  // each row/column from the image edges inward and retaining only
-  // wall-length features, effectively removing text, dimension labels,
-  // and logos which form short or irregular dark runs.
-  const wallOnlyMask = filterToLongRuns(baseWallMask, w, h, minSegLen, gapTol);
+  // Step 2: Remove disconnected dark features (text, logos) outside the
+  // floorplan by keeping only the largest connected component of wall
+  // pixels.  The exterior walls + interior walls form the largest
+  // connected structure; isolated text/logos are smaller.
+  const cleanedMask = keepLargestWallComponent(dilatedMask, w, h);
 
-  // Step 2: Remove remaining disconnected features (e.g. a long text
-  // line that happened to exceed the minimum segment length) by keeping
-  // only the largest connected component of wall pixels.
-  const cleanedMask = keepLargestWallComponent(wallOnlyMask, w, h);
-
-  // Step 3: Bridge small wall gaps with morphological closing so the
-  // flood fill does not leak through narrow openings.  Unlike pure
-  // dilation, closing bridges gaps without permanently expanding the
-  // mask — this prevents text near walls from merging with them.
-  const closedMask = closeMask(cleanedMask, w, h, options.outerClose ?? 2);
-
-  // Step 4: Flood fill from image edges.  The floorplan is surrounded
+  // Step 3: Flood fill from image edges.  The floorplan is surrounded
   // by whitespace, so the fill covers the exterior region.  Inverting
   // gives the floorplan footprint — this naturally handles complex
   // shapes (L-shaped, concave) without assumptions about geometry.
-  let footprint = getFloorplanFootprint(closedMask, w, h);
+  let footprint = getFloorplanFootprint(cleanedMask, w, h);
 
   // Validate the footprint is non-trivial.
   let fpSize = 0;
@@ -383,9 +294,9 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     if (footprint[i]) fpSize += 1;
   }
   if (fpSize < w * h * 0.02) {
-    // Fallback: use dilated base mask when filtering was too aggressive.
-    const fallbackMask = dilate(baseWallMask, w, h, options.outerDilate ?? 2);
-    footprint = getFloorplanFootprint(fallbackMask, w, h);
+    // Fallback: use dilated base mask without keepLargest filtering,
+    // in case the largest-component step was too aggressive.
+    footprint = getFloorplanFootprint(dilatedMask, w, h);
   }
 
   // Outer boundary
