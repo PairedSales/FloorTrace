@@ -293,6 +293,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   for (let i = 0; i < footprint.length; i += 1) {
     if (footprint[i]) fpSize += 1;
   }
+  // 2% of image area — a valid floorplan footprint is always substantially
+  // larger; anything smaller indicates the filtering removed too much.
   if (fpSize < w * h * 0.02) {
     // Fallback: use dilated base mask without keepLargest filtering,
     // in case the largest-component step was too aggressive.
