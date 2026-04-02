@@ -81,6 +81,7 @@ const Canvas = forwardRef(({
   perimeterVertices,
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
+  onDeletePerimeterVertex,
   autoSnapEnabled,
   debugDetection,
   detectionDebugData,
@@ -1308,6 +1309,11 @@ const Canvas = forwardRef(({
                       onDragStart={() => handleVertexDragStart(i)}
                       onDragMove={(e) => handleVertexDrag(i, e)}
                       onDragEnd={() => handleVertexDragEnd(i)}
+                      onContextMenu={(e) => {
+                        e.evt.preventDefault();
+                        e.cancelBubble = true;
+                        if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
+                      }}
                     />
                   </React.Fragment>
                 ))}
