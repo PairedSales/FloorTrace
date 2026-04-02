@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="FloorTrace logo">
   <rect width="128" height="128" rx="20" fill="#111827"/>
-  <path d="M24 98V30h80v68H24zm10-10h60V40H34v48z" fill="#22d3ee"/>
-  <path d="M48 54h14v14H48zM66 54h14v14H66zM48 72h32v10H48z" fill="#34d399"/>
+  <circle cx="64" cy="26" r="10" fill="#fff"/>
+  <path d="M59 34L64 34L38 102L33 102Z" fill="#fff"/>
+  <path d="M64 34L69 34L95 102L90 102Z" fill="#fff"/>
 </svg>
