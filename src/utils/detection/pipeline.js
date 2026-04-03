@@ -366,8 +366,17 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
  *  • Small non-structural shapes: components that don't span at least
  *    8% of the shorter dimension in either direction
  *  • Logos: compact, solid shapes (low aspect ratio + high solidity)
+ *  • Text annotations: elongated, sparse shapes (high aspect ratio
+ *    + low solidity + thin minor axis)
  * Keep only components likely to be structural walls.
  */
+
+// --- Thresholds for text-annotation filtering (Fletcher-Kasturi inspired) ---
+const TEXT_MIN_ASPECT = 4.0;         // text strings are highly elongated
+const TEXT_MAX_MINOR_AXIS_PCT = 0.05; // minor axis < 5% of shorter image dim
+const TEXT_MAX_SOLIDITY = 0.4;       // sparse fill (inter-letter gaps)
+const TEXT_MAX_AREA_PCT = 0.015;     // text is small relative to image
+
 const filterComponentsByStructure = (wallMask, width, height) => {
   const labeled = labelConnectedComponents(wallMask, width, height, 1);
   const { components, labels } = labeled;
@@ -404,8 +413,8 @@ const filterComponentsByStructure = (wallMask, width, height) => {
     // kept low to avoid false-positives on dashed or cross-hatched walls.
     // (Inspired by Fletcher-Kasturi text/graphics separation — Ref 10.)
     const minorAxis = Math.min(bboxW, bboxH);
-    if (aspect >= 4.0 && minorAxis < minDim * 0.05
-        && solidity < 0.4 && comp.size < imageArea * 0.015) continue;
+    if (aspect >= TEXT_MIN_ASPECT && minorAxis < minDim * TEXT_MAX_MINOR_AXIS_PCT
+        && solidity < TEXT_MAX_SOLIDITY && comp.size < imageArea * TEXT_MAX_AREA_PCT) continue;
 
     keptIds.add(comp.id);
   }
