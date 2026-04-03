@@ -950,8 +950,6 @@ function App() {
             detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
           />
         </div>
 
