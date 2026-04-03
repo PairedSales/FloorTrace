@@ -879,6 +879,22 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handlePasteImage, handleRedo, handleUndo]);
 
+  // Handle side mouse buttons for undo (button 3 = back) and redo (button 4 = forward)
+  useEffect(() => {
+    const handleMouseDown = (e) => {
+      if (e.button === 3) {
+        e.preventDefault();
+        handleUndo();
+      } else if (e.button === 4) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    return () => window.removeEventListener('mousedown', handleMouseDown);
+  }, [handleUndo, handleRedo]);
+
   // Disable right-click context menu unless text is selected
   useEffect(() => {
     const handleContextMenu = (e) => {
