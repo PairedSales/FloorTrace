@@ -136,7 +136,6 @@ const Canvas = forwardRef(({
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
-  const visualSnapPositionRef = useRef(null); // Stores the visual snap position during drag (like .NET's _visualSnapPosition)
   const imageSnapAnalyzerRef = useRef(null);
 
   useEffect(() => {
@@ -465,22 +464,12 @@ const Canvas = forwardRef(({
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
-    // Apply snapping to intersection points for visual feedback
-    const snappedPoint = autoSnapEnabled
-      ? findVertexSnapPoint(canvasPos)
-      : null;
-    
-    // Use snapped position if available, otherwise use raw position
-    const visualPoint = snappedPoint || canvasPos;
-    
-    // Store the snap position for use in MouseUp (drag end)
-    visualSnapPositionRef.current = snappedPoint;
-    
+    // Do NOT snap during drag — snapping is applied on drag end only.
     // Update only the visual elements, not the actual data
     // In .NET this updates Canvas.SetLeft/SetTop and polygon.Points
     // In React-Konva, we update the state which re-renders, but mark saveAction=false
     let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = { x: visualPoint.x, y: visualPoint.y };
+    newVertices[index] = { x: canvasPos.x, y: canvasPos.y };
     
     onPerimeterUpdate(newVertices, false); // Don't save action during drag
   };
@@ -495,7 +484,7 @@ const Canvas = forwardRef(({
         i === index ? lastDragStartPosRef.current : v
       ) : null;
     
-    // Get current position from visual snap or current vertex position
+    // Get current vertex position (raw, pre-snap)
     const currentVertex = perimeterOverlay.vertices[index];
     
     // Apply snapping to intersection points
@@ -516,7 +505,6 @@ const Canvas = forwardRef(({
     
     // Clean up
     setDraggingVertex(null);
-    visualSnapPositionRef.current = null;
   };
 
   const handleMeasurementLineSelect = (index, e) => {
