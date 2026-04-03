@@ -464,6 +464,16 @@ function App() {
         scrollY: -window.scrollY,
         windowWidth: document.documentElement.offsetWidth,
         windowHeight: document.documentElement.offsetHeight,
+        onclone: (clonedDoc) => {
+          // html2canvas skips background rendering for pointer-events:none elements;
+          // remove that style from all cloned nodes so panels render correctly.
+          clonedDoc.querySelectorAll('*').forEach((el) => {
+            if (el.style.pointerEvents === 'none') {
+              el.style.pointerEvents = '';
+            }
+            el.classList.remove('pointer-events-none');
+          });
+        },
       });
 
       canvas.toBlob((blob) => {
