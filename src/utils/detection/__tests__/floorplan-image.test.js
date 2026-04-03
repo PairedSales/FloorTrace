@@ -310,10 +310,14 @@ describe('ground-truth comparison (ExampleFloorplan-Traced.png)', () => {
     // After text/logo filtering, the boundary may be tighter at the
     // bottom edge where annotations previously inflated the extent.
     const tolerance = 100;
+    // Bottom edge uses a larger tolerance because text/logo filtering
+    // correctly excludes annotations below the building, tightening the
+    // boundary more than the reference traced image suggests.
+    const bottomTolerance = 250;
     expect(scaledMinX).toBeLessThan(2 + tolerance);
     expect(scaledMaxX).toBeGreaterThan(1374 - tolerance);
     expect(scaledMinY).toBeLessThan(71 + tolerance);
-    expect(scaledMaxY).toBeGreaterThan(1025 - 250);
+    expect(scaledMaxY).toBeGreaterThan(1025 - bottomTolerance);
   }, 15000);
 
   it.skipIf(!imagesAvailable)('running detection on traced image also produces valid boundary', () => {
