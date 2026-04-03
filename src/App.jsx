@@ -929,6 +929,9 @@ function App() {
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
         onOptionsToggle={() => setShowPanelOptions((v) => !v)}
+        hasAutoDetection={!!tracedBoundaries}
+        onManualMode={handleManualOutlineMode}
+        perimeterOverlay={perimeterOverlay}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -993,8 +996,6 @@ function App() {
           autoSnapEnabled={autoSnapEnabled}
           onAutoSnapChange={setAutoSnapEnabled}
           perimeterOverlay={perimeterOverlay}
-          hasAutoDetection={!!tracedBoundaries}
-          onManualMode={handleManualOutlineMode}
           lineToolActive={lineToolActive}
           onLineToolToggle={handleLineToolToggle}
           drawAreaActive={drawAreaActive}
