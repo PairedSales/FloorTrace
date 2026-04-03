@@ -4,6 +4,15 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
+/** Cycling colors for measurement lines (5 theme-matched colors). */
+const LINE_COLORS = [
+  { normal: '#F97316', selected: '#FB923C' }, // orange (accent)
+  { normal: '#0EA5E9', selected: '#38BDF8' }, // sky blue
+  { normal: '#22C55E', selected: '#4ADE80' }, // emerald green
+  { normal: '#A855F7', selected: '#C084FC' }, // purple
+  { normal: '#F43F5E', selected: '#FB7185' }, // rose
+];
+
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short. */
 const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
   const dx = line.end.x - line.start.x;
@@ -1502,7 +1511,8 @@ const Canvas = forwardRef(({
             <Layer>
               {measurementLines.map((line, index) => {
                 const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit);
-                const strokeColor = selectedMeasurementLineIndex === index ? '#FB923C' : '#F97316';
+                const colors = LINE_COLORS[index % LINE_COLORS.length];
+                const strokeColor = selectedMeasurementLineIndex === index ? colors.selected : colors.normal;
                 const strokeW = (selectedMeasurementLineIndex === index ? 3 : 2) / scale;
                 return (
                 <Group
@@ -1514,6 +1524,13 @@ const Canvas = forwardRef(({
                   onTap={(e) => handleMeasurementLineSelect(index, e)}
                   onDragStart={(e) => handleMeasurementLineSelect(index, e)}
                   onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    e.cancelBubble = true;
+                    if (onMeasurementLinesChange) {
+                      onMeasurementLinesChange(measurementLines.filter((_, i) => i !== index));
+                    }
+                  }}
                 >
                   <Line
                     name="measurement-line"
@@ -1547,22 +1564,46 @@ const Canvas = forwardRef(({
           )}
 
           {/* Measurement Line Preview */}
-          {lineToolActive && currentMeasurementLine && (
-            <Layer>
-              <Line
-                points={[
-                  currentMeasurementLine.start.x,
-                  currentMeasurementLine.start.y,
-                  currentMeasurementLine.end.x,
-                  currentMeasurementLine.end.y
-                ]}
-                stroke="#F97316"
-                strokeWidth={2 / scale}
-                dash={[6 / scale, 3 / scale]}
-                opacity={0.7}
-              />
-            </Layer>
-          )}
+          {lineToolActive && currentMeasurementLine && (() => {
+            const previewColors = LINE_COLORS[measurementLines.length % LINE_COLORS.length];
+            const previewColor = previewColors.normal;
+            const dx = currentMeasurementLine.end.x - currentMeasurementLine.start.x;
+            const dy = currentMeasurementLine.end.y - currentMeasurementLine.start.y;
+            const minPreviewLength = 1; // pixels; suppress label for near-zero-length lines
+            const hasLength = Math.sqrt(dx * dx + dy * dy) > minPreviewLength;
+            const previewLayout = hasLength && pixelsPerFoot
+              ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit)
+              : null;
+            return (
+              <Layer>
+                <Line
+                  points={[
+                    currentMeasurementLine.start.x,
+                    currentMeasurementLine.start.y,
+                    currentMeasurementLine.end.x,
+                    currentMeasurementLine.end.y
+                  ]}
+                  stroke={previewColor}
+                  strokeWidth={2 / scale}
+                  dash={[6 / scale, 3 / scale]}
+                  opacity={0.7}
+                />
+                {previewLayout && (
+                  <Text
+                    x={previewLayout.labelX}
+                    y={previewLayout.labelY}
+                    text={previewLayout.textStr}
+                    fontSize={previewLayout.fontSize}
+                    fill={previewColor}
+                    fontStyle="bold"
+                    offsetX={previewLayout.approxTextWidth / 2}
+                    offsetY={previewLayout.approxTextHeight / 2}
+                    opacity={0.9}
+                  />
+                )}
+              </Layer>
+            );
+          })()}
           
           {/* Custom Areas */}
           {customShapes && customShapes.length > 0 && (
