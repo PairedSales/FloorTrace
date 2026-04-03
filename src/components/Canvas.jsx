@@ -1348,10 +1348,11 @@ const Canvas = forwardRef(({
                   // Derive ideal font size from OCR text heights when available, else default to 14pt.
                   // OCR bbox heights are in image/stage pixels; dividing by scale gives a zoom-invariant
                   // screen size (same px on screen at any zoom level, matching the `xx/scale` convention).
-                  const ocrAvgHeightPx = detectedDimensions && detectedDimensions.length > 0
+                  // The fallback of 14 is the target screen-pixel size when no OCR data is available.
+                  const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
                     ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
                     : 14;
-                  const idealFs = Math.max(14, ocrAvgHeightPx) / scale;
+                  const idealFs = Math.max(14, ocrRefScreenPx) / scale;
                   const minFs = 8 / scale;
 
                   // Use precise text measurement to avoid excess padding
@@ -1385,7 +1386,7 @@ const Canvas = forwardRef(({
                   const ey = len > 0 ? dy / len : 0;
                   // Half-extent of the pill projected onto the edge direction (AABB approximation)
                   const halfAlong = (labelWidth * Math.abs(ex) + labelHeight * Math.abs(ey)) / 2;
-                  const vertexClearance = 8 / scale; // vertex visual radius (5/scale) + margin
+                  const vertexClearance = 8 / scale; // 5/scale vertex radius + 3/scale margin
                   const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
 
                   let edgeShift = 0;
