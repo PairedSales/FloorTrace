@@ -4,6 +4,13 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
+/** Approximate ratio of character width to font size used for pill-badge auto-sizing. */
+const CHAR_WIDTH_RATIO = 0.58;
+/** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
+const OCR_DOT_BASE_RADIUS = 3;
+/** Minimum rendered dot radius in pixels for the OCR anchor dot. */
+const OCR_DOT_MIN_RADIUS = 2;
+
 /** Cycling colors for measurement lines (5 theme-matched colors). */
 const LINE_COLORS = [
   { normal: '#F97316', selected: '#FB923C' }, // orange (accent)
@@ -1414,7 +1421,7 @@ const Canvas = forwardRef(({
                   const fs = 12 / scale;
                   const padX = 7 / scale;
                   const padY = 3.5 / scale;
-                  const labelW = labelText.length * fs * 0.58 + padX * 2;
+                  const labelW = labelText.length * fs * CHAR_WIDTH_RATIO + padX * 2;
                   const labelH = fs + padY * 2;
                   const cornerR = labelH / 2;
                   const gap = 5 / scale;
@@ -1422,7 +1429,10 @@ const Canvas = forwardRef(({
                   // Position pill above the bbox; clamp so it doesn't go off the top edge
                   const labelY = Math.max(0, dim.bbox.y - labelH - tailH - gap);
                   const labelX = cx - labelW / 2;
-                  const dotR = Math.max(2, 3 / scale);
+                  const dotR = Math.max(OCR_DOT_MIN_RADIUS, OCR_DOT_BASE_RADIUS / scale);
+                  const handleClick = () => onDimensionSelect && onDimensionSelect(dim);
+                  const handlePointerEnter = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; };
+                  const handlePointerLeave = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'default'; };
 
                   return (
                     <React.Fragment key={i}>
@@ -1432,10 +1442,10 @@ const Canvas = forwardRef(({
                         y={cy}
                         radius={dotR}
                         fill="#F97316"
-                        onClick={() => onDimensionSelect && onDimensionSelect(dim)}
-                        onTap={() => onDimensionSelect && onDimensionSelect(dim)}
-                        onMouseEnter={() => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; }}
-                        onMouseLeave={() => { if (stageRef.current) stageRef.current.container().style.cursor = 'default'; }}
+                        onClick={handleClick}
+                        onTap={handleClick}
+                        onMouseEnter={handlePointerEnter}
+                        onMouseLeave={handlePointerLeave}
                       />
                       {/* Connector line from dot to pill */}
                       <Line
@@ -1453,10 +1463,10 @@ const Canvas = forwardRef(({
                         height={labelH}
                         fill="#F97316"
                         cornerRadius={cornerR}
-                        onClick={() => onDimensionSelect && onDimensionSelect(dim)}
-                        onTap={() => onDimensionSelect && onDimensionSelect(dim)}
-                        onMouseEnter={() => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; }}
-                        onMouseLeave={() => { if (stageRef.current) stageRef.current.container().style.cursor = 'default'; }}
+                        onClick={handleClick}
+                        onTap={handleClick}
+                        onMouseEnter={handlePointerEnter}
+                        onMouseLeave={handlePointerLeave}
                       />
                       <Text
                         x={labelX + padX}
