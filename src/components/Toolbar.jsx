@@ -5,6 +5,7 @@ import {
   Maximize,
   Trash2,
   SlidersHorizontal,
+  LayoutList,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
@@ -23,6 +24,9 @@ const Toolbar = ({
   onRestart,
   showPanelOptions,
   onOptionsToggle,
+  hasAutoDetection,
+  onManualMode,
+  perimeterOverlay,
 }) => {
   const hasToolData =
     measurementLines?.length > 0 ||
@@ -101,6 +105,17 @@ const Toolbar = ({
           <SlidersHorizontal className="w-3.5 h-3.5" />
           <span>Options</span>
         </button>
+
+        {perimeterOverlay && hasAutoDetection && (
+          <button
+            onClick={onManualMode}
+            className="toolbar-btn"
+            title="Switch to manual outline mode"
+          >
+            <LayoutList className="w-3.5 h-3.5" />
+            <span>Manual Mode</span>
+          </button>
+        )}
       </div>
 
       {/* Spacer */}

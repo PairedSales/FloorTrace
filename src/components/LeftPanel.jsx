@@ -20,8 +20,6 @@ const LeftPanel = ({
   autoSnapEnabled,
   onAutoSnapChange,
   perimeterOverlay,
-  hasAutoDetection,
-  onManualMode,
   lineToolActive,
   onLineToolToggle,
   drawAreaActive,
@@ -95,92 +93,92 @@ const LeftPanel = ({
   return (
     <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
 
-      {/* Room Dimensions + Tools */}
+      {/* Room Dimensions */}
       <section className="px-3 py-3 pointer-events-auto">
-        <div className="flex gap-2">
-          {/* Room Size */}
-          <div className="flex-1 min-w-0">
-            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Room Size
-            </h3>
-            <div className="flex gap-0.5 mb-2.5">
-              <button
-                onClick={() => onUnitChange('decimal')}
-                className={`unit-pill ${unit === 'decimal' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
-              >
-                Decimal
-              </button>
-              <button
-                onClick={() => onUnitChange('inches')}
-                className={`unit-pill ${unit === 'inches' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
-              >
-                Inches
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
-                  Width
-                </label>
-                {unit === 'inches' ? (
-                  <InchesInput
-                    value={localDimensions.width}
-                    onChange={(v) => handleDimensionChange('width', v)}
-                    onFocus={() => handleFocus('width')}
-                    onBlur={() => handleBlur('width')}
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    value={displayValues.width}
-                    onChange={(e) => handleDimensionChange('width', e.target.value)}
-                    onFocus={() => handleFocus('width')}
-                    onBlur={() => handleBlur('width')}
-                    className="panel-input"
-                    placeholder="0.0 ft"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
-                  Height
-                </label>
-                {unit === 'inches' ? (
-                  <InchesInput
-                    value={localDimensions.height}
-                    onChange={(v) => handleDimensionChange('height', v)}
-                    onFocus={() => handleFocus('height')}
-                    onBlur={() => handleBlur('height')}
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    value={displayValues.height}
-                    onChange={(e) => handleDimensionChange('height', e.target.value)}
-                    onFocus={() => handleFocus('height')}
-                    onBlur={() => handleBlur('height')}
-                    className="panel-input"
-                    placeholder="0.0 ft"
-                  />
-                )}
-              </div>
-            </div>
-
-            {mode === 'manual' && ocrFailed && !isProcessing && (
-              <div className="mt-2.5 px-2.5 py-2 bg-amber-500/10 border border-amber-500/20 rounded-md">
-                <p className="text-[11px] text-amber-400 font-medium">
-                  Scan failed — enter room size manually.
-                </p>
-              </div>
+        <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+          Room Size
+        </h3>
+        <div className="flex gap-0.5 mb-2.5">
+          <button
+            onClick={() => onUnitChange('decimal')}
+            className={`unit-pill ${unit === 'decimal' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
+          >
+            Decimal
+          </button>
+          <button
+            onClick={() => onUnitChange('inches')}
+            className={`unit-pill ${unit === 'inches' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
+          >
+            Inches
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
+              Width
+            </label>
+            {unit === 'inches' ? (
+              <InchesInput
+                value={localDimensions.width}
+                onChange={(v) => handleDimensionChange('width', v)}
+                onFocus={() => handleFocus('width')}
+                onBlur={() => handleBlur('width')}
+              />
+            ) : (
+              <input
+                type="text"
+                value={displayValues.width}
+                onChange={(e) => handleDimensionChange('width', e.target.value)}
+                onFocus={() => handleFocus('width')}
+                onBlur={() => handleBlur('width')}
+                className="panel-input"
+                placeholder="0.0 ft"
+              />
             )}
           </div>
+          <div>
+            <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
+              Height
+            </label>
+            {unit === 'inches' ? (
+              <InchesInput
+                value={localDimensions.height}
+                onChange={(v) => handleDimensionChange('height', v)}
+                onFocus={() => handleFocus('height')}
+                onBlur={() => handleBlur('height')}
+              />
+            ) : (
+              <input
+                type="text"
+                value={displayValues.height}
+                onChange={(e) => handleDimensionChange('height', e.target.value)}
+                onFocus={() => handleFocus('height')}
+                onBlur={() => handleBlur('height')}
+                className="panel-input"
+                placeholder="0.0 ft"
+              />
+            )}
+          </div>
+        </div>
 
-          {/* Tools — only shown when area has been calculated */}
-          {area > 0 && (
-            <div className="flex flex-col shrink-0 gap-1.5">
-              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Tools
-              </h3>
+        {mode === 'manual' && ocrFailed && !isProcessing && (
+          <div className="mt-2.5 px-2.5 py-2 bg-amber-500/10 border border-amber-500/20 rounded-md">
+            <p className="text-[11px] text-amber-400 font-medium">
+              Scan failed — enter room size manually.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Tools Panel — only shown when area has been calculated */}
+      {area > 0 && (
+        <>
+          <div className="panel-divider mx-3" />
+          <section className="px-3 py-3 pointer-events-auto">
+            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              Tools
+            </h3>
+            <div className="flex gap-1.5">
               <button
                 onClick={onLineToolToggle}
                 className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
@@ -206,9 +204,9 @@ const LeftPanel = ({
                 Draw
               </button>
             </div>
-          )}
-        </div>
-      </section>
+          </section>
+        </>
+      )}
 
       <div className="panel-divider mx-3" />
 
@@ -266,14 +264,6 @@ const LeftPanel = ({
                   checked={autoSnapEnabled}
                   onChange={onAutoSnapChange}
                 />
-                {hasAutoDetection && (
-                  <button
-                    onClick={onManualMode}
-                    className="flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
-                  >
-                    Manual Mode
-                  </button>
-                )}
               </section>
               <div className="panel-divider mx-3" />
             </>
