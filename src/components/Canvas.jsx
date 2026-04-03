@@ -11,13 +11,13 @@ const OCR_DOT_BASE_RADIUS = 3;
 /** Minimum rendered dot radius in pixels for the OCR anchor dot. */
 const OCR_DOT_MIN_RADIUS = 2;
 
-/** Cycling colors for measurement lines (5 theme-matched colors). */
+/** Cycling colors for measurement lines (Dracula color scheme). */
 const LINE_COLORS = [
-  { normal: '#F97316', selected: '#FB923C' }, // orange (accent)
-  { normal: '#0EA5E9', selected: '#38BDF8' }, // sky blue
-  { normal: '#22C55E', selected: '#4ADE80' }, // emerald green
-  { normal: '#A855F7', selected: '#C084FC' }, // purple
-  { normal: '#F43F5E', selected: '#FB7185' }, // rose
+  { normal: '#FFB86C', selected: '#FFCA99' }, // Dracula Orange
+  { normal: '#8BE9FD', selected: '#A8F0FF' }, // Dracula Cyan
+  { normal: '#50FA7B', selected: '#7AFFA0' }, // Dracula Green
+  { normal: '#BD93F9', selected: '#D2B8FC' }, // Dracula Purple
+  { normal: '#FF79C6', selected: '#FFA8D9' }, // Dracula Pink
 ];
 
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short. */
@@ -1236,10 +1236,10 @@ const Canvas = forwardRef(({
             {perimeterOverlay && perimeterOverlay.vertices && (
               <Line
                 points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
-                stroke="#6366f1"
+                stroke="#BD93F9"
                 strokeWidth={2 / scale}
                 closed={true}
-                fill="rgba(99, 102, 241, 0.15)"
+                fill="rgba(189, 147, 249, 0.15)"
                 onDblClick={handleStageDoubleClick}
                 onDblTap={handleStageDoubleClick}
               />
@@ -1252,9 +1252,9 @@ const Canvas = forwardRef(({
                   <Line
                     points={roomOverlay.polygon.flatMap((point) => [point.x, point.y])}
                     closed
-                    stroke="rgba(16, 185, 129, 0.85)"
+                    stroke="rgba(80, 250, 123, 0.85)"
                     strokeWidth={1.5 / scale}
-                    fill="rgba(16, 185, 129, 0.1)"
+                    fill="rgba(80, 250, 123, 0.1)"
                     listening={false}
                   />
                 )}
@@ -1263,9 +1263,9 @@ const Canvas = forwardRef(({
                   y={Math.min(roomOverlay.y1, roomOverlay.y2)}
                   width={Math.abs(roomOverlay.x2 - roomOverlay.x1)}
                   height={Math.abs(roomOverlay.y2 - roomOverlay.y1)}
-                  stroke="#10b981"
+                  stroke="#50FA7B"
                   strokeWidth={2 / scale}
-                  fill="rgba(16, 185, 129, 0.15)"
+                  fill="rgba(80, 250, 123, 0.15)"
                   onMouseDown={handleRoomMouseDown}
                 />
                 
@@ -1282,7 +1282,7 @@ const Canvas = forwardRef(({
                       x={handle.x}
                       y={handle.y}
                       radius={5 / scale}
-                      fill="#10b981"
+                      fill="#50FA7B"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
                       onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
@@ -1295,7 +1295,7 @@ const Canvas = forwardRef(({
                     y={Math.min(roomOverlay.y1, roomOverlay.y2) - 16 / scale}
                     text={`Room confidence ${Math.round(roomOverlay.confidence * 100)}%`}
                     fontSize={11 / scale}
-                    fill="#10b981"
+                    fill="#50FA7B"
                     fontStyle="bold"
                     listening={false}
                   />
@@ -1309,7 +1309,7 @@ const Canvas = forwardRef(({
                 y={34}
                 text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
                 fontSize={12 / scale}
-                fill="#22d3ee"
+                fill="#8BE9FD"
                 listening={false}
               />
             )}
@@ -1323,7 +1323,7 @@ const Canvas = forwardRef(({
                       x={vertex.x}
                       y={vertex.y}
                       radius={5 / scale}
-                      fill="#6366f1"
+                      fill="#BD93F9"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
                       draggable={!lineToolActive && !drawAreaActive}
@@ -1388,7 +1388,7 @@ const Canvas = forwardRef(({
                         y={midY + offsetY - labelHeight / 2}
                         width={labelWidth}
                         height={labelHeight}
-                        fill="rgba(17, 24, 39, 0.88)"
+                        fill="rgba(40, 42, 54, 0.92)"
                         strokeWidth={0}
                         cornerRadius={cornerR}
                       />
@@ -1441,7 +1441,7 @@ const Canvas = forwardRef(({
                         x={cx}
                         y={cy}
                         radius={dotR}
-                        fill="#F97316"
+                        fill="#FFB86C"
                         onClick={handleClick}
                         onTap={handleClick}
                         onMouseEnter={handlePointerEnter}
@@ -1450,7 +1450,7 @@ const Canvas = forwardRef(({
                       {/* Connector line from dot to pill */}
                       <Line
                         points={[cx, cy - dotR, cx, labelY + labelH]}
-                        stroke="#F97316"
+                        stroke="#FFB86C"
                         strokeWidth={1.5 / scale}
                         opacity={0.6}
                         listening={false}
@@ -1461,7 +1461,7 @@ const Canvas = forwardRef(({
                         y={labelY}
                         width={labelW}
                         height={labelH}
-                        fill="#F97316"
+                        fill="#FFB86C"
                         cornerRadius={cornerR}
                         onClick={handleClick}
                         onTap={handleClick}
@@ -1491,7 +1491,7 @@ const Canvas = forwardRef(({
                 y={10}
                 text="Click on the canvas to place overlays"
                 fontSize={16 / scale}
-                fill="#3b82f6"
+                fill="#8BE9FD"
                 fontStyle="bold"
               />
             )}
@@ -1505,7 +1505,7 @@ const Canvas = forwardRef(({
                   y={10}
                   text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click undo / Ctrl+Right-click redo`}
                   fontSize={16 / scale}
-                  fill="#f59e0b"
+                  fill="#F1FA8C"
                   fontStyle="bold"
                 />
                 
@@ -1516,7 +1516,7 @@ const Canvas = forwardRef(({
                       x={vertex.x}
                       y={vertex.y}
                       radius={5 / scale}
-                      fill="#f59e0b"
+                      fill="#F1FA8C"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
                     />
@@ -1530,7 +1530,7 @@ const Canvas = forwardRef(({
                           vertex.x,
                           vertex.y
                         ]}
-                        stroke="#f59e0b"
+                        stroke="#F1FA8C"
                         strokeWidth={2 / scale}
                         dash={[10 / scale, 5 / scale]}
                       />
@@ -1547,7 +1547,7 @@ const Canvas = forwardRef(({
                       currentMousePos.x,
                       currentMousePos.y
                     ]}
-                    stroke="#f59e0b"
+                    stroke="#F1FA8C"
                     strokeWidth={2 / scale}
                     dash={[10 / scale, 5 / scale]}
                     opacity={0.5}
@@ -1675,8 +1675,8 @@ const Canvas = forwardRef(({
                     name="custom-shape"
                     points={shape.vertices.flatMap(v => [v.x, v.y])}
                     closed={shape.closed}
-                    fill={shape.closed ? 'rgba(14, 165, 233, 0.15)' : 'transparent'}
-                    stroke={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
+                    fill={shape.closed ? 'rgba(139, 233, 253, 0.15)' : 'transparent'}
+                    stroke={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
                     strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
                   />
                   {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
@@ -1686,8 +1686,8 @@ const Canvas = forwardRef(({
                       x={vertex.x}
                       y={vertex.y}
                       radius={5 / scale}
-                      fill={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
-                      stroke="#0369A1"
+                      fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
+                      stroke="#6272A4"
                       strokeWidth={1 / scale}
                     />
                   ))}
@@ -1704,7 +1704,7 @@ const Canvas = forwardRef(({
                         y={centroid.y}
                         text={areaText}
                         fontSize={14 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#38BDF8' : '#0EA5E9'}
+                        fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
                         fontStyle="bold"
                         offsetX={0}
                         offsetY={0}
@@ -1729,7 +1729,7 @@ const Canvas = forwardRef(({
               <Line
                 points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
                 closed={false}
-                stroke="#0EA5E9"
+                stroke="#8BE9FD"
                 strokeWidth={2 / scale}
                 dash={[6 / scale, 3 / scale]}
               />
@@ -1739,8 +1739,8 @@ const Canvas = forwardRef(({
                   x={vertex.x}
                   y={vertex.y}
                   radius={5 / scale}
-                  fill={index === 0 ? '#F97316' : '#0EA5E9'} // Highlight first vertex to indicate closing point
-                  stroke="#0369A1"
+                  fill={index === 0 ? '#FFB86C' : '#8BE9FD'} // Highlight first vertex to indicate closing point
+                  stroke="#6272A4"
                   strokeWidth={1 / scale}
                 />
               ))}

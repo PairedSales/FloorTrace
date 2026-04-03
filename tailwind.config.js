@@ -11,17 +11,18 @@ export default {
         mono: ['Fira Code', 'ui-monospace', 'monospace'],
       },
       colors: {
+        // Dracula color scheme: https://draculatheme.com/
         chrome: {
-          900: '#0F172A',
-          800: '#1E293B',
-          700: '#334155',
-          600: '#475569',
+          900: '#21222C', // Dracula darker variant (sidebars / deepest panels)
+          800: '#282A36', // Dracula Background
+          700: '#44475A', // Dracula Current Line (borders / dividers)
+          600: '#6272A4', // Dracula Comment (muted elements)
         },
         accent: {
-          DEFAULT: '#F97316',
-          hover: '#EA580C',
-          muted: 'rgba(249, 115, 22, 0.15)',
-          glow: 'rgba(249, 115, 22, 0.3)',
+          DEFAULT: '#BD93F9', // Dracula Purple
+          hover: '#A97EF0',   // Slightly darker purple
+          muted: 'rgba(189, 147, 249, 0.15)',
+          glow: 'rgba(189, 147, 249, 0.3)',
         },
       },
       animation: {
