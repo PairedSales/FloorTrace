@@ -178,7 +178,7 @@ const LeftPanel = ({
           {/* Tools — only shown when area has been calculated */}
           {area > 0 && (
             <div className="flex flex-col shrink-0 gap-1.5">
-              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
+              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                 Tools
               </h3>
               <button
