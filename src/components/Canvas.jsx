@@ -109,8 +109,6 @@ const Canvas = forwardRef(({
   autoSnapEnabled,
   debugDetection,
   detectionDebugData,
-  onUndo,
-  onRedo
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -130,7 +128,7 @@ const Canvas = forwardRef(({
   const zoomTimeoutRef = useRef(null);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
-  const rightClickTimeoutRef = useRef(null);
+
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
   const lastDragStartPosRef = useRef(null); // Track starting position before drag
   const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
@@ -964,32 +962,14 @@ const Canvas = forwardRef(({
     }, 50); // Wait 50ms to distinguish single from double-click (faster response)
   };
   
-  // Handle right click for undo/redo functionality.
-  // Single right-click = undo, double right-click = redo.
-  // Exception: if the line tool is active and a line is in progress, right-click cancels it.
+  // Handle right click on the stage background.
+  // If the line tool is active and a line is in progress, right-click cancels it.
   const handleStageContextMenu = (e) => {
     e.evt.preventDefault();
 
     if (lineToolActive && currentMeasurementLine && onMeasurementLineUpdate) {
       onMeasurementLineUpdate(null);
-      return;
     }
-
-    if (rightClickTimeoutRef.current) {
-      clearTimeout(rightClickTimeoutRef.current);
-      rightClickTimeoutRef.current = null;
-      if (onRedo) {
-        onRedo();
-      }
-      return;
-    }
-
-    rightClickTimeoutRef.current = setTimeout(() => {
-      if (onUndo) {
-        onUndo();
-      }
-      rightClickTimeoutRef.current = null;
-    }, 220);
   };
   
 
@@ -1001,9 +981,6 @@ const Canvas = forwardRef(({
       }
       if (zoomTimeoutRef.current) {
         clearTimeout(zoomTimeoutRef.current);
-      }
-      if (rightClickTimeoutRef.current) {
-        clearTimeout(rightClickTimeoutRef.current);
       }
     };
   }, []);
@@ -1499,7 +1476,7 @@ const Canvas = forwardRef(({
                 <Text
                   x={10}
                   y={10}
-                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3) | Right-click undo / Ctrl+Right-click redo`}
+                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3)`}
                   fontSize={16 / scale}
                   fill="#F1FA8C"
                   fontStyle="bold"
