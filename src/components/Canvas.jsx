@@ -127,7 +127,6 @@ const Canvas = forwardRef(({
   const [isImageReady, setIsImageReady] = useState(false);
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
-  const [roomStart, setRoomStart] = useState(null);
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
@@ -426,9 +425,6 @@ const Canvas = forwardRef(({
     }
     
     setDraggingRoom(true);
-    if (canvasPos) {
-      setRoomStart(canvasPos);
-    }
   };
 
   // Handle room corner dragging (with snapping)
@@ -693,20 +689,19 @@ const Canvas = forwardRef(({
     }
     
     // Handle room overlay dragging with live edge scans.
-    if (draggingRoom && roomStart) {
-      const deltaX = mousePoint.x - roomStart.x;
-      const deltaY = mousePoint.y - roomStart.y;
-      
-      const movedOverlay = {
-        x1: roomOverlay.x1 + deltaX,
-        y1: roomOverlay.y1 + deltaY,
-        x2: roomOverlay.x2 + deltaX,
-        y2: roomOverlay.y2 + deltaY
+    if (draggingRoom && dragStartPosRef.current && lastRoomDragStartRef.current) {
+      const totalDeltaX = mousePoint.x - dragStartPosRef.current.x;
+      const totalDeltaY = mousePoint.y - dragStartPosRef.current.y;
+
+      const intendedOverlay = {
+        x1: lastRoomDragStartRef.current.x1 + totalDeltaX,
+        y1: lastRoomDragStartRef.current.y1 + totalDeltaY,
+        x2: lastRoomDragStartRef.current.x2 + totalDeltaX,
+        y2: lastRoomDragStartRef.current.y2 + totalDeltaY,
       };
-      
-      const newOverlay = autoSnapEnabled ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
+
+      const newOverlay = autoSnapEnabled ? snapRoomOverlayPosition(intendedOverlay) : intendedOverlay;
       onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
-      setRoomStart(mousePoint);
       return;
     }
     
@@ -772,7 +767,6 @@ const Canvas = forwardRef(({
         }
       }
       setDraggingRoom(false);
-      setRoomStart(null);
       lastRoomDragStartRef.current = null;
     }
     if (draggingRoomCorner) {
