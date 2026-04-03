@@ -4,6 +4,13 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
+/** Approximate ratio of character width to font size used for pill-badge auto-sizing. */
+const CHAR_WIDTH_RATIO = 0.58;
+/** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
+const OCR_DOT_BASE_RADIUS = 3;
+/** Minimum rendered dot radius in pixels for the OCR anchor dot. */
+const OCR_DOT_MIN_RADIUS = 2;
+
 /** Cycling colors for measurement lines (5 theme-matched colors). */
 const LINE_COLORS = [
   { normal: '#F97316', selected: '#FB923C' }, // orange (accent)
@@ -1407,33 +1414,73 @@ const Canvas = forwardRef(({
             {/* Manual Mode - Detected Dimensions Highlights */}
             {mode === 'manual' && detectedDimensions && detectedDimensions.length > 0 && (
               <>
-                {detectedDimensions.map((dim, i) => (
-                  <React.Fragment key={i}>
-                    {/* Highlight box around detected dimension */}
-                    <Rect
-                      x={dim.bbox.x}
-                      y={dim.bbox.y}
-                      width={dim.bbox.width}
-                      height={dim.bbox.height}
-                      stroke="#8b5cf6"
-                      strokeWidth={2 / scale}
-                      fill="rgba(139, 92, 246, 0.15)"
-                      onClick={() => onDimensionSelect && onDimensionSelect(dim)}
-                      onTap={() => onDimensionSelect && onDimensionSelect(dim)}
-                    />
-                    {/* Label with dimension text */}
-                    <Text
-                      x={dim.bbox.x}
-                      y={dim.bbox.y + dim.bbox.height + 5 / scale}
-                      width={dim.bbox.width}
-                      align="center"
-                      text={`${formatLength(dim.width, unit)} x ${formatLength(dim.height, unit)}`}
-                      fontSize={14 / scale}
-                      fill="#8b5cf6"
-                      fontStyle="bold"
-                    />
-                  </React.Fragment>
-                ))}
+                {detectedDimensions.map((dim, i) => {
+                  const cx = dim.bbox.x + dim.bbox.width / 2;
+                  const cy = dim.bbox.y + dim.bbox.height / 2;
+                  const labelText = `${formatLength(dim.width, unit)} × ${formatLength(dim.height, unit)}`;
+                  const fs = 12 / scale;
+                  const padX = 7 / scale;
+                  const padY = 3.5 / scale;
+                  const labelW = labelText.length * fs * CHAR_WIDTH_RATIO + padX * 2;
+                  const labelH = fs + padY * 2;
+                  const cornerR = labelH / 2;
+                  const gap = 5 / scale;
+                  const tailH = 5 / scale;
+                  // Position pill above the bbox; clamp so it doesn't go off the top edge
+                  const labelY = Math.max(0, dim.bbox.y - labelH - tailH - gap);
+                  const labelX = cx - labelW / 2;
+                  const dotR = Math.max(OCR_DOT_MIN_RADIUS, OCR_DOT_BASE_RADIUS / scale);
+                  const handleClick = () => onDimensionSelect && onDimensionSelect(dim);
+                  const handlePointerEnter = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; };
+                  const handlePointerLeave = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'default'; };
+
+                  return (
+                    <React.Fragment key={i}>
+                      {/* Small dot marker at OCR text center */}
+                      <Circle
+                        x={cx}
+                        y={cy}
+                        radius={dotR}
+                        fill="#F97316"
+                        onClick={handleClick}
+                        onTap={handleClick}
+                        onMouseEnter={handlePointerEnter}
+                        onMouseLeave={handlePointerLeave}
+                      />
+                      {/* Connector line from dot to pill */}
+                      <Line
+                        points={[cx, cy - dotR, cx, labelY + labelH]}
+                        stroke="#F97316"
+                        strokeWidth={1.5 / scale}
+                        opacity={0.6}
+                        listening={false}
+                      />
+                      {/* Floating pill badge */}
+                      <Rect
+                        x={labelX}
+                        y={labelY}
+                        width={labelW}
+                        height={labelH}
+                        fill="#F97316"
+                        cornerRadius={cornerR}
+                        onClick={handleClick}
+                        onTap={handleClick}
+                        onMouseEnter={handlePointerEnter}
+                        onMouseLeave={handlePointerLeave}
+                      />
+                      <Text
+                        x={labelX + padX}
+                        y={labelY + padY}
+                        text={labelText}
+                        fontSize={fs}
+                        fill="#ffffff"
+                        fontFamily="Inter, system-ui, sans-serif"
+                        fontStyle="bold"
+                        listening={false}
+                      />
+                    </React.Fragment>
+                  );
+                })}
               </>
             )}
             
