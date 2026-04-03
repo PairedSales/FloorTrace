@@ -4,8 +4,16 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
-/** Approximate ratio of character width to font size used for pill-badge auto-sizing. */
-const CHAR_WIDTH_RATIO = 0.58;
+/** Font family and style used for OCR pill badge text (must match the Konva Text element). */
+const OCR_PILL_FONT_FAMILY = 'Inter, system-ui, sans-serif';
+const OCR_PILL_FONT_STYLE = 'bold';
+/** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
+const _measureCtx = document.createElement('canvas').getContext('2d');
+/** Measure the rendered pixel width of a text string using the Canvas 2D API. */
+function measureTextWidth(text, fontSize) {
+  _measureCtx.font = `${OCR_PILL_FONT_STYLE} ${fontSize}px ${OCR_PILL_FONT_FAMILY}`;
+  return _measureCtx.measureText(text).width;
+}
 /** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
 const OCR_DOT_BASE_RADIUS = 3;
 /** Minimum rendered dot radius in pixels for the OCR anchor dot. */
@@ -1421,7 +1429,7 @@ const Canvas = forwardRef(({
                   const fs = 12 / scale;
                   const padX = 7 / scale;
                   const padY = 3.5 / scale;
-                  const labelW = labelText.length * fs * CHAR_WIDTH_RATIO + padX * 2;
+                  const labelW = measureTextWidth(labelText, fs) + padX * 2;
                   const labelH = fs + padY * 2;
                   const cornerR = labelH / 2;
                   const gap = 5 / scale;
@@ -1474,8 +1482,8 @@ const Canvas = forwardRef(({
                         text={labelText}
                         fontSize={fs}
                         fill="#ffffff"
-                        fontFamily="Inter, system-ui, sans-serif"
-                        fontStyle="bold"
+                        fontFamily={OCR_PILL_FONT_FAMILY}
+                        fontStyle={OCR_PILL_FONT_STYLE}
                         listening={false}
                       />
                     </React.Fragment>
