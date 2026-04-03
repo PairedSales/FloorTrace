@@ -4,6 +4,7 @@ import {
   ScanSearch,
   Maximize,
   Trash2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
@@ -20,6 +21,8 @@ const Toolbar = ({
   onFitToWindow,
   onClearTools,
   onRestart,
+  showPanelOptions,
+  onOptionsToggle,
 }) => {
   const hasToolData =
     measurementLines?.length > 0 ||
@@ -88,6 +91,15 @@ const Toolbar = ({
         >
           <Maximize className="w-3.5 h-3.5" />
           <span>Fit</span>
+        </button>
+
+        <button
+          onClick={onOptionsToggle}
+          className={`toolbar-btn ${showPanelOptions ? 'text-accent hover:text-accent hover:bg-accent/10' : ''}`}
+          title="Toggle panel options"
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+          <span>Options</span>
         </button>
       </div>
 

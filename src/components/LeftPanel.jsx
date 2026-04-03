@@ -28,6 +28,7 @@ const LeftPanel = ({
   onDrawAreaToggle,
   debugDetection,
   onDebugDetectionChange,
+  showOptions,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
@@ -221,85 +222,89 @@ const LeftPanel = ({
 
       <div className="panel-divider mx-3" />
 
-      <section className="px-3 py-3 pointer-events-auto">
-        <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-          Detection
-        </h3>
-        <Toggle
-          label="Debug Overlays"
-          checked={debugDetection}
-          onChange={onDebugDetectionChange}
-        />
-      </section>
-
-      <div className="panel-divider mx-3" />
-
-      {/* Options */}
-      {perimeterOverlay && (
+      {showOptions && (
         <>
-          <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
-            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
-              Options
+          <section className="px-3 py-3 pointer-events-auto">
+            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
+              Detection
             </h3>
             <Toggle
-              label="Show Lengths"
-              checked={showSideLengths}
-              onChange={onShowSideLengthsChange}
+              label="Debug Overlays"
+              checked={debugDetection}
+              onChange={onDebugDetectionChange}
             />
-            <Toggle
-              label="Exterior Walls"
-              checked={!useInteriorWalls}
-              onChange={(v) => onInteriorWallToggle(!v)}
-            />
-            <Toggle
-              label="Auto Snap"
-              checked={autoSnapEnabled}
-              onChange={onAutoSnapChange}
-            />
-            {hasAutoDetection && (
-              <button
-                onClick={onManualMode}
-                className="flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
-              >
-                Manual Mode
-              </button>
-            )}
           </section>
-          <div className="panel-divider mx-3" />
-        </>
-      )}
 
-      {/* Tools */}
-      {area > 0 && (
-        <section className="px-3 py-3 pointer-events-auto">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-            Tools
-          </h3>
-          <div className="flex flex-col gap-1.5">
-            <button
-              onClick={onLineToolToggle}
-              className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
-                lineToolActive
-                  ? 'bg-accent/15 text-accent border border-accent/30'
-                  : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-              }`}
-            >
-              <Ruler className="w-4 h-4" />
-              Measure Line
-            </button>
-            <button
-              onClick={onDrawAreaToggle}
-              className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
-                drawAreaActive
-                  ? 'bg-accent/15 text-accent border border-accent/30'
-                  : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-              }`}
-            >
-              <Pentagon className="w-4 h-4" />
-              Draw Area
-            </button>
-          </div>
-        </section>
+          <div className="panel-divider mx-3" />
+
+          {/* Options */}
+          {perimeterOverlay && (
+            <>
+              <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
+                <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
+                  Options
+                </h3>
+                <Toggle
+                  label="Show Lengths"
+                  checked={showSideLengths}
+                  onChange={onShowSideLengthsChange}
+                />
+                <Toggle
+                  label="Exterior Walls"
+                  checked={!useInteriorWalls}
+                  onChange={(v) => onInteriorWallToggle(!v)}
+                />
+                <Toggle
+                  label="Auto Snap"
+                  checked={autoSnapEnabled}
+                  onChange={onAutoSnapChange}
+                />
+                {hasAutoDetection && (
+                  <button
+                    onClick={onManualMode}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
+                  >
+                    Manual Mode
+                  </button>
+                )}
+              </section>
+              <div className="panel-divider mx-3" />
+            </>
+          )}
+
+          {/* Tools */}
+          {area > 0 && (
+            <section className="px-3 py-3 pointer-events-auto">
+              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
+                Tools
+              </h3>
+              <div className="flex flex-col gap-1.5">
+                <button
+                  onClick={onLineToolToggle}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
+                    lineToolActive
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                  }`}
+                >
+                  <Ruler className="w-4 h-4" />
+                  Measure Line
+                </button>
+                <button
+                  onClick={onDrawAreaToggle}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
+                    drawAreaActive
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                  }`}
+                >
+                  <Pentagon className="w-4 h-4" />
+                  Draw Area
+                </button>
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   );

@@ -41,6 +41,7 @@ function App() {
   const [debugDetection, setDebugDetection] = useState(false);
   const [detectionDebugData, setDetectionDebugData] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '' });
+  const [showPanelOptions, setShowPanelOptions] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const undoStackRef = useRef([]);
@@ -926,6 +927,8 @@ function App() {
         onFitToWindow={handleFitToWindow}
         onClearTools={handleClearTools}
         onRestart={handleRestart}
+        showPanelOptions={showPanelOptions}
+        onOptionsToggle={() => setShowPanelOptions((v) => !v)}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -998,6 +1001,7 @@ function App() {
           onDrawAreaToggle={handleDrawAreaToggle}
           debugDetection={debugDetection}
           onDebugDetectionChange={setDebugDetection}
+          showOptions={showPanelOptions}
         />
 
         {notification.show && (
