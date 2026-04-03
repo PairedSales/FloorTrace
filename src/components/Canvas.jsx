@@ -7,11 +7,19 @@ import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 /** Font family and style used for OCR pill badge text (must match the Konva Text element). */
 const OCR_PILL_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 const OCR_PILL_FONT_STYLE = 'bold';
+/** Font family and style used for side-length pill badge text (must match the Konva Text element). */
+const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
+const SIDE_LEN_FONT_STYLE = '500';
 /** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
 const _measureCtx = document.createElement('canvas').getContext('2d');
 /** Measure the rendered pixel width of a text string using the Canvas 2D API. */
 function measureTextWidth(text, fontSize) {
   _measureCtx.font = `${OCR_PILL_FONT_STYLE} ${fontSize}px ${OCR_PILL_FONT_FAMILY}`;
+  return _measureCtx.measureText(text).width;
+}
+/** Measure the pixel width of a side-length pill label using the Canvas 2D API. */
+function measureSideLenWidth(text, fontSize) {
+  _measureCtx.font = `${SIDE_LEN_FONT_STYLE} ${fontSize}px ${SIDE_LEN_FONT_FAMILY}`;
   return _measureCtx.measureText(text).width;
 }
 /** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
@@ -1315,68 +1323,119 @@ const Canvas = forwardRef(({
                 {/* Side Length Labels */}
                 {showSideLengths && pixelsPerFoot && perimeterOverlay.vertices.map((vertex, i) => {
                   const nextVertex = perimeterOverlay.vertices[(i + 1) % perimeterOverlay.vertices.length];
-                  
+
                   // Calculate side length in pixels
                   const dx = nextVertex.x - vertex.x;
                   const dy = nextVertex.y - vertex.y;
                   const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-                  
-                  // Convert to feet
+
+                  // Convert to feet and always format as decimal feet (e.g. "1.2 ft")
                   const lengthInFeet = lengthInPixels * pixelsPerFoot;
-                  
-                  // Format based on unit preference
-                  const formattedLength = formatLength(lengthInFeet, unit);
-                  
+                  const formattedLength = formatLength(lengthInFeet, 'decimal');
+
                   // Calculate midpoint for label placement
                   const midX = (vertex.x + nextVertex.x) / 2;
                   const midY = (vertex.y + nextVertex.y) / 2;
-                  
-                  // Calculate offset perpendicular to the line (for label positioning)
+
+                  // Calculate offset perpendicular to the line
                   const angle = Math.atan2(dy, dx);
                   const sideSign = i % 2 === 0 ? 1 : -1;
                   const shortEdge = lengthInPixels < 48;
-                  const offsetDistance =
-                    sideSign * (shortEdge ? 12 / scale : 9 / scale);
+                  const offsetDistance = sideSign * (shortEdge ? 12 / scale : 9 / scale);
                   const offsetX = Math.sin(angle) * offsetDistance;
                   const offsetY = -Math.cos(angle) * offsetDistance;
-                  
-                  const padX = 4 / scale;
-                  const minW = 26 / scale;
+
+                  // Derive ideal font size from OCR text heights when available, else default to 14pt.
+                  // OCR bbox heights are in image/stage pixels; dividing by scale gives a zoom-invariant
+                  // screen size (same px on screen at any zoom level, matching the `xx/scale` convention).
+                  // The fallback of 14 is the target screen-pixel size when no OCR data is available.
+                  const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
+                    ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
+                    : 14;
+                  const idealFs = Math.max(14, ocrRefScreenPx) / scale;
+                  const minFs = 8 / scale;
+
+                  // Use precise text measurement to avoid excess padding
+                  const padX = 5 / scale;
+                  const minW = 30 / scale;
                   const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
-                  const idealFs = 9 / scale;
-                  const minFs = 6.25 / scale;
-                  const widthForFs = (fs) => formattedLength.length * fs * 0.55 + padX * 2;
+                  const widthForFs = (fs) => measureSideLenWidth(formattedLength, fs) + padX * 2;
+
+                  // Shrink font to fit edge width if necessary
                   let fontSize = idealFs;
                   if (widthForFs(fontSize) > maxWByEdge) {
-                    fontSize = Math.max(minFs, (maxWByEdge - padX * 2) / Math.max(0.5, formattedLength.length * 0.55));
+                    let lo = minFs, hi = fontSize;
+                    for (let iter = 0; iter < 10; iter++) {
+                      const mid = (lo + hi) / 2;
+                      if (widthForFs(mid) > maxWByEdge) hi = mid; else lo = mid;
+                    }
+                    fontSize = Math.max(minFs, lo);
                   }
+
                   const labelWidth = Math.min(Math.max(minW, widthForFs(fontSize)), maxWByEdge);
-                  const labelHeight = Math.max(13 / scale, fontSize * 1.35);
-                  const cornerR = 4 / scale;
+                  const labelHeight = Math.max(fontSize * 1.5, 16 / scale);
+                  const cornerR = labelHeight / 2;
+
+                  // Initial pill centre (midpoint + perpendicular offset)
+                  const cx0 = midX + offsetX;
+                  const cy0 = midY + offsetY;
+
+                  // Shift pill along the edge to avoid colliding with any perimeter vertex.
+                  const len = lengthInPixels;
+                  const ex = len > 0 ? dx / len : 1;
+                  const ey = len > 0 ? dy / len : 0;
+                  // Half-extent of the pill projected onto the edge direction (AABB approximation)
+                  const halfAlong = (labelWidth * Math.abs(ex) + labelHeight * Math.abs(ey)) / 2;
+                  const vertexClearance = 8 / scale; // 5/scale vertex radius + 3/scale margin
+                  const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
+
+                  let edgeShift = 0;
+                  for (const v of perimeterOverlay.vertices) {
+                    const pcx = cx0 + edgeShift * ex;
+                    const pcy = cy0 + edgeShift * ey;
+                    // Nearest point on pill rect to vertex
+                    const nearX = Math.max(pcx - labelWidth / 2, Math.min(v.x, pcx + labelWidth / 2));
+                    const nearY = Math.max(pcy - labelHeight / 2, Math.min(v.y, pcy + labelHeight / 2));
+                    const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
+                    if (dist2 < vertexClearance * vertexClearance) {
+                      // Collision: shift pill along edge away from this vertex
+                      const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
+                      const required = halfAlong + vertexClearance - Math.abs(projEdge);
+                      if (required > 0) {
+                        const dir = projEdge > 0 ? -1 : 1;
+                        edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
+                      }
+                    }
+                  }
+
+                  const finalCx = cx0 + edgeShift * ex;
+                  const finalCy = cy0 + edgeShift * ey;
 
                   return (
                     <React.Fragment key={`label-${i}`}>
                       <Rect
-                        x={midX + offsetX - labelWidth / 2}
-                        y={midY + offsetY - labelHeight / 2}
+                        x={finalCx - labelWidth / 2}
+                        y={finalCy - labelHeight / 2}
                         width={labelWidth}
                         height={labelHeight}
                         fill="rgba(40, 42, 54, 0.92)"
                         strokeWidth={0}
                         cornerRadius={cornerR}
+                        listening={false}
                       />
                       <Text
-                        x={midX + offsetX}
-                        y={midY + offsetY}
+                        x={finalCx - labelWidth / 2}
+                        y={finalCy - labelHeight / 2}
+                        width={labelWidth}
+                        height={labelHeight}
                         text={formattedLength}
                         fontSize={fontSize}
                         fill="#ffffff"
-                        fontFamily="Inter, system-ui, sans-serif"
-                        fontStyle="500"
+                        fontFamily={SIDE_LEN_FONT_FAMILY}
+                        fontStyle={SIDE_LEN_FONT_STYLE}
                         align="center"
                         verticalAlign="middle"
-                        offsetX={labelWidth / 2}
-                        offsetY={fontSize * 0.36}
+                        listening={false}
                       />
                     </React.Fragment>
                   );
