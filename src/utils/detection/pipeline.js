@@ -558,12 +558,25 @@ const buildSegmentMask = (hSegments, vSegments, width, height, halfThickness) =>
 };
 /**
  * Step 6 — Build footprint by filling between extreme wall positions.
- * For each row, fill from the leftmost to the rightmost wall pixel.
- * For each column, fill from the topmost to the bottommost wall pixel.
- * Intersect both fills to preserve concavities (e.g. L-shapes).
+ *
+ * Phase 1 (row fill): for each row, fill from the leftmost to the
+ *   rightmost wall pixel.  This bridges horizontal gaps in wall lines
+ *   (dashed lines, cross-hatch marks, and missing wall sections between
+ *   two wall endpoints on the same row).
+ *
+ * Phase 2 (column fill): for each column, find the topmost and
+ *   bottommost pixel that was filled in Phase 1, and fill between them.
+ *   Using the row-fill output (instead of the raw mask) ensures that
+ *   columns inside large horizontal wall gaps inherit correct vertical
+ *   extents from their neighboring wall pixels.
+ *
+ * Phase 3: intersect row fill and column fill to preserve concavities
+ *   (e.g. L-shapes, T-shapes).
+ *
  * Unlike flood-fill, this is not affected by interior door openings.
  */
 const buildFillBetweenFootprint = (mask, width, height, minSpan) => {
+  // Phase 1: Row fill — bridges horizontal gaps in wall lines.
   const rowFill = new Uint8Array(width * height);
   for (let y = 0; y < height; y += 1) {
     let first = -1;
@@ -581,12 +594,15 @@ const buildFillBetweenFootprint = (mask, width, height, minSpan) => {
     }
   }
 
+  // Phase 2: Column fill — uses row-fill output so that columns inside
+  // horizontal wall gaps (e.g. dashed exterior walls with large breaks)
+  // correctly extend to the full vertical extent of the building.
   const colFill = new Uint8Array(width * height);
   for (let x = 0; x < width; x += 1) {
     let first = -1;
     let last = -1;
     for (let y = 0; y < height; y += 1) {
-      if (mask[y * width + x]) {
+      if (rowFill[y * width + x]) {
         if (first < 0) first = y;
         last = y;
       }
@@ -598,10 +614,35 @@ const buildFillBetweenFootprint = (mask, width, height, minSpan) => {
     }
   }
 
+  // Phase 3: Intersect to preserve concavities.
   const footprint = new Uint8Array(width * height);
   for (let i = 0; i < footprint.length; i += 1) {
     footprint[i] = rowFill[i] && colFill[i] ? 1 : 0;
   }
+
+  // Phase 4: Column-convex closure — for each column, fill between the
+  // topmost and bottommost footprint pixel.  This bridges vertical gaps
+  // between disconnected horizontal wall bands (e.g. the main building
+  // body and a distant bottom wall drawn with dashes/cross-hatch) that
+  // belong to the same structure.  L-shape and T-shape concavities are
+  // preserved because those shapes do not produce vertical gaps within
+  // a single column.
+  for (let x = 0; x < width; x += 1) {
+    let first = -1;
+    let last = -1;
+    for (let y = 0; y < height; y += 1) {
+      if (footprint[y * width + x]) {
+        if (first < 0) first = y;
+        last = y;
+      }
+    }
+    if (first >= 0 && last > first) {
+      for (let y = first; y <= last; y += 1) {
+        footprint[y * width + x] = 1;
+      }
+    }
+  }
+
   return footprint;
 };
 
@@ -672,8 +713,15 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
    * concavities.  Unlike flood-fill, this is robust against interior
    * door openings that would otherwise leak.
    * Use the full base wall mask (not CC-filtered) so that thin
-   * exterior wall fragments at the building edges are included.         */
-  let footprint = buildFillBetweenFootprint(baseWallMask, w, h, gapTol);
+   * exterior wall fragments at the building edges are included.
+   *
+   * Apply morphological closing before footprint extraction to bridge
+   * small gaps in dashed or cross-hatched exterior wall lines.  This
+   * ensures the extreme-position scan (leftmost/rightmost/top/bottom)
+   * correctly identifies wall pixels at the building edges.             */
+  const footprintCloseRadius = options.footprintCloseRadius ?? 8;
+  const closedForFootprint = closeMask(baseWallMask, w, h, footprintCloseRadius);
+  let footprint = buildFillBetweenFootprint(closedForFootprint, w, h, gapTol);
   let usedStructuralPath = true;
 
   // Verify footprint is non-trivial.
