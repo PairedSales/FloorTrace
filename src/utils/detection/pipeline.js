@@ -366,8 +366,17 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
  *  • Small non-structural shapes: components that don't span at least
  *    8% of the shorter dimension in either direction
  *  • Logos: compact, solid shapes (low aspect ratio + high solidity)
+ *  • Text annotations: elongated, sparse shapes (high aspect ratio
+ *    + low solidity + thin minor axis)
  * Keep only components likely to be structural walls.
  */
+
+// --- Thresholds for text-annotation filtering (Fletcher-Kasturi inspired) ---
+const TEXT_MIN_ASPECT = 4.0;         // text strings are highly elongated
+const TEXT_MAX_MINOR_AXIS_PCT = 0.05; // minor axis < 5% of shorter image dim
+const TEXT_MAX_SOLIDITY = 0.4;       // sparse fill (inter-letter gaps)
+const TEXT_MAX_AREA_PCT = 0.015;     // text is small relative to image
+
 const filterComponentsByStructure = (wallMask, width, height) => {
   const labeled = labelConnectedComponents(wallMask, width, height, 1);
   const { components, labels } = labeled;
@@ -396,6 +405,17 @@ const filterComponentsByStructure = (wallMask, width, height) => {
     const solidity = comp.size / (bboxW * bboxH);
     if (aspect < 2.0 && solidity > 0.4 && comp.size < imageArea * 0.03) continue;
 
+    // Remove text annotations / watermarks: elongated components whose
+    // minor axis is very thin AND that consist of sparse, disconnected
+    // pixels (low solidity).  Wall segments are also elongated but have
+    // near-perfect solidity (~1.0 after dilation); text has inter-letter
+    // gaps giving solidity well below 0.4.  The solidity threshold is
+    // kept low to avoid false-positives on dashed or cross-hatched walls.
+    // (Inspired by Fletcher-Kasturi text/graphics separation — Ref 10.)
+    const minorAxis = Math.min(bboxW, bboxH);
+    if (aspect >= TEXT_MIN_ASPECT && minorAxis < minDim * TEXT_MAX_MINOR_AXIS_PCT
+        && solidity < TEXT_MAX_SOLIDITY && comp.size < imageArea * TEXT_MAX_AREA_PCT) continue;
+
     keptIds.add(comp.id);
   }
 
@@ -407,24 +427,6 @@ const filterComponentsByStructure = (wallMask, width, height) => {
   const out = new Uint8Array(width * height);
   for (let i = 0; i < labels.length; i += 1) {
     if (keptIds.has(labels[i])) out[i] = 1;
-  }
-  return out;
-};
-
-/**
- * Step 2 — Keep only the single largest connected component.
- * After CC filtering, the remaining mask may still contain multiple
- * disconnected groups.  The largest one is the main wall structure.
- */
-const keepLargestComponent = (mask, width, height) => {
-  const labeled = labelConnectedComponents(mask, width, height, 1);
-  const { components, labels } = labeled;
-  if (!components.length) return mask;
-
-  const largest = components.reduce((a, b) => (a.size > b.size ? a : b));
-  const out = new Uint8Array(width * height);
-  for (let i = 0; i < labels.length; i += 1) {
-    if (labels[i] === largest.id) out[i] = 1;
   }
   return out;
 };
@@ -712,15 +714,27 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
    * topmost/bottommost) wall pixel.  Intersecting both fills preserves
    * concavities.  Unlike flood-fill, this is robust against interior
    * door openings that would otherwise leak.
-   * Use the full base wall mask (not CC-filtered) so that thin
-   * exterior wall fragments at the building edges are included.
+   *
+   * Use a stricter segment mask for the footprint input (not the raw
+   * baseWallMask) so that text labels, logos, and watermarks outside
+   * the building boundary do not pull the footprint outward.
+   * Re-filter merged segments with a higher minimum length (20% of
+   * the shorter dimension) to exclude logo/watermark text that can
+   * produce moderate-length runs via gap-tolerance bridging, while
+   * keeping all genuine wall segments.
    *
    * Apply morphological closing before footprint extraction to bridge
-   * small gaps in dashed or cross-hatched exterior wall lines.  This
-   * ensures the extreme-position scan (leftmost/rightmost/top/bottom)
-   * correctly identifies wall pixels at the building edges.             */
+   * small gaps at wall corners/junctions and in dashed or cross-hatched
+   * exterior wall lines.                                                */
   const footprintCloseRadius = options.footprintCloseRadius ?? 8;
-  const closedForFootprint = closeMask(baseWallMask, w, h, footprintCloseRadius);
+  const fpMinLen = Math.max(
+    Math.floor(Math.min(w, h) * (options.footprintMinSegPct ?? 0.20)),
+    minSegLen,
+  );
+  const fpH = mergedH.filter(s => s.end - s.start + 1 >= fpMinLen);
+  const fpV = mergedV.filter(s => s.end - s.start + 1 >= fpMinLen);
+  const fpSegMask = buildSegmentMask(fpH, fpV, w, h, lineHalf);
+  const closedForFootprint = closeMask(fpSegMask, w, h, footprintCloseRadius);
   let footprint = buildFillBetweenFootprint(closedForFootprint, w, h, gapTol);
   let usedStructuralPath = true;
 
