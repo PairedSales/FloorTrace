@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
+import ToolsPanel from './components/ToolsPanel';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import {
@@ -996,14 +997,19 @@ function App() {
           autoSnapEnabled={autoSnapEnabled}
           onAutoSnapChange={setAutoSnapEnabled}
           perimeterOverlay={perimeterOverlay}
-          lineToolActive={lineToolActive}
-          onLineToolToggle={handleLineToolToggle}
-          drawAreaActive={drawAreaActive}
-          onDrawAreaToggle={handleDrawAreaToggle}
           debugDetection={debugDetection}
           onDebugDetectionChange={setDebugDetection}
           showOptions={showPanelOptions}
         />
+
+        {area > 0 && (
+          <ToolsPanel
+            lineToolActive={lineToolActive}
+            onLineToolToggle={handleLineToolToggle}
+            drawAreaActive={drawAreaActive}
+            onDrawAreaToggle={handleDrawAreaToggle}
+          />
+        )}
 
         {notification.show && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
