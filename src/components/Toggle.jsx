@@ -1,6 +1,6 @@
 const Toggle = ({ checked, onChange, label }) => {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between pointer-events-auto">
       <span className="text-[11px] font-medium text-slate-400">{label}</span>
       <button
         type="button"

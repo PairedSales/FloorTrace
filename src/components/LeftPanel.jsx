@@ -92,10 +92,10 @@ const LeftPanel = ({
 
   if (collapsed) {
     return (
-      <div className="relative z-10 flex flex-col items-center w-10 shrink-0 self-start max-h-full border-r border-chrome-700/35 bg-chrome-900/55 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45">
+      <div className="relative z-10 flex flex-col items-center w-10 shrink-0 self-start max-h-full border-r border-chrome-700/35 bg-chrome-900/55 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45 pointer-events-none">
         <button
           onClick={() => setCollapsed(false)}
-          className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-chrome-700 transition-colors cursor-pointer"
+          className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-chrome-700 transition-colors cursor-pointer pointer-events-auto"
           title="Expand panel"
         >
           <PanelLeft className="w-4 h-4" />
@@ -107,9 +107,9 @@ const LeftPanel = ({
   const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
 
   return (
-    <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700/35 bg-chrome-900/55 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45">
+    <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700/35 bg-chrome-900/55 backdrop-blur-md supports-[backdrop-filter]:bg-chrome-900/45 pointer-events-none">
       {/* Panel header */}
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-chrome-700/50 px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-chrome-700/50 px-3 pointer-events-auto">
         <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
           Controls
         </span>
@@ -123,7 +123,7 @@ const LeftPanel = ({
       </div>
 
       {/* Room Dimensions */}
-      <section className="px-3 py-3">
+      <section className="px-3 py-3 pointer-events-auto">
         <div className="flex items-center justify-between mb-2.5">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
             Room Size
@@ -221,7 +221,7 @@ const LeftPanel = ({
 
       <div className="panel-divider mx-3" />
 
-      <section className="px-3 py-3">
+      <section className="px-3 py-3 pointer-events-auto">
         <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
           Detection
         </h3>
@@ -237,7 +237,7 @@ const LeftPanel = ({
       {/* Options */}
       {perimeterOverlay && (
         <>
-          <section className="px-3 py-3 flex flex-col gap-2.5">
+          <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
             <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
               Options
             </h3>
@@ -271,7 +271,7 @@ const LeftPanel = ({
 
       {/* Tools */}
       {area > 0 && (
-        <section className="px-3 py-3">
+        <section className="px-3 py-3 pointer-events-auto">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
             Tools
           </h3>
