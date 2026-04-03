@@ -4,8 +4,13 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
-/** Approximate ratio of character width to font size used for pill-badge auto-sizing. */
-const CHAR_WIDTH_RATIO = 0.58;
+/** Measure the rendered pixel width of a text string using the Canvas 2D API. */
+function measureTextWidth(text, fontSize, fontFamily = 'Inter, system-ui, sans-serif', fontStyle = 'bold') {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `${fontStyle} ${fontSize}px ${fontFamily}`;
+  return ctx.measureText(text).width;
+}
 /** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
 const OCR_DOT_BASE_RADIUS = 3;
 /** Minimum rendered dot radius in pixels for the OCR anchor dot. */
@@ -1421,7 +1426,7 @@ const Canvas = forwardRef(({
                   const fs = 12 / scale;
                   const padX = 7 / scale;
                   const padY = 3.5 / scale;
-                  const labelW = labelText.length * fs * CHAR_WIDTH_RATIO + padX * 2;
+                  const labelW = measureTextWidth(labelText, fs) + padX * 2;
                   const labelH = fs + padY * 2;
                   const cornerR = labelH / 2;
                   const gap = 5 / scale;
