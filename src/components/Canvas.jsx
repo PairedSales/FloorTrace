@@ -4,12 +4,15 @@ import { formatLength } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
+/** Font family and style used for OCR pill badge text (must match the Konva Text element). */
+const OCR_PILL_FONT_FAMILY = 'Inter, system-ui, sans-serif';
+const OCR_PILL_FONT_STYLE = 'bold';
+/** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
+const _measureCtx = document.createElement('canvas').getContext('2d');
 /** Measure the rendered pixel width of a text string using the Canvas 2D API. */
-function measureTextWidth(text, fontSize, fontFamily = 'Inter, system-ui, sans-serif', fontStyle = 'bold') {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.font = `${fontStyle} ${fontSize}px ${fontFamily}`;
-  return ctx.measureText(text).width;
+function measureTextWidth(text, fontSize) {
+  _measureCtx.font = `${OCR_PILL_FONT_STYLE} ${fontSize}px ${OCR_PILL_FONT_FAMILY}`;
+  return _measureCtx.measureText(text).width;
 }
 /** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
 const OCR_DOT_BASE_RADIUS = 3;
@@ -1479,8 +1482,8 @@ const Canvas = forwardRef(({
                         text={labelText}
                         fontSize={fs}
                         fill="#ffffff"
-                        fontFamily="Inter, system-ui, sans-serif"
-                        fontStyle="bold"
+                        fontFamily={OCR_PILL_FONT_FAMILY}
+                        fontStyle={OCR_PILL_FONT_STYLE}
                         listening={false}
                       />
                     </React.Fragment>
