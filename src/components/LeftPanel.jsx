@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PanelLeftClose, PanelLeft, Ruler, Pentagon } from 'lucide-react';
+import { Ruler, Pentagon } from 'lucide-react';
 import { formatDimensionInput } from '../utils/unitConverter';
 import InchesInput from './InchesInput';
 import Toggle from './Toggle';
@@ -30,7 +30,6 @@ const LeftPanel = ({
   onDebugDetectionChange,
   showOptions,
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
@@ -91,116 +90,124 @@ const LeftPanel = ({
     setEditingField(null);
   };
 
-  if (collapsed) {
-    return (
-      <div className="relative z-10 flex flex-col items-center w-10 shrink-0 self-start max-h-full border-r border-chrome-700 bg-chrome-800 py-2 pointer-events-none">
-        <button
-          onClick={() => setCollapsed(false)}
-          className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-chrome-700 transition-colors cursor-pointer pointer-events-auto"
-          title="Expand panel"
-        >
-          <PanelLeft className="w-4 h-4" />
-        </button>
-      </div>
-    );
-  }
-
   const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
 
   return (
     <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
-      {/* Panel header */}
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-chrome-700/50 px-3 pointer-events-auto">
-        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-          Controls
-        </span>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="p-1 rounded text-slate-500 hover:text-white hover:bg-chrome-700 transition-colors cursor-pointer"
-          title="Collapse panel"
-        >
-          <PanelLeftClose className="w-3.5 h-3.5" />
-        </button>
-      </div>
 
-      {/* Room Dimensions */}
+      {/* Room Dimensions + Tools */}
       <section className="px-3 py-3 pointer-events-auto">
-        <div className="flex items-center justify-between mb-2.5">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-            Room Size
-          </h3>
-          <div className="flex gap-0.5">
-            <button
-              onClick={() => onUnitChange('decimal')}
-              className={`unit-pill ${unit === 'decimal' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
-            >
-              Decimal
-            </button>
-            <button
-              onClick={() => onUnitChange('inches')}
-              className={`unit-pill ${unit === 'inches' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
-            >
-              Inches
-            </button>
-          </div>
-        </div>
+        <div className="flex gap-2">
+          {/* Room Size */}
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              Room Size
+            </h3>
+            <div className="flex gap-0.5 mb-2.5">
+              <button
+                onClick={() => onUnitChange('decimal')}
+                className={`unit-pill ${unit === 'decimal' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
+              >
+                Decimal
+              </button>
+              <button
+                onClick={() => onUnitChange('inches')}
+                className={`unit-pill ${unit === 'inches' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
+              >
+                Inches
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
+                  Width
+                </label>
+                {unit === 'inches' ? (
+                  <InchesInput
+                    value={localDimensions.width}
+                    onChange={(v) => handleDimensionChange('width', v)}
+                    onFocus={() => handleFocus('width')}
+                    onBlur={() => handleBlur('width')}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={displayValues.width}
+                    onChange={(e) => handleDimensionChange('width', e.target.value)}
+                    onFocus={() => handleFocus('width')}
+                    onBlur={() => handleBlur('width')}
+                    className="panel-input"
+                    placeholder="0.0 ft"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
+                  Height
+                </label>
+                {unit === 'inches' ? (
+                  <InchesInput
+                    value={localDimensions.height}
+                    onChange={(v) => handleDimensionChange('height', v)}
+                    onFocus={() => handleFocus('height')}
+                    onBlur={() => handleBlur('height')}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={displayValues.height}
+                    onChange={(e) => handleDimensionChange('height', e.target.value)}
+                    onFocus={() => handleFocus('height')}
+                    onBlur={() => handleBlur('height')}
+                    className="panel-input"
+                    placeholder="0.0 ft"
+                  />
+                )}
+              </div>
+            </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
-              Width
-            </label>
-            {unit === 'inches' ? (
-              <InchesInput
-                value={localDimensions.width}
-                onChange={(v) => handleDimensionChange('width', v)}
-                onFocus={() => handleFocus('width')}
-                onBlur={() => handleBlur('width')}
-              />
-            ) : (
-              <input
-                type="text"
-                value={displayValues.width}
-                onChange={(e) => handleDimensionChange('width', e.target.value)}
-                onFocus={() => handleFocus('width')}
-                onBlur={() => handleBlur('width')}
-                className="panel-input"
-                placeholder="0.0 ft"
-              />
+            {mode === 'manual' && ocrFailed && !isProcessing && (
+              <div className="mt-2.5 px-2.5 py-2 bg-amber-500/10 border border-amber-500/20 rounded-md">
+                <p className="text-[11px] text-amber-400 font-medium">
+                  Scan failed — enter room size manually.
+                </p>
+              </div>
             )}
           </div>
-          <div>
-            <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">
-              Height
-            </label>
-            {unit === 'inches' ? (
-              <InchesInput
-                value={localDimensions.height}
-                onChange={(v) => handleDimensionChange('height', v)}
-                onFocus={() => handleFocus('height')}
-                onBlur={() => handleBlur('height')}
-              />
-            ) : (
-              <input
-                type="text"
-                value={displayValues.height}
-                onChange={(e) => handleDimensionChange('height', e.target.value)}
-                onFocus={() => handleFocus('height')}
-                onBlur={() => handleBlur('height')}
-                className="panel-input"
-                placeholder="0.0 ft"
-              />
-            )}
-          </div>
-        </div>
 
-        {mode === 'manual' && ocrFailed && !isProcessing && (
-          <div className="mt-2.5 px-2.5 py-2 bg-amber-500/10 border border-amber-500/20 rounded-md">
-            <p className="text-[11px] text-amber-400 font-medium">
-              Scan failed — enter room size manually.
-            </p>
-          </div>
-        )}
+          {/* Tools — only shown when area has been calculated */}
+          {area > 0 && (
+            <div className="flex flex-col shrink-0 gap-1.5">
+              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
+                Tools
+              </h3>
+              <button
+                onClick={onLineToolToggle}
+                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+                  lineToolActive
+                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                }`}
+                title="Measure Line"
+              >
+                <Ruler className="w-4 h-4" />
+                Measure
+              </button>
+              <button
+                onClick={onDrawAreaToggle}
+                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+                  drawAreaActive
+                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                }`}
+                title="Draw Area"
+              >
+                <Pentagon className="w-4 h-4" />
+                Draw
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
       <div className="panel-divider mx-3" />
@@ -270,39 +277,6 @@ const LeftPanel = ({
               </section>
               <div className="panel-divider mx-3" />
             </>
-          )}
-
-          {/* Tools */}
-          {area > 0 && (
-            <section className="px-3 py-3 pointer-events-auto">
-              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-                Tools
-              </h3>
-              <div className="flex flex-col gap-1.5">
-                <button
-                  onClick={onLineToolToggle}
-                  className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
-                    lineToolActive
-                      ? 'bg-accent/15 text-accent border border-accent/30'
-                      : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-                  }`}
-                >
-                  <Ruler className="w-4 h-4" />
-                  Measure Line
-                </button>
-                <button
-                  onClick={onDrawAreaToggle}
-                  className={`flex items-center gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer ${
-                    drawAreaActive
-                      ? 'bg-accent/15 text-accent border border-accent/30'
-                      : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-                  }`}
-                >
-                  <Pentagon className="w-4 h-4" />
-                  Draw Area
-                </button>
-              </div>
-            </section>
           )}
         </>
       )}
