@@ -5,6 +5,7 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const mod = isMac ? '⌘' : 'Ctrl';
 
 const shortcuts = [
+  { keys: 'Right-click', description: 'Delete a vertex' },
   { keys: `${mod} + O`, description: 'Open image' },
   { keys: `${mod} + V`, description: 'Paste image from clipboard' },
   { keys: `${mod} + Z`, description: 'Undo' },
@@ -19,7 +20,6 @@ const tips = [
   'Click on a room to auto-detect its boundary.',
   'Use "Find Perimeter" to auto-detect exterior walls.',
   'Drag overlay vertices to adjust detected boundaries.',
-  'Right-click a vertex to remove it.',
   'Use the Measure tool to draw measurement lines.',
   'Use the Draw tool to create custom area polygons.',
   'Drag & drop an image file onto the canvas to open it.',
