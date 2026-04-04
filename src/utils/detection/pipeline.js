@@ -60,8 +60,6 @@ const getFloorplanFootprint = (wallMask, width, height) => {
   return footprint;
 };
 
-const pointInBounds = (point, width, height) => point.x >= 0 && point.y >= 0 && point.x < width && point.y < height;
-
 const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {}) => {
   const mapped = mapPolygonFromNormalized(polygon, preprocessResult.scale);
   const bounds = polygonToBounds(mapped);
@@ -806,5 +804,3 @@ export const boundaryByMode = (result, wallMode = 'inner') => {
   if (wallMode === 'outer') return result.outer ?? result.inner;
   return result.inner ?? result.outer;
 };
-
-export const isPointInsideNormalizedImage = (point, preprocess) => pointInBounds(point, preprocess.width, preprocess.height);

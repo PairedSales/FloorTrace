@@ -67,60 +67,6 @@ export const labelConnectedComponents = (mask, width, height, targetValue = 1) =
   return { labels, components };
 };
 
-export const contourForComponent = (labels, width, height, componentId) => {
-  const points = [];
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const idx = y * width + x;
-      if (labels[idx] !== componentId) continue;
-
-      let border = false;
-      for (const [dx, dy] of neighbors8) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (!inBounds(nx, ny, width, height) || labels[ny * width + nx] !== componentId) {
-          border = true;
-          break;
-        }
-      }
-
-      if (border) {
-        points.push({ x, y });
-      }
-    }
-  }
-  return points;
-};
-
-const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-
-export const convexHull = (points) => {
-  if (!points?.length) return [];
-  const sorted = [...points].sort((a, b) => (a.x - b.x) || (a.y - b.y));
-  if (sorted.length < 4) return sorted;
-
-  const lower = [];
-  for (const point of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) {
-      lower.pop();
-    }
-    lower.push(point);
-  }
-
-  const upper = [];
-  for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    const point = sorted[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) {
-      upper.pop();
-    }
-    upper.push(point);
-  }
-
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
-};
-
 const perpendicularDistance = (point, start, end) => {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
