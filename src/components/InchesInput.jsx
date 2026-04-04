@@ -3,10 +3,12 @@ import { useState, useEffect, useRef } from 'react';
 const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
+  const [inchesPrompt, setInchesPrompt] = useState(false);
   const feetRef = useRef(null);
   const inchesRef = useRef(null);
   const prevFeetRef = useRef('');
   const prevInchesRef = useRef('');
+  const inchesPromptTimerRef = useRef(null);
 
   useEffect(() => {
     if (value) {
@@ -21,6 +23,10 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
     }
   }, [value]);
 
+  useEffect(() => {
+    return () => clearTimeout(inchesPromptTimerRef.current);
+  }, []);
+
   const handleFeetChange = (e) => {
     const val = e.target.value;
     if (/^\d*$/.test(val)) {
@@ -33,6 +39,14 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   const handleInchesChange = (e) => {
     const val = e.target.value;
     if (/^\d*$/.test(val)) {
+      const numVal = parseInt(val, 10);
+      if (!isNaN(numVal) && numVal > 11) {
+        setInches('');
+        clearTimeout(inchesPromptTimerRef.current);
+        setInchesPrompt(true);
+        inchesPromptTimerRef.current = setTimeout(() => setInchesPrompt(false), 2000);
+        return;
+      }
       setInches(val);
       const newTotalFeet = (parseInt(feet, 10) || 0) + ((parseInt(val, 10) || 0) / 12);
       onChange(newTotalFeet.toString());
@@ -63,7 +77,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
 
   return (
     <div
-      className="flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
+      className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
                  focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
       onClick={(e) => { if (e.target === e.currentTarget) feetRef.current?.focus(); }}
     >
@@ -93,6 +107,11 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
         />
         <span className="text-slate-500">&Prime;</span>
       </div>
+      {inchesPrompt && (
+        <span className="absolute -bottom-5 right-0 text-xs text-amber-400 whitespace-nowrap pointer-events-none">
+          Inches: 0–11 only
+        </span>
+      )}
     </div>
   );
 };
