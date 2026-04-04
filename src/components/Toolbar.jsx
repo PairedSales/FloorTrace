@@ -89,15 +89,6 @@ const Toolbar = ({
           <span>Fit</span>
         </button>
 
-        <button
-          onClick={onOptionsToggle}
-          className={`toolbar-btn ${showPanelOptions ? 'text-accent hover:text-accent hover:bg-accent/10' : ''}`}
-          title="Toggle panel options"
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>Options</span>
-        </button>
-
         {perimeterOverlay && hasAutoDetection && (
           <button
             onClick={onManualMode}
@@ -123,6 +114,16 @@ const Toolbar = ({
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      {/* Options button */}
+      <button
+        onClick={onOptionsToggle}
+        className={`toolbar-btn ${showPanelOptions ? 'text-accent hover:text-accent hover:bg-accent/10' : ''}`}
+        title="Toggle panel options"
+      >
+        <SlidersHorizontal className="w-3.5 h-3.5" />
+        <span>Options</span>
+      </button>
 
       {/* Help button */}
       <button
