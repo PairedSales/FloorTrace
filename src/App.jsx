@@ -13,6 +13,7 @@ import {
   terminateDetectionWorker,
 } from './utils/detection';
 import useAppStore from './store/appStore';
+import * as undoManager from './store/undoManager';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
@@ -79,10 +80,7 @@ function App() {
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setDebugDetection = useAppStore((s) => s.setDebugDetection);
 
-  const pushUndoState = useAppStore((s) => s.pushUndoState);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
-  const handleUndo = useAppStore((s) => s.handleUndo);
-  const handleRedo = useAppStore((s) => s.handleRedo);
 
   const [saveOnExit, setSaveOnExit] = useState(() => {
     const stored = localStorage.getItem(SAVE_ON_EXIT_KEY);
@@ -116,6 +114,7 @@ function App() {
   // Reset entire application
   const handleRestart = () => {
     clearAutosavedDraft();
+    undoManager.clear();
     useAppStore.getState().restart();
   };
 
@@ -123,6 +122,7 @@ function App() {
   const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
     if (!forceEnter && mode === 'manual') {
       // Exiting manual mode
+      undoManager.save();
       setMode('normal');
       setDetectedDimensions([]);
       setManualEntryMode(false);
@@ -136,6 +136,8 @@ function App() {
         if (!confirmed) {
           return;
         }
+        // Save undo state before clearing overlays
+        undoManager.save();
         // Clear overlays
         setRoomOverlay(null);
         setPerimeterOverlay(null);
@@ -237,6 +239,7 @@ function App() {
   // Start over: clear all overlays and re-process the current image as if freshly pasted
   const handleStartOver = useCallback(async () => {
     if (!image) return;
+    undoManager.save();
     const currentImage = image;
     resetOverlays();
     await handleManualMode(currentImage, true);
@@ -251,6 +254,7 @@ function App() {
         setImage(null);
         // Clear overlays as well
         resetOverlays();
+        undoManager.clear();
 
         const loadedImage = await loadImageFromFile(file);
         setImage(loadedImage);
@@ -274,6 +278,7 @@ function App() {
       setImage(null);
       // Clear overlays as well
       resetOverlays();
+      undoManager.clear();
 
       const loadedImage = await loadImageFromClipboard();
       if (loadedImage) {
@@ -296,6 +301,7 @@ function App() {
     if (!file || !file.type.startsWith('image/')) return;
     try {
       resetOverlays();
+      undoManager.clear();
       const loadedImage = await loadImageFromFile(file);
       setImage(loadedImage);
       handleManualMode(loadedImage, true);
@@ -327,6 +333,7 @@ function App() {
   const handleTracePerimeter = async () => {
     if (!image) return;
 
+    undoManager.save();
     setIsProcessing(true, 'Tracing exterior walls…');
     try {
       const traced = await traceFloorplanBoundary(image, {
@@ -361,6 +368,7 @@ function App() {
   };
 
   const handleInteriorWallToggle = (value) => {
+    undoManager.save();
     setUseInteriorWalls(value);
     if (tracedBoundaries) {
       applyTracedBoundary(tracedBoundaries, value);
@@ -376,7 +384,7 @@ function App() {
 
   // Toggle line tool
   const handleLineToolToggle = () => {
-    pushUndoState();
+    undoManager.save();
     const newState = !lineToolActive;
     setLineToolActive(newState);
     if (newState) {
@@ -390,7 +398,7 @@ function App() {
 
   // Toggle draw area tool
   const handleDrawAreaToggle = () => {
-    pushUndoState();
+    undoManager.save();
     const newState = !drawAreaActive;
     setDrawAreaActive(newState);
     if (newState) {
@@ -404,7 +412,7 @@ function App() {
 
   // Clear all lines and custom shapes
   const handleClearTools = () => {
-    pushUndoState();
+    undoManager.save();
     setMeasurementLines([]);
     setCurrentMeasurementLine(null);
     setCustomShapes([]);
@@ -412,24 +420,24 @@ function App() {
   };
 
   const handleAddMeasurementLine = useCallback((line) => {
-    pushUndoState();
+    undoManager.save();
     setMeasurementLines([...useAppStore.getState().measurementLines, line]);
-  }, [pushUndoState, setMeasurementLines]);
+  }, [setMeasurementLines]);
 
   const handleMeasurementLinesChange = useCallback((nextLines) => {
-    pushUndoState();
+    undoManager.save();
     setMeasurementLines(nextLines);
-  }, [pushUndoState]);
+  }, [setMeasurementLines]);
 
   const handleAddCustomShape = useCallback((shape) => {
-    pushUndoState();
+    undoManager.save();
     setCustomShapes([...useAppStore.getState().customShapes, shape]);
-  }, [pushUndoState, setCustomShapes]);
+  }, [setCustomShapes]);
 
   const handleCustomShapesChange = useCallback((nextShapes) => {
-    pushUndoState();
+    undoManager.save();
     setCustomShapes(nextShapes);
-  }, [pushUndoState]);
+  }, [setCustomShapes]);
 
   // Handle save image (one-click screenshot of the entire app)
   const handleSaveImage = async () => {
@@ -486,7 +494,7 @@ function App() {
 
   // Update room overlay position
   const updateRoomOverlay = (overlay, saveAction = true) => {
-    if (saveAction) pushUndoState();
+    if (saveAction) undoManager.save();
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
       updateScale(roomDimensions, overlay);
@@ -495,7 +503,7 @@ function App() {
 
   // Update perimeter vertices
   const updatePerimeterVertices = (vertices, saveAction = true) => {
-    if (saveAction) pushUndoState();
+    if (saveAction) undoManager.save();
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
     if (roomOverlay) {
       const calculatedArea = calculateArea(vertices, scale);
@@ -507,7 +515,7 @@ function App() {
 
   // Handle adding perimeter vertex in manual mode
   const handleAddPerimeterVertex = (vertex) => {
-    pushUndoState();
+    undoManager.save();
     const newVertices = [...perimeterVertices, vertex];
     setPerimeterVertices(newVertices);
 
@@ -521,7 +529,7 @@ function App() {
   // Handle closing the perimeter
   const handleClosePerimeter = () => {
     if (perimeterVertices && perimeterVertices.length > 2) {
-      pushUndoState();
+      undoManager.save();
       setPerimeterOverlay({ vertices: perimeterVertices });
       if (roomOverlay) {
         const calculatedArea = calculateArea(perimeterVertices, scale);
@@ -536,7 +544,7 @@ function App() {
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = () => {
     if (perimeterVertices && perimeterVertices.length > 0) {
-      pushUndoState();
+      undoManager.save();
       const newVertices = perimeterVertices.slice(0, -1);
       setPerimeterVertices(newVertices);
     }
@@ -553,7 +561,7 @@ function App() {
 
   // Switch to manual outline drawing: clear the auto-detected perimeter and let the user draw fresh
   const handleManualOutlineMode = () => {
-    pushUndoState();
+    undoManager.save();
     setPerimeterOverlay(null);
     setArea(0);
     setPerimeterVertices([]); // activate manual vertex placement
@@ -597,6 +605,7 @@ function App() {
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = async (dimension) => {
+    undoManager.save();
     const dims = {
       width: dimension.width.toString(),
       height: dimension.height.toString(),
@@ -654,6 +663,8 @@ function App() {
       alert('Please enter valid room dimensions first');
       return;
     }
+
+    undoManager.save();
     
     const fallbackOverlay = {
       x1: clickPoint.x - 100,
@@ -799,14 +810,14 @@ function App() {
           case 'z':
             e.preventDefault();
             if (e.shiftKey) {
-              handleRedo();
+              undoManager.redo();
             } else {
-              handleUndo();
+              undoManager.undo();
             }
             break;
           case 'y':
             e.preventDefault();
-            handleRedo();
+            undoManager.redo();
             break;
         }
       }
@@ -814,23 +825,23 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePasteImage, handleRedo, handleUndo]);
+  }, [handlePasteImage]);
 
   // Handle side mouse buttons for undo (button 3 = back) and redo (button 4 = forward)
   useEffect(() => {
     const handleMouseDown = (e) => {
       if (e.button === 3) {
         e.preventDefault();
-        handleUndo();
+        undoManager.undo();
       } else if (e.button === 4) {
         e.preventDefault();
-        handleRedo();
+        undoManager.redo();
       }
     };
 
     window.addEventListener('mousedown', handleMouseDown);
     return () => window.removeEventListener('mousedown', handleMouseDown);
-  }, [handleUndo, handleRedo]);
+  }, []);
 
   // Disable right-click context menu unless text is selected
   useEffect(() => {
