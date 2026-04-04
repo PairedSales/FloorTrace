@@ -15,59 +15,6 @@ import {
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
-const FILE_HANDLE_DB_NAME = 'floortrace:filehandles';
-const FILE_HANDLE_STORE = 'handles';
-const SAVE_HANDLE_KEY = 'saveFileHandle';
-
-const openHandleDB = () =>
-  new Promise((resolve, reject) => {
-    const req = indexedDB.open(FILE_HANDLE_DB_NAME, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(FILE_HANDLE_STORE);
-    req.onsuccess = (e) => resolve(e.target.result);
-    req.onerror = () => reject(req.error);
-  });
-
-const getStoredFileHandle = async () => {
-  try {
-    const db = await openHandleDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction(FILE_HANDLE_STORE, 'readonly');
-      const req = tx.objectStore(FILE_HANDLE_STORE).get(SAVE_HANDLE_KEY);
-      req.onsuccess = () => resolve(req.result ?? null);
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
-  }
-};
-
-const storeFileHandle = async (handle) => {
-  try {
-    const db = await openHandleDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(FILE_HANDLE_STORE, 'readwrite');
-      tx.objectStore(FILE_HANDLE_STORE).put(handle, SAVE_HANDLE_KEY);
-      tx.oncomplete = resolve;
-      tx.onerror = reject;
-    });
-  } catch {
-    // ignore — handle will still be used in-session via ref
-  }
-};
-
-const clearStoredFileHandle = async () => {
-  try {
-    const db = await openHandleDB();
-    await new Promise((resolve) => {
-      const tx = db.transaction(FILE_HANDLE_STORE, 'readwrite');
-      tx.objectStore(FILE_HANDLE_STORE).delete(SAVE_HANDLE_KEY);
-      tx.oncomplete = resolve;
-      tx.onerror = resolve;
-    });
-  } catch {
-    // ignore
-  }
-};
 
 function App() {
   const [image, setImage] = useState(null);
@@ -103,14 +50,12 @@ function App() {
     return stored === null ? true : stored === 'true';
   });
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [hasSaveLocation, setHasSaveLocation] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   const appStateRef = useRef({});
   const hasRestoredStateRef = useRef(false);
-  const saveFileHandleRef = useRef(null);
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
@@ -544,33 +489,6 @@ function App() {
   // Handle save image (one-click screenshot of the entire app)
   const handleSaveImage = async () => {
     try {
-      // Acquire file handle / check permissions FIRST while user gesture is still
-      // active.  showSaveFilePicker and requestPermission both require transient
-      // user activation, which can expire if toPng runs before them.
-      let fileHandle = null;
-      if (window.showSaveFilePicker) {
-        fileHandle = saveFileHandleRef.current;
-        if (!fileHandle) {
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-          fileHandle = await window.showSaveFilePicker({
-            suggestedName: `floortrace-${timestamp}.png`,
-            types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
-          });
-          saveFileHandleRef.current = fileHandle;
-          setHasSaveLocation(true);
-          await storeFileHandle(fileHandle);
-        } else {
-          const perm = await fileHandle.queryPermission({ mode: 'readwrite' });
-          if (perm !== 'granted') {
-            const req = await fileHandle.requestPermission({ mode: 'readwrite' });
-            if (req !== 'granted') {
-              alert('Permission to write file was denied.');
-              return;
-            }
-          }
-        }
-      }
-
       const { toPng } = await import('html-to-image');
       const appElement = document.getElementById('app-container');
       if (!appElement) {
@@ -580,34 +498,22 @@ function App() {
 
       const dataUrl = await toPng(appElement, { pixelRatio: 2, skipFonts: true });
 
-      if (fileHandle) {
-        const base64 = dataUrl.split(',')[1];
-        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: 'image/png' });
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        link.download = `floortrace-${timestamp}.png`;
-        link.href = dataUrl;
-        link.click();
-      }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const base64 = dataUrl.split(',')[1];
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = `floortrace-${timestamp}.png`;
+      link.href = url;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (error) {
       if (error.name === 'AbortError') return;
       console.error('Error saving screenshot:', error);
       alert('Error saving screenshot. Please try again.');
     }
   };
-
-  const handleChangeSaveLocation = useCallback(async () => {
-    saveFileHandleRef.current = null;
-    setHasSaveLocation(false);
-    await clearStoredFileHandle();
-    setNotification({ show: true, message: 'Save location cleared. Next save will prompt for a new location.' });
-    setTimeout(() => setNotification({ show: false, message: '' }), 3000);
-  }, []);
 
 
   // Update scale based on room dimensions and overlay
@@ -886,16 +792,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!window.showSaveFilePicker) return;
-    getStoredFileHandle().then((handle) => {
-      if (handle) {
-        saveFileHandleRef.current = handle;
-        setHasSaveLocation(true);
-      }
-    });
-  }, []);
-
-  useEffect(() => {
     appStateRef.current = {
       roomOverlay,
       perimeterOverlay,
@@ -1127,8 +1023,6 @@ function App() {
           showOptions={showPanelOptions}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
-          hasSaveLocation={hasSaveLocation}
-          onChangeSaveLocation={handleChangeSaveLocation}
         />
 
         {area > 0 && (
