@@ -86,7 +86,7 @@ const LeftPanel = ({
   const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
 
   return (
-    <div className="relative z-10 flex w-[264px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
+    <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
 
       {/* Room Dimensions */}
       <section className="px-3 py-3 pointer-events-auto">
@@ -172,7 +172,7 @@ const LeftPanel = ({
         <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
           Area
         </h3>
-        <div className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-3">
+        <div className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2">
           <div className="font-mono font-bold text-accent leading-none" style={{
             fontSize: areaText.length <= 7 ? '1.75rem' : areaText.length <= 9 ? '1.375rem' : '1.125rem',
           }}>
