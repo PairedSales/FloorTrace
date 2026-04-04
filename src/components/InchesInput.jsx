@@ -79,7 +79,16 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
     <div
       className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
                  focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
-      onClick={(e) => { if (e.target === e.currentTarget) feetRef.current?.focus(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (e.clientX < rect.left + rect.width / 2) {
+            feetRef.current?.focus();
+          } else {
+            inchesRef.current?.focus();
+          }
+        }
+      }}
     >
       <div className="flex items-center text-slate-500">
         <input
