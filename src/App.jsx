@@ -486,51 +486,23 @@ function App() {
     setCustomShapes(nextShapes);
   }, [pushUndoState]);
 
-  // Handle save image (screenshot entire app)
+  // Handle save image (one-click screenshot of the entire app)
   const handleSaveImage = async () => {
     try {
-      const html2canvas = (await import('html2canvas')).default;
+      const { toPng } = await import('html-to-image');
       const appElement = document.getElementById('app-container');
       if (!appElement) {
         alert('Could not capture screenshot');
         return;
       }
 
-      const canvas = await html2canvas(appElement, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        logging: false,
-        useCORS: true,
-        // Ensure all elements are rendered
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: document.documentElement.offsetWidth,
-        windowHeight: document.documentElement.offsetHeight,
-        onclone: (clonedDoc) => {
-          // html2canvas skips background rendering for pointer-events:none elements;
-          // remove that style from matched nodes so panels render correctly.
-          clonedDoc.querySelectorAll('.pointer-events-none').forEach((el) => {
-            el.classList.remove('pointer-events-none');
-          });
-          clonedDoc.querySelectorAll('[style*="pointer-events"]').forEach((el) => {
-            el.style.pointerEvents = '';
-          });
-        },
-      });
+      const dataUrl = await toPng(appElement, { pixelRatio: 2 });
 
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          alert('Failed to create image');
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        link.download = `floortrace-${timestamp}.webp`;
-        link.href = url;
-        link.click();
-        URL.revokeObjectURL(url);
-      }, 'image/webp', 0.95);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `floortrace-${timestamp}.png`;
+      link.href = dataUrl;
+      link.click();
     } catch (error) {
       console.error('Error saving screenshot:', error);
       alert('Error saving screenshot. Please try again.');
