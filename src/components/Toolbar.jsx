@@ -3,25 +3,20 @@ import {
   Download,
   ScanSearch,
   Maximize,
-  Trash2,
   SlidersHorizontal,
   LayoutList,
   RotateCcw,
+  CircleHelp,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
 const Toolbar = ({
   image,
   isProcessing,
-  measurementLines,
-  customShapes,
-  currentMeasurementLine,
-  currentCustomShape,
   onFileOpen,
   onSaveImage,
   onTracePerimeter,
   onFitToWindow,
-  onClearTools,
   onRestart,
   showPanelOptions,
   onOptionsToggle,
@@ -29,13 +24,8 @@ const Toolbar = ({
   onManualMode,
   perimeterOverlay,
   onStartOver,
+  onHelpOpen,
 }) => {
-  const hasToolData =
-    measurementLines?.length > 0 ||
-    customShapes?.length > 0 ||
-    currentMeasurementLine ||
-    currentCustomShape;
-
   return (
     <header className="flex items-center h-12 px-3 bg-chrome-800 border-b border-chrome-700 select-none shrink-0">
       {/* Logo */}
@@ -134,17 +124,14 @@ const Toolbar = ({
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Conditional clear */}
-      {hasToolData && (
-        <button
-          onClick={onClearTools}
-          className="toolbar-btn text-red-400 hover:text-red-300 hover:bg-red-500/10"
-          title="Clear all measurements and shapes"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span>Clear</span>
-        </button>
-      )}
+      {/* Help button */}
+      <button
+        onClick={onHelpOpen}
+        className="toolbar-btn"
+        title="Hotkeys & Help"
+      >
+        <CircleHelp className="w-4 h-4" />
+      </button>
     </header>
   );
 };

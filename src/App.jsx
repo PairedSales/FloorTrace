@@ -3,6 +3,7 @@ import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
+import HelpModal from './components/HelpModal';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import {
@@ -13,6 +14,7 @@ import {
 } from './utils/detection';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
+const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
 
 function App() {
   const [image, setImage] = useState(null);
@@ -43,6 +45,11 @@ function App() {
   const [detectionDebugData, setDetectionDebugData] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [showPanelOptions, setShowPanelOptions] = useState(false);
+  const [saveOnExit, setSaveOnExit] = useState(() => {
+    const stored = localStorage.getItem(SAVE_ON_EXIT_KEY);
+    return stored === null ? true : stored === 'true';
+  });
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const undoStackRef = useRef([]);
@@ -52,6 +59,14 @@ function App() {
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+  }, []);
+
+  const handleSaveOnExitChange = useCallback((enabled) => {
+    setSaveOnExit(enabled);
+    localStorage.setItem(SAVE_ON_EXIT_KEY, String(enabled));
+    if (!enabled) {
+      localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+    }
   }, []);
 
   const saveAutosavedDraft = useCallback((snapshot) => {
@@ -753,8 +768,9 @@ function App() {
   // Restore locally autosaved data first, otherwise auto-load example floorplan for testing
   useEffect(() => {
     const restoreOrLoadExampleImage = async () => {
+      const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       try {
-        const savedStateRaw = localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY);
+        const savedStateRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
         if (savedStateRaw) {
           const savedState = JSON.parse(savedStateRaw);
           if (savedState?.image) {
@@ -848,6 +864,10 @@ function App() {
       return;
     }
 
+    if (!saveOnExit) {
+      return;
+    }
+
     if (!image) {
       clearAutosavedDraft();
       return;
@@ -879,7 +899,7 @@ function App() {
       debugDetection,
       detectionDebugData
     });
-  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, clearAutosavedDraft, saveAutosavedDraft, saveOnExit]);
 
   useEffect(() => () => terminateDetectionWorker(), []);
 
@@ -960,15 +980,10 @@ function App() {
       <Toolbar
         image={image}
         isProcessing={isProcessing}
-        measurementLines={measurementLines}
-        customShapes={customShapes}
-        currentMeasurementLine={currentMeasurementLine}
-        currentCustomShape={currentCustomShape}
         onFileOpen={() => fileInputRef.current?.click()}
         onSaveImage={handleSaveImage}
         onTracePerimeter={handleTracePerimeter}
         onFitToWindow={handleFitToWindow}
-        onClearTools={handleClearTools}
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
         onOptionsToggle={() => setShowPanelOptions((v) => !v)}
@@ -976,6 +991,7 @@ function App() {
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
         onStartOver={handleStartOver}
+        onHelpOpen={() => setShowHelpModal(true)}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -1045,6 +1061,8 @@ function App() {
           debugDetection={debugDetection}
           onDebugDetectionChange={setDebugDetection}
           showOptions={showPanelOptions}
+          saveOnExit={saveOnExit}
+          onSaveOnExitChange={handleSaveOnExitChange}
         />
 
         {area > 0 && (
@@ -1053,6 +1071,11 @@ function App() {
             onLineToolToggle={handleLineToolToggle}
             drawAreaActive={drawAreaActive}
             onDrawAreaToggle={handleDrawAreaToggle}
+            measurementLines={measurementLines}
+            customShapes={customShapes}
+            currentMeasurementLine={currentMeasurementLine}
+            currentCustomShape={currentCustomShape}
+            onClearTools={handleClearTools}
           />
         )}
 
@@ -1062,6 +1085,10 @@ function App() {
               {notification.message}
             </div>
           </div>
+        )}
+
+        {showHelpModal && (
+          <HelpModal onClose={() => setShowHelpModal(false)} />
         )}
 
       </div>
