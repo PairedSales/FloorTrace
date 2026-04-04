@@ -145,14 +145,6 @@ function App() {
     resetOverlays();
   };
 
-  // Start over: clear all overlays and re-process the current image as if freshly pasted
-  const handleStartOver = useCallback(async () => {
-    if (!image) return;
-    const currentImage = image;
-    resetOverlays();
-    await handleManualMode(currentImage);
-  }, [image, resetOverlays, handleManualMode]);
-
   const handleUndo = useCallback(() => {
     if (undoStackRef.current.length === 0) return false;
     const previousSnapshot = undoStackRef.current.pop();
@@ -283,6 +275,14 @@ function App() {
       }
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit]);
+
+  // Start over: clear all overlays and re-process the current image as if freshly pasted
+  const handleStartOver = useCallback(async () => {
+    if (!image) return;
+    const currentImage = image;
+    resetOverlays();
+    await handleManualMode(currentImage);
+  }, [image, resetOverlays, handleManualMode]);
 
   // Handle file upload
   const handleFileUpload = useCallback(async (event) => {
