@@ -27,6 +27,7 @@ function App() {
   const mode = useAppStore((s) => s.mode);
   const scale = useAppStore((s) => s.scale);
   const isProcessing = useAppStore((s) => s.isProcessing);
+  const processingMessage = useAppStore((s) => s.processingMessage);
   const detectedDimensions = useAppStore((s) => s.detectedDimensions);
   const showSideLengths = useAppStore((s) => s.showSideLengths);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
@@ -146,7 +147,7 @@ function App() {
         return;
       }
       
-      setIsProcessing(true);
+      setIsProcessing(true, 'Scanning for dimensions…');
       setMode('manual');
       setManualEntryMode(false);
       setOcrFailed(false);
@@ -326,7 +327,7 @@ function App() {
   const handleTracePerimeter = async () => {
     if (!image) return;
 
-    setIsProcessing(true);
+    setIsProcessing(true, 'Tracing exterior walls…');
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
@@ -560,6 +561,7 @@ function App() {
 
   // Auto-trace exterior boundary after room overlay is placed.
   const autoTraceExterior = async (overlayForScale, dims) => {
+    setIsProcessing(true, 'Detecting exterior boundary…');
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
@@ -588,6 +590,8 @@ function App() {
     } catch (error) {
       console.error('Auto exterior tracing failed:', error);
       // Non-fatal — user can still trace manually
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -608,6 +612,7 @@ function App() {
       y2: centerY + 100,
     };
 
+    setIsProcessing(true, 'Finding room…');
     try {
       const roomResult = await detectRoomFromClick(image, { x: centerX, y: centerY }, {
         preprocess: { maxDimension: 1300 },
@@ -634,6 +639,7 @@ function App() {
     setManualEntryMode(false);
 
     // Automatically detect exterior boundary after room overlay is placed.
+    // autoTraceExterior manages its own isProcessing state.
     autoTraceExterior(nextOverlay, dims);
   };
 
@@ -658,6 +664,7 @@ function App() {
 
     const placeOverlay = async () => {
       let nextOverlay = fallbackOverlay;
+      setIsProcessing(true, 'Finding room…');
       try {
         const roomResult = await detectRoomFromClick(image, clickPoint, {
           preprocess: { maxDimension: 1300 },
@@ -681,6 +688,7 @@ function App() {
       setMode('normal');
 
       // Automatically detect exterior boundary after manual overlay placement.
+      // autoTraceExterior manages its own isProcessing state.
       autoTraceExterior(nextOverlay, roomDimensions);
     };
 
@@ -875,6 +883,7 @@ function App() {
             onRoomOverlayUpdate={updateRoomOverlay}
             onPerimeterUpdate={updatePerimeterVertices}
             isProcessing={isProcessing}
+            processingMessage={processingMessage}
             detectedDimensions={detectedDimensions}
             onDimensionSelect={handleDimensionSelect}
             showSideLengths={showSideLengths}
