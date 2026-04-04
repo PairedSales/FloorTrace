@@ -22,6 +22,8 @@ const LeftPanel = ({
   debugDetection,
   onDebugDetectionChange,
   showOptions,
+  saveOnExit,
+  onSaveOnExitChange,
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -225,6 +227,18 @@ const LeftPanel = ({
               <div className="panel-divider mx-3" />
             </>
           )}
+
+          <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
+            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
+              Settings
+            </h3>
+            <Toggle
+              label="Save on Exit"
+              checked={saveOnExit}
+              onChange={onSaveOnExitChange}
+            />
+          </section>
+          <div className="panel-divider mx-3" />
         </>
       )}
     </div>
