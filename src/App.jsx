@@ -551,7 +551,7 @@ function App() {
         return;
       }
 
-      const dataUrl = await toPng(appElement, { pixelRatio: 2 });
+      const dataUrl = await toPng(appElement, { pixelRatio: 2, skipFonts: true });
 
       if (window.showSaveFilePicker) {
         let handle = saveFileHandleRef.current;
@@ -574,8 +574,9 @@ function App() {
             }
           }
         }
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
+        const base64 = dataUrl.split(',')[1];
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: 'image/png' });
         const writable = await handle.createWritable();
         await writable.write(blob);
         await writable.close();
