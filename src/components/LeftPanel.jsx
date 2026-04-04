@@ -173,7 +173,7 @@ const LeftPanel = ({
           Area
         </h3>
         <div className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2">
-          <div className="font-mono font-bold text-accent leading-none" style={{
+        <div className="font-mono font-bold text-accent leading-none text-center" style={{
             fontSize: areaText.length <= 7 ? '1.75rem' : areaText.length <= 9 ? '1.375rem' : '1.125rem',
           }}>
             {areaText}
