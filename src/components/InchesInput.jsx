@@ -81,7 +81,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
                  focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
       onClick={(e) => { if (e.target === e.currentTarget) feetRef.current?.focus(); }}
     >
-      <div className="flex items-center text-slate-500 gap-0.5">
+      <div className="flex items-center text-slate-500">
         <input
           ref={feetRef}
           type="text"
@@ -90,10 +90,11 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={handleFieldFocus('feet')}
           onBlur={handleFieldBlur('feet')}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
-          className="w-7 text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          style={{ width: `${Math.max((feet || '0').length, 1)}ch` }}
           placeholder="0"
         />
-        <span className="text-slate-500">&prime;</span>
+        <span className="text-slate-500 mr-1">&prime;</span>
         <input
           ref={inchesRef}
           type="text"
@@ -102,7 +103,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={handleFieldFocus('inches')}
           onBlur={handleFieldBlur('inches')}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
-          className="w-5 text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          style={{ width: `${Math.max((inches || '0').length, 1)}ch` }}
           placeholder="0"
         />
         <span className="text-slate-500">&Prime;</span>
