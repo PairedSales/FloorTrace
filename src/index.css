@@ -41,7 +41,7 @@
   /* Toolbar button base */
   .toolbar-btn {
     @apply flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
-           transition-all duration-200 cursor-pointer select-none
+           transition-all duration-200 cursor-pointer select-none whitespace-nowrap
            text-slate-300 hover:text-white hover:bg-chrome-700/70
            focus:outline-none focus-visible:ring-1 focus-visible:ring-accent;
   }
