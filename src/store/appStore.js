@@ -14,6 +14,7 @@ const WORKING_STATE_DEFAULTS = {
   scale: 1,
   mode: 'normal',
   isProcessing: false,
+  processingMessage: '',
   detectedDimensions: [],
   showSideLengths: false,
   useInteriorWalls: true,
@@ -39,7 +40,7 @@ const WORKING_STATE_DEFAULTS = {
  * isProcessing is transient).
  */
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'image' && k !== 'isProcessing'
+  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage'
 );
 
 /**
@@ -47,7 +48,7 @@ const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * Same as SNAPSHOT_FIELDS but also includes `image`.
  */
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'isProcessing'
+  (k) => k !== 'isProcessing' && k !== 'processingMessage'
 );
 
 // ──── helpers ────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ const useAppStore = create((set, get) => ({
   setArea: (v) => set({ area: v }),
   setMode: (v) => set({ mode: v }),
   setScale: (v) => set({ scale: v }),
-  setIsProcessing: (v) => set({ isProcessing: v }),
+  setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
   setDetectedDimensions: (v) => set({ detectedDimensions: v }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
@@ -201,8 +202,9 @@ const useAppStore = create((set, get) => ({
         patch[k] = saved[k];
       }
     }
-    // Also set isProcessing to false when restoring
+    // Also set isProcessing/processingMessage to false/empty when restoring
     patch.isProcessing = false;
+    patch.processingMessage = '';
     set(patch);
   },
 }));
