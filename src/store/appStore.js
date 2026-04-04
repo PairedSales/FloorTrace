@@ -70,8 +70,6 @@ const pickFields = (state, fields) => {
 
 // ──── store ──────────────────────────────────────────────────────────────────
 
-const MAX_UNDO = 100;
-
 const useAppStore = create((set, get) => ({
   // ── working state ──────────────────────────────────────────────────────────
   ...WORKING_STATE_DEFAULTS,
@@ -80,10 +78,6 @@ const useAppStore = create((set, get) => ({
   notification: { show: false, message: '' },
   showPanelOptions: false,
   showHelpModal: false,
-
-  // ── undo / redo stacks ─────────────────────────────────────────────────────
-  _undoStack: [],
-  _redoStack: [],
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -136,61 +130,18 @@ const useAppStore = create((set, get) => ({
     set(patch);
   },
 
-  // ── undo / redo ────────────────────────────────────────────────────────────
-
-  pushUndoState: () => {
-    const state = get();
-    if (!state.image) return;
-    const snap = cloneSnapshot(pickFields(state, SNAPSHOT_FIELDS));
-    const stack = [...state._undoStack, snap];
-    if (stack.length > MAX_UNDO) stack.shift();
-    set({ _undoStack: stack, _redoStack: [] });
-  },
-
-  handleUndo: () => {
-    const state = get();
-    if (state._undoStack.length === 0) return false;
-    const undoStack = [...state._undoStack];
-    const previous = undoStack.pop();
-    const redoStack = [...state._redoStack, cloneSnapshot(pickFields(state, SNAPSHOT_FIELDS))];
-
-    const patch = {};
-    for (const k of SNAPSHOT_FIELDS) {
-      patch[k] = previous[k] ?? WORKING_STATE_DEFAULTS[k];
-    }
-    set({ ...patch, _undoStack: undoStack, _redoStack: redoStack });
-    return true;
-  },
-
-  handleRedo: () => {
-    const state = get();
-    if (state._redoStack.length === 0) return false;
-    const redoStack = [...state._redoStack];
-    const next = redoStack.pop();
-    const undoStack = [...state._undoStack, cloneSnapshot(pickFields(state, SNAPSHOT_FIELDS))];
-
-    const patch = {};
-    for (const k of SNAPSHOT_FIELDS) {
-      patch[k] = next[k] ?? WORKING_STATE_DEFAULTS[k];
-    }
-    set({ ...patch, _undoStack: undoStack, _redoStack: redoStack });
-    return true;
-  },
-
-  clearHistory: () => set({ _undoStack: [], _redoStack: [] }),
-
   // ── reset ──────────────────────────────────────────────────────────────────
 
-  /** Reset all working state except `image` to defaults, and clear undo history. */
+  /** Reset all working state except `image` to defaults. */
   resetOverlays: () => {
     const defaults = { ...WORKING_STATE_DEFAULTS };
     delete defaults.image; // preserve current image
-    set({ ...defaults, _undoStack: [], _redoStack: [] });
+    set(defaults);
   },
 
   /** Full restart: clear image and all working state. */
   restart: () => {
-    set({ ...WORKING_STATE_DEFAULTS, _undoStack: [], _redoStack: [] });
+    set({ ...WORKING_STATE_DEFAULTS });
   },
 
   // ── bulk restore (used by autosave restore) ────────────────────────────────
