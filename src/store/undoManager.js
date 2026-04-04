@@ -13,8 +13,8 @@ let redoStack = [];
 export function save() {
   const state = useAppStore.getState();
   if (!state.image) return;
+  if (undoStack.length >= MAX_UNDO) undoStack.shift();
   undoStack.push(state.createSnapshot());
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
   redoStack = [];
 }
 
@@ -35,6 +35,7 @@ export function undo() {
  */
 export function redo() {
   if (redoStack.length === 0) return false;
+  if (undoStack.length >= MAX_UNDO) undoStack.shift();
   undoStack.push(useAppStore.getState().createSnapshot());
   useAppStore.getState().applySnapshot(redoStack.pop());
   return true;
