@@ -578,7 +578,7 @@ function App() {
         return;
       }
 
-      const dataUrl = await toPng(appElement, { pixelRatio: 2 });
+      const dataUrl = await toPng(appElement, { pixelRatio: 2, skipFonts: true });
 
       if (fileHandle) {
         const base64 = dataUrl.split(',')[1];
