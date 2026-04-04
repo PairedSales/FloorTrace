@@ -6,6 +6,7 @@ import {
   Trash2,
   SlidersHorizontal,
   LayoutList,
+  RotateCcw,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
@@ -27,6 +28,7 @@ const Toolbar = ({
   hasAutoDetection,
   onManualMode,
   perimeterOverlay,
+  onStartOver,
 }) => {
   const hasToolData =
     measurementLines?.length > 0 ||
@@ -114,6 +116,17 @@ const Toolbar = ({
           >
             <LayoutList className="w-3.5 h-3.5" />
             <span>Manual Mode</span>
+          </button>
+        )}
+
+        {image && (
+          <button
+            onClick={onStartOver}
+            className="toolbar-btn"
+            title="Clear all overlays and reload the current floorplan"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Start Over</span>
           </button>
         )}
       </div>
