@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.20.0",
-    "html2canvas": "^1.4.1",
+    "html-to-image": "^1.11.13",
     "konva": "^10.0.2",
     "lucide-react": "^0.545.0",
     "react": "^19.1.1",

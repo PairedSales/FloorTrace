@@ -486,65 +486,26 @@ function App() {
     setCustomShapes(nextShapes);
   }, [pushUndoState]);
 
-  // Handle save image (screenshot the visible browser window)
+  // Handle save image (one-click screenshot of the entire app)
   const handleSaveImage = async () => {
-    let stream = null;
     try {
-      // Capture the current tab as it actually appears in the browser.
-      // preferCurrentTab is a hint (Chrome 94+) that pre-selects this tab so
-      // the user only needs to click "Share" without having to pick a source.
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        preferCurrentTab: true,
-        video: { frameRate: 1 },
-        audio: false,
-      });
-
-      // Draw a single frame from the captured stream onto a canvas.
-      const track = stream.getVideoTracks()[0];
-      const { width, height } = track.getSettings();
-
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      await new Promise((resolve, reject) => {
-        video.onloadedmetadata = () => video.play().then(resolve).catch(reject);
-        video.onerror = reject;
-      });
-
-      const canvasWidth = width || video.videoWidth;
-      const canvasHeight = height || video.videoHeight;
-      if (!canvasWidth || !canvasHeight) {
-        throw new Error('Could not determine capture dimensions');
+      const { toPng } = await import('html-to-image');
+      const appElement = document.getElementById('app-container');
+      if (!appElement) {
+        alert('Could not capture screenshot');
+        return;
       }
 
-      const offscreen = document.createElement('canvas');
-      offscreen.width = canvasWidth;
-      offscreen.height = canvasHeight;
-      offscreen.getContext('2d').drawImage(video, 0, 0, canvasWidth, canvasHeight);
-      video.srcObject = null;
+      const dataUrl = await toPng(appElement, { pixelRatio: 2 });
 
-      offscreen.toBlob((blob) => {
-        if (!blob) {
-          alert('Failed to create image');
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        link.download = `floortrace-${timestamp}.png`;
-        link.href = url;
-        link.click();
-        URL.revokeObjectURL(url);
-      }, 'image/png');
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `floortrace-${timestamp}.png`;
+      link.href = dataUrl;
+      link.click();
     } catch (error) {
-      // The user cancelled the screen-share dialog — treat as a no-op.
-      if (error.name === 'NotAllowedError') return;
       console.error('Error saving screenshot:', error);
       alert('Error saving screenshot. Please try again.');
-    } finally {
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
-      }
     }
   };
 
