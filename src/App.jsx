@@ -964,12 +964,14 @@ function App() {
             onCanvasClick={handleCanvasClick}
             unit={unit}
             lineToolActive={lineToolActive}
+            onLineToolToggle={handleLineToolToggle}
             measurementLines={measurementLines}
             currentMeasurementLine={currentMeasurementLine}
             onMeasurementLineUpdate={setCurrentMeasurementLine}
             onAddMeasurementLine={handleAddMeasurementLine}
             onMeasurementLinesChange={handleMeasurementLinesChange}
             drawAreaActive={drawAreaActive}
+            onDrawAreaToggle={handleDrawAreaToggle}
             customShapes={customShapes}
             currentCustomShape={currentCustomShape}
             onCustomShapeUpdate={setCurrentCustomShape}
