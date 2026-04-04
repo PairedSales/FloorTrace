@@ -40,6 +40,8 @@ const Canvas = forwardRef(({
   autoSnapEnabled,
   debugDetection,
   detectionDebugData,
+  onSaveUndoPoint,
+  onCancelUndoSave,
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -328,7 +330,10 @@ const Canvas = forwardRef(({
     e.cancelBubble = true;
     e.evt.preventDefault();
     
-    // Save initial state for undo
+    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
+    onSaveUndoPoint?.();
+    
+    // Save initial state for change detection at drag end
     lastRoomDragStartRef.current = { ...roomOverlay };
     
     // Track drag start position
@@ -353,7 +358,10 @@ const Canvas = forwardRef(({
     e.cancelBubble = true;
     e.evt.preventDefault();
     
-    // Save initial state for undo
+    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
+    onSaveUndoPoint?.();
+    
+    // Save initial state for change detection at drag end
     lastRoomDragStartRef.current = { ...roomOverlay };
     
     // Track drag start position
@@ -369,7 +377,9 @@ const Canvas = forwardRef(({
   const handleVertexDragStart = (index) => {
     if (!perimeterOverlay) return;
     
-    // Save initial position for undo
+    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
+    onSaveUndoPoint?.();
+    
     lastDraggedVertexRef.current = index;
     lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
     
@@ -396,12 +406,6 @@ const Canvas = forwardRef(({
   const handleVertexDragEnd = (index) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     
-    // Build the previous state with the original position
-    const previousVertices = lastDragStartPosRef.current ? 
-      perimeterOverlay.vertices.map((v, i) => 
-        i === index ? lastDragStartPosRef.current : v
-      ) : null;
-    
     // Get current position from visual snap or current vertex position
     const currentVertex = perimeterOverlay.vertices[index];
     
@@ -413,13 +417,20 @@ const Canvas = forwardRef(({
     // Use snapped position if available, otherwise use raw position
     const finalPoint = snappedPoint || currentVertex;
     
+    // If vertex didn't actually move, cancel the undo point saved at drag start
+    const origVertex = lastDragStartPosRef.current;
+    if (origVertex && finalPoint.x === origVertex.x && finalPoint.y === origVertex.y) {
+      onCancelUndoSave?.();
+      setDraggingVertex(null);
+      return;
+    }
+    
     // Now update the actual data point
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = finalPoint;
 
-    // Re-render to show final position and any aligned vertices
-    // Notify that perimeter changed
-    onPerimeterUpdate(newVertices, true, previousVertices); // Save action for undo
+    // Undo point was already saved at drag start; just commit the final position
+    onPerimeterUpdate(newVertices, false);
     
     // Clean up
     setDraggingVertex(null);
@@ -643,7 +654,7 @@ const Canvas = forwardRef(({
   // Handle global mouse up
   const handleStageMouseUp = () => {
     if (draggingRoom) {
-      // Check if room position changed and save for undo
+      // If room didn't actually move, cancel the undo point saved at drag start
       if (lastRoomDragStartRef.current && roomOverlay) {
         const changed = 
           lastRoomDragStartRef.current.x1 !== roomOverlay.x1 ||
@@ -651,18 +662,17 @@ const Canvas = forwardRef(({
           lastRoomDragStartRef.current.x2 !== roomOverlay.x2 ||
           lastRoomDragStartRef.current.y2 !== roomOverlay.y2;
         
-        if (changed) {
-          // Trigger a final update with saveAction=true to record the change
-          // Pass the previous state explicitly
-          onRoomOverlayUpdate(roomOverlay, true, lastRoomDragStartRef.current);
+        if (!changed) {
+          onCancelUndoSave?.();
         }
+        // The final overlay state is already in the store from intermediate drag updates
       }
       setDraggingRoom(false);
       setRoomStart(null);
       lastRoomDragStartRef.current = null;
     }
     if (draggingRoomCorner) {
-      // Check if room size changed and save for undo
+      // If room size didn't actually change, cancel the undo point saved at drag start
       if (lastRoomDragStartRef.current && roomOverlay) {
         const changed = 
           lastRoomDragStartRef.current.x1 !== roomOverlay.x1 ||
@@ -670,11 +680,10 @@ const Canvas = forwardRef(({
           lastRoomDragStartRef.current.x2 !== roomOverlay.x2 ||
           lastRoomDragStartRef.current.y2 !== roomOverlay.y2;
         
-        if (changed) {
-          // Trigger a final update with saveAction=true to record the change
-          // Pass the previous state explicitly
-          onRoomOverlayUpdate(roomOverlay, true, lastRoomDragStartRef.current);
+        if (!changed) {
+          onCancelUndoSave?.();
         }
+        // The final overlay state is already in the store from intermediate drag updates
       }
       setDraggingRoomCorner(null);
       lastRoomDragStartRef.current = null;
