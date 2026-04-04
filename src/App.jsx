@@ -43,9 +43,7 @@ function App() {
   const [detectionDebugData, setDetectionDebugData] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [showPanelOptions, setShowPanelOptions] = useState(false);
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef(null);
-  const dragCounterRef = useRef(0);
   const canvasRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
@@ -328,34 +326,12 @@ function App() {
     }
   }, [resetOverlays, handleManualMode]);
 
-  // Handle file drag-and-drop when no floorplan is loaded
-  const handleDragEnter = useCallback((e) => {
-    e.preventDefault();
-    if (image) return;
-    dragCounterRef.current += 1;
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDraggingOver(true);
-    }
-  }, [image]);
-
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    if (image) return;
-    dragCounterRef.current -= 1;
-    if (dragCounterRef.current === 0) {
-      setIsDraggingOver(false);
-    }
-  }, [image]);
-
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
   }, []);
 
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
-    dragCounterRef.current = 0;
-    setIsDraggingOver(false);
-    if (image) return;
     const file = e.dataTransfer.files[0];
     if (!file || !file.type.startsWith('image/')) return;
     try {
@@ -367,7 +343,7 @@ function App() {
       console.error('Error loading dropped image:', error);
       alert('Failed to load image. Please try again.');
     }
-  }, [image, resetOverlays, handleManualMode]);
+  }, [resetOverlays, handleManualMode]);
 
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
     const activeBoundary = getBoundaryForMode(boundaryResult, interiorMode);
@@ -978,8 +954,6 @@ function App() {
     <div
       id="app-container"
       className="flex flex-col h-screen bg-chrome-900"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -1090,17 +1064,6 @@ function App() {
           </div>
         )}
 
-        {!image && isDraggingOver && (
-          <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
-            <div className="absolute inset-2 rounded-xl border-2 border-dashed border-blue-400 bg-blue-900/30" />
-            <div className="relative flex flex-col items-center gap-2 text-blue-300">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
-              <span className="text-lg font-semibold">Drop image to load</span>
-            </div>
-          </div>
-        )}
       </div>
 
       <input
