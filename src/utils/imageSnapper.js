@@ -165,8 +165,8 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
     const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
 
-    const yLo = clamp(Math.min(y1, y2), 0, height - 1);
-    const yHi = clamp(Math.max(y1, y2), 0, height - 1);
+    const yLo = clamp(Math.round(Math.min(y1, y2)), 0, height - 1);
+    const yHi = clamp(Math.round(Math.max(y1, y2)), 0, height - 1);
     const span = Math.max(1, yHi - yLo + 1);
 
     const xCenter = Math.round(targetX);
@@ -200,8 +200,8 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
     const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
 
-    const xLo = clamp(Math.min(x1, x2), 0, width - 1);
-    const xHi = clamp(Math.max(x1, x2), 0, width - 1);
+    const xLo = clamp(Math.round(Math.min(x1, x2)), 0, width - 1);
+    const xHi = clamp(Math.round(Math.max(x1, x2)), 0, width - 1);
     const span = Math.max(1, xHi - xLo + 1);
 
     const yCenter = Math.round(targetY);
