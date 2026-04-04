@@ -88,7 +88,7 @@ function App() {
   });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
-  const dimensionFocusedRef = useRef(false); // Prevents multiple undo saves when focus moves between sub-fields
+  const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
@@ -960,13 +960,13 @@ function App() {
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
           onDimensionFocus={() => {
-            if (!dimensionFocusedRef.current) {
-              dimensionFocusedRef.current = true;
+            if (!dimensionEditActiveRef.current) {
+              dimensionEditActiveRef.current = true;
               undoManager.save();
             }
           }}
           onDimensionBlur={() => {
-            setTimeout(() => { dimensionFocusedRef.current = false; }, 0);
+            setTimeout(() => { dimensionEditActiveRef.current = false; }, 0);
           }}
         />
 
