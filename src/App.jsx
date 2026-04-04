@@ -973,7 +973,7 @@ function App() {
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
         onStartOver={handleStartOver}
-        onHelpOpen={() => setShowHelpModal(true)}
+        onHelpOpen={() => setShowHelpModal(prev => !prev)}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
