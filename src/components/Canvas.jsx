@@ -1653,11 +1653,6 @@ const Canvas = forwardRef(({
             const previewColor = previewColors.normal;
             const dx = currentMeasurementLine.end.x - currentMeasurementLine.start.x;
             const dy = currentMeasurementLine.end.y - currentMeasurementLine.start.y;
-            const minPreviewLength = 1; // pixels; suppress label for near-zero-length lines
-            const hasLength = Math.sqrt(dx * dx + dy * dy) > minPreviewLength;
-            const previewLayout = hasLength && pixelsPerFoot
-              ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit)
-              : null;
             return (
               <Layer>
                 <Line
@@ -1672,19 +1667,6 @@ const Canvas = forwardRef(({
                   dash={[6 / scale, 3 / scale]}
                   opacity={0.7}
                 />
-                {previewLayout && (
-                  <Text
-                    x={previewLayout.labelX}
-                    y={previewLayout.labelY}
-                    text={previewLayout.textStr}
-                    fontSize={previewLayout.fontSize}
-                    fill={previewColor}
-                    fontStyle="bold"
-                    offsetX={previewLayout.approxTextWidth / 2}
-                    offsetY={previewLayout.approxTextHeight / 2}
-                    opacity={0.9}
-                  />
-                )}
               </Layer>
             );
           })()}
