@@ -59,12 +59,3 @@ export const dataUrlToImage = (dataUrl) => {
   });
 };
 
-// Convert Image to Canvas for processing
-export const imageToCanvas = (img) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-  return canvas;
-};
