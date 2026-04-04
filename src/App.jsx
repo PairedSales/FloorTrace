@@ -544,6 +544,33 @@ function App() {
   // Handle save image (one-click screenshot of the entire app)
   const handleSaveImage = async () => {
     try {
+      // Acquire file handle / check permissions FIRST while user gesture is still
+      // active.  showSaveFilePicker and requestPermission both require transient
+      // user activation, which can expire if toPng runs before them.
+      let fileHandle = null;
+      if (window.showSaveFilePicker) {
+        fileHandle = saveFileHandleRef.current;
+        if (!fileHandle) {
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: `floortrace-${timestamp}.png`,
+            types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
+          });
+          saveFileHandleRef.current = fileHandle;
+          setHasSaveLocation(true);
+          await storeFileHandle(fileHandle);
+        } else {
+          const perm = await fileHandle.queryPermission({ mode: 'readwrite' });
+          if (perm !== 'granted') {
+            const req = await fileHandle.requestPermission({ mode: 'readwrite' });
+            if (req !== 'granted') {
+              alert('Permission to write file was denied.');
+              return;
+            }
+          }
+        }
+      }
+
       const { toPng } = await import('html-to-image');
       const appElement = document.getElementById('app-container');
       if (!appElement) {
@@ -551,33 +578,13 @@ function App() {
         return;
       }
 
-      const dataUrl = await toPng(appElement, { pixelRatio: 2, skipFonts: true });
+      const dataUrl = await toPng(appElement, { pixelRatio: 2 });
 
-      if (window.showSaveFilePicker) {
-        let handle = saveFileHandleRef.current;
-        if (!handle) {
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-          handle = await window.showSaveFilePicker({
-            suggestedName: `floortrace-${timestamp}.png`,
-            types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
-          });
-          saveFileHandleRef.current = handle;
-          setHasSaveLocation(true);
-          await storeFileHandle(handle);
-        } else {
-          const perm = await handle.queryPermission({ mode: 'readwrite' });
-          if (perm !== 'granted') {
-            const req = await handle.requestPermission({ mode: 'readwrite' });
-            if (req !== 'granted') {
-              alert('Permission to write file was denied.');
-              return;
-            }
-          }
-        }
+      if (fileHandle) {
         const base64 = dataUrl.split(',')[1];
         const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
         const blob = new Blob([bytes], { type: 'image/png' });
-        const writable = await handle.createWritable();
+        const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
       } else {
