@@ -54,7 +54,7 @@
 
   /* Panel input */
   .panel-input {
-    @apply w-full px-2.5 py-1.5 text-sm font-mono rounded-md
+    @apply w-full px-2.5 py-1.5 text-sm font-mono rounded-md text-center
            bg-chrome-900/80 border border-chrome-700 text-slate-100
            placeholder-slate-500
            focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent
