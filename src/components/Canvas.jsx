@@ -1072,7 +1072,7 @@ const Canvas = forwardRef(({
       )}
 
       {isProcessing && (
-        <div className="absolute inset-0 bg-chrome-900/60 backdrop-blur-sm flex items-center justify-center z-10">
+        <div className="absolute inset-0 bg-chrome-900/60 flex items-start justify-center pt-3 z-10">
           <div className="bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3.5 shadow-xl">
             <div className="flex items-center gap-3">
               <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
