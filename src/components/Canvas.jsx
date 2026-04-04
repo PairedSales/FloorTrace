@@ -11,6 +11,7 @@ const Canvas = forwardRef(({
   onRoomOverlayUpdate,
   onPerimeterUpdate,
   isProcessing,
+  processingMessage,
   detectedDimensions,
   onDimensionSelect,
   showSideLengths,
@@ -1076,7 +1077,7 @@ const Canvas = forwardRef(({
           <div className="bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3.5 shadow-xl">
             <div className="flex items-center gap-3">
               <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
-              <span className="text-sm text-slate-200 font-medium">Processing image&hellip;</span>
+              <span className="text-sm text-slate-200 font-medium">{processingMessage || 'Working…'}</span>
             </div>
           </div>
         </div>
