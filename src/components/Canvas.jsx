@@ -36,8 +36,10 @@ const LINE_COLORS = [
   { normal: '#FF79C6', selected: '#FFA8D9' }, // Dracula Pink
 ];
 
-/** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short. */
-const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
+/** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
+ *  @param {object} options
+ *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). */
+const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove = false } = {}) => {
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const lenPx = Math.sqrt(dx * dx + dy * dy);
@@ -48,8 +50,10 @@ const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
   const uy = lenPx > 1e-6 ? dy / lenPx : 0;
   const mx = (line.start.x + line.end.x) / 2;
   const my = (line.start.y + line.end.y) / 2;
-  const nx = -uy;
-  const ny = ux;
+  // Normal (perpendicular) to the line, chosen to point "above" (negative-y in screen space).
+  let nx = -uy;
+  let ny = ux;
+  if (ny > 0 || (ny === 0 && nx > 0)) { nx = -nx; ny = -ny; }
 
   const approxPad = 6 / scale;
   const approxCharW = fontSize * 0.58;
@@ -60,7 +64,7 @@ const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit) => {
     (approxTextWidth * Math.abs(ux) + approxTextHeight * Math.abs(uy)) / 2 + approxPad;
   const maxHalfGap = Math.max(0, lenPx / 2 - 0.5 / scale);
   const halfGap = Math.min(extentAlongLine, maxHalfGap);
-  const needsPerpendicularLift = maxHalfGap < extentAlongLine - 1e-3;
+  const needsPerpendicularLift = forceAbove || maxHalfGap < extentAlongLine - 1e-3;
   const halfExtentOnNormal =
     (approxTextWidth / 2) * Math.abs(nx) + (approxTextHeight / 2) * Math.abs(ny);
   const liftPerp = needsPerpendicularLift ? halfExtentOnNormal + 4 / scale : 0;
@@ -1656,7 +1660,7 @@ const Canvas = forwardRef(({
             const minPreviewLength = 1; // pixels; suppress label for near-zero-length lines
             const hasLength = Math.sqrt(dx * dx + dy * dy) > minPreviewLength;
             const previewLayout = hasLength && pixelsPerFoot
-              ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit)
+              ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit, { forceAbove: true })
               : null;
             return (
               <Layer>
