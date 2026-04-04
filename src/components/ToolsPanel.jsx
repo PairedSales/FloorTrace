@@ -30,7 +30,7 @@ const ToolsPanel = ({
               className="text-[11px] font-semibold text-red-400 uppercase tracking-wider hover:text-red-300 cursor-pointer transition-colors duration-200"
               title="Clear all measurements and shapes"
             >
-              Clear
+              CLEAR
             </button>
           )}
         </div>
