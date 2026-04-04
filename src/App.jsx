@@ -506,15 +506,22 @@ function App() {
       const video = document.createElement('video');
       video.srcObject = stream;
       video.muted = true;
-      await new Promise((resolve) => {
-        video.onloadedmetadata = () => resolve();
-        video.play();
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => video.play().then(resolve).catch(reject);
+        video.onerror = reject;
       });
 
+      const canvasWidth = width || video.videoWidth;
+      const canvasHeight = height || video.videoHeight;
+      if (!canvasWidth || !canvasHeight) {
+        throw new Error('Could not determine capture dimensions');
+      }
+
       const offscreen = document.createElement('canvas');
-      offscreen.width = width || video.videoWidth;
-      offscreen.height = height || video.videoHeight;
-      offscreen.getContext('2d').drawImage(video, 0, 0, offscreen.width, offscreen.height);
+      offscreen.width = canvasWidth;
+      offscreen.height = canvasHeight;
+      offscreen.getContext('2d').drawImage(video, 0, 0, canvasWidth, canvasHeight);
+      video.srcObject = null;
 
       offscreen.toBlob((blob) => {
         if (!blob) {
