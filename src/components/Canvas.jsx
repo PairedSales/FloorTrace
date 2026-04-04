@@ -1,6 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
-import { formatLength } from '../utils/unitConverter';
+import { formatLength, sqFeetToSqMeters } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
@@ -26,6 +26,11 @@ function measureSideLenWidth(text, fontSize) {
 const OCR_DOT_BASE_RADIUS = 3;
 /** Minimum rendered dot radius in pixels for the OCR anchor dot. */
 const OCR_DOT_MIN_RADIUS = 2;
+
+/** Conversion factor from square meters to square centimeters. */
+const SQ_M_TO_SQ_CM = 10000;
+/** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
+const MIN_SQ_M_DISPLAY = 0.1;
 
 /** Cycling colors for measurement lines (Dracula color scheme). */
 const LINE_COLORS = [
@@ -1744,9 +1749,17 @@ const Canvas = forwardRef(({
                   {shape.closed && shape.vertices.length >= 3 && (() => {
                     const centroid = getCentroid(shape.vertices);
                     const areaValue = calculateArea(shape.vertices, pixelsPerFoot);
-                    const areaText = areaValue >= 1
-                      ? `${areaValue.toFixed(1)} sq ft`
-                      : `${(areaValue * 144).toFixed(0)} sq in`;
+                    let areaText;
+                    if (unit === 'metric') {
+                      const sqMeters = sqFeetToSqMeters(areaValue);
+                      areaText = sqMeters >= MIN_SQ_M_DISPLAY
+                        ? `${sqMeters.toFixed(2)} m²`
+                        : `${(sqMeters * SQ_M_TO_SQ_CM).toFixed(0)} cm²`;
+                    } else {
+                      areaText = areaValue >= 1
+                        ? `${areaValue.toFixed(1)} sq ft`
+                        : `${(areaValue * 144).toFixed(0)} sq in`;
+                    }
                     return (
                       <Text
                         name="custom-shape"

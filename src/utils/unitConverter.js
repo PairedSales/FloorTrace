@@ -1,3 +1,8 @@
+/** Conversion factor: 1 foot = 0.3048 meters */
+const FEET_TO_METERS = 0.3048;
+/** Conversion factor: 1 square foot = 0.092903 square meters */
+const SQ_FEET_TO_SQ_METERS = FEET_TO_METERS * FEET_TO_METERS;
+
 /**
  * Convert decimal feet to feet and inches
  * @param {number} decimalFeet - Length in decimal feet (e.g., 12.4)
@@ -20,17 +25,70 @@ export const feetInchesToDecimal = (feet, inches) => {
 };
 
 /**
+ * Convert decimal feet to meters
+ * @param {number} decimalFeet - Length in decimal feet
+ * @returns {number} - Length in meters
+ */
+export const feetToMeters = (decimalFeet) => {
+  return decimalFeet * FEET_TO_METERS;
+};
+
+/**
+ * Convert meters to decimal feet
+ * @param {number} meters - Length in meters
+ * @returns {number} - Length in decimal feet
+ */
+export const metersToFeet = (meters) => {
+  return meters / FEET_TO_METERS;
+};
+
+/**
+ * Convert square feet to square meters
+ * @param {number} sqFeet - Area in square feet
+ * @returns {number} - Area in square meters
+ */
+export const sqFeetToSqMeters = (sqFeet) => {
+  return sqFeet * SQ_FEET_TO_SQ_METERS;
+};
+
+/**
  * Format a length value based on the selected unit system
  * @param {number} decimalFeet - Length in decimal feet
- * @param {string} unit - 'decimal' or 'inches'
- * @returns {string} - Formatted string (e.g., "12.4 ft" or "12' 4\"")
+ * @param {string} unit - 'decimal', 'inches', or 'metric'
+ * @returns {string} - Formatted string (e.g., "12.4 ft", "12' 4\"", or "3.8 m")
  */
 export const formatLength = (decimalFeet, unit = 'decimal') => {
   if (unit === 'inches') {
     const { feet, inches } = decimalToFeetInches(decimalFeet);
     return `${feet}' ${inches}"`;
   }
+  if (unit === 'metric') {
+    const meters = feetToMeters(decimalFeet);
+    return `${meters.toFixed(2)} m`;
+  }
   return `${decimalFeet.toFixed(1)} ft`;
+};
+
+/**
+ * Format an area value based on the selected unit system
+ * @param {number} areaInSqFeet - Area in square feet
+ * @param {string} unit - 'decimal', 'inches', or 'metric'
+ * @returns {{ value: string, suffix: string }} - Formatted area value and unit suffix
+ */
+export const formatArea = (areaInSqFeet, unit = 'decimal') => {
+  if (unit === 'metric') {
+    const sqMeters = sqFeetToSqMeters(areaInSqFeet);
+    return {
+      value: sqMeters >= 1
+        ? Math.round(sqMeters).toLocaleString()
+        : sqMeters.toFixed(2),
+      suffix: 'm²',
+    };
+  }
+  return {
+    value: areaInSqFeet > 0 ? Math.round(areaInSqFeet).toLocaleString() : '0',
+    suffix: 'ft²',
+  };
 };
 
 /**
@@ -84,7 +142,7 @@ export const parseLength = (input) => {
 /**
  * Format dimension value for display in input field
  * @param {string|number} value - Current value (stored value in decimal feet)
- * @param {string} unit - 'decimal' or 'inches'
+ * @param {string} unit - 'decimal', 'inches', or 'metric'
  * @returns {string} - Formatted value for input field
  */
 export const formatDimensionInput = (value, unit = 'decimal') => {
@@ -97,6 +155,11 @@ export const formatDimensionInput = (value, unit = 'decimal') => {
   if (unit === 'inches') {
     const { feet, inches } = decimalToFeetInches(numValue);
     return `${feet}' ${inches}"`;
+  }
+  
+  if (unit === 'metric') {
+    const meters = feetToMeters(numValue);
+    return meters.toFixed(2);
   }
   
   return numValue.toFixed(1);
