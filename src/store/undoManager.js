@@ -12,6 +12,7 @@ let savedRedoStackForCancel = null; // Saved redo stack before last save, for ca
  * No-op if no image is loaded.
  */
 export function save() {
+  savedRedoStackForCancel = null; // Reset any stale cancel target first
   const state = useAppStore.getState();
   if (!state.image) return;
   if (undoStack.length >= MAX_UNDO) undoStack.shift();
@@ -25,7 +26,7 @@ export function save() {
  * Only call this when you know save() was just called and nothing changed.
  */
 export function cancelLastSave() {
-  if (savedRedoStackForCancel !== null) {
+  if (savedRedoStackForCancel !== null && undoStack.length > 0) {
     undoStack.pop();
     redoStack = savedRedoStackForCancel;
     savedRedoStackForCancel = null;
