@@ -1,6 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
-import { formatLength, feetToMeters, sqFeetToSqMeters } from '../utils/unitConverter';
+import { formatLength, sqFeetToSqMeters } from '../utils/unitConverter';
 import { calculateArea, getCentroid } from '../utils/areaCalculator';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 
