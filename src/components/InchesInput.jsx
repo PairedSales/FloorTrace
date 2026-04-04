@@ -49,7 +49,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
 
   return (
     <div
-      className="flex items-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
+      className="flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
                  focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
       onClick={() => feetRef.current?.focus()}
     >
