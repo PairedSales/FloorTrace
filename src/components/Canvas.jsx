@@ -27,6 +27,11 @@ const OCR_DOT_BASE_RADIUS = 3;
 /** Minimum rendered dot radius in pixels for the OCR anchor dot. */
 const OCR_DOT_MIN_RADIUS = 2;
 
+/** Conversion factor from square meters to square centimeters. */
+const SQ_M_TO_SQ_CM = 10000;
+/** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
+const MIN_SQ_M_DISPLAY = 0.1;
+
 /** Cycling colors for measurement lines (Dracula color scheme). */
 const LINE_COLORS = [
   { normal: '#FFB86C', selected: '#FFCA99' }, // Dracula Orange
@@ -1747,9 +1752,9 @@ const Canvas = forwardRef(({
                     let areaText;
                     if (unit === 'metric') {
                       const sqMeters = sqFeetToSqMeters(areaValue);
-                      areaText = sqMeters >= 0.1
+                      areaText = sqMeters >= MIN_SQ_M_DISPLAY
                         ? `${sqMeters.toFixed(2)} m²`
-                        : `${(sqMeters * 10000).toFixed(0)} cm²`;
+                        : `${(sqMeters * SQ_M_TO_SQ_CM).toFixed(0)} cm²`;
                     } else {
                       areaText = areaValue >= 1
                         ? `${areaValue.toFixed(1)} sq ft`
