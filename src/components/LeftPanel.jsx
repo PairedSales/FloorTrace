@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { formatDimensionInput } from '../utils/unitConverter';
+import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import InchesInput from './InchesInput';
 import Toggle from './Toggle';
 
@@ -33,15 +33,16 @@ const LeftPanel = ({
     if (!editingField) {
       const fw = formatDimensionInput(roomDimensions.width, unit);
       const fh = formatDimensionInput(roomDimensions.height, unit);
+      const suffix = unit === 'metric' ? ' m' : unit === 'decimal' ? ' ft' : '';
       setDisplayValues({
-        width: unit === 'decimal' && fw ? `${fw} ft` : fw,
-        height: unit === 'decimal' && fh ? `${fh} ft` : fh,
+        width: (unit === 'decimal' || unit === 'metric') && fw ? `${fw}${suffix}` : fw,
+        height: (unit === 'decimal' || unit === 'metric') && fh ? `${fh}${suffix}` : fh,
       });
     }
   }, [roomDimensions, unit, editingField]);
 
   const handleDimensionChange = (field, value) => {
-    if (unit === 'decimal') {
+    if (unit === 'decimal' || unit === 'metric') {
       if (/^[\d.]*$/.test(value)) {
         setDisplayValues((p) => ({ ...p, [field]: value }));
       }
@@ -54,14 +55,14 @@ const LeftPanel = ({
 
   const handleFocus = (field) => {
     setEditingField(field);
-    if (unit === 'decimal') {
+    if (unit === 'decimal' || unit === 'metric') {
       setOriginalValues((p) => ({ ...p, [field]: displayValues[field] }));
       setDisplayValues((p) => ({ ...p, [field]: '' }));
     }
   };
 
   const handleBlur = (field) => {
-    if (unit === 'decimal') {
+    if (unit === 'decimal' || unit === 'metric') {
       const value = displayValues[field].trim();
       if (!value) {
         setDisplayValues((p) => ({ ...p, [field]: originalValues[field] }));
@@ -70,12 +71,20 @@ const LeftPanel = ({
       }
       const num = parseFloat(value);
       if (!isNaN(num) && num > 0) {
-        const parsed = Math.round(num * 10) / 10;
-        const next = { ...localDimensions, [field]: parsed.toString() };
+        let storedValue;
+        if (unit === 'metric') {
+          // User entered meters — convert to feet for internal storage
+          const parsed = Math.round(num * 100) / 100;
+          storedValue = metersToFeet(parsed);
+        } else {
+          storedValue = Math.round(num * 10) / 10;
+        }
+        const next = { ...localDimensions, [field]: storedValue.toString() };
         setLocalDimensions(next);
         onDimensionsChange?.(next);
-        const formatted = formatDimensionInput(parsed, unit);
-        setDisplayValues((p) => ({ ...p, [field]: `${formatted} ft` }));
+        const formatted = formatDimensionInput(storedValue, unit);
+        const suffix = unit === 'metric' ? ' m' : ' ft';
+        setDisplayValues((p) => ({ ...p, [field]: `${formatted}${suffix}` }));
       } else {
         setDisplayValues((p) => ({ ...p, [field]: originalValues[field] }));
       }
@@ -83,7 +92,7 @@ const LeftPanel = ({
     setEditingField(null);
   };
 
-  const areaText = area > 0 ? Math.round(area).toLocaleString() : '0';
+  const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
 
   return (
     <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
@@ -106,6 +115,12 @@ const LeftPanel = ({
           >
             Inches
           </button>
+          <button
+            onClick={() => onUnitChange('metric')}
+            className={`unit-pill ${unit === 'metric' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
+          >
+            Metric
+          </button>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -127,7 +142,7 @@ const LeftPanel = ({
                 onFocus={() => handleFocus('width')}
                 onBlur={() => handleBlur('width')}
                 className="panel-input"
-                placeholder="0.0 ft"
+                placeholder={unit === 'metric' ? '0.00 m' : '0.0 ft'}
               />
             )}
           </div>
@@ -150,7 +165,7 @@ const LeftPanel = ({
                 onFocus={() => handleFocus('height')}
                 onBlur={() => handleBlur('height')}
                 className="panel-input"
-                placeholder="0.0 ft"
+                placeholder={unit === 'metric' ? '0.00 m' : '0.0 ft'}
               />
             )}
           </div>
@@ -177,7 +192,7 @@ const LeftPanel = ({
             fontSize: areaText.length <= 7 ? '1.75rem' : areaText.length <= 9 ? '1.375rem' : '1.125rem',
           }}>
             {areaText}
-            <span className="text-accent/60 text-sm font-medium ml-1">ft²</span>
+            <span className="text-accent/60 text-sm font-medium ml-1">{areaSuffix}</span>
           </div>
         </div>
       </section>
