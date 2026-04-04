@@ -765,9 +765,9 @@ function App() {
     placeOverlay();
   };
 
-  // Restore locally autosaved data first, otherwise auto-load example floorplan for testing
+  // Restore locally autosaved data on startup (if save-on-exit is enabled)
   useEffect(() => {
-    const restoreOrLoadExampleImage = async () => {
+    const restoreAutosavedDraft = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       try {
         const savedStateRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
@@ -807,28 +807,10 @@ function App() {
         console.error('Failed to restore autosaved draft:', error);
       }
 
-      try {
-        console.log('Loading ExampleFloorplan.png for testing...');
-        const response = await fetch('./ExampleFloorplan.png');
-        const blob = await response.blob();
-
-        // Create file object
-        const file = new File([blob], 'ExampleFloorplan.png', { type: 'image/png' });
-
-        // Use the existing file upload logic
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        hasRestoredStateRef.current = true;
-        console.log('ExampleFloorplan.png loaded successfully');
-      } catch (error) {
-        console.error('Failed to load example image:', error);
-        // Don't show error to user for now - it's temporary testing code
-      } finally {
-        hasRestoredStateRef.current = true;
-      }
+      hasRestoredStateRef.current = true;
     };
 
-    restoreOrLoadExampleImage();
+    restoreAutosavedDraft();
   }, []);
 
   useEffect(() => {
