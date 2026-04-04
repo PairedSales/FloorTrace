@@ -818,7 +818,8 @@ function App() {
     };
   }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
 
-  // Autosave draft to local storage when working state changes.
+  // Autosave draft to local storage when working state changes (debounced).
+  const autosaveTimerRef = useRef(null);
   useEffect(() => {
     if (!hasRestoredStateRef.current) {
       return;
@@ -833,32 +834,25 @@ function App() {
       return;
     }
 
-    saveAutosavedDraft({
-      image,
-      roomOverlay,
-      perimeterOverlay,
-      roomDimensions,
-      area,
-      scale,
-      mode,
-      detectedDimensions,
-      showSideLengths,
-      useInteriorWalls,
-      autoSnapEnabled,
-      manualEntryMode,
-      ocrFailed,
-      unit,
-      lineToolActive,
-      measurementLines,
-      currentMeasurementLine,
-      drawAreaActive,
-      customShapes,
-      currentCustomShape,
-      perimeterVertices,
-      tracedBoundaries,
-      debugDetection,
-      detectionDebugData
-    });
+    // Debounce: wait 2 seconds of inactivity before writing to localStorage.
+    // This avoids dozens of writes per second during drag operations.
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = setTimeout(() => {
+      saveAutosavedDraft({
+        image,
+        ...appStateRef.current,
+        detectedDimensions,
+      });
+    }, 2000);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
   }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, clearAutosavedDraft, saveAutosavedDraft, saveOnExit]);
 
   useEffect(() => () => terminateDetectionWorker(), []);
