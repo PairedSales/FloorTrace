@@ -117,12 +117,6 @@ const LeftPanel = ({
           >
             Inches
           </button>
-          <button
-            onClick={() => onUnitChange('metric')}
-            className={`unit-pill ${unit === 'metric' ? 'unit-pill-active' : 'unit-pill-inactive'}`}
-          >
-            Metric
-          </button>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -247,6 +241,11 @@ const LeftPanel = ({
             <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
               Settings
             </h3>
+            <Toggle
+              label="Metric"
+              checked={unit === 'metric'}
+              onChange={(v) => onUnitChange(v ? 'metric' : 'decimal')}
+            />
             <Toggle
               label="Save on Exit"
               checked={saveOnExit}
