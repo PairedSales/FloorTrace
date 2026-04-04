@@ -88,6 +88,7 @@ function App() {
   });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
+  const dimensionFocusedRef = useRef(false); // Prevents multiple undo saves when focus moves between sub-fields
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
@@ -924,6 +925,8 @@ function App() {
             detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
+            onSaveUndoPoint={() => undoManager.save()}
+            onCancelUndoSave={() => undoManager.cancelLastSave()}
           />
         </div>
 
@@ -938,7 +941,10 @@ function App() {
           area={area}
           mode={mode}
           unit={unit}
-          onUnitChange={setUnit}
+          onUnitChange={(u) => {
+            undoManager.save();
+            setUnit(u);
+          }}
           isProcessing={isProcessing}
           ocrFailed={ocrFailed}
           showSideLengths={showSideLengths}
@@ -953,6 +959,15 @@ function App() {
           showOptions={showPanelOptions}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
+          onDimensionFocus={() => {
+            if (!dimensionFocusedRef.current) {
+              dimensionFocusedRef.current = true;
+              undoManager.save();
+            }
+          }}
+          onDimensionBlur={() => {
+            setTimeout(() => { dimensionFocusedRef.current = false; }, 0);
+          }}
         />
 
         {area > 0 && (
