@@ -4,6 +4,7 @@ const MAX_UNDO = 100;
 
 let undoStack = [];
 let redoStack = [];
+let savedRedoStackForCancel = null; // Saved redo stack before last save, for cancelLastSave
 
 /**
  * Save the current state as an undo point.
@@ -11,11 +12,25 @@ let redoStack = [];
  * No-op if no image is loaded.
  */
 export function save() {
+  savedRedoStackForCancel = null; // Reset any stale cancel target first
   const state = useAppStore.getState();
   if (!state.image) return;
   if (undoStack.length >= MAX_UNDO) undoStack.shift();
+  savedRedoStackForCancel = redoStack;
   undoStack.push(state.createSnapshot());
   redoStack = [];
+}
+
+/**
+ * Cancel the most recent save(), restoring the redo stack that was cleared.
+ * Only call this when you know save() was just called and nothing changed.
+ */
+export function cancelLastSave() {
+  if (savedRedoStackForCancel !== null && undoStack.length > 0) {
+    undoStack.pop();
+    redoStack = savedRedoStackForCancel;
+    savedRedoStackForCancel = null;
+  }
 }
 
 /**
@@ -48,4 +63,5 @@ export function redo() {
 export function clear() {
   undoStack = [];
   redoStack = [];
+  savedRedoStackForCancel = null;
 }

@@ -24,6 +24,8 @@ const LeftPanel = ({
   showOptions,
   saveOnExit,
   onSaveOnExitChange,
+  onDimensionFocus,
+  onDimensionBlur,
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -56,6 +58,7 @@ const LeftPanel = ({
   };
 
   const handleFocus = (field) => {
+    onDimensionFocus?.();
     setEditingField(field);
     if (unit === 'decimal' || unit === 'metric') {
       setOriginalValues((p) => ({ ...p, [field]: displayValues[field] }));
@@ -64,6 +67,7 @@ const LeftPanel = ({
   };
 
   const handleBlur = (field) => {
+    onDimensionBlur?.();
     if (unit === 'decimal' || unit === 'metric') {
       const value = displayValues[field].trim();
       if (!value) {
