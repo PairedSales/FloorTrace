@@ -486,39 +486,37 @@ function App() {
     setCustomShapes(nextShapes);
   }, [pushUndoState]);
 
-  // Handle save image (screenshot entire app)
+  // Handle save image (screenshot the visible browser window)
   const handleSaveImage = async () => {
+    let stream = null;
     try {
-      const html2canvas = (await import('html2canvas')).default;
-      const appElement = document.getElementById('app-container');
-      if (!appElement) {
-        alert('Could not capture screenshot');
-        return;
-      }
-
-      const canvas = await html2canvas(appElement, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        logging: false,
-        useCORS: true,
-        // Ensure all elements are rendered
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: document.documentElement.offsetWidth,
-        windowHeight: document.documentElement.offsetHeight,
-        onclone: (clonedDoc) => {
-          // html2canvas skips background rendering for pointer-events:none elements;
-          // remove that style from matched nodes so panels render correctly.
-          clonedDoc.querySelectorAll('.pointer-events-none').forEach((el) => {
-            el.classList.remove('pointer-events-none');
-          });
-          clonedDoc.querySelectorAll('[style*="pointer-events"]').forEach((el) => {
-            el.style.pointerEvents = '';
-          });
-        },
+      // Capture the current tab as it actually appears in the browser.
+      // preferCurrentTab is a hint (Chrome 94+) that pre-selects this tab so
+      // the user only needs to click "Share" without having to pick a source.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        preferCurrentTab: true,
+        video: { frameRate: 1 },
+        audio: false,
       });
 
-      canvas.toBlob((blob) => {
+      // Draw a single frame from the captured stream onto a canvas.
+      const track = stream.getVideoTracks()[0];
+      const { width, height } = track.getSettings();
+
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => resolve();
+        video.play();
+      });
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = width || video.videoWidth;
+      offscreen.height = height || video.videoHeight;
+      offscreen.getContext('2d').drawImage(video, 0, 0, offscreen.width, offscreen.height);
+
+      offscreen.toBlob((blob) => {
         if (!blob) {
           alert('Failed to create image');
           return;
@@ -526,14 +524,20 @@ function App() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        link.download = `floortrace-${timestamp}.webp`;
+        link.download = `floortrace-${timestamp}.png`;
         link.href = url;
         link.click();
         URL.revokeObjectURL(url);
-      }, 'image/webp', 0.95);
+      }, 'image/png');
     } catch (error) {
+      // The user cancelled the screen-share dialog — treat as a no-op.
+      if (error.name === 'NotAllowedError') return;
       console.error('Error saving screenshot:', error);
       alert('Error saving screenshot. Please try again.');
+    } finally {
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
     }
   };
 
