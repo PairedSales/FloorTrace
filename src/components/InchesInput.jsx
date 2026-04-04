@@ -62,7 +62,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={onFocus}
           onBlur={onBlur}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
-          className="w-5 text-right outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          className="w-7 text-right outline-none bg-transparent text-slate-100 placeholder-slate-600"
           placeholder="0"
         />
         <span className="text-slate-500">&prime;</span>
