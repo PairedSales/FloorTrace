@@ -1,4 +1,4 @@
-import { Ruler, Pentagon, Trash2 } from 'lucide-react';
+import { Ruler, Pentagon } from 'lucide-react';
 
 const ToolsPanel = ({
   lineToolActive,
@@ -20,9 +20,20 @@ const ToolsPanel = ({
   return (
     <div className="relative z-10 flex shrink-0 flex-col self-start animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none">
       <section className="px-3 py-3 pointer-events-auto">
-        <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-          Tools
-        </h3>
+        <div className="flex items-center justify-between mb-1.5">
+          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+            Tools
+          </h3>
+          {hasToolData && (
+            <button
+              onClick={onClearTools}
+              className="text-[11px] font-semibold text-red-400 uppercase tracking-wider hover:text-red-300 cursor-pointer transition-colors duration-200"
+              title="Clear all measurements and shapes"
+            >
+              Clear
+            </button>
+          )}
+        </div>
         <div className="flex gap-1.5">
           <button
             onClick={onLineToolToggle}
@@ -34,7 +45,7 @@ const ToolsPanel = ({
             title="Measure Line"
           >
             <Ruler className="w-4 h-4" />
-            Measure
+            Line
           </button>
           <button
             onClick={onDrawAreaToggle}
@@ -46,19 +57,9 @@ const ToolsPanel = ({
             title="Draw Area"
           >
             <Pentagon className="w-4 h-4" />
-            Draw
+            Area
           </button>
         </div>
-        {hasToolData && (
-          <button
-            onClick={onClearTools}
-            className="flex items-center justify-center gap-1.5 w-full mt-2 px-2 py-1.5 rounded-md text-[10px] font-medium cursor-pointer transition-all duration-200 text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/30"
-            title="Clear all measurements and shapes"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear All
-          </button>
-        )}
       </section>
     </div>
   );
