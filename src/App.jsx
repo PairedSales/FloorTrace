@@ -12,50 +12,83 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
+import useAppStore from './store/appStore';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
 
 function App() {
-  const [image, setImage] = useState(null);
-  const [roomOverlay, setRoomOverlay] = useState(null);
-  const [perimeterOverlay, setPerimeterOverlay] = useState(null);
-  const [roomDimensions, setRoomDimensions] = useState({ width: '', height: '' });
-  const [area, setArea] = useState(0);
-  const [mode, setMode] = useState('normal'); // 'normal' or 'manual'
-  const [scale, setScale] = useState(1);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [detectedDimensions, setDetectedDimensions] = useState([]);
-  const [showSideLengths, setShowSideLengths] = useState(false);
-  const [useInteriorWalls, setUseInteriorWalls] = useState(true);
-  const [autoSnapEnabled, setAutoSnapEnabled] = useState(true);
-  const [manualEntryMode, setManualEntryMode] = useState(false); // User entering dimensions manually
-  const [ocrFailed, setOcrFailed] = useState(false); // Track if OCR failed in manual mode
-  const [unit, setUnit] = useState('decimal'); // 'decimal' or 'inches'
-  
-  const [lineToolActive, setLineToolActive] = useState(false);
-  const [measurementLines, setMeasurementLines] = useState([]); // Array of { start, end }
-  const [currentMeasurementLine, setCurrentMeasurementLine] = useState(null); // The line currently being drawn
-  const [drawAreaActive, setDrawAreaActive] = useState(false);
-  const [customShapes, setCustomShapes] = useState([]); // Array of { vertices, closed, area }
-  const [currentCustomShape, setCurrentCustomShape] = useState(null); // The shape currently being drawn
-  const [perimeterVertices, setPerimeterVertices] = useState(null); // Vertices being placed in manual mode (null = not active, [] = active)
-  const [tracedBoundaries, setTracedBoundaries] = useState(null);
-  const [debugDetection, setDebugDetection] = useState(false);
-  const [detectionDebugData, setDetectionDebugData] = useState(null);
-  const [notification, setNotification] = useState({ show: false, message: '' });
-  const [showPanelOptions, setShowPanelOptions] = useState(false);
+  // ── Pull everything from the Zustand store ──────────────────────────────
+  const image = useAppStore((s) => s.image);
+  const roomOverlay = useAppStore((s) => s.roomOverlay);
+  const perimeterOverlay = useAppStore((s) => s.perimeterOverlay);
+  const roomDimensions = useAppStore((s) => s.roomDimensions);
+  const area = useAppStore((s) => s.area);
+  const mode = useAppStore((s) => s.mode);
+  const scale = useAppStore((s) => s.scale);
+  const isProcessing = useAppStore((s) => s.isProcessing);
+  const detectedDimensions = useAppStore((s) => s.detectedDimensions);
+  const showSideLengths = useAppStore((s) => s.showSideLengths);
+  const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
+  const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
+  const manualEntryMode = useAppStore((s) => s.manualEntryMode);
+  const ocrFailed = useAppStore((s) => s.ocrFailed);
+  const unit = useAppStore((s) => s.unit);
+  const lineToolActive = useAppStore((s) => s.lineToolActive);
+  const measurementLines = useAppStore((s) => s.measurementLines);
+  const currentMeasurementLine = useAppStore((s) => s.currentMeasurementLine);
+  const drawAreaActive = useAppStore((s) => s.drawAreaActive);
+  const customShapes = useAppStore((s) => s.customShapes);
+  const currentCustomShape = useAppStore((s) => s.currentCustomShape);
+  const perimeterVertices = useAppStore((s) => s.perimeterVertices);
+  const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
+  const debugDetection = useAppStore((s) => s.debugDetection);
+  const detectionDebugData = useAppStore((s) => s.detectionDebugData);
+  const notification = useAppStore((s) => s.notification);
+  const showPanelOptions = useAppStore((s) => s.showPanelOptions);
+  const showHelpModal = useAppStore((s) => s.showHelpModal);
+
+  // Store actions (stable references — never cause re-renders)
+  const setImage = useAppStore((s) => s.setImage);
+  const setRoomOverlay = useAppStore((s) => s.setRoomOverlay);
+  const setPerimeterOverlay = useAppStore((s) => s.setPerimeterOverlay);
+  const setRoomDimensions = useAppStore((s) => s.setRoomDimensions);
+  const setArea = useAppStore((s) => s.setArea);
+  const setMode = useAppStore((s) => s.setMode);
+  const setScale = useAppStore((s) => s.setScale);
+  const setIsProcessing = useAppStore((s) => s.setIsProcessing);
+  const setDetectedDimensions = useAppStore((s) => s.setDetectedDimensions);
+  const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
+  const setOcrFailed = useAppStore((s) => s.setOcrFailed);
+  const setUnit = useAppStore((s) => s.setUnit);
+  const setLineToolActive = useAppStore((s) => s.setLineToolActive);
+  const setMeasurementLines = useAppStore((s) => s.setMeasurementLines);
+  const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
+  const setDrawAreaActive = useAppStore((s) => s.setDrawAreaActive);
+  const setCustomShapes = useAppStore((s) => s.setCustomShapes);
+  const setCurrentCustomShape = useAppStore((s) => s.setCurrentCustomShape);
+  const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
+  const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
+  const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
+  const setNotification = useAppStore((s) => s.setNotification);
+  const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
+  const setHasRestoredState = useAppStore((s) => s.setHasRestoredState);
+  const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
+  const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
+  const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
+  const setDebugDetection = useAppStore((s) => s.setDebugDetection);
+
+  const pushUndoState = useAppStore((s) => s.pushUndoState);
+  const resetOverlays = useAppStore((s) => s.resetOverlays);
+  const handleUndo = useAppStore((s) => s.handleUndo);
+  const handleRedo = useAppStore((s) => s.handleRedo);
+
   const [saveOnExit, setSaveOnExit] = useState(() => {
     const stored = localStorage.getItem(SAVE_ON_EXIT_KEY);
     return stored === null ? true : stored === 'true';
   });
-  const [showHelpModal, setShowHelpModal] = useState(false);
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
-  const undoStackRef = useRef([]);
-  const redoStackRef = useRef([]);
-  const appStateRef = useRef({});
-  const hasRestoredStateRef = useRef(false);
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
@@ -77,102 +110,13 @@ function App() {
       setNotification({ show: true, message: 'Autosave unavailable (storage full or blocked).' });
       setTimeout(() => setNotification({ show: false, message: '' }), 3000);
     }
-  }, []);
-
-  const cloneSnapshot = (value) => {
-    if (typeof structuredClone === 'function') {
-      return structuredClone(value);
-    }
-    return JSON.parse(JSON.stringify(value));
-  };
-
-  const createSnapshot = useCallback(() => cloneSnapshot(appStateRef.current), []);
-
-  const pushUndoState = useCallback(() => {
-    if (!image) return;
-    undoStackRef.current.push(createSnapshot());
-    if (undoStackRef.current.length > 100) {
-      undoStackRef.current.shift();
-    }
-    redoStackRef.current = [];
-  }, [createSnapshot, image]);
-
-  const clearHistory = useCallback(() => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-  }, []);
-
-  const applySnapshot = useCallback((snapshot) => {
-    setRoomOverlay(snapshot.roomOverlay);
-    setPerimeterOverlay(snapshot.perimeterOverlay);
-    setRoomDimensions(snapshot.roomDimensions);
-    setArea(snapshot.area);
-    setScale(snapshot.scale);
-    setMode(snapshot.mode);
-    setManualEntryMode(snapshot.manualEntryMode);
-    setOcrFailed(snapshot.ocrFailed);
-    setLineToolActive(snapshot.lineToolActive);
-    setMeasurementLines(snapshot.measurementLines);
-    setCurrentMeasurementLine(snapshot.currentMeasurementLine);
-    setDrawAreaActive(snapshot.drawAreaActive);
-    setCustomShapes(snapshot.customShapes);
-    setCurrentCustomShape(snapshot.currentCustomShape);
-    setPerimeterVertices(snapshot.perimeterVertices);
-    setTracedBoundaries(snapshot.tracedBoundaries ?? null);
-    setDebugDetection(snapshot.debugDetection ?? false);
-    setDetectionDebugData(snapshot.detectionDebugData ?? null);
-    setShowSideLengths(snapshot.showSideLengths);
-    setUseInteriorWalls(snapshot.useInteriorWalls);
-    setAutoSnapEnabled(snapshot.autoSnapEnabled ?? true);
-    setUnit(snapshot.unit);
-  }, []);
-
-  // Reset overlays
-  const resetOverlays = useCallback(() => {
-    setRoomOverlay(null);
-    setPerimeterOverlay(null);
-    setRoomDimensions({ width: '', height: '' });
-    setArea(0);
-    setScale(1);
-    setDetectedDimensions([]);
-    setMode('normal');
-    setManualEntryMode(false);
-    setOcrFailed(false);
-    setLineToolActive(false);
-    setMeasurementLines([]);
-    setCurrentMeasurementLine(null);
-    setDrawAreaActive(false);
-    setCustomShapes([]);
-    setCurrentCustomShape(null);
-    setPerimeterVertices(null);
-    setTracedBoundaries(null);
-    setDetectionDebugData(null);
-    setAutoSnapEnabled(true);
-    clearHistory();
-  }, [clearHistory]);
+  }, [setNotification]);
 
   // Reset entire application
   const handleRestart = () => {
     clearAutosavedDraft();
-    setImage(null);
-    resetOverlays();
+    useAppStore.getState().restart();
   };
-
-  const handleUndo = useCallback(() => {
-    if (undoStackRef.current.length === 0) return false;
-    const previousSnapshot = undoStackRef.current.pop();
-    redoStackRef.current.push(createSnapshot());
-    applySnapshot(previousSnapshot);
-    return true;
-  }, [applySnapshot, createSnapshot]);
-
-  const handleRedo = useCallback(() => {
-    if (redoStackRef.current.length === 0) return false;
-    const nextSnapshot = redoStackRef.current.pop();
-    undoStackRef.current.push(createSnapshot());
-    applySnapshot(nextSnapshot);
-    return true;
-  }, [applySnapshot, createSnapshot]);
 
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
@@ -468,8 +412,8 @@ function App() {
 
   const handleAddMeasurementLine = useCallback((line) => {
     pushUndoState();
-    setMeasurementLines((prev) => [...prev, line]);
-  }, [pushUndoState]);
+    setMeasurementLines([...useAppStore.getState().measurementLines, line]);
+  }, [pushUndoState, setMeasurementLines]);
 
   const handleMeasurementLinesChange = useCallback((nextLines) => {
     pushUndoState();
@@ -478,8 +422,8 @@ function App() {
 
   const handleAddCustomShape = useCallback((shape) => {
     pushUndoState();
-    setCustomShapes((prev) => [...prev, shape]);
-  }, [pushUndoState]);
+    setCustomShapes([...useAppStore.getState().customShapes, shape]);
+  }, [pushUndoState, setCustomShapes]);
 
   const handleCustomShapesChange = useCallback((nextShapes) => {
     pushUndoState();
@@ -622,7 +566,7 @@ function App() {
       });
       if (!traced) return;
       setTracedBoundaries(traced);
-      setDetectionDebugData((prev) => ({ ...(prev ?? {}), ...(traced.debug ?? {}) }));
+      setDetectionDebugData({ ...(useAppStore.getState().detectionDebugData ?? {}), ...(traced.debug ?? {}) });
 
       const activeBoundary = getBoundaryForMode(traced, useInteriorWalls);
       if (!activeBoundary?.polygon?.length) return;
@@ -752,32 +696,8 @@ function App() {
         if (savedStateRaw) {
           const savedState = JSON.parse(savedStateRaw);
           if (savedState?.image) {
-            setImage(savedState.image);
-            setRoomOverlay(savedState.roomOverlay ?? null);
-            setPerimeterOverlay(savedState.perimeterOverlay ?? null);
-            setRoomDimensions(savedState.roomDimensions ?? { width: '', height: '' });
-            setArea(savedState.area ?? 0);
-            setScale(savedState.scale ?? 1);
-            setMode(savedState.mode ?? 'normal');
-            setIsProcessing(false);
-            setDetectedDimensions(savedState.detectedDimensions ?? []);
-            setShowSideLengths(savedState.showSideLengths ?? false);
-            setUseInteriorWalls(savedState.useInteriorWalls ?? true);
-            setAutoSnapEnabled(savedState.autoSnapEnabled ?? true);
-            setManualEntryMode(savedState.manualEntryMode ?? false);
-            setOcrFailed(savedState.ocrFailed ?? false);
-            setUnit(savedState.unit ?? 'decimal');
-            setLineToolActive(savedState.lineToolActive ?? false);
-            setMeasurementLines(savedState.measurementLines ?? []);
-            setCurrentMeasurementLine(savedState.currentMeasurementLine ?? null);
-            setDrawAreaActive(savedState.drawAreaActive ?? false);
-            setCustomShapes(savedState.customShapes ?? []);
-            setCurrentCustomShape(savedState.currentCustomShape ?? null);
-            setPerimeterVertices(savedState.perimeterVertices ?? null);
-            setTracedBoundaries(savedState.tracedBoundaries ?? null);
-            setDebugDetection(savedState.debugDetection ?? false);
-            setDetectionDebugData(savedState.detectionDebugData ?? null);
-            hasRestoredStateRef.current = true;
+            useAppStore.getState().restoreFromSaved(savedState);
+            setHasRestoredState(true);
             return;
           }
         }
@@ -785,81 +705,71 @@ function App() {
         console.error('Failed to restore autosaved draft:', error);
       }
 
-      hasRestoredStateRef.current = true;
+      setHasRestoredState(true);
     };
 
     restoreAutosavedDraft();
-  }, []);
+  }, [setHasRestoredState]);
 
+  // Autosave draft to local storage when working state changes (debounced).
+  // Uses Zustand's subscribe to listen for ANY working-state change, replacing
+  // the old useEffect with a 24-item dependency array.
+  const autosaveTimerRef = useRef(null);
   useEffect(() => {
-    appStateRef.current = {
-      roomOverlay,
-      perimeterOverlay,
-      roomDimensions,
-      area,
-      scale,
-      mode,
-      manualEntryMode,
-      ocrFailed,
-      lineToolActive,
-      measurementLines,
-      currentMeasurementLine,
-      drawAreaActive,
-      customShapes,
-      currentCustomShape,
-      perimeterVertices,
-      tracedBoundaries,
-      debugDetection,
-      detectionDebugData,
-      showSideLengths,
-      useInteriorWalls,
-      autoSnapEnabled,
-      unit
-    };
-  }, [roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, manualEntryMode, ocrFailed, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, showSideLengths, useInteriorWalls, autoSnapEnabled, unit]);
+    const unsub = useAppStore.subscribe((state, prevState) => {
+      if (!state._hasRestoredState) return;
+      if (!saveOnExit) return;
 
-  // Autosave draft to local storage when working state changes.
-  useEffect(() => {
-    if (!hasRestoredStateRef.current) {
-      return;
-    }
+      if (!state.image) {
+        clearAutosavedDraft();
+        return;
+      }
 
-    if (!saveOnExit) {
-      return;
-    }
+      // Skip if nothing autosave-relevant changed
+      if (state.image === prevState.image &&
+          state.roomOverlay === prevState.roomOverlay &&
+          state.perimeterOverlay === prevState.perimeterOverlay &&
+          state.roomDimensions === prevState.roomDimensions &&
+          state.area === prevState.area &&
+          state.scale === prevState.scale &&
+          state.mode === prevState.mode &&
+          state.detectedDimensions === prevState.detectedDimensions &&
+          state.showSideLengths === prevState.showSideLengths &&
+          state.useInteriorWalls === prevState.useInteriorWalls &&
+          state.autoSnapEnabled === prevState.autoSnapEnabled &&
+          state.manualEntryMode === prevState.manualEntryMode &&
+          state.ocrFailed === prevState.ocrFailed &&
+          state.unit === prevState.unit &&
+          state.lineToolActive === prevState.lineToolActive &&
+          state.measurementLines === prevState.measurementLines &&
+          state.currentMeasurementLine === prevState.currentMeasurementLine &&
+          state.drawAreaActive === prevState.drawAreaActive &&
+          state.customShapes === prevState.customShapes &&
+          state.currentCustomShape === prevState.currentCustomShape &&
+          state.perimeterVertices === prevState.perimeterVertices &&
+          state.tracedBoundaries === prevState.tracedBoundaries &&
+          state.debugDetection === prevState.debugDetection &&
+          state.detectionDebugData === prevState.detectionDebugData) {
+        return;
+      }
 
-    if (!image) {
-      clearAutosavedDraft();
-      return;
-    }
+      // Debounce: wait 2 seconds of inactivity before writing to localStorage.
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
 
-    saveAutosavedDraft({
-      image,
-      roomOverlay,
-      perimeterOverlay,
-      roomDimensions,
-      area,
-      scale,
-      mode,
-      detectedDimensions,
-      showSideLengths,
-      useInteriorWalls,
-      autoSnapEnabled,
-      manualEntryMode,
-      ocrFailed,
-      unit,
-      lineToolActive,
-      measurementLines,
-      currentMeasurementLine,
-      drawAreaActive,
-      customShapes,
-      currentCustomShape,
-      perimeterVertices,
-      tracedBoundaries,
-      debugDetection,
-      detectionDebugData
+      autosaveTimerRef.current = setTimeout(() => {
+        saveAutosavedDraft(useAppStore.getState().getAutosaveState());
+      }, 2000);
     });
-  }, [image, roomOverlay, perimeterOverlay, roomDimensions, area, scale, mode, detectedDimensions, showSideLengths, useInteriorWalls, autoSnapEnabled, manualEntryMode, ocrFailed, unit, lineToolActive, measurementLines, currentMeasurementLine, drawAreaActive, customShapes, currentCustomShape, perimeterVertices, tracedBoundaries, debugDetection, detectionDebugData, clearAutosavedDraft, saveAutosavedDraft, saveOnExit]);
+
+    return () => {
+      unsub();
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
 
   useEffect(() => () => terminateDetectionWorker(), []);
 
@@ -946,12 +856,12 @@ function App() {
         onFitToWindow={handleFitToWindow}
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
-        onOptionsToggle={() => setShowPanelOptions((v) => !v)}
+        onOptionsToggle={() => { const s = useAppStore.getState(); s.setShowPanelOptions(!s.showPanelOptions); }}
         hasAutoDetection={!!tracedBoundaries}
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
         onStartOver={handleStartOver}
-        onHelpOpen={() => setShowHelpModal(prev => !prev)}
+        onHelpOpen={() => { const s = useAppStore.getState(); s.setShowHelpModal(!s.showHelpModal); }}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">

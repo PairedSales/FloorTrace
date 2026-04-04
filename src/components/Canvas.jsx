@@ -1,96 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
-import { Stage, Layer, Group, Image as KonvaImage, Rect, Line, Circle, Text } from 'react-konva';
-import { formatLength, sqFeetToSqMeters } from '../utils/unitConverter';
-import { calculateArea, getCentroid } from '../utils/areaCalculator';
+import { Stage, Layer, Image as KonvaImage, Text } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
-
-/** Font family and style used for OCR pill badge text (must match the Konva Text element). */
-const OCR_PILL_FONT_FAMILY = 'Inter, system-ui, sans-serif';
-const OCR_PILL_FONT_STYLE = 'bold';
-/** Font family and style used for side-length pill badge text (must match the Konva Text element). */
-const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
-const SIDE_LEN_FONT_STYLE = '500';
-/** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
-const _measureCtx = document.createElement('canvas').getContext('2d');
-/** Measure the rendered pixel width of a text string using the Canvas 2D API. */
-function measureTextWidth(text, fontSize) {
-  _measureCtx.font = `${OCR_PILL_FONT_STYLE} ${fontSize}px ${OCR_PILL_FONT_FAMILY}`;
-  return _measureCtx.measureText(text).width;
-}
-/** Measure the pixel width of a side-length pill label using the Canvas 2D API. */
-function measureSideLenWidth(text, fontSize) {
-  _measureCtx.font = `${SIDE_LEN_FONT_STYLE} ${fontSize}px ${SIDE_LEN_FONT_FAMILY}`;
-  return _measureCtx.measureText(text).width;
-}
-/** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
-const OCR_DOT_BASE_RADIUS = 3;
-/** Minimum rendered dot radius in pixels for the OCR anchor dot. */
-const OCR_DOT_MIN_RADIUS = 2;
-
-/** Conversion factor from square meters to square centimeters. */
-const SQ_M_TO_SQ_CM = 10000;
-/** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
-const MIN_SQ_M_DISPLAY = 0.1;
-
-/** Cycling colors for measurement lines (Dracula color scheme). */
-const LINE_COLORS = [
-  { normal: '#FFB86C', selected: '#FFCA99' }, // Dracula Orange
-  { normal: '#8BE9FD', selected: '#A8F0FF' }, // Dracula Cyan
-  { normal: '#50FA7B', selected: '#7AFFA0' }, // Dracula Green
-  { normal: '#BD93F9', selected: '#D2B8FC' }, // Dracula Purple
-  { normal: '#FF79C6', selected: '#FFA8D9' }, // Dracula Pink
-];
-
-/** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
- *  @param {object} options
- *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). */
-const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove = false } = {}) => {
-  const dx = line.end.x - line.start.x;
-  const dy = line.end.y - line.start.y;
-  const lenPx = Math.sqrt(dx * dx + dy * dy);
-  const lengthFeet = lenPx * pixelsPerFoot;
-  const textStr = `${formatLength(lengthFeet, unit)}`;
-  const fontSize = 12 / scale;
-  const ux = lenPx > 1e-6 ? dx / lenPx : 1;
-  const uy = lenPx > 1e-6 ? dy / lenPx : 0;
-  const mx = (line.start.x + line.end.x) / 2;
-  const my = (line.start.y + line.end.y) / 2;
-  // Normal (perpendicular) to the line, chosen to point "above" (negative-y in screen space).
-  let nx = -uy;
-  let ny = ux;
-  if (ny > 0 || (ny === 0 && nx > 0)) { nx = -nx; ny = -ny; }
-
-  const approxPad = 6 / scale;
-  const approxCharW = fontSize * 0.58;
-  const approxTextWidth = Math.max(textStr.length * approxCharW, fontSize * 2.5);
-  const approxTextHeight = fontSize * 1.25;
-
-  const extentAlongLine =
-    (approxTextWidth * Math.abs(ux) + approxTextHeight * Math.abs(uy)) / 2 + approxPad;
-  const maxHalfGap = Math.max(0, lenPx / 2 - 0.5 / scale);
-  const halfGap = Math.min(extentAlongLine, maxHalfGap);
-  const needsPerpendicularLift = forceAbove || maxHalfGap < extentAlongLine - 1e-3;
-  const halfExtentOnNormal =
-    (approxTextWidth / 2) * Math.abs(nx) + (approxTextHeight / 2) * Math.abs(ny);
-  const liftPerp = needsPerpendicularLift ? halfExtentOnNormal + 4 / scale : 0;
-
-  const labelX = mx + nx * liftPerp;
-  const labelY = my + ny * liftPerp;
-
-  const line1End = { x: mx - ux * halfGap, y: my - uy * halfGap };
-  const line2Start = { x: mx + ux * halfGap, y: my + uy * halfGap };
-
-  return {
-    textStr,
-    fontSize,
-    labelX,
-    labelY,
-    approxTextWidth,
-    approxTextHeight,
-    line1Points: [line.start.x, line.start.y, line1End.x, line1End.y],
-    line2Points: [line2Start.x, line2Start.y, line.end.x, line.end.y],
-  };
-};
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
 
 const Canvas = forwardRef(({
   image,
@@ -404,18 +315,7 @@ const Canvas = forwardRef(({
   }));
 
   // Helper function to convert screen coordinates to canvas coordinates
-  const getCanvasCoordinates = (stage) => {
-    const pos = stage.getPointerPosition();
-    if (!pos) return null;
-    
-    const stagePos = stage.position();
-    const currentScale = scaleRef.current;
-    
-    return {
-      x: (pos.x - stagePos.x) / currentScale,
-      y: (pos.y - stagePos.y) / currentScale
-    };
-  };
+  const getCanvasCoords = (stage) => getCanvasCoordinates(stage, scaleRef);
 
   // Handle room overlay dragging (move entire overlay)
   const handleRoomMouseDown = (e) => {
@@ -431,7 +331,7 @@ const Canvas = forwardRef(({
     lastRoomDragStartRef.current = { ...roomOverlay };
     
     // Track drag start position
-    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    const canvasPos = getCanvasCoords(e.target.getStage());
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
@@ -456,7 +356,7 @@ const Canvas = forwardRef(({
     lastRoomDragStartRef.current = { ...roomOverlay };
     
     // Track drag start position
-    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    const canvasPos = getCanvasCoords(e.target.getStage());
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
@@ -478,7 +378,7 @@ const Canvas = forwardRef(({
   // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseMove
   const handleVertexDrag = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
-    const canvasPos = getCanvasCoordinates(e.target.getStage());
+    const canvasPos = getCanvasCoords(e.target.getStage());
     if (!canvasPos) return;
     
     // No snapping during drag — snapping is applied on vertex release (handleVertexDragEnd)
@@ -589,7 +489,7 @@ const Canvas = forwardRef(({
     if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start) {
       const stage = e.target.getStage();
       if (!stage) return;
-      const finalPoint = getCanvasCoordinates(stage);
+      const finalPoint = getCanvasCoords(stage);
       if (!finalPoint) return;
 
       const newLine = { start: currentMeasurementLine.start, end: finalPoint };
@@ -616,7 +516,7 @@ const Canvas = forwardRef(({
     const stage = e.target.getStage();
     if (!stage) return;
     
-    const clickPoint = getCanvasCoordinates(stage);
+    const clickPoint = getCanvasCoords(stage);
     if (!clickPoint) return;
     
     // Apply snapping to corner points
@@ -654,39 +554,13 @@ const Canvas = forwardRef(({
 
 
 
-  // Helper function to calculate distance from point to line segment
-  const pointToLineDistance = (point, lineStart, lineEnd) => {
-    const dx = lineEnd.x - lineStart.x;
-    const dy = lineEnd.y - lineStart.y;
-    const lengthSquared = dx * dx + dy * dy;
-    
-    if (lengthSquared === 0) {
-      // Line segment is a point
-      const dpx = point.x - lineStart.x;
-      const dpy = point.y - lineStart.y;
-      return Math.sqrt(dpx * dpx + dpy * dpy);
-    }
-    
-    // Calculate projection of point onto line
-    const t = Math.max(0, Math.min(1, 
-      ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSquared
-    ));
-    
-    const projX = lineStart.x + t * dx;
-    const projY = lineStart.y + t * dy;
-    
-    const dpx = point.x - projX;
-    const dpy = point.y - projY;
-    
-    return Math.sqrt(dpx * dpx + dpy * dpy);
-  };
 
   // Handle global mouse move for dragging
   const handleStageMouseMove = (e) => {
     const stage = e.target.getStage();
     if (!stage) return;
     
-    const mousePoint = getCanvasCoordinates(stage);
+    const mousePoint = getCanvasCoords(stage);
     if (!mousePoint) return;
     
     setCurrentMousePos(mousePoint);
@@ -881,7 +755,7 @@ const Canvas = forwardRef(({
         const stage = e.target.getStage();
         if (!stage) return;
         
-        const clickPoint = getCanvasCoordinates(stage);
+        const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
         
         onCanvasClick(clickPoint);
@@ -900,7 +774,7 @@ const Canvas = forwardRef(({
         const stage = e.target.getStage();
         if (!stage) return;
         
-        const clickPoint = getCanvasCoordinates(stage);
+        const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
         
         // Apply snapping to corner points
@@ -935,7 +809,7 @@ const Canvas = forwardRef(({
       if (lineToolActive && onMeasurementLineUpdate) {
         const stage = e.target.getStage();
         if (!stage) return;
-        const clickPoint = getCanvasCoordinates(stage);
+        const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
 
         if (!currentMeasurementLine) {
@@ -954,7 +828,7 @@ const Canvas = forwardRef(({
       if (drawAreaActive && onCustomShapeUpdate) {
         const stage = e.target.getStage();
         if (!stage) return;
-        const clickPoint = getCanvasCoordinates(stage);
+        const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
 
         if (!currentCustomShape) {
@@ -1236,76 +1110,28 @@ const Canvas = forwardRef(({
               />
             )}
 
-            {/* Perimeter Overlay - Line only (lowest z-index for overlays) */}
-            {perimeterOverlay && perimeterOverlay.vertices && (
-              <Line
-                points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
-                stroke="#BD93F9"
-                strokeWidth={2 / scale}
-                closed={true}
-                fill="rgba(189, 147, 249, 0.15)"
-                onDblClick={handleStageDoubleClick}
-                onDblTap={handleStageDoubleClick}
-              />
-            )}
-            
+            {/* Perimeter Overlay - Outline and vertices with side-length labels */}
+            <PerimeterLayer
+              perimeterOverlay={perimeterOverlay}
+              scale={scale}
+              showSideLengths={showSideLengths}
+              pixelsPerFoot={pixelsPerFoot}
+              detectedDimensions={detectedDimensions}
+              onVertexDragStart={handleVertexDragStart}
+              onVertexDrag={handleVertexDrag}
+              onVertexDragEnd={handleVertexDragEnd}
+              onDeletePerimeterVertex={onDeletePerimeterVertex}
+              onDoubleClick={handleStageDoubleClick}
+            />
+
             {/* Room Overlay - Render above perimeter line but below perimeter vertices */}
-            {roomOverlay && (
-              <>
-                {Array.isArray(roomOverlay.polygon) && roomOverlay.polygon.length > 2 && (
-                  <Line
-                    points={roomOverlay.polygon.flatMap((point) => [point.x, point.y])}
-                    closed
-                    stroke="rgba(80, 250, 123, 0.85)"
-                    strokeWidth={1.5 / scale}
-                    fill="rgba(80, 250, 123, 0.1)"
-                    listening={false}
-                  />
-                )}
-                <Rect
-                  x={Math.min(roomOverlay.x1, roomOverlay.x2)}
-                  y={Math.min(roomOverlay.y1, roomOverlay.y2)}
-                  width={Math.abs(roomOverlay.x2 - roomOverlay.x1)}
-                  height={Math.abs(roomOverlay.y2 - roomOverlay.y1)}
-                  stroke="#50FA7B"
-                  strokeWidth={2 / scale}
-                  fill="rgba(80, 250, 123, 0.15)"
-                  onMouseDown={handleRoomMouseDown}
-                />
-                
-                {/* Room Corner Handles */}
-                {[
-                  { x: roomOverlay.x1, y: roomOverlay.y1, corner: 'tl' },
-                  { x: roomOverlay.x2, y: roomOverlay.y1, corner: 'tr' },
-                  { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
-                  { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
-                ].map((handle, i) => {
-                  return (
-                    <Circle
-                      key={i}
-                      x={handle.x}
-                      y={handle.y}
-                      radius={5 / scale}
-                      fill="#50FA7B"
-                      stroke="#fff"
-                      strokeWidth={1.5 / scale}
-                      onMouseDown={(e) => handleRoomCornerMouseDown(handle.corner, e)}
-                    />
-                  );
-                })}
-                {debugDetection && typeof roomOverlay.confidence === 'number' && (
-                  <Text
-                    x={Math.min(roomOverlay.x1, roomOverlay.x2)}
-                    y={Math.min(roomOverlay.y1, roomOverlay.y2) - 16 / scale}
-                    text={`Room confidence ${Math.round(roomOverlay.confidence * 100)}%`}
-                    fontSize={11 / scale}
-                    fill="#50FA7B"
-                    fontStyle="bold"
-                    listening={false}
-                  />
-                )}
-              </>
-            )}
+            <RoomOverlayLayer
+              roomOverlay={roomOverlay}
+              scale={scale}
+              debugDetection={debugDetection}
+              onRoomMouseDown={handleRoomMouseDown}
+              onRoomCornerMouseDown={handleRoomCornerMouseDown}
+            />
 
             {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
               <Text
@@ -1317,227 +1143,16 @@ const Canvas = forwardRef(({
                 listening={false}
               />
             )}
-            
-            {/* Perimeter Vertices - Render last (highest z-index for interaction priority) */}
-            {perimeterOverlay && perimeterOverlay.vertices && (
-              <>
-                {perimeterOverlay.vertices.map((vertex, i) => (
-                  <React.Fragment key={i}>
-                    <Circle
-                      x={vertex.x}
-                      y={vertex.y}
-                      radius={5 / scale}
-                      fill="#BD93F9"
-                      stroke="#fff"
-                      strokeWidth={1.5 / scale}
-                      draggable
-                      onDragStart={() => handleVertexDragStart(i)}
-                      onDragMove={(e) => handleVertexDrag(i, e)}
-                      onDragEnd={() => handleVertexDragEnd(i)}
-                      onContextMenu={(e) => {
-                        e.evt.preventDefault();
-                        e.cancelBubble = true;
-                        if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
-                      }}
-                    />
-                  </React.Fragment>
-                ))}
 
-                {/* Side Length Labels */}
-                {showSideLengths && pixelsPerFoot && perimeterOverlay.vertices.map((vertex, i) => {
-                  const nextVertex = perimeterOverlay.vertices[(i + 1) % perimeterOverlay.vertices.length];
-
-                  // Calculate side length in pixels
-                  const dx = nextVertex.x - vertex.x;
-                  const dy = nextVertex.y - vertex.y;
-                  const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-
-                  // Convert to feet and always format as decimal feet (e.g. "1.2 ft")
-                  const lengthInFeet = lengthInPixels * pixelsPerFoot;
-                  const formattedLength = formatLength(lengthInFeet, 'decimal');
-
-                  // Calculate midpoint for label placement
-                  const midX = (vertex.x + nextVertex.x) / 2;
-                  const midY = (vertex.y + nextVertex.y) / 2;
-
-                  // Calculate offset perpendicular to the line
-                  const angle = Math.atan2(dy, dx);
-                  const sideSign = i % 2 === 0 ? 1 : -1;
-                  const shortEdge = lengthInPixels < 48;
-                  const offsetDistance = sideSign * (shortEdge ? 12 / scale : 9 / scale);
-                  const offsetX = Math.sin(angle) * offsetDistance;
-                  const offsetY = -Math.cos(angle) * offsetDistance;
-
-                  // Derive ideal font size from OCR text heights when available, else default to 14pt.
-                  // OCR bbox heights are in image/stage pixels; dividing by scale gives a zoom-invariant
-                  // screen size (same px on screen at any zoom level, matching the `xx/scale` convention).
-                  // The fallback of 14 is the target screen-pixel size when no OCR data is available.
-                  const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
-                    ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
-                    : 14;
-                  const idealFs = Math.max(14, ocrRefScreenPx) / scale;
-                  const minFs = 8 / scale;
-
-                  // Use precise text measurement to avoid excess padding
-                  const padX = 5 / scale;
-                  const minW = 30 / scale;
-                  const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
-                  const widthForFs = (fs) => measureSideLenWidth(formattedLength, fs) + padX * 2;
-
-                  // Shrink font to fit edge width if necessary
-                  let fontSize = idealFs;
-                  if (widthForFs(fontSize) > maxWByEdge) {
-                    let lo = minFs, hi = fontSize;
-                    for (let iter = 0; iter < 10; iter++) {
-                      const mid = (lo + hi) / 2;
-                      if (widthForFs(mid) > maxWByEdge) hi = mid; else lo = mid;
-                    }
-                    fontSize = Math.max(minFs, lo);
-                  }
-
-                  const labelWidth = Math.min(Math.max(minW, widthForFs(fontSize)), maxWByEdge);
-                  const labelHeight = Math.max(fontSize * 1.5, 16 / scale);
-                  const cornerR = labelHeight / 2;
-
-                  // Initial pill centre (midpoint + perpendicular offset)
-                  const cx0 = midX + offsetX;
-                  const cy0 = midY + offsetY;
-
-                  // Shift pill along the edge to avoid colliding with any perimeter vertex.
-                  const len = lengthInPixels;
-                  const ex = len > 0 ? dx / len : 1;
-                  const ey = len > 0 ? dy / len : 0;
-                  // Half-extent of the pill projected onto the edge direction (AABB approximation)
-                  const halfAlong = (labelWidth * Math.abs(ex) + labelHeight * Math.abs(ey)) / 2;
-                  const vertexClearance = 8 / scale; // 5/scale vertex radius + 3/scale margin
-                  const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
-
-                  let edgeShift = 0;
-                  for (const v of perimeterOverlay.vertices) {
-                    const pcx = cx0 + edgeShift * ex;
-                    const pcy = cy0 + edgeShift * ey;
-                    // Nearest point on pill rect to vertex
-                    const nearX = Math.max(pcx - labelWidth / 2, Math.min(v.x, pcx + labelWidth / 2));
-                    const nearY = Math.max(pcy - labelHeight / 2, Math.min(v.y, pcy + labelHeight / 2));
-                    const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
-                    if (dist2 < vertexClearance * vertexClearance) {
-                      // Collision: shift pill along edge away from this vertex
-                      const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
-                      const required = halfAlong + vertexClearance - Math.abs(projEdge);
-                      if (required > 0) {
-                        const dir = projEdge > 0 ? -1 : 1;
-                        edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
-                      }
-                    }
-                  }
-
-                  const finalCx = cx0 + edgeShift * ex;
-                  const finalCy = cy0 + edgeShift * ey;
-
-                  return (
-                    <React.Fragment key={`label-${i}`}>
-                      <Rect
-                        x={finalCx - labelWidth / 2}
-                        y={finalCy - labelHeight / 2}
-                        width={labelWidth}
-                        height={labelHeight}
-                        fill="rgba(40, 42, 54, 0.92)"
-                        strokeWidth={0}
-                        cornerRadius={cornerR}
-                        listening={false}
-                      />
-                      <Text
-                        x={finalCx - labelWidth / 2}
-                        y={finalCy - labelHeight / 2}
-                        width={labelWidth}
-                        height={labelHeight}
-                        text={formattedLength}
-                        fontSize={fontSize}
-                        fill="#ffffff"
-                        fontFamily={SIDE_LEN_FONT_FAMILY}
-                        fontStyle={SIDE_LEN_FONT_STYLE}
-                        align="center"
-                        verticalAlign="middle"
-                        listening={false}
-                      />
-                    </React.Fragment>
-                  );
-                })}
-              </>
-            )}
-            
             {/* Manual Mode - Detected Dimensions Highlights */}
-            {mode === 'manual' && detectedDimensions && detectedDimensions.length > 0 && (
-              <>
-                {detectedDimensions.map((dim, i) => {
-                  const cx = dim.bbox.x + dim.bbox.width / 2;
-                  const cy = dim.bbox.y + dim.bbox.height / 2;
-                  const labelText = `${formatLength(dim.width, unit)} × ${formatLength(dim.height, unit)}`;
-                  const fs = 12 / scale;
-                  const padX = 7 / scale;
-                  const padY = 3.5 / scale;
-                  const labelW = measureTextWidth(labelText, fs) + padX * 2;
-                  const labelH = fs + padY * 2;
-                  const cornerR = labelH / 2;
-                  const gap = 5 / scale;
-                  const tailH = 5 / scale;
-                  // Position pill above the bbox; clamp so it doesn't go off the top edge
-                  const labelY = Math.max(0, dim.bbox.y - labelH - tailH - gap);
-                  const labelX = cx - labelW / 2;
-                  const dotR = Math.max(OCR_DOT_MIN_RADIUS, OCR_DOT_BASE_RADIUS / scale);
-                  const handleClick = () => onDimensionSelect && onDimensionSelect(dim);
-                  const handlePointerEnter = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; };
-                  const handlePointerLeave = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'default'; };
-
-                  return (
-                    <React.Fragment key={i}>
-                      {/* Small dot marker at OCR text center */}
-                      <Circle
-                        x={cx}
-                        y={cy}
-                        radius={dotR}
-                        fill="#FFB86C"
-                        onClick={handleClick}
-                        onTap={handleClick}
-                        onMouseEnter={handlePointerEnter}
-                        onMouseLeave={handlePointerLeave}
-                      />
-                      {/* Connector line from dot to pill */}
-                      <Line
-                        points={[cx, cy - dotR, cx, labelY + labelH]}
-                        stroke="#FFB86C"
-                        strokeWidth={1.5 / scale}
-                        opacity={0.6}
-                        listening={false}
-                      />
-                      {/* Floating pill badge */}
-                      <Rect
-                        x={labelX}
-                        y={labelY}
-                        width={labelW}
-                        height={labelH}
-                        fill="#FFB86C"
-                        cornerRadius={cornerR}
-                        onClick={handleClick}
-                        onTap={handleClick}
-                        onMouseEnter={handlePointerEnter}
-                        onMouseLeave={handlePointerLeave}
-                      />
-                      <Text
-                        x={labelX + padX}
-                        y={labelY + padY}
-                        text={labelText}
-                        fontSize={fs}
-                        fill="#ffffff"
-                        fontFamily={OCR_PILL_FONT_FAMILY}
-                        fontStyle={OCR_PILL_FONT_STYLE}
-                        listening={false}
-                      />
-                    </React.Fragment>
-                  );
-                })}
-              </>
-            )}
+            <DimensionOverlay
+              mode={mode}
+              detectedDimensions={detectedDimensions}
+              scale={scale}
+              unit={unit}
+              stageRef={stageRef}
+              onDimensionSelect={onDimensionSelect}
+            />
             
             {/* Manual Entry Mode - Click to place overlays */}
             {manualEntryMode && (
@@ -1551,264 +1166,47 @@ const Canvas = forwardRef(({
               />
             )}
             
-            {/* Perimeter Vertex Placement Mode - Instructions and temporary vertices */}
-            {roomOverlay && !perimeterOverlay && perimeterVertices && perimeterVertices.length < 3 && !lineToolActive && !drawAreaActive && !manualEntryMode && (
-              <>
-                {/* Instructions */}
-                <Text
-                  x={10}
-                  y={10}
-                  text={`Click to add perimeter vertices (${perimeterVertices.length}/3)`}
-                  fontSize={16 / scale}
-                  fill="#F1FA8C"
-                  fontStyle="bold"
-                />
-                
-                {/* Temporary vertices */}
-                {perimeterVertices.map((vertex, i) => (
-                  <React.Fragment key={`temp-vertex-${i}`}>
-                    <Circle
-                      x={vertex.x}
-                      y={vertex.y}
-                      radius={5 / scale}
-                      fill="#F1FA8C"
-                      stroke="#fff"
-                      strokeWidth={1.5 / scale}
-                    />
-                    
-                    {/* Preview line from previous vertex */}
-                    {i > 0 && (
-                      <Line
-                        points={[
-                          perimeterVertices[i - 1].x,
-                          perimeterVertices[i - 1].y,
-                          vertex.x,
-                          vertex.y
-                        ]}
-                        stroke="#F1FA8C"
-                        strokeWidth={2 / scale}
-                        dash={[10 / scale, 5 / scale]}
-                      />
-                    )}
-                  </React.Fragment>
-                ))}
-                
-                {/* Preview line from last vertex to mouse */}
-                {perimeterVertices.length > 0 && currentMousePos && (
-                  <Line
-                    points={[
-                      perimeterVertices[perimeterVertices.length - 1].x,
-                      perimeterVertices[perimeterVertices.length - 1].y,
-                      currentMousePos.x,
-                      currentMousePos.y
-                    ]}
-                    stroke="#F1FA8C"
-                    strokeWidth={2 / scale}
-                    dash={[10 / scale, 5 / scale]}
-                    opacity={0.5}
-                  />
-                )}
-              </>
-            )}
+            {/* Perimeter Vertex Placement Mode */}
+            <PerimeterPlacementLayer
+              roomOverlay={roomOverlay}
+              perimeterOverlay={perimeterOverlay}
+              perimeterVertices={perimeterVertices}
+              currentMousePos={currentMousePos}
+              lineToolActive={lineToolActive}
+              drawAreaActive={drawAreaActive}
+              manualEntryMode={manualEntryMode}
+              scale={scale}
+            />
             
           </Layer>
 
-          {/* Measurement Lines */}
-          {measurementLines && measurementLines.length > 0 && (
-            <Layer>
-              {measurementLines.map((line, index) => {
-                const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit);
-                const colors = LINE_COLORS[index % LINE_COLORS.length];
-                const strokeColor = selectedMeasurementLineIndex === index ? colors.selected : colors.normal;
-                const strokeW = (selectedMeasurementLineIndex === index ? 3 : 2) / scale;
-                return (
-                <Group
-                  key={`line-${index}`}
-                  x={0}
-                  y={0}
-                  draggable
-                  onClick={(e) => handleMeasurementLineSelect(index, e)}
-                  onTap={(e) => handleMeasurementLineSelect(index, e)}
-                  onDragStart={(e) => handleMeasurementLineSelect(index, e)}
-                  onDragEnd={(e) => handleMeasurementLineDragEnd(index, e)}
-                  onContextMenu={(e) => {
-                    e.evt.preventDefault();
-                    e.cancelBubble = true;
-                    if (onMeasurementLinesChange) {
-                      onMeasurementLinesChange(measurementLines.filter((_, i) => i !== index));
-                    }
-                  }}
-                >
-                  <Line
-                    name="measurement-line"
-                    points={layout.line1Points}
-                    stroke={strokeColor}
-                    strokeWidth={strokeW}
-                    hitStrokeWidth={16 / scale}
-                  />
-                  <Line
-                    name="measurement-line"
-                    points={layout.line2Points}
-                    stroke={strokeColor}
-                    strokeWidth={strokeW}
-                    hitStrokeWidth={16 / scale}
-                  />
-                  <Text
-                    name="measurement-line"
-                    x={layout.labelX}
-                    y={layout.labelY}
-                    text={layout.textStr}
-                    fontSize={layout.fontSize}
-                    fill={strokeColor}
-                    fontStyle="bold"
-                    offsetX={layout.approxTextWidth / 2}
-                    offsetY={layout.approxTextHeight / 2}
-                  />
-                </Group>
-                );
-              })}
-            </Layer>
-          )}
+          {/* Measurement Lines & Preview */}
+          <MeasurementLayer
+            measurementLines={measurementLines}
+            currentMeasurementLine={currentMeasurementLine}
+            lineToolActive={lineToolActive}
+            scale={scale}
+            pixelsPerFoot={pixelsPerFoot}
+            unit={unit}
+            selectedMeasurementLineIndex={selectedMeasurementLineIndex}
+            onMeasurementLineSelect={handleMeasurementLineSelect}
+            onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
+            onMeasurementLinesChange={onMeasurementLinesChange}
+          />
 
-          {/* Measurement Line Preview */}
-          {lineToolActive && currentMeasurementLine && (() => {
-            const previewColors = LINE_COLORS[measurementLines.length % LINE_COLORS.length];
-            const previewColor = previewColors.normal;
-            const dx = currentMeasurementLine.end.x - currentMeasurementLine.start.x;
-            const dy = currentMeasurementLine.end.y - currentMeasurementLine.start.y;
-            const minPreviewLength = 1; // pixels; suppress label for near-zero-length lines
-            const hasLength = Math.sqrt(dx * dx + dy * dy) > minPreviewLength;
-            const previewLayout = hasLength && pixelsPerFoot
-              ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit, { forceAbove: true })
-              : null;
-            return (
-              <Layer>
-                <Line
-                  points={[
-                    currentMeasurementLine.start.x,
-                    currentMeasurementLine.start.y,
-                    currentMeasurementLine.end.x,
-                    currentMeasurementLine.end.y
-                  ]}
-                  stroke={previewColor}
-                  strokeWidth={2 / scale}
-                  dash={[6 / scale, 3 / scale]}
-                  opacity={0.7}
-                />
-                {previewLayout && (
-                  <Text
-                    x={previewLayout.labelX}
-                    y={previewLayout.labelY}
-                    text={previewLayout.textStr}
-                    fontSize={previewLayout.fontSize}
-                    fill={previewColor}
-                    fontStyle="bold"
-                    offsetX={previewLayout.approxTextWidth / 2}
-                    offsetY={previewLayout.approxTextHeight / 2}
-                    opacity={0.9}
-                  />
-                )}
-              </Layer>
-            );
-          })()}
-          
-          {/* Custom Areas */}
-          {customShapes && customShapes.length > 0 && (
-            <Layer>
-              {customShapes.map((shape, shapeIndex) => (
-                <Group
-                  key={`shape-${shapeIndex}`}
-                  x={0}
-                  y={0}
-                  draggable={shape.closed}
-                  onClick={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                  onTap={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                  onDragStart={(e) => handleCustomShapeSelect(shapeIndex, e)}
-                  onDragEnd={(e) => handleCustomShapeDragEnd(shapeIndex, e)}
-                >
-                  <Line
-                    name="custom-shape"
-                    points={shape.vertices.flatMap(v => [v.x, v.y])}
-                    closed={shape.closed}
-                    fill={shape.closed ? 'rgba(139, 233, 253, 0.15)' : 'transparent'}
-                    stroke={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
-                    strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
-                  />
-                  {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
-                    <Circle
-                      key={`shape-${shapeIndex}-vertex-${vertexIndex}`}
-                      name="custom-shape"
-                      x={vertex.x}
-                      y={vertex.y}
-                      radius={5 / scale}
-                      fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
-                      stroke="#6272A4"
-                      strokeWidth={1 / scale}
-                    />
-                  ))}
-                  {shape.closed && shape.vertices.length >= 3 && (() => {
-                    const centroid = getCentroid(shape.vertices);
-                    const areaValue = calculateArea(shape.vertices, pixelsPerFoot);
-                    let areaText;
-                    if (unit === 'metric') {
-                      const sqMeters = sqFeetToSqMeters(areaValue);
-                      areaText = sqMeters >= MIN_SQ_M_DISPLAY
-                        ? `${sqMeters.toFixed(2)} m²`
-                        : `${(sqMeters * SQ_M_TO_SQ_CM).toFixed(0)} cm²`;
-                    } else {
-                      areaText = areaValue >= 1
-                        ? `${areaValue.toFixed(1)} sq ft`
-                        : `${(areaValue * 144).toFixed(0)} sq in`;
-                    }
-                    return (
-                      <Text
-                        name="custom-shape"
-                        x={centroid.x}
-                        y={centroid.y}
-                        text={areaText}
-                        fontSize={14 / scale}
-                        fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
-                        fontStyle="bold"
-                        offsetX={0}
-                        offsetY={0}
-                        align="center"
-                        ref={(node) => {
-                          if (node) {
-                            node.offsetX(node.width() / 2);
-                            node.offsetY(node.height() / 2);
-                          }
-                        }}
-                      />
-                    );
-                  })()}
-                </Group>
-              ))}
-            </Layer>
-          )}
-          
-          {/* Custom Shape (Draw Area Tool) Preview */}
-          {drawAreaActive && currentCustomShape && currentMousePos && (
-            <Layer>
-              <Line
-                points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
-                closed={false}
-                stroke="#8BE9FD"
-                strokeWidth={2 / scale}
-                dash={[6 / scale, 3 / scale]}
-              />
-              {currentCustomShape.vertices.map((vertex, index) => (
-                <Circle
-                  key={`current-shape-vertex-${index}`}
-                  x={vertex.x}
-                  y={vertex.y}
-                  radius={5 / scale}
-                  fill={index === 0 ? '#FFB86C' : '#8BE9FD'} // Highlight first vertex to indicate closing point
-                  stroke="#6272A4"
-                  strokeWidth={1 / scale}
-                />
-              ))}
-            </Layer>
-          )}
+          {/* Custom Shapes & Preview */}
+          <ShapeLayer
+            customShapes={customShapes}
+            currentCustomShape={currentCustomShape}
+            currentMousePos={currentMousePos}
+            drawAreaActive={drawAreaActive}
+            scale={scale}
+            pixelsPerFoot={pixelsPerFoot}
+            unit={unit}
+            selectedCustomShapeIndex={selectedCustomShapeIndex}
+            onCustomShapeSelect={handleCustomShapeSelect}
+            onCustomShapeDragEnd={handleCustomShapeDragEnd}
+          />
         </Stage>
       )}
     </div>
