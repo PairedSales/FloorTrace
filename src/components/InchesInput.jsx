@@ -5,6 +5,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   const [inches, setInches] = useState('');
   const feetRef = useRef(null);
   const inchesRef = useRef(null);
+  const prevFeetRef = useRef('');
+  const prevInchesRef = useRef('');
 
   useEffect(() => {
     if (value) {
@@ -47,11 +49,23 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
     }
   };
 
+  const handleFieldFocus = (field) => (e) => {
+    if (field === 'feet') { prevFeetRef.current = feet; setFeet(''); }
+    else { prevInchesRef.current = inches; setInches(''); }
+    if (onFocus) onFocus(e);
+  };
+
+  const handleFieldBlur = (field) => (e) => {
+    if (field === 'feet' && feet === '') setFeet(prevFeetRef.current);
+    else if (field === 'inches' && inches === '') setInches(prevInchesRef.current);
+    if (onBlur) onBlur(e);
+  };
+
   return (
     <div
       className="flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
                  focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
-      onClick={() => feetRef.current?.focus()}
+      onClick={(e) => { if (e.target === e.currentTarget) feetRef.current?.focus(); }}
     >
       <div className="flex items-center text-slate-500 gap-0.5">
         <input
@@ -59,8 +73,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           type="text"
           value={feet}
           onChange={handleFeetChange}
-          onFocus={onFocus}
-          onBlur={onBlur}
+          onFocus={handleFieldFocus('feet')}
+          onBlur={handleFieldBlur('feet')}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
           className="w-7 text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
           placeholder="0"
@@ -71,8 +85,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           type="text"
           value={inches}
           onChange={handleInchesChange}
-          onFocus={onFocus}
-          onBlur={onBlur}
+          onFocus={handleFieldFocus('inches')}
+          onBlur={handleFieldBlur('inches')}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
           className="w-5 text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
           placeholder="0"
