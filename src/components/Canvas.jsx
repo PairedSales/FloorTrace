@@ -109,6 +109,7 @@ const Canvas = forwardRef(({
   onAddMeasurementLine,
   onMeasurementLinesChange,
   drawAreaActive,
+  onDrawAreaToggle,
   customShapes,
   currentCustomShape,
   onCustomShapeUpdate,
@@ -118,6 +119,7 @@ const Canvas = forwardRef(({
   onAddPerimeterVertex,
   onClosePerimeter, // New prop to handle closing the shape
   onDeletePerimeterVertex,
+  onLineToolToggle,
   autoSnapEnabled,
   debugDetection,
   detectionDebugData,
@@ -412,7 +414,7 @@ const Canvas = forwardRef(({
 
   // Handle room overlay dragging (move entire overlay)
   const handleRoomMouseDown = (e) => {
-    if (!roomOverlay || lineToolActive || drawAreaActive) return;
+    if (!roomOverlay) return;
     
     // ONLY allow LEFT mouse button (button 0) for dragging
     if (e.evt && e.evt.button !== 0) return;
@@ -437,7 +439,7 @@ const Canvas = forwardRef(({
 
   // Handle room corner dragging (with snapping)
   const handleRoomCornerMouseDown = (corner, e) => {
-    if (!roomOverlay || lineToolActive || drawAreaActive) return;
+    if (!roomOverlay) return;
     
     // ONLY allow LEFT mouse button (button 0) for dragging
     if (e.evt && e.evt.button !== 0) return;
@@ -459,7 +461,7 @@ const Canvas = forwardRef(({
 
   // Handle perimeter vertex dragging (no snapping)
   const handleVertexDragStart = (index) => {
-    if (!perimeterOverlay || lineToolActive || drawAreaActive) return;
+    if (!perimeterOverlay) return;
     
     // Save initial position for undo
     lastDraggedVertexRef.current = index;
@@ -470,7 +472,7 @@ const Canvas = forwardRef(({
 
   // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseMove
   const handleVertexDrag = (index, e) => {
-    if (!perimeterOverlay || draggingVertex !== index || lineToolActive || drawAreaActive) return;
+    if (!perimeterOverlay || draggingVertex !== index) return;
     const canvasPos = getCanvasCoordinates(e.target.getStage());
     if (!canvasPos) return;
     
@@ -1120,6 +1122,15 @@ const Canvas = forwardRef(({
       return;
     }
 
+    if (e.key === 'Escape') {
+      if (lineToolActive && onLineToolToggle) {
+        onLineToolToggle();
+      } else if (drawAreaActive && onDrawAreaToggle) {
+        onDrawAreaToggle();
+      }
+      return;
+    }
+
     if (e.key === 'Enter') {
       // Close perimeter on Enter key
       if (perimeterVertices && perimeterVertices.length > 2 && onClosePerimeter) {
@@ -1133,9 +1144,12 @@ const Canvas = forwardRef(({
       }
     }
   }, [
+    lineToolActive,
+    onLineToolToggle,
     perimeterVertices,
     onClosePerimeter,
     drawAreaActive,
+    onDrawAreaToggle,
     currentCustomShape,
     onAddCustomShape,
     onCustomShapeUpdate,
@@ -1311,7 +1325,7 @@ const Canvas = forwardRef(({
                       fill="#BD93F9"
                       stroke="#fff"
                       strokeWidth={1.5 / scale}
-                      draggable={!lineToolActive && !drawAreaActive}
+                      draggable
                       onDragStart={() => handleVertexDragStart(i)}
                       onDragMove={(e) => handleVertexDrag(i, e)}
                       onDragEnd={() => handleVertexDragEnd(i)}
