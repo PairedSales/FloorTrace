@@ -856,12 +856,12 @@ function App() {
         onFitToWindow={handleFitToWindow}
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
-        onOptionsToggle={() => useAppStore.getState().setShowPanelOptions(!showPanelOptions)}
+        onOptionsToggle={() => { const s = useAppStore.getState(); s.setShowPanelOptions(!s.showPanelOptions); }}
         hasAutoDetection={!!tracedBoundaries}
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
         onStartOver={handleStartOver}
-        onHelpOpen={() => useAppStore.getState().setShowHelpModal(!showHelpModal)}
+        onHelpOpen={() => { const s = useAppStore.getState(); s.setShowHelpModal(!s.showHelpModal); }}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
