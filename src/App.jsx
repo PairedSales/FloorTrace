@@ -160,16 +160,16 @@ function App() {
   }, [applySnapshot, createSnapshot]);
 
   // Handle manual mode
-  const handleManualMode = useCallback(async (imgSrc = image) => {
-    if (mode === 'manual') {
+  const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
+    if (!forceEnter && mode === 'manual') {
       // Exiting manual mode
       setMode('normal');
       setDetectedDimensions([]);
       setManualEntryMode(false);
       setOcrFailed(false);
     } else {
-      // Entering manual mode - check if overlays exist
-      if (roomOverlay || perimeterOverlay) {
+      // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
+      if (!forceEnter && (roomOverlay || perimeterOverlay)) {
         const confirmed = window.confirm(
           'Entering Manual Mode will clear existing overlays. Are you sure?'
         );
@@ -279,7 +279,7 @@ function App() {
     if (!image) return;
     const currentImage = image;
     resetOverlays();
-    await handleManualMode(currentImage);
+    await handleManualMode(currentImage, true);
   }, [image, resetOverlays, handleManualMode]);
 
   // Handle file upload
@@ -294,7 +294,7 @@ function App() {
 
         const loadedImage = await loadImageFromFile(file);
         setImage(loadedImage);
-        handleManualMode(loadedImage); // Automatically enter manual mode
+        handleManualMode(loadedImage, true); // Automatically enter manual mode
       } catch (error) {
         console.error('Error loading image:', error);
         alert('Failed to load image. Please try again.');
@@ -318,7 +318,7 @@ function App() {
       const loadedImage = await loadImageFromClipboard();
       if (loadedImage) {
         setImage(loadedImage);
-        handleManualMode(loadedImage); // Automatically enter manual mode
+        handleManualMode(loadedImage, true); // Automatically enter manual mode
       }
     } catch (error) {
       console.error('Error pasting image:', error);
@@ -338,7 +338,7 @@ function App() {
       resetOverlays();
       const loadedImage = await loadImageFromFile(file);
       setImage(loadedImage);
-      handleManualMode(loadedImage);
+      handleManualMode(loadedImage, true);
     } catch (error) {
       console.error('Error loading dropped image:', error);
       alert('Failed to load image. Please try again.');
