@@ -24,8 +24,6 @@ const LeftPanel = ({
   showOptions,
   saveOnExit,
   onSaveOnExitChange,
-  hasSaveLocation,
-  onChangeSaveLocation,
 }) => {
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -253,20 +251,6 @@ const LeftPanel = ({
               checked={saveOnExit}
               onChange={onSaveOnExitChange}
             />
-            {window.showSaveFilePicker && (
-              <div className="flex items-center justify-between pointer-events-auto">
-                <span className="text-[11px] font-medium text-slate-400">Save Location</span>
-                <button
-                  type="button"
-                  onClick={onChangeSaveLocation}
-                  disabled={!hasSaveLocation}
-                  className="text-[11px] font-medium px-2 py-0.5 rounded bg-chrome-700 text-slate-300 hover:bg-chrome-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  title={hasSaveLocation ? 'Clear saved location so next save prompts for a new one' : 'No save location set yet'}
-                >
-                  Change
-                </button>
-              </div>
-            )}
           </section>
           <div className="panel-divider mx-3" />
         </>
