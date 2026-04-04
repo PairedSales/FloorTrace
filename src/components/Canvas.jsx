@@ -50,7 +50,7 @@ const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove
   const uy = lenPx > 1e-6 ? dy / lenPx : 0;
   const mx = (line.start.x + line.end.x) / 2;
   const my = (line.start.y + line.end.y) / 2;
-  // Normal (perpendicular) to the line, chosen to point "above" (negative‑y in screen space).
+  // Normal (perpendicular) to the line, chosen to point "above" (negative-y in screen space).
   let nx = -uy;
   let ny = ux;
   if (ny > 0 || (ny === 0 && nx > 0)) { nx = -nx; ny = -ny; }
