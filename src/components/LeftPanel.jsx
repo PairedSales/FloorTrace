@@ -233,9 +233,9 @@ const LeftPanel = ({
                   onChange={onShowSideLengthsChange}
                 />
                 <Toggle
-                  label="Exterior Walls"
-                  checked={!useInteriorWalls}
-                  onChange={(v) => onInteriorWallToggle(!v)}
+                  label="Measure From Interior"
+                  checked={false}
+                  onChange={() => {}}
                 />
                 <Toggle
                   label="Auto Snap"
