@@ -703,8 +703,10 @@ const Canvas = forwardRef(({
 
   // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
   const handleStageClick = (e) => {
-    // Ignore right-clicks (button=2); those are handled by handleStageContextMenu
-    if (e.evt.button === 2) {
+    // Ignore right-clicks (button=2) and side mouse buttons (button=3/4);
+    // right-clicks are handled by handleStageContextMenu, and side buttons are
+    // reserved for undo/redo.
+    if (e.evt.button === 2 || e.evt.button === 3 || e.evt.button === 4) {
       return;
     }
 
