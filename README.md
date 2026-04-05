@@ -2,6 +2,8 @@
 
 ## The Fast, Private Floor Plan Area Calculator for Real Estate Professionals
 
+**[Try it now → pairedsales.github.io/FloorTrace](https://pairedsales.github.io/FloorTrace/)**
+
 If you work in real estate appraisal or as an agent in Chicago, you've run into this problem: **the city doesn't record the square footage of condos.** When you're doing an appraisal, you need that number — but getting it from a floor plan sketch is surprisingly painful. Some listing services charge extra just to show the square footage. Some realtors leave it off entirely. Other general-purpose tools can technically do the job, but they weren't built for this workflow and they're slow.
 
 FloorTrace was built specifically to solve this problem, and it does it faster than anything else out there.
