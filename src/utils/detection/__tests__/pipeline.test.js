@@ -244,10 +244,10 @@ describe('detection pipeline', () => {
     // A rectangular outline with 45° cut corners at upper-left and lower-right,
     // similar to the example preprocessed floorplan from the problem statement.
     const img = createBlankImageData(400, 350);
-    drawLine(img, 60, 30, 30, 60, 4);     // upper-left 45° corner
+    drawLine(img, 60, 30, 30, 60, 4);     // upper-left chamfer (45° edge)
     drawLine(img, 60, 30, 350, 30, 4);    // top edge
     drawLine(img, 350, 30, 350, 280, 4);  // right edge
-    drawLine(img, 350, 280, 320, 310, 4); // lower-right 45° corner
+    drawLine(img, 350, 280, 320, 310, 4); // lower-right chamfer (45° edge)
     drawLine(img, 320, 310, 30, 310, 4);  // bottom edge
     drawLine(img, 30, 310, 30, 60, 4);    // left edge
 
