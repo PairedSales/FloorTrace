@@ -677,12 +677,14 @@ const Canvas = forwardRef(({
     // Ignore tiny selections (accidental clicks)
     if (cw < 10 || ch < 10) return false;
 
-    // Crop on an offscreen canvas
+    // Keep the full image size; fill everything outside the selection with white
     const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
+    canvas.width = imageObj.width;
+    canvas.height = imageObj.height;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(imageObj, cx1, cy1, cw, ch, 0, 0, cw, ch);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, imageObj.width, imageObj.height);
+    ctx.drawImage(imageObj, cx1, cy1, cw, ch, cx1, cy1, cw, ch);
 
     const dataUrl = canvas.toDataURL('image/png');
     onImageUpdate(dataUrl);
