@@ -421,9 +421,12 @@ function App() {
   };
 
   const handleAddMeasurementLine = useCallback((line) => {
+    // Clear the in-progress line before saving the snapshot so that undo restores
+    // a clean state (no half-drawn line) rather than the mid-draw state.
+    setCurrentMeasurementLine(null);
     undoManager.save();
     setMeasurementLines([...useAppStore.getState().measurementLines, line]);
-  }, [setMeasurementLines]);
+  }, [setMeasurementLines, setCurrentMeasurementLine]);
 
   const handleMeasurementLinesChange = useCallback((nextLines) => {
     undoManager.save();
