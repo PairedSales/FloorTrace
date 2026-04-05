@@ -6,6 +6,3 @@ Everything runs in your browser, so no data is collected! When automatic tracing
 
 Try it out → **[pairedsales.github.io/FloorTrace](https://pairedsales.github.io/FloorTrace/)**
 
-## License
-
-MIT
