@@ -1280,6 +1280,8 @@ const Canvas = forwardRef(({
         if (isErasingRef.current) {
           isErasingRef.current = false;
           eraserCanvasRef.current = null;
+          eraserStartPosRef.current = null;
+          eraserAxisRef.current = null;
           // Restore original image object on the Konva Image node
           if (stageRef.current && imageObj) {
             const imgNode = stageRef.current.findOne('Image');

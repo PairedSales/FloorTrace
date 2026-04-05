@@ -850,14 +850,12 @@ function App() {
       if (!e.ctrlKey && !e.metaKey) {
         if (e.key === '[' && eraserToolActive) {
           e.preventDefault();
-          const currentSize = useAppStore.getState().eraserBrushSize;
-          setEraserBrushSize(Math.max(4, currentSize - 4));
+          setEraserBrushSize(Math.max(4, eraserBrushSize - 4));
           return;
         }
         if (e.key === ']' && eraserToolActive) {
           e.preventDefault();
-          const currentSize = useAppStore.getState().eraserBrushSize;
-          setEraserBrushSize(Math.min(200, currentSize + 4));
+          setEraserBrushSize(Math.min(200, eraserBrushSize + 4));
           return;
         }
       }
@@ -892,7 +890,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePasteImage, eraserToolActive, setEraserBrushSize]);
+  }, [handlePasteImage, eraserToolActive, eraserBrushSize, setEraserBrushSize]);
 
   // Handle side mouse buttons for undo (button 3 = back) and redo (button 4 = forward)
   useEffect(() => {
