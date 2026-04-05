@@ -32,6 +32,9 @@ const WORKING_STATE_DEFAULTS = {
   tracedBoundaries: null,
   debugDetection: false,
   detectionDebugData: null,
+  eraserToolActive: false,
+  eraserBrushSize: 20,
+  cropToolActive: false,
 };
 
 /**
@@ -108,6 +111,9 @@ const useAppStore = create((set, get) => ({
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
   setDebugDetection: (v) => set({ debugDetection: v }),
   setDetectionDebugData: (v) => set({ detectionDebugData: v }),
+  setEraserToolActive: (v) => set({ eraserToolActive: v }),
+  setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
+  setCropToolActive: (v) => set({ cropToolActive: v }),
   setNotification: (v) => set({ notification: v }),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),

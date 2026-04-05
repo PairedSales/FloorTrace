@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
-import { Stage, Layer, Image as KonvaImage, Text } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
 
@@ -42,6 +42,11 @@ const Canvas = forwardRef(({
   detectionDebugData,
   onSaveUndoPoint,
   onCancelUndoSave,
+  eraserToolActive,
+  eraserBrushSize,
+  onEraserBrushSizeChange,
+  cropToolActive,
+  onImageUpdate,
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -68,6 +73,17 @@ const Canvas = forwardRef(({
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   const imageSnapAnalyzerRef = useRef(null);
+
+  // Eraser tool state
+  const eraserCanvasRef = useRef(null); // Offscreen canvas for erasing
+  const isErasingRef = useRef(false);
+  const eraserStartPosRef = useRef(null); // For shift-constrained erasing
+  const eraserAxisRef = useRef(null); // 'h' or 'v' or null
+
+  // Crop tool state
+  const [cropSelection, setCropSelection] = useState(null); // {x1, y1, x2, y2}
+  const isCroppingRef = useRef(false);
+  const cropStartRef = useRef(null);
 
   useEffect(() => {
     if (selectedMeasurementLineIndex !== null && selectedMeasurementLineIndex >= measurementLines.length) {
@@ -492,6 +508,188 @@ const Canvas = forwardRef(({
     onCustomShapesChange(nextShapes);
   };
 
+  // ── Eraser tool helpers ─────────────────────────────────────────────────────
+
+  /** Initialise an offscreen canvas from the current image for erasing. */
+  const initEraserCanvas = useCallback(() => {
+    if (!imageObj) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = imageObj.width;
+    canvas.height = imageObj.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imageObj, 0, 0);
+    return canvas;
+  }, [imageObj]);
+
+  /** Paint a white rectangle centred at (x, y) on the offscreen eraser canvas. */
+  const eraseAt = useCallback((x, y, brushSize) => {
+    const canvas = eraserCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const half = brushSize / 2;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(x - half, y - half, brushSize, brushSize);
+  }, []);
+
+  /** Commit the eraser canvas back to the store image and refresh the Konva node. */
+  const commitEraserCanvas = useCallback(() => {
+    const canvas = eraserCanvasRef.current;
+    if (!canvas || !onImageUpdate) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    onImageUpdate(dataUrl);
+    eraserCanvasRef.current = null;
+  }, [onImageUpdate]);
+
+  /** Handle eraser mousedown: start a new erase session. */
+  const handleEraserMouseDown = useCallback((stage) => {
+    if (!eraserToolActive || !imageObj) return false;
+    const pos = getCanvasCoords(stage);
+    if (!pos) return false;
+
+    // Save undo point before starting
+    onSaveUndoPoint?.();
+
+    // Init offscreen canvas
+    eraserCanvasRef.current = initEraserCanvas();
+    isErasingRef.current = true;
+    eraserStartPosRef.current = pos;
+    eraserAxisRef.current = null;
+
+    // Paint first stroke
+    eraseAt(pos.x, pos.y, eraserBrushSize);
+
+    // Update Konva image from offscreen canvas for immediate visual feedback
+    if (stageRef.current) {
+      const imgNode = stageRef.current.findOne('Image');
+      if (imgNode && eraserCanvasRef.current) {
+        imgNode.image(eraserCanvasRef.current);
+        imgNode.getLayer()?.batchDraw();
+      }
+    }
+
+    return true;
+  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseAt, onSaveUndoPoint]);
+
+  /** Handle eraser mousemove: continue erasing along the drag path. */
+  const handleEraserMouseMove = useCallback((stage, shiftKey) => {
+    if (!isErasingRef.current || !eraserCanvasRef.current) return false;
+    const pos = getCanvasCoords(stage);
+    if (!pos) return false;
+
+    let drawX = pos.x;
+    let drawY = pos.y;
+
+    // Shift constrains to axis
+    if (shiftKey && eraserStartPosRef.current) {
+      if (!eraserAxisRef.current) {
+        const dx = Math.abs(pos.x - eraserStartPosRef.current.x);
+        const dy = Math.abs(pos.y - eraserStartPosRef.current.y);
+        if (dx > 5 || dy > 5) {
+          eraserAxisRef.current = dx >= dy ? 'h' : 'v';
+        }
+      }
+      if (eraserAxisRef.current === 'h') {
+        drawY = eraserStartPosRef.current.y;
+      } else if (eraserAxisRef.current === 'v') {
+        drawX = eraserStartPosRef.current.x;
+      }
+    } else {
+      eraserAxisRef.current = null;
+    }
+
+    eraseAt(drawX, drawY, eraserBrushSize);
+
+    // Update Konva image live
+    if (stageRef.current) {
+      const imgNode = stageRef.current.findOne('Image');
+      if (imgNode && eraserCanvasRef.current) {
+        imgNode.image(eraserCanvasRef.current);
+        imgNode.getLayer()?.batchDraw();
+      }
+    }
+
+    return true;
+  }, [eraserBrushSize, eraseAt]);
+
+  /** Handle eraser mouseup: commit the erased image to the store. */
+  const handleEraserMouseUp = useCallback(() => {
+    if (!isErasingRef.current) return false;
+    isErasingRef.current = false;
+    eraserStartPosRef.current = null;
+    eraserAxisRef.current = null;
+    commitEraserCanvas();
+    return true;
+  }, [commitEraserCanvas]);
+
+  // ── Crop tool helpers ───────────────────────────────────────────────────────
+
+  /** Handle crop mousedown: start the selection. */
+  const handleCropMouseDown = useCallback((stage) => {
+    if (!cropToolActive || !imageObj) return false;
+    const pos = getCanvasCoords(stage);
+    if (!pos) return false;
+
+    isCroppingRef.current = true;
+    cropStartRef.current = pos;
+    setCropSelection({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
+    return true;
+  }, [cropToolActive, imageObj]);
+
+  /** Handle crop mousemove: update the selection rectangle. */
+  const handleCropMouseMove = useCallback((stage) => {
+    if (!isCroppingRef.current || !cropStartRef.current) return false;
+    const pos = getCanvasCoords(stage);
+    if (!pos) return false;
+
+    setCropSelection({
+      x1: cropStartRef.current.x,
+      y1: cropStartRef.current.y,
+      x2: pos.x,
+      y2: pos.y,
+    });
+    return true;
+  }, []);
+
+  /** Handle crop mouseup: apply the crop. */
+  const handleCropMouseUp = useCallback(() => {
+    if (!isCroppingRef.current || !cropStartRef.current || !imageObj || !onImageUpdate) {
+      isCroppingRef.current = false;
+      cropStartRef.current = null;
+      setCropSelection(null);
+      return false;
+    }
+
+    isCroppingRef.current = false;
+    cropStartRef.current = null;
+
+    // Compute the normalised crop rectangle
+    const sel = cropSelection;
+    if (!sel) { setCropSelection(null); return false; }
+
+    const cx1 = Math.max(0, Math.min(sel.x1, sel.x2));
+    const cy1 = Math.max(0, Math.min(sel.y1, sel.y2));
+    const cx2 = Math.min(imageObj.width, Math.max(sel.x1, sel.x2));
+    const cy2 = Math.min(imageObj.height, Math.max(sel.y1, sel.y2));
+    const cw = cx2 - cx1;
+    const ch = cy2 - cy1;
+
+    setCropSelection(null);
+
+    // Ignore tiny selections (accidental clicks)
+    if (cw < 10 || ch < 10) return false;
+
+    // Crop on an offscreen canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imageObj, cx1, cy1, cw, ch, 0, 0, cw, ch);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    onImageUpdate(dataUrl);
+    return true;
+  }, [imageObj, cropSelection, onImageUpdate]);
+
   // Handle double-click to close custom shape or add perimeter vertex
   const handleStageDoubleClick = (e) => {
     // IMPORTANT: Only respond to LEFT double-click (button 0)
@@ -576,6 +774,18 @@ const Canvas = forwardRef(({
     if (!mousePoint) return;
     
     setCurrentMousePos(mousePoint);
+
+    // Eraser tool: continuous erase during drag
+    if (eraserToolActive && isErasingRef.current) {
+      handleEraserMouseMove(stage, e.evt.shiftKey);
+      return;
+    }
+
+    // Crop tool: update selection rectangle during drag
+    if (cropToolActive && isCroppingRef.current) {
+      handleCropMouseMove(stage);
+      return;
+    }
     
     // Detect if mouse has moved enough to be considered a drag
     if (dragStartPosRef.current && !isDraggingRef.current) {
@@ -653,6 +863,18 @@ const Canvas = forwardRef(({
   
   // Handle global mouse up
   const handleStageMouseUp = () => {
+    // Eraser tool: commit the erased image
+    if (isErasingRef.current) {
+      handleEraserMouseUp();
+      return;
+    }
+
+    // Crop tool: apply the crop
+    if (isCroppingRef.current) {
+      handleCropMouseUp();
+      return;
+    }
+
     if (draggingRoom) {
       // If room didn't actually move, cancel the undo point saved at drag start
       if (lastRoomDragStartRef.current && roomOverlay) {
@@ -701,7 +923,28 @@ const Canvas = forwardRef(({
     }
   };
 
-  // Handle stage click for manual entry mode, line tool, draw area tool, or perimeter vertex placement
+  // Handle Stage mousedown for eraser/crop tool
+  const handleStageMouseDown = useCallback((e) => {
+    // Only handle left mouse button
+    if (e.evt && e.evt.button !== 0) return;
+
+    const stage = e.target.getStage();
+    if (!stage) return;
+
+    if (eraserToolActive) {
+      e.cancelBubble = true;
+      e.evt.preventDefault();
+      handleEraserMouseDown(stage);
+      return;
+    }
+
+    if (cropToolActive) {
+      e.cancelBubble = true;
+      e.evt.preventDefault();
+      handleCropMouseDown(stage);
+      return;
+    }
+  }, [eraserToolActive, cropToolActive, handleEraserMouseDown, handleCropMouseDown]);
   const handleStageClick = (e) => {
     // Ignore right-clicks (button=2) and side mouse buttons (button=3/4);
     // right-clicks are handled by handleStageContextMenu, and side buttons are
@@ -712,6 +955,11 @@ const Canvas = forwardRef(({
 
     // Ignore clicks that occurred after a drag operation
     if (isDraggingRef.current) {
+      return;
+    }
+
+    // Eraser and crop tools handle their own mousedown/mouseup; skip click processing
+    if (eraserToolActive || cropToolActive) {
       return;
     }
 
@@ -999,6 +1247,18 @@ const Canvas = forwardRef(({
       return;
     }
 
+    // Eraser brush size keys
+    if (e.key === '[' && eraserToolActive && onEraserBrushSizeChange) {
+      e.preventDefault();
+      onEraserBrushSizeChange(Math.max(4, eraserBrushSize - 4));
+      return;
+    }
+    if (e.key === ']' && eraserToolActive && onEraserBrushSizeChange) {
+      e.preventDefault();
+      onEraserBrushSizeChange(Math.min(200, eraserBrushSize + 4));
+      return;
+    }
+
     if ((e.key === 'Delete' || e.key === 'Backspace')) {
       if (selectedMeasurementLineIndex !== null && onMeasurementLinesChange) {
         onMeasurementLinesChange(measurementLines.filter((_, index) => index !== selectedMeasurementLineIndex));
@@ -1014,7 +1274,21 @@ const Canvas = forwardRef(({
     }
 
     if (e.key === 'Escape') {
-      if (lineToolActive && onLineToolToggle) {
+      if (eraserToolActive) {
+        // Cancel any in-progress erase and deactivate
+        if (isErasingRef.current) {
+          isErasingRef.current = false;
+          eraserCanvasRef.current = null;
+          onCancelUndoSave?.();
+        }
+      } else if (cropToolActive) {
+        // Cancel any in-progress crop selection
+        if (isCroppingRef.current) {
+          isCroppingRef.current = false;
+          cropStartRef.current = null;
+          setCropSelection(null);
+        }
+      } else if (lineToolActive && onLineToolToggle) {
         onLineToolToggle();
       } else if (drawAreaActive && onDrawAreaToggle) {
         onDrawAreaToggle();
@@ -1035,6 +1309,11 @@ const Canvas = forwardRef(({
       }
     }
   }, [
+    eraserToolActive,
+    eraserBrushSize,
+    onEraserBrushSizeChange,
+    cropToolActive,
+    onCancelUndoSave,
     lineToolActive,
     onLineToolToggle,
     perimeterVertices,
@@ -1100,9 +1379,10 @@ const Canvas = forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !(roomOverlay && !perimeterOverlay)}
+          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !(roomOverlay && !perimeterOverlay) && !eraserToolActive && !cropToolActive}
           onDragStart={handleStageDragStart}
           onDragEnd={handleStageDragEnd}
+          onMouseDown={handleStageMouseDown}
           onClick={handleStageClick}
           onTap={handleStageClick}
           onContextMenu={handleStageContextMenu}
@@ -1110,7 +1390,7 @@ const Canvas = forwardRef(({
           onMouseUp={handleStageMouseUp}
           onDblClick={handleStageDoubleClick}
           onDblTap={handleStageDoubleClick}
-          style={{ cursor: 'default' }}
+          style={{ cursor: eraserToolActive ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
         >
           <Layer>
             {/* Main Image - only show when ready */}
@@ -1219,6 +1499,59 @@ const Canvas = forwardRef(({
             onCustomShapeSelect={handleCustomShapeSelect}
             onCustomShapeDragEnd={handleCustomShapeDragEnd}
           />
+
+          {/* Eraser cursor and crop selection overlay */}
+          <Layer listening={false}>
+            {/* Eraser brush cursor */}
+            {eraserToolActive && currentMousePos && (
+              <Rect
+                x={currentMousePos.x - eraserBrushSize / 2}
+                y={currentMousePos.y - eraserBrushSize / 2}
+                width={eraserBrushSize}
+                height={eraserBrushSize}
+                stroke="#8BE9FD"
+                strokeWidth={1.5 / scale}
+                dash={[4 / scale, 4 / scale]}
+                listening={false}
+              />
+            )}
+
+            {/* Crop selection overlay */}
+            {cropToolActive && cropSelection && (() => {
+              const sx = Math.min(cropSelection.x1, cropSelection.x2);
+              const sy = Math.min(cropSelection.y1, cropSelection.y2);
+              const sw = Math.abs(cropSelection.x2 - cropSelection.x1);
+              const sh = Math.abs(cropSelection.y2 - cropSelection.y1);
+              return (
+                <>
+                  {/* Dimmed overlay outside selection */}
+                  {imageObj && (
+                    <>
+                      {/* Top */}
+                      <Rect x={0} y={0} width={imageObj.width} height={sy} fill="rgba(0,0,0,0.45)" listening={false} />
+                      {/* Bottom */}
+                      <Rect x={0} y={sy + sh} width={imageObj.width} height={imageObj.height - sy - sh} fill="rgba(0,0,0,0.45)" listening={false} />
+                      {/* Left */}
+                      <Rect x={0} y={sy} width={sx} height={sh} fill="rgba(0,0,0,0.45)" listening={false} />
+                      {/* Right */}
+                      <Rect x={sx + sw} y={sy} width={imageObj.width - sx - sw} height={sh} fill="rgba(0,0,0,0.45)" listening={false} />
+                    </>
+                  )}
+                  {/* Selection border */}
+                  <Rect
+                    x={sx}
+                    y={sy}
+                    width={sw}
+                    height={sh}
+                    stroke="#8BE9FD"
+                    strokeWidth={2 / scale}
+                    dash={[6 / scale, 4 / scale]}
+                    listening={false}
+                  />
+                </>
+              );
+            })()}
+          </Layer>
         </Stage>
       )}
     </div>
