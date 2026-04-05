@@ -4,9 +4,9 @@
 
 **[Try it now → pairedsales.github.io/FloorTrace](https://pairedsales.github.io/FloorTrace/)**
 
-If you work in real estate appraisal or as an agent in Chicago, you've run into this problem: **the city doesn't record the square footage of condos.** When you're doing an appraisal, you need that number — but getting it from a floor plan sketch is surprisingly painful. Some listing services charge extra just to show the square footage. Some realtors leave it off entirely. Other general-purpose tools can technically do the job, but they weren't built for this workflow and they're slow.
+Floor plan area calculations come up constantly in real estate appraisal — and getting that number from a sketch is harder than it should be. Square footage is sometimes missing from listings, paywalled, or just not recorded. Other tools can technically measure area from an image, but they weren't built for this workflow and they're slow.
 
-FloorTrace was built specifically to solve this problem, and it does it faster than anything else out there.
+FloorTrace was built specifically for this, and it does it faster than anything else out there.
 
 ---
 
@@ -28,13 +28,13 @@ For real estate professionals, this matters. Your clients' property information 
 
 ## Why It's Faster
 
-Most tools that can measure area from an image are general-purpose — they were designed for architects or engineers, not for someone working through a stack of condo appraisals. FloorTrace is built around the specific workflow of reading a floor plan sketch with printed dimensions. It recognizes the room labels and numbers already on the sketch and uses them to do the math automatically. What would take several minutes with another tool takes seconds here.
+Most tools that can measure area from an image are general-purpose — they were designed for architects or engineers, not for someone working through a stack of appraisals. FloorTrace is built around the specific workflow of reading a floor plan sketch with printed dimensions. It recognizes the room labels and numbers already on the sketch and uses them to do the math automatically. What would take several minutes with another tool takes seconds here.
 
 ---
 
 ## Who It's For
 
-- **Real estate appraisers** who need gross living area calculations from floor plan sketches for condo appraisals in markets like Chicago where unit sizes aren't publicly recorded
+- **Real estate appraisers** who need gross living area calculations from floor plan sketches when unit sizes aren't publicly recorded or are missing from listing data
 - **Real estate agents** who want to verify or calculate square footage from a floor plan without paying extra for a third-party service
 
 ---
