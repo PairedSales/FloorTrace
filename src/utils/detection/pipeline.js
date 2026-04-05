@@ -345,6 +345,12 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
   return { polygon, component };
 };
 
+// Brightness below which a pixel is considered part of a wall.
+// 200 detects 1-pixel-wide walls after box-blur (gray ≈ 170 for a thin
+// line on white background) while rejecting background near walls (≈ 225)
+// and JPEG artifacts (≈ 250).
+const DARK_PIXEL_THRESHOLD = 200;
+
 /* ---------- Exterior Wall Tracing (Problem 2) ----------
  * Exterior boundary detection using edge-inward scanning on raw
  * grayscale brightness (global threshold).
@@ -446,7 +452,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
    * the floorplan, a global threshold is robust and accurate.  The
    * edge-inward scan naturally ignores interior features because it
    * only records the first dark pixel from each image edge.            */
-  const darkThreshold = options.darkThreshold ?? 200;
+  const darkThreshold = options.darkThreshold ?? DARK_PIXEL_THRESHOLD;
   const edgeScanMask = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i += 1) {
     edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
