@@ -239,4 +239,45 @@ describe('detection pipeline', () => {
     expect(Math.min(...ys)).toBeLessThanOrEqual(40);
     expect(Math.max(...ys)).toBeGreaterThanOrEqual(160);
   });
+
+  it('traces exterior boundary of a clean preprocessed floorplan with 45-degree corners', () => {
+    // A rectangular outline with 45° cut corners at upper-left and lower-right,
+    // similar to the example preprocessed floorplan from the problem statement.
+    const img = createBlankImageData(400, 350);
+    drawLine(img, 60, 30, 30, 60, 4);     // upper-left 45° corner
+    drawLine(img, 60, 30, 350, 30, 4);    // top edge
+    drawLine(img, 350, 30, 350, 280, 4);  // right edge
+    drawLine(img, 350, 280, 320, 310, 4); // lower-right 45° corner
+    drawLine(img, 320, 310, 30, 310, 4);  // bottom edge
+    drawLine(img, 30, 310, 30, 60, 4);    // left edge
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    // Shape has 6 corners (rectangle with 2 cut corners)
+    expect(outerPoly.length).toBeGreaterThanOrEqual(6);
+
+    const xs = outerPoly.map((p) => p.x);
+    const ys = outerPoly.map((p) => p.y);
+
+    // Boundary should encompass the drawn shape
+    expect(Math.min(...xs)).toBeLessThanOrEqual(40);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(340);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(40);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(300);
+
+    // Area should be less than full rectangle (45° cuts reduce area)
+    // but still most of it.  The drawn walls have thickness 4 (±4 pixels)
+    // so the outer extent is larger than the inner coordinates.
+    const outerWidth = Math.max(...xs) - Math.min(...xs);
+    const outerHeight = Math.max(...ys) - Math.min(...ys);
+    const fullRectArea = outerWidth * outerHeight;
+    const area = polygonArea(outerPoly);
+    expect(area).toBeLessThan(fullRectArea);
+    expect(area).toBeGreaterThan(fullRectArea * 0.85);
+  });
 });
