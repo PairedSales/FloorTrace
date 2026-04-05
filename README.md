@@ -1,6 +1,6 @@
 # FloorTrace
 
-Try it now → **[pairedsales.github.io/FloorTrace](https://pairedsales.github.io/FloorTrace/)**
+Try it out → **[pairedsales.github.io/FloorTrace](https://pairedsales.github.io/FloorTrace/)**
 
 Upload a floor plan sketch. FloorTrace instantly reads the room dimensions, automatically sets the scale, traces the outer walls, and calculates the area with precision. Built for real estate professionals.
 
