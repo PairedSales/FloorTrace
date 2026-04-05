@@ -49,6 +49,9 @@ function App() {
   const notification = useAppStore((s) => s.notification);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
+  const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
+  const cropToolActive = useAppStore((s) => s.cropToolActive);
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
@@ -79,6 +82,9 @@ function App() {
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setDebugDetection = useAppStore((s) => s.setDebugDetection);
+  const setEraserToolActive = useAppStore((s) => s.setEraserToolActive);
+  const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
+  const setCropToolActive = useAppStore((s) => s.setCropToolActive);
 
   const resetOverlays = useAppStore((s) => s.resetOverlays);
 
@@ -389,9 +395,11 @@ function App() {
     const newState = !lineToolActive;
     setLineToolActive(newState);
     if (newState) {
-      // Deactivate draw area tool when line tool is activated
+      // Deactivate other tools when line tool is activated
       setDrawAreaActive(false);
-      setCurrentCustomShape(null); // Stop drawing custom shape
+      setCurrentCustomShape(null);
+      setEraserToolActive(false);
+      setCropToolActive(false);
     } else {
       setCurrentMeasurementLine(null); // Stop drawing line
     }
@@ -403,11 +411,41 @@ function App() {
     const newState = !drawAreaActive;
     setDrawAreaActive(newState);
     if (newState) {
-      // Deactivate line tool when draw area tool is activated
+      // Deactivate other tools when draw area tool is activated
       setLineToolActive(false);
-      setCurrentMeasurementLine(null); // Stop drawing line
+      setCurrentMeasurementLine(null);
+      setEraserToolActive(false);
+      setCropToolActive(false);
     } else {
       setCurrentCustomShape(null); // Stop drawing custom shape
+    }
+  };
+
+  // Toggle eraser tool
+  const handleEraserToolToggle = () => {
+    const newState = !eraserToolActive;
+    setEraserToolActive(newState);
+    if (newState) {
+      // Deactivate other tools when eraser is activated
+      setLineToolActive(false);
+      setCurrentMeasurementLine(null);
+      setDrawAreaActive(false);
+      setCurrentCustomShape(null);
+      setCropToolActive(false);
+    }
+  };
+
+  // Toggle crop tool
+  const handleCropToolToggle = () => {
+    const newState = !cropToolActive;
+    setCropToolActive(newState);
+    if (newState) {
+      // Deactivate other tools when crop is activated
+      setLineToolActive(false);
+      setCurrentMeasurementLine(null);
+      setDrawAreaActive(false);
+      setCurrentCustomShape(null);
+      setEraserToolActive(false);
     }
   };
 
@@ -419,6 +457,12 @@ function App() {
     setCustomShapes([]);
     setCurrentCustomShape(null);
   };
+
+  // Handle image update from eraser or crop tool (saves undo point before changing)
+  const handleImageUpdate = useCallback((newImageDataUrl) => {
+    undoManager.save();
+    setImage(newImageDataUrl);
+  }, [setImage]);
 
   const handleAddMeasurementLine = useCallback((line) => {
     // Clear the in-progress line before saving the snapshot so that undo restores
@@ -772,7 +816,10 @@ function App() {
           state.perimeterVertices === prevState.perimeterVertices &&
           state.tracedBoundaries === prevState.tracedBoundaries &&
           state.debugDetection === prevState.debugDetection &&
-          state.detectionDebugData === prevState.detectionDebugData) {
+          state.detectionDebugData === prevState.detectionDebugData &&
+          state.eraserToolActive === prevState.eraserToolActive &&
+          state.eraserBrushSize === prevState.eraserBrushSize &&
+          state.cropToolActive === prevState.cropToolActive) {
         return;
       }
 
@@ -799,6 +846,20 @@ function App() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Eraser brush size shortcuts (no modifier keys required)
+      if (!e.ctrlKey && !e.metaKey) {
+        if (e.key === '[' && eraserToolActive) {
+          e.preventDefault();
+          setEraserBrushSize(Math.max(4, eraserBrushSize - 4));
+          return;
+        }
+        if (e.key === ']' && eraserToolActive) {
+          e.preventDefault();
+          setEraserBrushSize(Math.min(200, eraserBrushSize + 4));
+          return;
+        }
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
 
@@ -829,7 +890,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePasteImage]);
+  }, [handlePasteImage, eraserToolActive, eraserBrushSize, setEraserBrushSize]);
 
   // Handle side mouse buttons for undo (button 3 = back) and redo (button 4 = forward)
   useEffect(() => {
@@ -930,6 +991,11 @@ function App() {
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onSaveUndoPoint={() => undoManager.save()}
             onCancelUndoSave={() => undoManager.cancelLastSave()}
+            eraserToolActive={eraserToolActive}
+            eraserBrushSize={eraserBrushSize}
+            onEraserBrushSizeChange={setEraserBrushSize}
+            cropToolActive={cropToolActive}
+            onImageUpdate={handleImageUpdate}
           />
         </div>
 
@@ -973,17 +1039,22 @@ function App() {
           }}
         />
 
-        {area > 0 && (
+        {image && (
           <ToolsPanel
             lineToolActive={lineToolActive}
             onLineToolToggle={handleLineToolToggle}
             drawAreaActive={drawAreaActive}
             onDrawAreaToggle={handleDrawAreaToggle}
+            eraserToolActive={eraserToolActive}
+            onEraserToolToggle={handleEraserToolToggle}
+            cropToolActive={cropToolActive}
+            onCropToolToggle={handleCropToolToggle}
             measurementLines={measurementLines}
             customShapes={customShapes}
             currentMeasurementLine={currentMeasurementLine}
             currentCustomShape={currentCustomShape}
             onClearTools={handleClearTools}
+            hasArea={area > 0}
           />
         )}
 
