@@ -1,6 +1,6 @@
 # FloorTrace
 
-Upload a floor plan sketch. FloorTrace instantly reads the room dimensions, automatically sets the scale, traces the outer walls, and calculates the area with precision. Built for real estate professionals.
+Upload a floorplan sketch. FloorTrace instantly reads the room dimensions, automatically sets the scale, traces the outer walls, and calculates the area with precision. Built for real estate professionals.
 
 Everything runs in your browser, so no data is collected! When automatic tracing needs help, manual mode is faster and easier than any other tool.
 
