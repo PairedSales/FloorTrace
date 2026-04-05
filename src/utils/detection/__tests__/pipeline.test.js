@@ -240,6 +240,59 @@ describe('detection pipeline', () => {
     expect(Math.max(...ys)).toBeGreaterThanOrEqual(160);
   });
 
+  it('traces exterior boundary at outer edge of thick walls, not through the middle', () => {
+    // Draw a rectangle with very thick walls (thickness=12, so wall band is ±12 pixels).
+    // The outer boundary should trace along the OUTER edge of the wall, not the center.
+    const img = createBlankImageData(400, 300);
+    const thick = 12;
+    // Top wall at y=40, bottom at y=260, left at x=40, right at x=360
+    drawLine(img, 40, 40, 360, 40, thick);
+    drawLine(img, 40, 260, 360, 260, thick);
+    drawLine(img, 40, 40, 40, 260, thick);
+    drawLine(img, 360, 40, 360, 260, thick);
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const xs = outerPoly.map((p) => p.x);
+    const ys = outerPoly.map((p) => p.y);
+
+    // The outer edge of the thick wall should be at approximately (40-12, 40-12)
+    // to (360+12, 260+12) = (28, 28) to (372, 272).
+    // The polygon should reach these outer edges, NOT stop at the center
+    // of the wall band (which would be around 40, 40 to 360, 260).
+    expect(Math.min(...xs)).toBeLessThanOrEqual(32);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(368);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(32);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(268);
+  });
+
+  it('traces exterior boundary for thin 1-pixel wall lines (windows)', () => {
+    // Draw a rectangle with very thin walls (thickness=0, so only 1 pixel wide).
+    // The boundary should still detect and trace these thin walls.
+    const img = createBlankImageData(300, 250);
+    drawLine(img, 50, 40, 250, 40, 0);   // 1px wide horizontal
+    drawLine(img, 50, 200, 250, 200, 0); // 1px wide horizontal
+    drawLine(img, 50, 40, 50, 200, 0);   // 1px wide vertical
+    drawLine(img, 250, 40, 250, 200, 0); // 1px wide vertical
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const xs = outerPoly.map((p) => p.x);
+    const ys = outerPoly.map((p) => p.y);
+
+    // The polygon should reach the thin wall locations
+    expect(Math.min(...xs)).toBeLessThanOrEqual(55);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(245);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(45);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(195);
+  });
+
   it('traces exterior boundary of a clean preprocessed floorplan with 45-degree corners', () => {
     // A rectangular outline with 45° cut corners at upper-left and lower-right,
     // similar to the example preprocessed floorplan from the problem statement.

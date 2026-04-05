@@ -1,6 +1,6 @@
 import { normalizeImageData, mapPointToNormalized } from './preprocess';
 import { estimateDominantOrientations } from './orientation';
-import { prepareWallMask, closeMask, erode, dilate } from './wallMask';
+import { closeMask, erode, dilate } from './wallMask';
 import {
   labelConnectedComponents,
   componentToPolygon,
@@ -345,95 +345,31 @@ const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
   return { polygon, component };
 };
 
+// Brightness below which a pixel is considered part of a wall.
+// 200 detects 1-pixel-wide walls after box-blur (gray ≈ 170 for a thin
+// line on white background) while rejecting background near walls (≈ 225)
+// and JPEG artifacts (≈ 250).
+const DARK_PIXEL_THRESHOLD = 200;
+
 /* ---------- Exterior Wall Tracing (Problem 2) ----------
- * Optimized exterior boundary detection using edge-inward scanning:
- *   1. Connected component analysis to remove noise (text, logos)
- *   2. Recover precise wall edges (intersect filtered + original mask)
- *   3. Edge-scan from all 4 edges to find first wall pixels
- *   4. Profile intersection to build floorplan footprint
+ * Exterior boundary detection using edge-inward scanning on raw
+ * grayscale brightness (global threshold).
  *
- * For clean, preprocessed inputs (black-on-white, no extraneous noise),
- * the edge-scan approach is trivially fast and robust.  Starting from
- * the outermost edges of the image, it scans inward to find the first
- * black (wall) pixel in each row/column.  The intersection of the 4
- * edge profiles defines the exterior perimeter, correctly handling
- * rectangular polygons with concavities and 45-degree angles.
+ * For clean inputs (black-on-white, no extraneous noise outside the
+ * floorplan), a simple global brightness threshold is more accurate
+ * than adaptive thresholding: it correctly captures the full thickness
+ * of thick walls (no hollow centers) and preserves thin lines such as
+ * window outlines (no morphological erosion).
+ *
+ * Starting from the outermost edges of the image, the algorithm scans
+ * inward to find the first dark pixel in each row/column.  The
+ * intersection of the 4 edge profiles defines the exterior perimeter,
+ * correctly handling rectangular polygons with concavities and
+ * 45-degree angles.
  */
 
 /**
- * Step 1 — Connected component filtering.
- * Identify all connected groups of wall pixels and remove:
- *  • Text: small, fragmented clusters (area < 0.2% of image)
- *  • Small non-structural shapes: components that don't span at least
- *    8% of the shorter dimension in either direction
- *  • Logos: compact, solid shapes (low aspect ratio + high solidity)
- *  • Text annotations: elongated, sparse shapes (high aspect ratio
- *    + low solidity + thin minor axis)
- * Keep only components likely to be structural walls.
- */
-
-// --- Thresholds for text-annotation filtering (Fletcher-Kasturi inspired) ---
-const TEXT_MIN_ASPECT = 4.0;         // text strings are highly elongated
-const TEXT_MAX_MINOR_AXIS_PCT = 0.05; // minor axis < 5% of shorter image dim
-const TEXT_MAX_SOLIDITY = 0.4;       // sparse fill (inter-letter gaps)
-const TEXT_MAX_AREA_PCT = 0.015;     // text is small relative to image
-
-const filterComponentsByStructure = (wallMask, width, height) => {
-  const labeled = labelConnectedComponents(wallMask, width, height, 1);
-  const { components, labels } = labeled;
-  if (!components.length) return wallMask;
-
-  const imageArea = width * height;
-  const minDim = Math.min(width, height);
-  const minArea = imageArea * 0.002;
-  const minSpan = minDim * 0.08;
-
-  const keptIds = new Set();
-
-  for (const comp of components) {
-    const bboxW = comp.bbox.maxX - comp.bbox.minX + 1;
-    const bboxH = comp.bbox.maxY - comp.bbox.minY + 1;
-
-    // Remove small fragments (text, stray dots).
-    if (comp.size < minArea) continue;
-
-    // Remove compact components that span very little in both dimensions.
-    if (bboxW < minSpan && bboxH < minSpan) continue;
-
-    // Remove compact solid shapes (logos): low aspect ratio + high fill
-    // ratio while still small relative to image.
-    const aspect = Math.max(bboxW, bboxH) / Math.max(1, Math.min(bboxW, bboxH));
-    const solidity = comp.size / (bboxW * bboxH);
-    if (aspect < 2.0 && solidity > 0.4 && comp.size < imageArea * 0.03) continue;
-
-    // Remove text annotations / watermarks: elongated components whose
-    // minor axis is very thin AND that consist of sparse, disconnected
-    // pixels (low solidity).  Wall segments are also elongated but have
-    // near-perfect solidity (~1.0 after dilation); text has inter-letter
-    // gaps giving solidity well below 0.4.  The solidity threshold is
-    // kept low to avoid false-positives on dashed or cross-hatched walls.
-    // (Inspired by Fletcher-Kasturi text/graphics separation — Ref 10.)
-    const minorAxis = Math.min(bboxW, bboxH);
-    if (aspect >= TEXT_MIN_ASPECT && minorAxis < minDim * TEXT_MAX_MINOR_AXIS_PCT
-        && solidity < TEXT_MAX_SOLIDITY && comp.size < imageArea * TEXT_MAX_AREA_PCT) continue;
-
-    keptIds.add(comp.id);
-  }
-
-  // Safety: always keep the largest component.
-  if (keptIds.size === 0 && components.length > 0) {
-    keptIds.add(components.reduce((a, b) => (a.size > b.size ? a : b)).id);
-  }
-
-  const out = new Uint8Array(width * height);
-  for (let i = 0; i < labels.length; i += 1) {
-    if (keptIds.has(labels[i])) out[i] = 1;
-  }
-  return out;
-};
-
-/**
- * Step 3 — Edge-inward scanning for exterior wall detection.
+ * Edge-inward scanning for exterior wall detection.
  * Scans from all 4 edges of the image towards the center, recording
  * the position of the first wall (black) pixel encountered in each
  * row/column.  Returns 4 profile arrays.
@@ -501,40 +437,28 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const orientation = estimateDominantOrientations(
     preprocess.gray, preprocess.width, preprocess.height, options.orientation,
   );
-  const baseWallMask = prepareWallMask(
-    preprocess.wallMask, preprocess.width, preprocess.height, options.wallMask,
-  );
 
   const w = preprocess.width;
   const h = preprocess.height;
 
-  /* --- Step 1: Connected component filtering (remove text & logos) ---
-   * Dilate before CC analysis so nearby wall segments connect across
-   * small gaps (doors, line breaks).  Filter removes small fragments
-   * (text) and compact solid shapes (logos).                            */
-  const ccDilateRadius = options.ccDilateRadius ?? 5;
-  const dilatedForCC = dilate(baseWallMask, w, h, ccDilateRadius);
-  const filteredMask = filterComponentsByStructure(dilatedForCC, w, h);
-
-  /* --- Step 2: Recover precise wall edges ---
-   * Intersect CC-filtered mask with original for true wall pixels.     */
-  const preciseMask = new Uint8Array(w * h);
-  for (let i = 0; i < preciseMask.length; i += 1) {
-    preciseMask[i] = baseWallMask[i] && filteredMask[i] ? 1 : 0;
+  /* --- Edge-scan footprint using global brightness threshold ---
+   * Use a simple global threshold on the grayscale image to identify
+   * wall pixels.  Unlike adaptive thresholding, this correctly captures
+   * the full thickness of walls (no hollow centers for thick walls) and
+   * preserves thin lines such as window outlines (no morphological
+   * erosion of fine features).
+   *
+   * Since the input is guaranteed black-on-white with no noise outside
+   * the floorplan, a global threshold is robust and accurate.  The
+   * edge-inward scan naturally ignores interior features because it
+   * only records the first dark pixel from each image edge.            */
+  const darkThreshold = options.darkThreshold ?? DARK_PIXEL_THRESHOLD;
+  const edgeScanMask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i += 1) {
+    edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
   }
 
-  /* --- Step 3: Edge-scan footprint ---
-   * Scan from all 4 edges inward to find the first wall pixel in each
-   * row/column.  The intersection of the 4 profiles defines the
-   * floorplan footprint.  This is trivially fast and robust for clean
-   * (preprocessed) inputs and correctly handles rectangular polygons
-   * with concavities and 45-degree angles.
-   *
-   * A small morphological closing is applied beforehand to bridge
-   * minor gaps at wall corners, junctions, and door openings.          */
-  const edgeScanCloseRadius = options.edgeScanCloseRadius ?? 4;
-  const closedForScan = closeMask(preciseMask, w, h, edgeScanCloseRadius);
-  let footprint = buildEdgeScanFootprint(closedForScan, w, h);
+  let footprint = buildEdgeScanFootprint(edgeScanMask, w, h);
   let usedEdgeScan = true;
 
   // Verify footprint is non-trivial.
@@ -546,7 +470,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   if (fpSize < w * h * 0.02) {
     // Fallback: flood-fill from edges.
     footprint = getFloorplanFootprint(
-      dilate(baseWallMask, w, h, options.outerDilate ?? 2), w, h,
+      dilate(edgeScanMask, w, h, options.outerDilate ?? 2), w, h,
     );
     usedEdgeScan = false;
   }
