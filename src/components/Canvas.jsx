@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, WallDetectionDebugLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
 
 const Canvas = forwardRef(({
   image,
@@ -40,9 +40,6 @@ const Canvas = forwardRef(({
   autoSnapEnabled,
   debugDetection,
   detectionDebugData,
-  wallDetectionDebugMode,
-  wallDetectionDebugData,
-  wallDetectionDebugLayers,
   onSaveUndoPoint,
   onCancelUndoSave,
   eraserToolActive,
@@ -1442,16 +1439,6 @@ const Canvas = forwardRef(({
                 fontSize={12 / scale}
                 fill="#8BE9FD"
                 listening={false}
-              />
-            )}
-
-            {/* Wall Detection Debug Overlay */}
-            {wallDetectionDebugMode && wallDetectionDebugData?.debug && (
-              <WallDetectionDebugLayer
-                debugData={wallDetectionDebugData.debug}
-                scale={scale}
-                enabledLayers={wallDetectionDebugLayers || new Set()}
-                pipelineScale={wallDetectionDebugData.debug?.preprocessed?.scale}
               />
             )}
 
