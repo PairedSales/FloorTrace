@@ -47,7 +47,8 @@ const WORKING_STATE_DEFAULTS = {
  * isProcessing is transient).
  */
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage' &&
+         k !== 'wallDetectionDebugData' && k !== 'wallDetectionDebugLayers' && k !== 'wallDetectionRunning'
 );
 
 /**
@@ -55,7 +56,8 @@ const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * Same as SNAPSHOT_FIELDS but also includes `image`.
  */
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => k !== 'isProcessing' && k !== 'processingMessage' &&
+         k !== 'wallDetectionDebugData' && k !== 'wallDetectionDebugLayers' && k !== 'wallDetectionRunning'
 );
 
 // ──── helpers ────────────────────────────────────────────────────────────────
