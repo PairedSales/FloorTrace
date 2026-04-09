@@ -16,7 +16,7 @@ const WORKING_STATE_DEFAULTS = {
   isProcessing: false,
   processingMessage: '',
   detectedDimensions: [],
-  showSideLengths: true,
+  showSideLengths: false,
   useInteriorWalls: true,
   autoSnapEnabled: true,
   manualEntryMode: false,
