@@ -1,6 +1,8 @@
 import { toGrayscale, boxBlurGray, resizeNearest } from './preprocess';
 import { closeMask, openMask } from './wallMask';
 import { labelConnectedComponents, mooreBoundaryTrace, simplifyRdp } from './vectorize';
+import { segmentRooms, extractRoomFeatures } from './roomSegmentation';
+import { assignTextToRooms, computeScale } from './ocrMapping';
 
 /**
  * Room detection — stub.
@@ -342,4 +344,99 @@ export const boundaryByMode = (result, wallMode = 'inner') => {
   if (!result) return null;
   if (wallMode === 'outer') return result.outer ?? result.inner;
   return result.inner ?? result.outer;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Full pipeline: boundary + rooms + OCR + scale                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Run the complete floorplan processing pipeline.
+ *
+ * 1. Preprocess → binary mask (walls = 1)
+ * 2. Clean binary mask (close + open + CC removal)
+ * 3. Detect outer boundary
+ * 4. Segment rooms from cleaned wall mask
+ * 5. Extract room features (contours, bbox, centroid)
+ * 6. Assign OCR text to rooms
+ * 7. Compute scale
+ *
+ * @param {ImageData}   imageData   RGBA image
+ * @param {Array}       [ocrResults=[]]  OCR items: { text, bbox: {x,y,w,h} }
+ * @param {object}      [options]
+ * @returns {object}    Full pipeline result
+ */
+export const runFullPipeline = (imageData, ocrResults = [], options = {}) => {
+  if (!imageData?.data || !imageData.width || !imageData.height) return null;
+
+  const { width, height } = imageData;
+  const warnings = [];
+
+  // Step 1 – Preprocess
+  const { binary, threshold } = preprocessImage(imageData, options);
+
+  // Step 2a – Clean binary for outer boundary (close + open + CC removal)
+  const cleanedWalls = cleanBinary(binary, width, height, {
+    closeRadius: options.closeRadius ?? 3,
+    openRadius: options.openRadius ?? 2,
+    minComponentArea: options.minComponentArea ?? Math.max(100, Math.round(width * height * 0.001)),
+  });
+
+  // Step 2b – Wall mask for room segmentation: closing only (no opening),
+  //           so thin interior walls are preserved.
+  const roomCloseR = options.roomCloseRadius ?? 2;
+  const roomMinArea = options.roomMinComponentArea ?? Math.max(50, Math.round(width * height * 0.0005));
+  let roomWallMask = closeMask(binary, width, height, roomCloseR);
+  roomWallMask = removeSmallComponents(roomWallMask, width, height, roomMinArea);
+
+  // Step 3 – Outer boundary (uses existing pipeline)
+  const boundaryResult = traceFloorplanBoundaryCore(imageData, options);
+
+  // Step 4 – Room segmentation (use wall mask that preserves interior walls)
+  const gapCloseRadius = options.gapCloseRadius ?? Math.max(3, Math.round(Math.min(width, height) * 0.01));
+  const { labels: roomLabels, rooms: roomComponents, closedWalls } = segmentRooms(
+    roomWallMask, width, height, { gapCloseRadius, ...options },
+  );
+
+  // Step 5 – Extract room features
+  const rooms = extractRoomFeatures(roomLabels, roomComponents, width, height, options);
+
+  if (rooms.length === 0) {
+    warnings.push('No rooms detected');
+  } else if (rooms.length < 2) {
+    warnings.push('Very few rooms detected — possible segmentation issue');
+  }
+
+  // Step 6 – OCR assignment
+  const ocrResult = assignTextToRooms(rooms, ocrResults);
+  if (ocrResults.length > 0 && ocrResult.unassigned.length > 0) {
+    warnings.push(`${ocrResult.unassigned.length} OCR item(s) not assigned to any room`);
+  }
+
+  // Step 7 – Scale computation
+  const scale = computeScale(rooms);
+
+  // Logging
+  const log = {
+    roomCount: rooms.length,
+    ocrAssigned: ocrResult.assigned,
+    ocrUnassigned: ocrResult.unassigned.length,
+    scale: scale ? { mean: scale.meanScale, std: scale.stdScale } : null,
+    warnings,
+  };
+
+  return {
+    binary,
+    cleanedWalls,
+    closedWalls,
+    boundary: boundaryResult,
+    roomLabels,
+    rooms,
+    ocrResult,
+    scale,
+    threshold,
+    log,
+    width,
+    height,
+  };
 };
