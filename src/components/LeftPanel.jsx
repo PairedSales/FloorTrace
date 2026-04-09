@@ -21,6 +21,8 @@ const LeftPanel = ({
   perimeterOverlay,
   debugDetection,
   onDebugDetectionChange,
+  wallDetectionDebugMode,
+  onWallDetectionDebugChange,
   showOptions,
   saveOnExit,
   onSaveOnExitChange,
@@ -216,6 +218,13 @@ const LeftPanel = ({
               checked={debugDetection}
               onChange={onDebugDetectionChange}
             />
+            <div className="mt-2">
+              <Toggle
+                label="Wall Detection Debug"
+                checked={wallDetectionDebugMode}
+                onChange={onWallDetectionDebugChange}
+              />
+            </div>
           </section>
 
           <div className="panel-divider mx-3" />
