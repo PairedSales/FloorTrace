@@ -4,7 +4,6 @@ import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
-import WallDetectionDebugPanel from './components/WallDetectionDebugPanel';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import {
@@ -13,7 +12,6 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
-import { runWallDetectionPipeline } from './utils/detection/wallDetectionPipeline';
 import useAppStore from './store/appStore';
 import * as undoManager from './store/undoManager';
 
@@ -48,10 +46,6 @@ function App() {
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const debugDetection = useAppStore((s) => s.debugDetection);
   const detectionDebugData = useAppStore((s) => s.detectionDebugData);
-  const wallDetectionDebugMode = useAppStore((s) => s.wallDetectionDebugMode);
-  const wallDetectionDebugData = useAppStore((s) => s.wallDetectionDebugData);
-  const wallDetectionDebugLayers = useAppStore((s) => s.wallDetectionDebugLayers);
-  const wallDetectionRunning = useAppStore((s) => s.wallDetectionRunning);
   const notification = useAppStore((s) => s.notification);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
@@ -88,10 +82,6 @@ function App() {
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setDebugDetection = useAppStore((s) => s.setDebugDetection);
-  const setWallDetectionDebugMode = useAppStore((s) => s.setWallDetectionDebugMode);
-  const setWallDetectionDebugData = useAppStore((s) => s.setWallDetectionDebugData);
-  const setWallDetectionDebugLayers = useAppStore((s) => s.setWallDetectionDebugLayers);
-  const setWallDetectionRunning = useAppStore((s) => s.setWallDetectionRunning);
   const setEraserToolActive = useAppStore((s) => s.setEraserToolActive);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const setCropToolActive = useAppStore((s) => s.setCropToolActive);
@@ -468,78 +458,6 @@ function App() {
     setCurrentCustomShape(null);
   };
 
-  // ── Wall Detection Debug Mode ──────────────────────────────────────────────
-
-  const handleWallDetectionDebugToggle = useCallback(async (enabled) => {
-    if (!enabled) {
-      setWallDetectionDebugMode(false);
-      setWallDetectionDebugData(null);
-      return;
-    }
-
-    setWallDetectionDebugMode(true);
-    // Initialise all layers visible
-    setWallDetectionDebugLayers(new Set([
-      'ocrRegions', 'wallCandidates', 'mergedSegments', 'junctions',
-      'graphNodes', 'roomRegions', 'roomPolygon', 'exteriorPerimeter', 'scores',
-    ]));
-
-    // Load ExampleFloorplan.png if no image is loaded
-    let imgSrc = image;
-    if (!imgSrc) {
-      try {
-        const resp = await fetch('/ExampleFloorplan.png');
-        const blob = await resp.blob();
-        imgSrc = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
-        setImage(imgSrc);
-      } catch {
-        setNotification({ show: true, message: 'Failed to load ExampleFloorplan.png' });
-        return;
-      }
-    }
-
-    // Run pipeline asynchronously
-    setWallDetectionRunning(true);
-    try {
-      // Convert data URL to ImageData
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = imgSrc;
-      });
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-
-      // Gather OCR boxes from current state
-      const ocrBoxes = useAppStore.getState().detectedDimensions || [];
-      const result = runWallDetectionPipeline(imageData, { ocrBoxes });
-      setWallDetectionDebugData(result);
-    } catch (err) {
-      console.error('Wall detection pipeline error:', err);
-      setNotification({ show: true, message: 'Wall detection failed: ' + err.message });
-    } finally {
-      setWallDetectionRunning(false);
-    }
-  }, [image, setImage, setNotification, setWallDetectionDebugMode, setWallDetectionDebugData,
-      setWallDetectionDebugLayers, setWallDetectionRunning]);
-
-  const handleWallDetectionLayerToggle = useCallback((layerId) => {
-    const prev = useAppStore.getState().wallDetectionDebugLayers;
-    const next = new Set(prev || []);
-    if (next.has(layerId)) next.delete(layerId);
-    else next.add(layerId);
-    setWallDetectionDebugLayers(next);
-  }, [setWallDetectionDebugLayers]);
-
   // Handle image update from eraser or crop tool (saves undo point before changing)
   const handleImageUpdate = useCallback((newImageDataUrl) => {
     undoManager.save();
@@ -899,7 +817,6 @@ function App() {
           state.tracedBoundaries === prevState.tracedBoundaries &&
           state.debugDetection === prevState.debugDetection &&
           state.detectionDebugData === prevState.detectionDebugData &&
-          state.wallDetectionDebugMode === prevState.wallDetectionDebugMode &&
           state.eraserToolActive === prevState.eraserToolActive &&
           state.eraserBrushSize === prevState.eraserBrushSize &&
           state.cropToolActive === prevState.cropToolActive) {
@@ -1070,9 +987,6 @@ function App() {
             autoSnapEnabled={autoSnapEnabled}
             debugDetection={debugDetection}
             detectionDebugData={detectionDebugData}
-            wallDetectionDebugMode={wallDetectionDebugMode}
-            wallDetectionDebugData={wallDetectionDebugData}
-            wallDetectionDebugLayers={wallDetectionDebugLayers}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onSaveUndoPoint={() => undoManager.save()}
@@ -1084,16 +998,6 @@ function App() {
             onImageUpdate={handleImageUpdate}
           />
         </div>
-
-        {/* Wall Detection Debug Panel (floats over canvas) */}
-        {wallDetectionDebugMode && (
-          <WallDetectionDebugPanel
-            enabledLayers={wallDetectionDebugLayers || new Set()}
-            onToggleLayer={handleWallDetectionLayerToggle}
-            onClose={() => handleWallDetectionDebugToggle(false)}
-            isRunning={wallDetectionRunning}
-          />
-        )}
 
         <LeftPanel
           roomDimensions={roomDimensions}
@@ -1121,8 +1025,6 @@ function App() {
           perimeterOverlay={perimeterOverlay}
           debugDetection={debugDetection}
           onDebugDetectionChange={setDebugDetection}
-          wallDetectionDebugMode={wallDetectionDebugMode}
-          onWallDetectionDebugChange={handleWallDetectionDebugToggle}
           showOptions={showPanelOptions}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
