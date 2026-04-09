@@ -32,6 +32,10 @@ const WORKING_STATE_DEFAULTS = {
   tracedBoundaries: null,
   debugDetection: false,
   detectionDebugData: null,
+  wallDetectionDebugMode: false,
+  wallDetectionDebugData: null,
+  wallDetectionDebugLayers: null,     // Set<string> — serialised as array
+  wallDetectionRunning: false,
   eraserToolActive: false,
   eraserBrushSize: 20,
   cropToolActive: false,
@@ -43,7 +47,8 @@ const WORKING_STATE_DEFAULTS = {
  * isProcessing is transient).
  */
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage' &&
+         k !== 'wallDetectionDebugData' && k !== 'wallDetectionDebugLayers' && k !== 'wallDetectionRunning'
 );
 
 /**
@@ -51,7 +56,8 @@ const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * Same as SNAPSHOT_FIELDS but also includes `image`.
  */
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => k !== 'isProcessing' && k !== 'processingMessage' &&
+         k !== 'wallDetectionDebugData' && k !== 'wallDetectionDebugLayers' && k !== 'wallDetectionRunning'
 );
 
 // ──── helpers ────────────────────────────────────────────────────────────────
@@ -111,6 +117,10 @@ const useAppStore = create((set, get) => ({
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
   setDebugDetection: (v) => set({ debugDetection: v }),
   setDetectionDebugData: (v) => set({ detectionDebugData: v }),
+  setWallDetectionDebugMode: (v) => set({ wallDetectionDebugMode: v }),
+  setWallDetectionDebugData: (v) => set({ wallDetectionDebugData: v }),
+  setWallDetectionDebugLayers: (v) => set({ wallDetectionDebugLayers: v }),
+  setWallDetectionRunning: (v) => set({ wallDetectionRunning: v }),
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
