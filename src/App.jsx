@@ -533,12 +533,11 @@ function App() {
       setWallDetectionDebugLayers, setWallDetectionRunning]);
 
   const handleWallDetectionLayerToggle = useCallback((layerId) => {
-    setWallDetectionDebugLayers((prev) => {
-      const next = new Set(prev || []);
-      if (next.has(layerId)) next.delete(layerId);
-      else next.add(layerId);
-      return next;
-    });
+    const prev = useAppStore.getState().wallDetectionDebugLayers;
+    const next = new Set(prev || []);
+    if (next.has(layerId)) next.delete(layerId);
+    else next.add(layerId);
+    setWallDetectionDebugLayers(next);
   }, [setWallDetectionDebugLayers]);
 
   // Handle image update from eraser or crop tool (saves undo point before changing)
@@ -900,6 +899,7 @@ function App() {
           state.tracedBoundaries === prevState.tracedBoundaries &&
           state.debugDetection === prevState.debugDetection &&
           state.detectionDebugData === prevState.detectionDebugData &&
+          state.wallDetectionDebugMode === prevState.wallDetectionDebugMode &&
           state.eraserToolActive === prevState.eraserToolActive &&
           state.eraserBrushSize === prevState.eraserBrushSize &&
           state.cropToolActive === prevState.cropToolActive) {
