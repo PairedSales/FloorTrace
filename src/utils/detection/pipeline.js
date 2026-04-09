@@ -1,18 +1,86 @@
 import { toGrayscale, boxBlurGray, resizeNearest } from './preprocess';
 import { closeMask, openMask } from './wallMask';
 import { labelConnectedComponents, mooreBoundaryTrace, simplifyRdp } from './vectorize';
-import { segmentRooms, extractRoomFeatures } from './roomSegmentation';
+import { segmentRooms, extractRoomFeatures, pointInPolygon, pointInBbox } from './roomSegmentation';
 import { assignTextToRooms, computeScale } from './ocrMapping';
 
 /**
- * Room detection — stub.
+ * Detect the room enclosure at a given click point.
  *
- * The algorithm implementation has been removed to prepare for a
- * full rewrite.  This export preserves the public API so the UI
- * continues to compile and run (detection simply returns null).
+ * Runs room segmentation on the image, then finds which room
+ * contains the click point using point-in-polygon / bbox tests.
+ *
+ * @param {ImageData}    imageData   RGBA image
+ * @param {{x,y}}        clickPoint  Click coordinates in image space
+ * @param {object}       [options]
+ * @returns {object|null}  { overlay, polygon, confidence, debug }
  */
-// eslint-disable-next-line no-unused-vars
-export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => null;
+export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
+  if (!imageData?.data || !imageData.width || !imageData.height || !clickPoint) return null;
+
+  const { width, height } = imageData;
+
+  // Step 1 – Preprocess to get binary wall mask
+  const { binary } = preprocessImage(imageData, options);
+
+  // Step 2 – Prepare wall mask for room segmentation (closing only, no opening)
+  const roomCloseR = options.roomCloseRadius ?? 2;
+  const roomMinArea = options.roomMinComponentArea ?? Math.max(50, Math.round(width * height * 0.0005));
+  let roomWallMask = closeMask(binary, width, height, roomCloseR);
+  roomWallMask = removeSmallComponents(roomWallMask, width, height, roomMinArea);
+
+  // Step 3 – Segment rooms
+  const gapCloseRadius = options.gapCloseRadius ?? Math.max(3, Math.round(Math.min(width, height) * 0.01));
+  const { labels: roomLabels, rooms: roomComponents } = segmentRooms(
+    roomWallMask, width, height, { gapCloseRadius, ...options },
+  );
+
+  // Step 4 – Extract room features (contours, bboxes)
+  const rooms = extractRoomFeatures(roomLabels, roomComponents, width, height, options);
+  if (rooms.length === 0) return null;
+
+  // Step 5 – Find the room containing the click point
+  let bestRoom = null;
+
+  // First try precise point-in-polygon test
+  for (const room of rooms) {
+    if (pointInPolygon(room.contour, clickPoint)) {
+      if (!bestRoom || room.area < bestRoom.area) {
+        bestRoom = room;
+      }
+    }
+  }
+
+  // Fallback to bounding-box test if polygon test fails
+  if (!bestRoom) {
+    for (const room of rooms) {
+      if (pointInBbox(room.bbox, clickPoint)) {
+        if (!bestRoom || room.area < bestRoom.area) {
+          bestRoom = room;
+        }
+      }
+    }
+  }
+
+  if (!bestRoom) return null;
+
+  const { bbox, contour } = bestRoom;
+  return {
+    overlay: {
+      x1: bbox.minX,
+      y1: bbox.minY,
+      x2: bbox.maxX,
+      y2: bbox.maxY,
+    },
+    polygon: contour,
+    confidence: contour.length >= 3 ? 0.8 : 0.4,
+    debug: {
+      roomCount: rooms.length,
+      selectedRoomId: bestRoom.id,
+      selectedRoomArea: bestRoom.area,
+    },
+  };
+};
 
 /* ------------------------------------------------------------------ */
 /*  Otsu threshold                                                     */
@@ -342,8 +410,10 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
 export const boundaryByMode = (result, wallMode = 'inner') => {
   if (!result) return null;
-  if (wallMode === 'outer') return result.outer ?? result.inner;
-  return result.inner ?? result.outer;
+  const polygon = wallMode === 'outer'
+    ? (result.outer ?? result.inner)
+    : (result.inner ?? result.outer);
+  return polygon ? { polygon } : null;
 };
 
 /* ------------------------------------------------------------------ */

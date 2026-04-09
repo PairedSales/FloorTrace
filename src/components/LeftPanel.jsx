@@ -234,8 +234,8 @@ const LeftPanel = ({
                 />
                 <Toggle
                   label="Measure From Interior"
-                  checked={false}
-                  onChange={() => {}}
+                  checked={useInteriorWalls}
+                  onChange={onInteriorWallToggle}
                 />
                 <Toggle
                   label="Auto Snap"
