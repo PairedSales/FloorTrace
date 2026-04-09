@@ -57,10 +57,18 @@ const PARAMS = {
   scoreThicknessConsistency: 0.2,
 };
 
+// Iteration limits for Moore boundary tracing (prevent infinite loops on complex contours)
+const ROOM_CONTOUR_ITER_MULTIPLIER = 8;   // max iterations = perim × this
+const ROOM_CONTOUR_ITER_MIN = 50000;
+const EXTERIOR_CONTOUR_ITER_MULTIPLIER = 8;
+const EXTERIOR_CONTOUR_ITER_MIN = 100000;
+const MIN_MORPH_CLOSE_RADIUS = 3;         // minimum pixel radius for morphological close
+
 // ─── Stage 1: Preprocessing ─────────────────────────────────────────────────
 
 /**
  * Convert RGBA ImageData to grayscale Uint8ClampedArray.
+ * Uses ITU-R BT.601 luma coefficients: 0.299·R + 0.587·G + 0.114·B.
  */
 export function toGrayscale(rgba, width, height) {
   const gray = new Uint8ClampedArray(width * height);
@@ -594,7 +602,7 @@ export function findClosedRegions(wallMask, width, height, params = PARAMS) {
   // Close door gaps with aggressive morphological close
   // Use 4% of smaller dimension by default — this bridges typical door gaps
   const closeRadius = params.roomCloseRadius ??
-    Math.max(3, Math.round((params.roomCloseRadiusPct ?? 0.04) * Math.min(width, height)));
+    Math.max(MIN_MORPH_CLOSE_RADIUS, Math.round((params.roomCloseRadiusPct ?? 0.04) * Math.min(width, height)));
   const closedMask = closeRadius > 0 ? morphClose(wallMask, width, height, closeRadius) : wallMask;
 
   // Invert: background (non-wall) becomes foreground
@@ -695,7 +703,7 @@ export function traceRegionContour(labels, width, height, label, minX, minY, max
   // is to the west, so we "moved east" to get here → dir = 4 (E).
   let dir = 4;
   const perim = 2 * ((maxX - minX) + (maxY - minY));
-  const maxIter = Math.max(perim * 8, 50000);
+  const maxIter = Math.max(perim * ROOM_CONTOUR_ITER_MULTIPLIER, ROOM_CONTOUR_ITER_MIN);
   let iter = 0;
 
   do {
@@ -943,7 +951,7 @@ function mooreBoundaryTrace(mask, width, height, minX, minY, maxX, maxY) {
   // Use perimeter-based limit: boundary can be at most 2*(W+H) for convex, but
   // for complex shapes allow up to 8× the perimeter of the bounding box
   const perim = 2 * ((maxX - minX) + (maxY - minY));
-  const maxIter = Math.max(perim * 8, 100000);
+  const maxIter = Math.max(perim * EXTERIOR_CONTOUR_ITER_MULTIPLIER, EXTERIOR_CONTOUR_ITER_MIN);
   let iter = 0;
 
   do {
