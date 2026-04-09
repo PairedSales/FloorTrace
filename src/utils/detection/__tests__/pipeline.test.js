@@ -91,10 +91,28 @@ describe('detection pipeline', () => {
     expect(orientation.dominant.some((angle) => Math.abs(angle - 60) <= 15)).toBe(true);
   });
 
-  it('detectRoomFromClickCore returns null (stub)', () => {
+  it('extracts a room enclosure from a clicked point', () => {
     const img = createBlankImageData(320, 220);
-    const result = detectRoomFromClickCore(img, { x: 80, y: 90 });
-    expect(result).toBeNull();
+    drawLine(img, 20, 20, 140, 20, 3);
+    drawLine(img, 20, 160, 140, 160, 3);
+    drawLine(img, 20, 20, 20, 160, 3);
+    drawLine(img, 140, 20, 140, 160, 3);
+    drawLine(img, 180, 30, 300, 30, 3);
+    drawLine(img, 180, 180, 300, 180, 3);
+    drawLine(img, 180, 30, 180, 180, 3);
+    drawLine(img, 300, 30, 300, 180, 3);
+
+    const room = detectRoomFromClickCore(
+      img,
+      { x: 80, y: 90 },
+      { wallMask: { closeRadius: 0, openRadius: 0 } }
+    );
+    expect(room).toBeTruthy();
+    expect(room.overlay.x1).toBeLessThanOrEqual(80);
+    expect(room.overlay.x2).toBeGreaterThanOrEqual(80);
+    expect(room.overlay.y1).toBeLessThanOrEqual(90);
+    expect(room.overlay.y2).toBeGreaterThanOrEqual(90);
+    expect(room.polygon.length).toBeGreaterThan(2);
   });
 
   it('traceFloorplanBoundaryCore returns null for blank white image', () => {

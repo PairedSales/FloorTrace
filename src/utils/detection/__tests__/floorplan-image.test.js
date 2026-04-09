@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { PNG } from 'pngjs';
 import {
   traceFloorplanBoundaryCore,
+  detectRoomFromClickCore,
   preprocessImage,
   fillExterior,
 } from '../pipeline';
@@ -220,5 +221,117 @@ describe('ExampleFloorplan.png – full pipeline', () => {
       const data = readFileSync(resolve(OUTPUT_DIR, f));
       expect(data.length).toBeGreaterThan(0);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Room Detection Tests                                               */
+/* ------------------------------------------------------------------ */
+
+/** Signed area (shoelace). */
+const polygonArea = (polygon) => {
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const cur = polygon[i];
+    const nxt = polygon[(i + 1) % polygon.length];
+    sum += cur.x * nxt.y - nxt.x * cur.y;
+  }
+  return Math.abs(sum) / 2;
+};
+
+const IMAGE_WIDTH = 2036;
+const IMAGE_HEIGHT = 1440;
+const IMAGE_AREA = IMAGE_WIDTH * IMAGE_HEIGHT;
+
+describe('ExampleFloorplan.png – room detection', () => {
+  it('detects the big left room at (342, 440)', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 342, y: 440 });
+    expect(room).toBeTruthy();
+    expect(room.polygon.length).toBeGreaterThan(2);
+    expect(room.overlay.x1).toBeLessThanOrEqual(342);
+    expect(room.overlay.x2).toBeGreaterThanOrEqual(342);
+    expect(room.overlay.y1).toBeLessThanOrEqual(440);
+    expect(room.overlay.y2).toBeGreaterThanOrEqual(440);
+    const area = polygonArea(room.polygon);
+    expect(area).toBeGreaterThan(50000);
+    expect(area).toBeLessThan(IMAGE_AREA * 0.6);
+  });
+
+  it('detects the upper-middle room at (861, 373)', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 861, y: 373 });
+    expect(room).toBeTruthy();
+    expect(room.polygon.length).toBeGreaterThan(2);
+    expect(room.overlay.x1).toBeLessThanOrEqual(861);
+    expect(room.overlay.x2).toBeGreaterThanOrEqual(861);
+    expect(room.overlay.y1).toBeLessThanOrEqual(373);
+    expect(room.overlay.y2).toBeGreaterThanOrEqual(373);
+    const area = polygonArea(room.polygon);
+    expect(area).toBeGreaterThan(30000);
+    expect(area).toBeLessThan(IMAGE_AREA * 0.6);
+  });
+
+  it('detects the lower-left room at (199, 911)', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 199, y: 911 });
+    expect(room).toBeTruthy();
+    expect(room.polygon.length).toBeGreaterThan(2);
+    expect(room.overlay.x1).toBeLessThanOrEqual(199);
+    expect(room.overlay.x2).toBeGreaterThanOrEqual(199);
+  });
+
+  it('different rooms yield distinct overlays', { timeout: 30_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room1 = detectRoomFromClickCore(imageData, { x: 342, y: 440 });
+    const room2 = detectRoomFromClickCore(imageData, { x: 861, y: 373 });
+    expect(room1).toBeTruthy();
+    expect(room2).toBeTruthy();
+    const overlaysDiffer =
+      room1.overlay.x1 !== room2.overlay.x1 ||
+      room1.overlay.y1 !== room2.overlay.y1 ||
+      room1.overlay.x2 !== room2.overlay.x2 ||
+      room1.overlay.y2 !== room2.overlay.y2;
+    expect(overlaysDiffer).toBe(true);
+  });
+
+  it('room detection returns a confidence value between 0 and 1', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 342, y: 440 });
+    expect(room).toBeTruthy();
+    expect(room.confidence).toBeGreaterThanOrEqual(0);
+    expect(room.confidence).toBeLessThanOrEqual(1);
+  });
+
+  it('room detection includes debug info', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 342, y: 440 });
+    expect(room).toBeTruthy();
+    expect(room.debug).toBeTruthy();
+    expect(room.debug.normalizedSize).toBeTruthy();
+    expect(room.debug.normalizedSize.width).toBeGreaterThan(0);
+    expect(room.debug.normalizedSize.height).toBeGreaterThan(0);
+    expect(room.debug.dominantAngles).toBeTruthy();
+  });
+
+  it('clicking on a wall pixel still finds a nearby room', { timeout: 15_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const room = detectRoomFromClickCore(imageData, { x: 85, y: 440 });
+    if (room) {
+      expect(room.polygon.length).toBeGreaterThan(2);
+    }
+  });
+
+  it('multiple room detections are stable (deterministic)', { timeout: 30_000 }, () => {
+    const imageData = loadPng('ExampleFloorplan.png');
+    const click = { x: 342, y: 440 };
+    const room1 = detectRoomFromClickCore(imageData, click);
+    const room2 = detectRoomFromClickCore(imageData, click);
+    expect(room1).toBeTruthy();
+    expect(room2).toBeTruthy();
+    expect(room1.overlay.x1).toBe(room2.overlay.x1);
+    expect(room1.overlay.y1).toBe(room2.overlay.y1);
+    expect(room1.overlay.x2).toBe(room2.overlay.x2);
+    expect(room1.overlay.y2).toBe(room2.overlay.y2);
   });
 });

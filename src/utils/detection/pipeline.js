@@ -1,18 +1,267 @@
-import { toGrayscale, boxBlurGray, resizeNearest } from './preprocess';
+import { toGrayscale, boxBlurGray, resizeNearest, normalizeImageData, mapPointToNormalized } from './preprocess';
+import { estimateDominantOrientations } from './orientation';
 import { closeMask, openMask } from './wallMask';
-import { labelConnectedComponents, mooreBoundaryTrace, simplifyRdp } from './vectorize';
+import { labelConnectedComponents, mooreBoundaryTrace, simplifyRdp, polygonToBounds, mapPolygonFromNormalized } from './vectorize';
 import { segmentRooms, extractRoomFeatures } from './roomSegmentation';
 import { assignTextToRooms, computeScale } from './ocrMapping';
 
-/**
- * Room detection — stub.
+/* ------------------------------------------------------------------ */
+/*  Room Detection helpers                                             */
+/* ------------------------------------------------------------------ */
+
+const invertMask = (mask) => {
+  const out = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i += 1) {
+    out[i] = mask[i] ? 0 : 1;
+  }
+  return out;
+};
+
+const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {}) => {
+  const mapped = mapPolygonFromNormalized(polygon, preprocessResult.scale);
+  const bounds = polygonToBounds(mapped);
+  if (!bounds) return null;
+
+  return {
+    polygon: mapped,
+    overlay: {
+      x1: bounds.minX,
+      y1: bounds.minY,
+      x2: bounds.maxX,
+      y2: bounds.maxY,
+    },
+    confidence,
+    debug,
+  };
+};
+
+/* ---------- Room Detection ----------
+ * Expansion-based room detection: from the OCR/click point,
+ * expand outward in 4 directions (left, right, up, down) until
+ * rectangular room walls are found.
  *
- * The algorithm implementation has been removed to prepare for a
- * full rewrite.  This export preserves the public API so the UI
- * continues to compile and run (detection simply returns null).
+ * Step 1: Preprocess – convert to binary wall mask and apply
+ *         morphological closing to bridge door/window gaps.
+ * Step 2: Start from the OCR/click location (find free-space seed
+ *         if the click lands on a wall pixel).
+ * Step 3: Expand outward in each direction, scanning for walls
+ *         with sufficient perpendicular continuity.
+ * Step 4: Handle wall gaps via the preprocessed image and
+ *         configurable gap tolerance.
+ * Step 5: Construct a rectangle from the four detected boundaries.
+ * Step 6: Validate the rectangle (minimum size, OCR point inside).
+ *
+ * Configurable parameters:
+ *   - roomCloseRadius: morphological closing radius (default 4)
+ *   - gapTolerance:    max gap in wall continuity (default 8)
+ *   - minWallThickness: min perpendicular wall extent (default 15)
+ *   - minRoomSize:     min room area in pixels² (default 400)
  */
-// eslint-disable-next-line no-unused-vars
-export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => null;
+
+// Room detection tuning constants
+const MIN_WALL_THICKNESS_PIXELS = 20;
+const WALL_THICKNESS_IMAGE_RATIO = 0.06;
+const HORIZONTAL_WALL_WIDTH_RATIO = 0.4;
+const MAX_ROOM_AREA_RATIO = 0.9;
+const MAX_SCAN_BAND = 3;
+const MIN_SCAN_BAND = 1;
+const SCAN_BAND_DIVISOR = 2;
+
+/**
+ * Measure wall continuity in the perpendicular direction at (x, y).
+ * For a vertical wall, measures how far the wall extends vertically.
+ * For a horizontal wall, measures how far the wall extends horizontally.
+ * Allows small gaps up to gapTolerance pixels.
+ */
+const measureWallContinuity = (wallMask, x, y, isVerticalWall, width, height, gapTolerance) => {
+  let count = 0;
+  let gap = 0;
+
+  if (isVerticalWall) {
+    for (let dy = 0; y - dy >= 0; dy += 1) {
+      if (wallMask[(y - dy) * width + x]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+    gap = 0;
+    for (let dy = 1; y + dy < height; dy += 1) {
+      if (wallMask[(y + dy) * width + x]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+  } else {
+    for (let dx = 0; x - dx >= 0; dx += 1) {
+      if (wallMask[y * width + (x - dx)]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+    gap = 0;
+    for (let dx = 1; x + dx < width; dx += 1) {
+      if (wallMask[y * width + (x + dx)]) { count += 1; gap = 0; }
+      else { gap += 1; if (gap > gapTolerance) break; }
+    }
+  }
+
+  return count;
+};
+
+/**
+ * Expand from (startX, startY) in the given direction until a wall
+ * with sufficient perpendicular continuity is found.
+ */
+const expandToFindWall = (wallMask, startX, startY, direction, width, height, options) => {
+  const { gapTolerance = 8, minWallThickness = 15 } = options;
+  const isHorizontalScan = direction === 'left' || direction === 'right';
+  const step = direction === 'left' || direction === 'up' ? -1 : 1;
+  const isVerticalWall = isHorizontalScan;
+
+  let pos = isHorizontalScan ? startX : startY;
+  const limit = step > 0
+    ? (isHorizontalScan ? width - 1 : height - 1)
+    : 0;
+  const fixedPos = isHorizontalScan ? startY : startX;
+  const scanBand = Math.min(MAX_SCAN_BAND, Math.max(MIN_SCAN_BAND, Math.floor(gapTolerance / SCAN_BAND_DIVISOR)));
+  const wallsChecked = [];
+
+  while (pos !== limit) {
+    pos += step;
+
+    let wallX = -1;
+    let wallY = -1;
+    for (let d = -scanBand; d <= scanBand; d += 1) {
+      const fp = fixedPos + d;
+      if (fp < 0 || fp >= (isHorizontalScan ? height : width)) continue;
+      const idx = isHorizontalScan ? fp * width + pos : pos * width + fp;
+      if (wallMask[idx]) {
+        wallX = isHorizontalScan ? pos : fp;
+        wallY = isHorizontalScan ? fp : pos;
+        break;
+      }
+    }
+
+    if (wallX >= 0) {
+      const continuity = measureWallContinuity(
+        wallMask, wallX, wallY, isVerticalWall, width, height, gapTolerance,
+      );
+      wallsChecked.push({ pos, continuity });
+
+      if (continuity >= minWallThickness) {
+        return { position: pos, continuity, wallsChecked };
+      }
+    }
+  }
+
+  return { position: pos, continuity: 0, wallsChecked };
+};
+
+const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
+  if (freeMask[cy * width + cx]) return { x: cx, y: cy };
+
+  const tryPixel = (px, py) => {
+    if (px >= 0 && py >= 0 && px < width && py < height && freeMask[py * width + px]) {
+      return { x: px, y: py };
+    }
+    return null;
+  };
+
+  for (let r = 1; r <= maxRadius; r += 1) {
+    for (let dx = -r; dx <= r; dx += 1) {
+      const hit = tryPixel(cx + dx, cy - r) ?? tryPixel(cx + dx, cy + r);
+      if (hit) return hit;
+    }
+    for (let dy = -r + 1; dy < r; dy += 1) {
+      const hit = tryPixel(cx - r, cy + dy) ?? tryPixel(cx + r, cy + dy);
+      if (hit) return hit;
+    }
+  }
+  return null;
+};
+
+export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
+  const preprocess = normalizeImageData(imageData, options.preprocess);
+  const orientation = estimateDominantOrientations(
+    preprocess.gray, preprocess.width, preprocess.height, options.orientation,
+  );
+
+  const roomCloseRadius = options.roomCloseRadius ?? 4;
+  const roomWallMask = closeMask(
+    preprocess.wallMask,
+    preprocess.width,
+    preprocess.height,
+    roomCloseRadius,
+  );
+  const freeMask = invertMask(roomWallMask);
+
+  const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
+  const clampedPoint = {
+    x: Math.max(0, Math.min(preprocess.width - 1, nPoint.x)),
+    y: Math.max(0, Math.min(preprocess.height - 1, nPoint.y)),
+  };
+
+  const seed = findFreeSpaceSeed(
+    freeMask, clampedPoint.x, clampedPoint.y, preprocess.width, preprocess.height,
+  );
+  if (!seed) return null;
+
+  const w = preprocess.width;
+  const h = preprocess.height;
+  const gapTolerance = options.gapTolerance ?? 8;
+  const minWallThickness = options.minWallThickness
+    ?? Math.max(MIN_WALL_THICKNESS_PIXELS, Math.floor(Math.min(w, h) * WALL_THICKNESS_IMAGE_RATIO));
+  const minRoomSize = options.minRoomSize ?? 400;
+  const expandOpts = { gapTolerance, minWallThickness };
+
+  const leftResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'left', w, h, expandOpts);
+  const rightResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'right', w, h, expandOpts);
+
+  const detectedWidth = rightResult.position - leftResult.position;
+  const horzWallThreshold = Math.max(minWallThickness, Math.floor(detectedWidth * HORIZONTAL_WALL_WIDTH_RATIO));
+  const horzExpandOpts = { gapTolerance, minWallThickness: horzWallThreshold };
+  const upResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'up', w, h, horzExpandOpts);
+  const downResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'down', w, h, horzExpandOpts);
+
+  const left = leftResult.position;
+  const right = rightResult.position;
+  const top = upResult.position;
+  const bottom = downResult.position;
+
+  const roomWidth = right - left + 1;
+  const roomHeight = bottom - top + 1;
+  const roomArea = roomWidth * roomHeight;
+  const imageArea = w * h;
+
+  if (roomArea < minRoomSize) return null;
+  if (roomArea > imageArea * MAX_ROOM_AREA_RATIO) return null;
+
+  if (seed.x < left || seed.x > right || seed.y < top || seed.y > bottom) return null;
+
+  const polygon = [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom },
+  ];
+
+  const confidenceBase = Math.min(1, roomArea / (imageArea * 0.2));
+  const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
+
+  return normalizedRoomResult(polygon, preprocess, confidence, {
+    normalizedSize: { width: w, height: h },
+    dominantAngles: orientation.dominant,
+    startPoint: { x: seed.x, y: seed.y },
+    expansionPaths: {
+      left: { position: left, continuity: leftResult.continuity },
+      right: { position: right, continuity: rightResult.continuity },
+      up: { position: top, continuity: upResult.continuity },
+      down: { position: bottom, continuity: downResult.continuity },
+    },
+    wallsDetected: {
+      left: leftResult.wallsChecked,
+      right: rightResult.wallsChecked,
+      up: upResult.wallsChecked,
+      down: downResult.wallsChecked,
+    },
+    roomBounds: { left, right, top, bottom },
+    roomArea,
+  });
+};
 
 /* ------------------------------------------------------------------ */
 /*  Otsu threshold                                                     */
