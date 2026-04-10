@@ -35,6 +35,21 @@ describe('normalizeOcrText', () => {
     expect(normalizeOcrText('3in')).toBe('3 in');
     expect(normalizeOcrText('12ft x 10ft')).toBe('12 ft x 10 ft');
   });
+
+  it('corrects common OCR digit confusions near digits', () => {
+    // l/I → 1 when adjacent to digits
+    expect(normalizeOcrText('1l2')).toBe('112');
+    expect(normalizeOcrText('l2')).toBe('12');
+    // o → 0 adjacent to digits
+    expect(normalizeOcrText("12o")).toBe('120');
+    // pipe → 1
+    expect(normalizeOcrText('|2')).toBe('12');
+  });
+
+  it('handles en-dash and em-dash normalisation', () => {
+    expect(normalizeOcrText('10\u2013 5')).toBe('10- 5');
+    expect(normalizeOcrText('10\u2014 5')).toBe('10- 5');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -78,6 +93,38 @@ describe('parseSingleToken', () => {
       expect(r).not.toBeNull();
       expect(r.value).toBe(12);
     });
+
+    // Floor plan specific dimension formats
+    it('parses 21\'8" (large room)', () => {
+      const r = parseSingleToken("21'8\"");
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(21 + 8 / 12, 5);
+      expect(r.format).toBe('inches');
+    });
+
+    it('parses 11\'4" (typical bedroom)', () => {
+      const r = parseSingleToken("11'4\"");
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(11 + 4 / 12, 5);
+    });
+
+    it('parses 7\'0" (zero inches)', () => {
+      const r = parseSingleToken("7'0\"");
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(7, 5);
+    });
+
+    it('parses 9\'11" (max inches)', () => {
+      const r = parseSingleToken("9'11\"");
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(9 + 11 / 12, 5);
+    });
+
+    it('parses 12\'0" (exact feet)', () => {
+      const r = parseSingleToken("12'0\"");
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(12, 5);
+    });
   });
 
   // Case B – decimal feet
@@ -112,6 +159,19 @@ describe('parseSingleToken', () => {
       const r = parseSingleToken('12 FT');
       expect(r).not.toBeNull();
       expect(r.value).toBe(12);
+    });
+
+    it('parses 47.9 ft (large decimal)', () => {
+      const r = parseSingleToken('47.9 ft');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(47.9, 5);
+      expect(r.format).toBe('decimal');
+    });
+
+    it('parses 81.6 ft (large decimal)', () => {
+      const r = parseSingleToken('81.6 ft');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(81.6, 5);
     });
   });
 
@@ -156,6 +216,18 @@ describe('parseSingleToken', () => {
       expect(r.value).toBeCloseTo(13 + 4 / 12, 5);
     });
 
+    it('parses "21 8" as 21ft 8in', () => {
+      const r = parseSingleToken('21 8');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(21 + 8 / 12, 5);
+    });
+
+    it('parses "12 0" as 12ft 0in', () => {
+      const r = parseSingleToken('12 0');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(12, 5);
+    });
+
     it('rejects "10 13" because 13 is not a valid inches value', () => {
       // 13 >= 12, so should not be treated as ft+in pair
       const r = parseSingleToken('10 13');
@@ -190,6 +262,18 @@ describe('parseSingleToken', () => {
       // 9 < 12 so this is actually valid: 13ft 9in
       expect(r).not.toBeNull();
       expect(r.value).toBeCloseTo(13 + 9 / 12, 5);
+    });
+
+    it('parses "218" as 21ft 8in', () => {
+      const r = parseSingleToken('218');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(21 + 8 / 12, 5);
+    });
+
+    it('parses "120" as 12ft 0in', () => {
+      const r = parseSingleToken('120');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(12, 5);
     });
   });
 
@@ -316,5 +400,63 @@ describe('parseDimensionLine', () => {
   it('returns null for non-dimension text', () => {
     expect(parseDimensionLine('bedroom')).toBeNull();
     expect(parseDimensionLine('')).toBeNull();
+  });
+
+  // -----------------------------------------------------------------------
+  // Real floor plan dimension labels (from the example image)
+  // -----------------------------------------------------------------------
+
+  it('parses 21\'8" x 21\'3" (BASEMENT)', () => {
+    const r = parseDimensionLine("21'8\" x 21'3\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(21 + 8 / 12, 5);
+    expect(r.height).toBeCloseTo(21 + 3 / 12, 5);
+    expect(r.format).toBe('inches');
+  });
+
+  it('parses 11\'4" x 7\'0" (small room)', () => {
+    const r = parseDimensionLine("11'4\" x 7'0\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(11 + 4 / 12, 5);
+    expect(r.height).toBeCloseTo(7, 5);
+    expect(r.format).toBe('inches');
+  });
+
+  it('parses 12\' 0" x 12\' 0" (square room)', () => {
+    const r = parseDimensionLine("12' 0\" x 12' 0\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(12, 5);
+    expect(r.height).toBeCloseTo(12, 5);
+  });
+
+  it('parses 9\'11" x 12\'0"', () => {
+    const r = parseDimensionLine("9'11\" x 12'0\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(9 + 11 / 12, 5);
+    expect(r.height).toBeCloseTo(12, 5);
+    expect(r.format).toBe('inches');
+  });
+
+  it('parses 47.9 ft x 81.6 ft (decimal format)', () => {
+    const r = parseDimensionLine('47.9 ft x 81.6 ft');
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(47.9, 5);
+    expect(r.height).toBeCloseTo(81.6, 5);
+    expect(r.format).toBe('decimal');
+  });
+
+  // OCR confusion cases
+  it('handles OCR l/I → 1 confusion: 1l\'4" x 7\'0"', () => {
+    const r = parseDimensionLine("1l'4\" x 7'0\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(11 + 4 / 12, 5);
+    expect(r.height).toBeCloseTo(7, 5);
+  });
+
+  it('handles OCR o → 0 confusion: 12\'o" x 12\'o"', () => {
+    const r = parseDimensionLine("12'o\" x 12'o\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(12, 5);
+    expect(r.height).toBeCloseTo(12, 5);
   });
 });

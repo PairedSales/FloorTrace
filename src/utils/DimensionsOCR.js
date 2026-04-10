@@ -9,7 +9,7 @@ import {
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
-const MIN_WORD_CONFIDENCE = 30;
+const MIN_WORD_CONFIDENCE = 25;
 
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
@@ -35,8 +35,70 @@ const scaleCanvas = (img, factor) => {
 };
 
 // ---------------------------------------------------------------------------
-// Preprocessing variants
+// Preprocessing: build multiple image variants for multi-pass OCR
 // ---------------------------------------------------------------------------
+
+/**
+ * Apply an inverted threshold: black text on white → white text on black.
+ * Tesseract can sometimes read inverted text better in noisy environments.
+ */
+const grayToInvertedThresholdedCanvas = (gray, width, height, threshold) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const out = ctx.createImageData(width, height);
+  const d = out.data;
+
+  for (let i = 0; i < gray.length; i++) {
+    const v = gray[i] < threshold ? 255 : 0;
+    const j = i * 4;
+    d[j] = v;
+    d[j + 1] = v;
+    d[j + 2] = v;
+    d[j + 3] = 255;
+  }
+
+  ctx.putImageData(out, 0, 0);
+  return canvas;
+};
+
+/**
+ * Apply a high-contrast sharpening pass via unsharp-mask style approach.
+ * Boost local contrast around edges (text boundaries) to make faint
+ * apostrophes / quote marks more visible to OCR.
+ */
+const sharpenGray = (gray, width, height) => {
+  const result = new Uint8Array(gray.length);
+  const strength = 0.5;
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      // Simple 3x3 Laplacian for edge detection
+      const lap =
+        -gray[(y - 1) * width + x] -
+        gray[y * width + (x - 1)] +
+        4 * gray[idx] -
+        gray[y * width + (x + 1)] -
+        gray[(y + 1) * width + x];
+      const sharpened = gray[idx] + strength * lap;
+      result[idx] = Math.max(0, Math.min(255, Math.round(sharpened)));
+    }
+  }
+
+  // Copy borders
+  for (let x = 0; x < width; x++) {
+    result[x] = gray[x];
+    result[(height - 1) * width + x] = gray[(height - 1) * width + x];
+  }
+  for (let y = 0; y < height; y++) {
+    result[y * width] = gray[y * width];
+    result[y * width + width - 1] = gray[y * width + width - 1];
+  }
+
+  return result;
+};
 
 const buildVariants = (img) => {
   const factor = estimateScaleFactor(img);
@@ -46,6 +108,8 @@ const buildVariants = (img) => {
   const gray = toGrayscale(imageData);
   const stretched = contrastStretch(gray);
   const otsu = otsuThreshold(stretched);
+  const sharpened = sharpenGray(stretched, scaled.width, scaled.height);
+  const sharpOtsu = otsuThreshold(sharpened);
 
   const variants = [];
 
@@ -58,7 +122,19 @@ const buildVariants = (img) => {
     canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
   });
 
-  return { variants, scaleFactor: factor };
+  // V3 – Sharpened + threshold: helps recover faint apostrophes / inch marks
+  variants.push({
+    name: 'sharp-otsu',
+    canvas: grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, sharpOtsu)
+  });
+
+  // V4 – Inverted: white-on-black can help Tesseract with low-contrast labels
+  variants.push({
+    name: 'inverted',
+    canvas: grayToInvertedThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
+  });
+
+  return { variants, scaleFactor: factor, width: scaled.width, height: scaled.height, gray: stretched };
 };
 
 // ---------------------------------------------------------------------------
@@ -89,6 +165,8 @@ const normalizeOcrText = (text) => {
   s = s.replace(/[li|](?![a-z])([0-9])/g, '1$1');
   s = s.replace(/([0-9])o(?=\s|'|"|$)/g, '$10');
   s = s.replace(/(?:^|\s)o([0-9])/g, ' 0$1');
+  // Handle o→0 after quote marks in dimension context: 12'o" → 12'0"
+  s = s.replace(/(['"])o(?=\s|'|"|$)/g, '$10');
   s = s.replace(/([0-9])s([0-9])/g, '$15$2');
   s = s.replace(/([0-9])b([0-9])/g, '$18$2');
   s = s.replace(/([0-9])z([0-9])/g, '$12$2');
@@ -225,39 +303,28 @@ const parseSingleToken = (token) => {
 };
 
 const parseDimensionLine = (line) => {
-  const raw = line;
   const norm = normalizeOcrText(line);
-  console.log('[OCR] raw:', raw);
-  console.log('[OCR] normalized:', norm);
 
   // --- Strategy 1: split on x separator (handles both 'x' and 'X') -------
-  // normalizeOcrText already lowercases everything, so the separator is
-  // always 'x' at this point; [xX] is kept for safety.
   const sepMatch = norm.match(SEPARATOR);
   if (sepMatch) {
     const left = norm.slice(0, sepMatch.index).trim();
     const right = norm.slice(sepMatch.index + sepMatch[0].length).trim();
-    console.log('[OCR] split → left:', left, '| right:', right);
     if (left && right) {
       const lp = parseSingleToken(left);
       const rp = parseSingleToken(right);
-      console.log('[OCR] left format:', lp?.format, 'value:', lp?.value);
-      console.log('[OCR] right format:', rp?.format, 'value:', rp?.value);
       if (lp && rp) {
-        const result = {
+        return {
           width: lp.value,
           height: rp.value,
           text: norm,
           format: lp.format === 'inches' || rp.format === 'inches' ? 'inches' : 'decimal'
         };
-        console.log('[OCR] parsed → width:', result.width, 'height:', result.height, 'format:', result.format);
-        return result;
       }
     }
   }
 
   // --- Strategy 2: two feet-inches groups without explicit x separator ----
-  // e.g. "12'5\"  10'3\""  — normalised quotes are straight ' and "
   const twoFi = norm.match(
     /(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?\s{1,}(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?/
   );
@@ -265,7 +332,6 @@ const parseDimensionLine = (line) => {
     const w = parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12;
     const h = parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12;
     if (isReasonable(w) && isReasonable(h)) {
-      console.log('[OCR] strategy 2 (two ft+in groups) → width:', w, 'height:', h);
       return { width: w, height: h, text: twoFi[0], format: 'inches' };
     }
   }
@@ -278,17 +344,15 @@ const parseDimensionLine = (line) => {
     const w = parseFloat(decFt[1]);
     const h = parseFloat(decFt[2]);
     if (isReasonable(w) && isReasonable(h)) {
-      console.log('[OCR] strategy 3 (decimal ft pairs) → width:', w, 'height:', h);
       return { width: w, height: h, text: decFt[0], format: 'decimal' };
     }
   }
 
-  console.log('[OCR] no parse for:', norm);
   return null;
 };
 
 // ---------------------------------------------------------------------------
-// Digit-first spatial detection
+// Collect OCR structural data
 // ---------------------------------------------------------------------------
 
 const collectLinesAndWords = (result) => {
@@ -308,6 +372,122 @@ const collectLinesAndWords = (result) => {
   }
   return { lines, words };
 };
+
+// ---------------------------------------------------------------------------
+// Region-of-interest (ROI) detection
+//
+// Instead of only scanning the full image, we identify likely dimension
+// regions by looking at where Tesseract found digit-containing words in
+// the first pass.  We then crop generous sub-images around those clusters
+// and run a second targeted OCR pass on each ROI with different
+// preprocessing / PSM settings.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cluster digit-containing bounding boxes into ROI rectangles.
+ * Words on the same horizontal band and within a reasonable gap are
+ * merged into a single ROI.
+ */
+const clusterDigitRegions = (words, imgWidth, imgHeight) => {
+  const digitWords = [];
+  for (const word of words) {
+    if (!word.text || !word.bbox) continue;
+    if (word.confidence < MIN_WORD_CONFIDENCE) continue;
+    const t = normalizeOcrText(word.text);
+    if (/\d/.test(t)) {
+      digitWords.push({
+        text: t,
+        bbox: word.bbox,
+        confidence: word.confidence
+      });
+    }
+  }
+
+  if (digitWords.length === 0) return [];
+
+  // Sort by vertical center, then horizontal position
+  digitWords.sort((a, b) => {
+    const aCy = (a.bbox.y0 + a.bbox.y1) / 2;
+    const bCy = (b.bbox.y0 + b.bbox.y1) / 2;
+    if (Math.abs(aCy - bCy) > 20) return aCy - bCy;
+    return a.bbox.x0 - b.bbox.x0;
+  });
+
+  const clusters = [];
+  const used = new Set();
+
+  for (let i = 0; i < digitWords.length; i++) {
+    if (used.has(i)) continue;
+    const cluster = [digitWords[i]];
+    used.add(i);
+
+    for (let j = i + 1; j < digitWords.length; j++) {
+      if (used.has(j)) continue;
+
+      // Check if j is on the same horizontal band as the cluster
+      const clusterMinY = Math.min(...cluster.map(w => w.bbox.y0));
+      const clusterMaxY = Math.max(...cluster.map(w => w.bbox.y1));
+      const jCy = (digitWords[j].bbox.y0 + digitWords[j].bbox.y1) / 2;
+      const bandH = clusterMaxY - clusterMinY;
+      const tolerance = Math.max(bandH * 1.5, 30);
+
+      if (jCy < clusterMinY - tolerance || jCy > clusterMaxY + tolerance) continue;
+
+      // Check horizontal proximity
+      const clusterMaxX = Math.max(...cluster.map(w => w.bbox.x1));
+      const gap = digitWords[j].bbox.x0 - clusterMaxX;
+      const avgCharW = cluster.reduce((s, w) => {
+        return s + (w.bbox.x1 - w.bbox.x0) / Math.max(w.text.length, 1);
+      }, 0) / cluster.length;
+
+      if (gap < avgCharW * 25) {
+        cluster.push(digitWords[j]);
+        used.add(j);
+      }
+    }
+
+    clusters.push(cluster);
+  }
+
+  // Convert clusters to padded ROI rectangles
+  const padding = Math.max(imgWidth, imgHeight) * 0.02;
+  const rois = clusters.map(cl => {
+    const x0 = Math.max(0, Math.min(...cl.map(w => w.bbox.x0)) - padding);
+    const y0 = Math.max(0, Math.min(...cl.map(w => w.bbox.y0)) - padding);
+    const x1 = Math.min(imgWidth, Math.max(...cl.map(w => w.bbox.x1)) + padding);
+    const y1 = Math.min(imgHeight, Math.max(...cl.map(w => w.bbox.y1)) + padding);
+    return {
+      x: Math.round(x0),
+      y: Math.round(y0),
+      width: Math.round(x1 - x0),
+      height: Math.round(y1 - y0),
+      words: cl
+    };
+  });
+
+  // Filter out tiny ROIs that are likely noise
+  return rois.filter(r => r.width > 20 && r.height > 10);
+};
+
+/**
+ * Crop a region from a canvas, returning a new canvas.
+ */
+const cropCanvas = (sourceCanvas, roi) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = roi.width;
+  canvas.height = roi.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(
+    sourceCanvas,
+    roi.x, roi.y, roi.width, roi.height,
+    0, 0, roi.width, roi.height
+  );
+  return canvas;
+};
+
+// ---------------------------------------------------------------------------
+// Digit-first spatial detection
+// ---------------------------------------------------------------------------
 
 const buildDigitGroups = (words) => {
   const groups = [];
@@ -431,19 +611,40 @@ const bboxOverlap = (a, b) => {
   return minArea > 0 && overlapArea / minArea > 0.3;
 };
 
-const valuesClose = (a, b, tolerance = 0.05) => {
+/**
+ * Check if two bboxes are close (within a tolerance) even if they don't
+ * literally overlap.  This catches near-duplicate reads from different
+ * preprocessing variants whose bboxes are slightly offset.
+ */
+const bboxNearby = (a, b) => {
+  if (!a || !b) return false;
+  // Check if centers are close relative to their sizes
+  const aCx = a.x + a.width / 2;
+  const aCy = a.y + a.height / 2;
+  const bCx = b.x + b.width / 2;
+  const bCy = b.y + b.height / 2;
+  const maxW = Math.max(a.width, b.width);
+  const maxH = Math.max(a.height, b.height);
+  return Math.abs(aCx - bCx) < maxW * 0.8 && Math.abs(aCy - bCy) < maxH * 1.2;
+};
+
+const valuesClose = (a, b, tolerance = 0.08) => {
   const wDiff = Math.abs(a.width - b.width) / Math.max(a.width, 1);
   const hDiff = Math.abs(a.height - b.height) / Math.max(a.height, 1);
   return wDiff < tolerance && hDiff < tolerance;
 };
 
+/**
+ * Enhanced deduplication that considers spatial proximity AND value similarity.
+ * Keeps the highest-confidence read for each spatial cluster.
+ */
 const deduplicateResults = (results) => {
   const sorted = [...results].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
   const kept = [];
 
   for (const r of sorted) {
     const isDup = kept.some(k =>
-      valuesClose(k, r) && bboxOverlap(k.bbox, r.bbox)
+      (valuesClose(k, r) && (bboxOverlap(k.bbox, r.bbox) || bboxNearby(k.bbox, r.bbox)))
     );
     if (!isDup) kept.push(r);
   }
@@ -460,12 +661,14 @@ const createConfiguredWorker = async () => {
   return worker;
 };
 
+/**
+ * Run OCR on a set of canvas variants using SPARSE_TEXT mode.
+ * Returns all collected lines and words across all variants.
+ */
 const recognizeVariants = async (worker, canvases) => {
   const allLines = [];
   const allWords = [];
 
-  // Text is always left-to-right; SPARSE_TEXT finds scattered dimension labels
-  // across the floor plan without imposing a block/column structure.
   await worker.setParameters({
     tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
     tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
@@ -482,8 +685,139 @@ const recognizeVariants = async (worker, canvases) => {
   return { lines: allLines, words: allWords };
 };
 
+/**
+ * Run a focused second pass on specific ROI crops using SINGLE_LINE mode
+ * for better accuracy on isolated dimension labels.
+ */
+const recognizeROIs = async (worker, baseCanvas, rois) => {
+  const allLines = [];
+  const allWords = [];
+
+  if (rois.length === 0) return { lines: allLines, words: allWords };
+
+  // Use SINGLE_LINE mode for tightly cropped dimension regions
+  await worker.setParameters({
+    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+    preserve_interword_spaces: '1'
+  });
+
+  for (const roi of rois) {
+    const cropped = cropCanvas(baseCanvas, roi);
+    const result = await worker.recognize(cropped, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+
+    // Offset bboxes back to full-image coordinates
+    for (const line of lines) {
+      if (line.bbox) {
+        line.bbox.x0 += roi.x;
+        line.bbox.y0 += roi.y;
+        line.bbox.x1 += roi.x;
+        line.bbox.y1 += roi.y;
+      }
+      if (line.words) {
+        for (const word of line.words) {
+          if (word.bbox) {
+            word.bbox.x0 += roi.x;
+            word.bbox.y0 += roi.y;
+            word.bbox.x1 += roi.x;
+            word.bbox.y1 += roi.y;
+          }
+        }
+      }
+    }
+
+    for (const word of words) {
+      if (word.bbox) {
+        word.bbox.x0 += roi.x;
+        word.bbox.y0 += roi.y;
+        word.bbox.x1 += roi.x;
+        word.bbox.y1 += roi.y;
+      }
+    }
+
+    allLines.push(...lines);
+    allWords.push(...words);
+  }
+
+  // Also try SPARSE_TEXT on ROIs for labels that span multiple words
+  await worker.setParameters({
+    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1'
+  });
+
+  for (const roi of rois) {
+    const cropped = cropCanvas(baseCanvas, roi);
+    const result = await worker.recognize(cropped, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+
+    for (const line of lines) {
+      if (line.bbox) {
+        line.bbox.x0 += roi.x;
+        line.bbox.y0 += roi.y;
+        line.bbox.x1 += roi.x;
+        line.bbox.y1 += roi.y;
+      }
+      if (line.words) {
+        for (const word of line.words) {
+          if (word.bbox) {
+            word.bbox.x0 += roi.x;
+            word.bbox.y0 += roi.y;
+            word.bbox.x1 += roi.x;
+            word.bbox.y1 += roi.y;
+          }
+        }
+      }
+    }
+
+    for (const word of words) {
+      if (word.bbox) {
+        word.bbox.x0 += roi.x;
+        word.bbox.y0 += roi.y;
+        word.bbox.x1 += roi.x;
+        word.bbox.y1 += roi.y;
+      }
+    }
+
+    allLines.push(...lines);
+    allWords.push(...words);
+  }
+
+  return { lines: allLines, words: allWords };
+};
+
 // ---------------------------------------------------------------------------
-// Main entry point
+// Confidence scoring – rank candidates by plausibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Score a parsed dimension result higher if it looks like a "real" room
+ * dimension (both sides in typical residential range, integer inches, etc.)
+ */
+const scoreDimension = (d) => {
+  let score = d.confidence || 50;
+
+  // Prefer reads where both dimensions are in a typical residential range
+  if (d.width >= 3 && d.width <= 50 && d.height >= 3 && d.height <= 50) {
+    score += 10;
+  }
+
+  // Prefer ft+in format (more specific = more likely correct)
+  if (d.format === 'inches') {
+    score += 5;
+  }
+
+  // Penalize unreasonably large or tiny rooms
+  if (d.width < 2 || d.height < 2 || d.width > 100 || d.height > 100) {
+    score -= 15;
+  }
+
+  return score;
+};
+
+// ---------------------------------------------------------------------------
+// Main entry point – multi-stage OCR pipeline
 // ---------------------------------------------------------------------------
 
 export const detectAllDimensions = async (imageDataUrl) => {
@@ -492,16 +826,46 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const { variants, scaleFactor } = buildVariants(img);
 
     const worker = await createConfiguredWorker();
+
+    // ===== Stage 1: Full-image multi-variant OCR =====
     const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
+
+    // ===== Stage 2: Region-of-interest detection =====
+    // Cluster digit-containing words from Stage 1 to identify likely
+    // dimension regions, then run targeted second-pass OCR on each ROI.
+    const rois = clusterDigitRegions(allWords, variants[0].canvas.width, variants[0].canvas.height);
+
+    // ===== Stage 3: ROI-targeted multi-pass OCR =====
+    // Run on the original canvas and the Otsu variant for diversity.
+    const roiResults = { lines: [], words: [] };
+    for (const variant of variants.slice(0, 2)) {
+      const r = await recognizeROIs(worker, variant.canvas, rois);
+      roiResults.lines.push(...r.lines);
+      roiResults.words.push(...r.words);
+    }
+
     await worker.terminate();
 
-    // Two detection strategies run in parallel, then merged
-    const lineResults = detectFromLines(allLines);
-    const spatialResults = detectFromSpatialWords(allWords);
+    // ===== Stage 4: Multi-strategy detection =====
+    // Run both line-level and spatial-word detection on ALL collected data
+    // (full-image + ROI passes).
+    const combinedLines = [...allLines, ...roiResults.lines];
+    const combinedWords = [...allWords, ...roiResults.words];
 
-    const merged = [...lineResults, ...spatialResults];
-    const deduped = deduplicateResults(merged);
+    const lineResults = detectFromLines(combinedLines);
+    const spatialResults = detectFromSpatialWords(combinedWords);
 
+    // ===== Stage 5: Score, merge, and deduplicate =====
+    const allResults = [...lineResults, ...spatialResults];
+
+    // Apply confidence scoring
+    for (const r of allResults) {
+      r.confidence = scoreDimension(r);
+    }
+
+    const deduped = deduplicateResults(allResults);
+
+    // ===== Stage 6: Output formatting =====
     // Scale bboxes back to original image coordinates
     const dimensions = deduped.map(d => {
       let bbox = d.bbox;
