@@ -405,7 +405,7 @@ const clusterDigitRegions = (words, imgWidth, imgHeight) => {
 
   if (digitWords.length === 0) return [];
 
-  // Sort by vertical centre, then horizontal position
+  // Sort by vertical center, then horizontal position
   digitWords.sort((a, b) => {
     const aCy = (a.bbox.y0 + a.bbox.y1) / 2;
     const bCy = (b.bbox.y0 + b.bbox.y1) / 2;
@@ -618,7 +618,7 @@ const bboxOverlap = (a, b) => {
  */
 const bboxNearby = (a, b) => {
   if (!a || !b) return false;
-  // Check if centres are close relative to their sizes
+  // Check if centers are close relative to their sizes
   const aCx = a.x + a.width / 2;
   const aCy = a.y + a.height / 2;
   const bCx = b.x + b.width / 2;
@@ -808,7 +808,7 @@ const scoreDimension = (d) => {
     score += 5;
   }
 
-  // Penalise unreasonably large or tiny rooms
+  // Penalize unreasonably large or tiny rooms
   if (d.width < 2 || d.height < 2 || d.width > 100 || d.height > 100) {
     score -= 15;
   }
