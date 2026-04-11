@@ -26,13 +26,14 @@ export const SQ_M_TO_SQ_CM = 10000;
 /** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
 export const MIN_SQ_M_DISPLAY = 0.1;
 
-/** Cycling colors for measurement lines (Dracula color scheme). */
+/** Cycling colors for measurement lines (Dracula color scheme).
+ *  `label` is a complementary Dracula color used for area shape text labels. */
 export const LINE_COLORS = [
-  { normal: '#FFB86C', selected: '#FFCA99' }, // Dracula Orange
-  { normal: '#8BE9FD', selected: '#A8F0FF' }, // Dracula Cyan
-  { normal: '#50FA7B', selected: '#7AFFA0' }, // Dracula Green
-  { normal: '#BD93F9', selected: '#D2B8FC' }, // Dracula Purple
-  { normal: '#FF79C6', selected: '#FFA8D9' }, // Dracula Pink
+  { normal: '#FFB86C', selected: '#FFCA99', label: '#BD93F9' }, // Orange shape → Purple label
+  { normal: '#8BE9FD', selected: '#A8F0FF', label: '#FFB86C' }, // Cyan shape → Orange label
+  { normal: '#50FA7B', selected: '#7AFFA0', label: '#FF79C6' }, // Green shape → Pink label
+  { normal: '#BD93F9', selected: '#D2B8FC', label: '#F1FA8C' }, // Purple shape → Yellow label
+  { normal: '#FF79C6', selected: '#FFA8D9', label: '#50FA7B' }, // Pink shape → Green label
 ];
 
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
