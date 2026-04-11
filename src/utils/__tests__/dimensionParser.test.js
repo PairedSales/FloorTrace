@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeOcrText, parseSingleToken, parseDimensionLine } from '../DimensionsOCR';
+import { normalizeOcrText, parseSingleToken, parseDimensionLine, extractDimensionSubstring } from '../DimensionsOCR';
 
 // ---------------------------------------------------------------------------
 // normalizeOcrText
@@ -357,5 +357,64 @@ describe('parseDimensionLine', () => {
     expect(r).not.toBeNull();
     expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
     expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDimensionSubstring
+// ---------------------------------------------------------------------------
+
+describe('extractDimensionSubstring', () => {
+  it('extracts dimensions from line with room name prefix', () => {
+    const norm = normalizeOcrText("BEDROOM 13' 5\" × 12' 11\"");
+    const sub = extractDimensionSubstring(norm);
+    expect(sub).toContain('13');
+    expect(sub).toContain('12');
+    const r = parseDimensionLine(sub);
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
+    expect(r.height).toBeCloseTo(12 + 11 / 12, 5);
+  });
+
+  it('extracts kitchen dimensions from prefixed line', () => {
+    const norm = normalizeOcrText("KITCHEN 10' 9\" x 7' 11\"");
+    const sub = extractDimensionSubstring(norm);
+    const r = parseDimensionLine(sub);
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 9 / 12, 5);
+    expect(r.height).toBeCloseTo(7 + 11 / 12, 5);
+  });
+
+  it('returns full string when no room name prefix', () => {
+    const norm = normalizeOcrText("13' 5\" x 12' 11\"");
+    const sub = extractDimensionSubstring(norm);
+    // Should be the same or very similar to the input
+    const r = parseDimensionLine(sub);
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
+    expect(r.height).toBeCloseTo(12 + 11 / 12, 5);
+  });
+
+  it('handles living room/dining room prefix', () => {
+    const norm = normalizeOcrText("LIVING ROOM/DINING ROOM 16' 7\" × 25' 10\"");
+    const sub = extractDimensionSubstring(norm);
+    const r = parseDimensionLine(sub);
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(16 + 7 / 12, 5);
+    expect(r.height).toBeCloseTo(25 + 10 / 12, 5);
+  });
+
+  it('handles entry prefix', () => {
+    const norm = normalizeOcrText("ENTRY 13' 5\" × 10' 7\"");
+    const sub = extractDimensionSubstring(norm);
+    const r = parseDimensionLine(sub);
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
+    expect(r.height).toBeCloseTo(10 + 7 / 12, 5);
+  });
+
+  it('returns non-dimension text as-is (no digits)', () => {
+    const sub = extractDimensionSubstring('bedroom closet');
+    expect(sub).toBe('bedroom closet');
   });
 });
