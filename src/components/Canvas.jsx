@@ -285,12 +285,25 @@ const Canvas = forwardRef(({
       bottomSnap !== null ? bottomSnap - overlay.y2 : null,
     ].filter((value) => value !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
 
-    return {
+    const result = {
       x1: overlay.x1 + snapDeltaX,
       y1: overlay.y1 + snapDeltaY,
       x2: overlay.x1 + snapDeltaX + width,
       y2: overlay.y1 + snapDeltaY + height,
     };
+
+    // Preserve and translate the polygon so it stays in sync with the rect
+    if (Array.isArray(overlay.polygon)) {
+      result.polygon = overlay.polygon.map(p => ({
+        x: p.x + snapDeltaX,
+        y: p.y + snapDeltaY,
+      }));
+    }
+    if (overlay.confidence !== undefined) {
+      result.confidence = overlay.confidence;
+    }
+
+    return result;
   }, [findHorizontalSnap, findVerticalSnap]);
   useEffect(() => {
     if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
@@ -814,7 +827,12 @@ const Canvas = forwardRef(({
         x1: roomOverlay.x1 + deltaX,
         y1: roomOverlay.y1 + deltaY,
         x2: roomOverlay.x2 + deltaX,
-        y2: roomOverlay.y2 + deltaY
+        y2: roomOverlay.y2 + deltaY,
+        // Translate polygon along with the bounding rect so the outline stays in sync
+        ...(Array.isArray(roomOverlay.polygon)
+          ? { polygon: roomOverlay.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
+          : {}),
+        ...(roomOverlay.confidence !== undefined ? { confidence: roomOverlay.confidence } : {}),
       };
       
       const shiftHeld = e.evt.shiftKey;
@@ -827,7 +845,12 @@ const Canvas = forwardRef(({
     // Handle room corner dragging with local edge scans while resizing.
     // Holding Shift disables auto-snapping for precise placement.
     if (draggingRoomCorner && roomOverlay) {
-      const newOverlay = { ...roomOverlay };
+      // Only copy coordinates (and confidence metadata) — resizing invalidates
+      // the detected polygon boundary so it is intentionally not preserved.
+      const newOverlay = { x1: roomOverlay.x1, y1: roomOverlay.y1, x2: roomOverlay.x2, y2: roomOverlay.y2 };
+      if (roomOverlay.confidence !== undefined) {
+        newOverlay.confidence = roomOverlay.confidence;
+      }
       const shiftHeld = e.evt.shiftKey;
       
       if (draggingRoomCorner === 'tl') {
