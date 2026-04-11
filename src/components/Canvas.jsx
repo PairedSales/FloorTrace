@@ -802,6 +802,7 @@ const Canvas = forwardRef(({
     }
     
     // Handle room overlay dragging with live edge scans.
+    // Holding Shift disables auto-snapping for precise placement.
     if (draggingRoom && roomStart) {
       const deltaX = mousePoint.x - roomStart.x;
       const deltaY = mousePoint.y - roomStart.y;
@@ -813,34 +814,37 @@ const Canvas = forwardRef(({
         y2: roomOverlay.y2 + deltaY
       };
       
-      const newOverlay = autoSnapEnabled ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
+      const shiftHeld = e.evt.shiftKey;
+      const newOverlay = (autoSnapEnabled && !shiftHeld) ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
       onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
       setRoomStart(mousePoint);
       return;
     }
     
     // Handle room corner dragging with local edge scans while resizing.
+    // Holding Shift disables auto-snapping for precise placement.
     if (draggingRoomCorner && roomOverlay) {
       const newOverlay = { ...roomOverlay };
+      const shiftHeld = e.evt.shiftKey;
       
       if (draggingRoomCorner === 'tl') {
-        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y);
-        const snappedY = findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2);
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y);
-        const snappedY = findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x);
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y);
-        const snappedY = findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2);
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        const snappedX = findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y);
-        const snappedY = findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x);
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
