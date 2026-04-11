@@ -400,9 +400,12 @@ const detectFromSpatialWords = (words) => {
 // character whitelist Tesseract reads room names as letters; we strip them so
 // parseDimensionLine only sees the numeric dimension text.
 const extractDimensionSubstring = (normalised) => {
-  // Match a dimension-like fragment: starts with a digit, may contain digits,
-  // tick marks, quotes, separators (x/×), spaces, commas, dots, dashes, and
-  // unit keywords — and ends with a digit, tick, or quote mark.
+  // Regex explanation:
+  //   \d                       – starts with a digit
+  //   [\d'"\s.,`x-]*           – followed by any mix of digits, quotes, spaces, separators
+  //   (?:ft|feet|in|inch|inches)?  – optional unit keyword
+  //   [\d'"\s.,`x-]*           – more dimension characters (covers the "x" separator + second half)
+  //   (?:ft|feet|in|inch|inches|'|"|\d)  – must end with a unit keyword, quote mark, or digit
   const m = normalised.match(
     /(\d[\d'"\s.,`x-]*(?:ft|feet|in|inch|inches)?[\d'"\s.,`x-]*(?:ft|feet|in|inch|inches|'|"|\d))/
   );
@@ -470,9 +473,10 @@ const bboxCentersClose = (a, b) => {
   const bCx = b.x + b.width / 2;
   const bCy = b.y + b.height / 2;
   const maxDim = Math.max(a.width, a.height, b.width, b.height);
-  // If centers are within 2× the largest bbox dimension, treat as same region
-  const dist = Math.sqrt((aCx - bCx) ** 2 + (aCy - bCy) ** 2);
-  return dist < maxDim * 2;
+  // Compare squared distances to avoid expensive sqrt
+  const dist2 = (aCx - bCx) ** 2 + (aCy - bCy) ** 2;
+  const threshold = maxDim * 2;
+  return dist2 < threshold * threshold;
 };
 
 const valuesClose = (a, b, tolerance = 0.05) => {
