@@ -98,6 +98,38 @@ export const contrastStretch = (gray) => {
 };
 
 /**
+ * Apply unsharp-mask sharpening to a grayscale image.
+ * Enhances edges/details (helpful for blurred tick marks ' and ").
+ * Uses a 3×3 Gaussian blur approximation then amplifies the difference.
+ * @param {Uint8Array} gray - Grayscale image
+ * @param {number} width
+ * @param {number} height
+ * @param {number} amount - Sharpening strength (default 1.5)
+ * @returns {Uint8Array} Sharpened grayscale image
+ */
+export const sharpen = (gray, width, height, amount = 1.5) => {
+  const result = new Uint8Array(gray.length);
+  // 3×3 Gaussian kernel weights (σ ≈ 0.85): center 4, edges 2, corners 1
+  // divisor = 16
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
+        result[idx] = gray[idx];
+        continue;
+      }
+      const blur =
+        (gray[idx - width - 1] + 2 * gray[idx - width] + gray[idx - width + 1] +
+         2 * gray[idx - 1] + 4 * gray[idx] + 2 * gray[idx + 1] +
+         gray[idx + width - 1] + 2 * gray[idx + width] + gray[idx + width + 1]) / 16;
+      const sharp = gray[idx] + amount * (gray[idx] - blur);
+      result[idx] = Math.max(0, Math.min(255, Math.round(sharp)));
+    }
+  }
+  return result;
+};
+
+/**
  * Convert a Uint8Array grayscale + Otsu-threshold to an RGBA canvas suitable for Tesseract.
  * Pixels below threshold become black, above become white.
  * @param {Uint8Array} gray - Grayscale values
