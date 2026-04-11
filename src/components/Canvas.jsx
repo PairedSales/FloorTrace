@@ -419,14 +419,15 @@ const Canvas = forwardRef(({
   };
 
   // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseUp
-  const handleVertexDragEnd = (index) => {
+  const handleVertexDragEnd = (index, e) => {
     if (!perimeterOverlay || draggingVertex !== index) return;
     
     // Get current position from visual snap or current vertex position
     const currentVertex = perimeterOverlay.vertices[index];
     
-    // Apply snapping to intersection points
-    const snappedPoint = autoSnapEnabled
+    // Apply snapping to intersection points (disabled when Shift is held)
+    const shiftHeld = e?.evt?.shiftKey ?? false;
+    const snappedPoint = (autoSnapEnabled && !shiftHeld)
       ? findVertexSnapPoint(currentVertex)
       : null;
     
