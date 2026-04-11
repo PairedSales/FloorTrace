@@ -2,7 +2,7 @@ import React from 'react';
 import { Layer, Group, Line, Circle, Text } from 'react-konva';
 import { sqFeetToSqMeters } from '../../utils/unitConverter';
 import { calculateArea, getCentroid } from '../../utils/areaCalculator';
-import { SQ_M_TO_SQ_CM, MIN_SQ_M_DISPLAY } from './canvasUtils';
+import { SQ_M_TO_SQ_CM, MIN_SQ_M_DISPLAY, LINE_COLORS } from './canvasUtils';
 
 /**
  * ShapeLayer renders completed custom shapes (closed polygons with area labels)
@@ -25,7 +25,11 @@ const ShapeLayer = ({
       {/* Completed Custom Areas */}
       {customShapes && customShapes.length > 0 && (
         <Layer>
-          {customShapes.map((shape, shapeIndex) => (
+          {customShapes.map((shape, shapeIndex) => {
+            const colors = LINE_COLORS[shapeIndex % LINE_COLORS.length];
+            const strokeColor = selectedCustomShapeIndex === shapeIndex ? colors.selected : colors.normal;
+            const labelColor = colors.label;
+            return (
             <Group
               key={`shape-${shapeIndex}`}
               x={0}
@@ -40,8 +44,8 @@ const ShapeLayer = ({
                 name="custom-shape"
                 points={shape.vertices.flatMap(v => [v.x, v.y])}
                 closed={shape.closed}
-                fill={shape.closed ? 'rgba(139, 233, 253, 0.15)' : 'transparent'}
-                stroke={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
+                fill={shape.closed ? `${colors.normal}26` : 'transparent'}
+                stroke={strokeColor}
                 strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
               />
               {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
@@ -51,7 +55,7 @@ const ShapeLayer = ({
                   x={vertex.x}
                   y={vertex.y}
                   radius={5 / scale}
-                  fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
+                  fill={strokeColor}
                   stroke="#6272A4"
                   strokeWidth={1 / scale}
                 />
@@ -77,7 +81,7 @@ const ShapeLayer = ({
                     y={centroid.y}
                     text={areaText}
                     fontSize={14 / scale}
-                    fill={selectedCustomShapeIndex === shapeIndex ? '#A8F0FF' : '#8BE9FD'}
+                    fill={labelColor}
                     fontStyle="bold"
                     offsetX={0}
                     offsetY={0}
@@ -92,7 +96,8 @@ const ShapeLayer = ({
                 );
               })()}
             </Group>
-          ))}
+            );
+          })}
         </Layer>
       )}
       
@@ -102,7 +107,7 @@ const ShapeLayer = ({
           <Line
             points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
             closed={false}
-            stroke="#8BE9FD"
+            stroke={LINE_COLORS[customShapes ? customShapes.length % LINE_COLORS.length : 0].normal}
             strokeWidth={2 / scale}
             dash={[6 / scale, 3 / scale]}
           />
