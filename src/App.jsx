@@ -995,6 +995,7 @@ function App() {
             eraserBrushSize={eraserBrushSize}
             onEraserBrushSizeChange={setEraserBrushSize}
             cropToolActive={cropToolActive}
+            onCropToolToggle={handleCropToolToggle}
             onImageUpdate={handleImageUpdate}
           />
         </div>
