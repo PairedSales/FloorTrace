@@ -11,6 +11,7 @@ import {
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
+const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
@@ -61,7 +62,7 @@ const buildVariants = (img) => {
 
   // V3 – Sharpened + Otsu: enhances thin features like ' and " before binarising.
   // This helps Tesseract resolve tick/quote marks that blur into noise.
-  const sharpened = sharpen(stretched, scaled.width, scaled.height, 2.0);
+  const sharpened = sharpen(stretched, scaled.width, scaled.height, SHARPEN_AMOUNT);
   const sharpOtsu = otsuThreshold(sharpened);
   variants.push({
     name: 'sharp-otsu',
@@ -90,7 +91,7 @@ const normalizeOcrText = (text) => {
   s = s.replace(/''/g, '"');
 
   // Common OCR misreadings of the foot mark (') – commas, backticks, and
-  // certain punctuation near digits that should be tick marks.
+  // middle dots near digits that should be tick marks.
   // Only convert when adjacent to a digit to avoid false positives.
   s = s.replace(/(\d)\s*[,`\u00B7]\s*(?=\d)/g, "$1' ");
   s = s.replace(/(\d)\s*[,`\u00B7]\s*$/g, "$1'");
