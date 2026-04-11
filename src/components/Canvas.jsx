@@ -845,8 +845,12 @@ const Canvas = forwardRef(({
     // Handle room corner dragging with local edge scans while resizing.
     // Holding Shift disables auto-snapping for precise placement.
     if (draggingRoomCorner && roomOverlay) {
-      // Only copy coordinates — resizing invalidates the detected polygon boundary
+      // Only copy coordinates (and confidence metadata) — resizing invalidates
+      // the detected polygon boundary so it is intentionally not preserved.
       const newOverlay = { x1: roomOverlay.x1, y1: roomOverlay.y1, x2: roomOverlay.x2, y2: roomOverlay.y2 };
+      if (roomOverlay.confidence !== undefined) {
+        newOverlay.confidence = roomOverlay.confidence;
+      }
       const shiftHeld = e.evt.shiftKey;
       
       if (draggingRoomCorner === 'tl') {
