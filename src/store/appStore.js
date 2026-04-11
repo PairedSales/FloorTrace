@@ -39,11 +39,11 @@ const WORKING_STATE_DEFAULTS = {
 
 /**
  * The subset of field names that are persisted in undo/redo snapshots.
- * `image` and `isProcessing` are excluded (image never changes mid-session;
- * isProcessing is transient).
+ * `isProcessing` and `processingMessage` are excluded as transient UI state.
+ * `image` is included so that crop and erase tool changes can be undone/redone.
  */
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'image' && k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => k !== 'isProcessing' && k !== 'processingMessage'
 );
 
 /**
