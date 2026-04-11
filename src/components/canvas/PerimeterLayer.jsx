@@ -50,7 +50,7 @@ const PerimeterLayer = ({
             draggable
             onDragStart={() => onVertexDragStart(i)}
             onDragMove={(e) => onVertexDrag(i, e)}
-            onDragEnd={() => onVertexDragEnd(i)}
+            onDragEnd={(e) => onVertexDragEnd(i, e)}
             onContextMenu={(e) => {
               e.evt.preventDefault();
               e.cancelBubble = true;
