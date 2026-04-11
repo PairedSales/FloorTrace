@@ -4,12 +4,13 @@ import {
   toGrayscale,
   otsuThreshold,
   contrastStretch,
+  sharpen,
   grayToThresholdedCanvas
 } from './imagePreprocessor';
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
-const MIN_WORD_CONFIDENCE = 30;
+const MIN_WORD_CONFIDENCE = 20;
 
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
@@ -58,7 +59,16 @@ const buildVariants = (img) => {
     canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
   });
 
-  return { variants, scaleFactor: factor };
+  // V3 – Sharpened + Otsu: enhances thin features like ' and " before binarising.
+  // This helps Tesseract resolve tick/quote marks that blur into noise.
+  const sharpened = sharpen(stretched, scaled.width, scaled.height, 2.0);
+  const sharpOtsu = otsuThreshold(sharpened);
+  variants.push({
+    name: 'sharp-otsu',
+    canvas: grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, sharpOtsu)
+  });
+
+  return { variants, scaleFactor: factor, width: scaled.width, height: scaled.height };
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +88,12 @@ const normalizeOcrText = (text) => {
   s = s.replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'");
   s = s.replace(/[\u201C\u201D\u02DD]/g, '"');
   s = s.replace(/''/g, '"');
+
+  // Common OCR misreadings of the foot mark (') – commas, backticks, and
+  // certain punctuation near digits that should be tick marks.
+  // Only convert when adjacent to a digit to avoid false positives.
+  s = s.replace(/(\d)\s*[,`\u00B7]\s*(?=\d)/g, "$1' ");
+  s = s.replace(/(\d)\s*[,`\u00B7]\s*$/g, "$1'");
 
   // Lowercase everything: normalises X→x, Ft→ft, IN→in, etc.
   s = s.toLowerCase();
@@ -483,23 +499,129 @@ const recognizeVariants = async (worker, canvases) => {
 };
 
 // ---------------------------------------------------------------------------
+// ROI extraction – crop regions where dimension-like text was found and
+// re-OCR them with SINGLE_LINE mode for higher accuracy on ' and ".
+// ---------------------------------------------------------------------------
+
+const extractROIs = (results, imgWidth, imgHeight) => {
+  const rois = [];
+  const PAD_X_FRAC = 0.15; // horizontal padding as fraction of roi width
+  const PAD_Y_FRAC = 0.5;  // vertical padding as fraction of roi height
+  for (const r of results) {
+    if (!r.bbox) continue;
+    const padX = Math.max(10, Math.round(r.bbox.width * PAD_X_FRAC));
+    const padY = Math.max(6, Math.round(r.bbox.height * PAD_Y_FRAC));
+    const x = Math.max(0, r.bbox.x - padX);
+    const y = Math.max(0, r.bbox.y - padY);
+    const x2 = Math.min(imgWidth, r.bbox.x + r.bbox.width + padX);
+    const y2 = Math.min(imgHeight, r.bbox.y + r.bbox.height + padY);
+    if (x2 - x > 10 && y2 - y > 5) {
+      rois.push({ x, y, w: x2 - x, h: y2 - y });
+    }
+  }
+  return rois;
+};
+
+const cropCanvas = (sourceCanvas, roi) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = roi.w;
+  canvas.height = roi.h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(sourceCanvas, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h);
+  return canvas;
+};
+
+const runROIOcr = async (worker, baseCanvas, rois) => {
+  if (rois.length === 0) return { lines: [], words: [] };
+
+  const allLines = [];
+  const allWords = [];
+
+  // SINGLE_LINE mode is optimal for cropped dimension labels
+  await worker.setParameters({
+    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+    preserve_interword_spaces: '1'
+  });
+
+  for (const roi of rois) {
+    const cropped = cropCanvas(baseCanvas, roi);
+    const result = await worker.recognize(cropped, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    // Offset bboxes back to full-image coordinates
+    for (const line of lines) {
+      if (line.bbox) {
+        line.bbox = {
+          x0: line.bbox.x0 + roi.x,
+          y0: line.bbox.y0 + roi.y,
+          x1: line.bbox.x1 + roi.x,
+          y1: line.bbox.y1 + roi.y
+        };
+      }
+      if (line.words) {
+        for (const w of line.words) {
+          if (w.bbox) {
+            w.bbox = {
+              x0: w.bbox.x0 + roi.x,
+              y0: w.bbox.y0 + roi.y,
+              x1: w.bbox.x1 + roi.x,
+              y1: w.bbox.y1 + roi.y
+            };
+          }
+        }
+      }
+    }
+    for (const w of words) {
+      if (w.bbox) {
+        w.bbox = {
+          x0: w.bbox.x0 + roi.x,
+          y0: w.bbox.y0 + roi.y,
+          x1: w.bbox.x1 + roi.x,
+          y1: w.bbox.y1 + roi.y
+        };
+      }
+    }
+    allLines.push(...lines);
+    allWords.push(...words);
+  }
+
+  return { lines: allLines, words: allWords };
+};
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
 export const detectAllDimensions = async (imageDataUrl) => {
   try {
     const img = await dataUrlToImage(imageDataUrl);
-    const { variants, scaleFactor } = buildVariants(img);
+    const { variants, scaleFactor, width: scaledW, height: scaledH } = buildVariants(img);
 
     const worker = await createConfiguredWorker();
-    const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
-    await worker.terminate();
 
-    // Two detection strategies run in parallel, then merged
+    // Pass 1: broad SPARSE_TEXT scan across all preprocessing variants
+    const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
+
+    // Initial detection from broad scan
     const lineResults = detectFromLines(allLines);
     const spatialResults = detectFromSpatialWords(allWords);
+    const pass1 = [...lineResults, ...spatialResults];
 
-    const merged = [...lineResults, ...spatialResults];
+    // Pass 2: targeted SINGLE_LINE OCR on cropped ROIs from the best variant.
+    // This gives Tesseract a much better chance at reading ' and " accurately
+    // because it can focus on a single line of text with less noise.
+    const rois = extractROIs(deduplicateResults(pass1), scaledW, scaledH);
+    // Use the Otsu-thresholded variant (index 1) for ROI crops – clean binary
+    // image gives SINGLE_LINE mode the best input.
+    const roiCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
+    const { lines: roiLines, words: roiWords } = await runROIOcr(worker, roiCanvas, rois);
+
+    await worker.terminate();
+
+    // Merge all detection results
+    const roiLineResults = detectFromLines(roiLines);
+    const roiSpatialResults = detectFromSpatialWords(roiWords);
+    const merged = [...pass1, ...roiLineResults, ...roiSpatialResults];
     const deduped = deduplicateResults(merged);
 
     // Scale bboxes back to original image coordinates
