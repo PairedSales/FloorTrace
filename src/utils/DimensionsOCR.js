@@ -4,14 +4,12 @@ import {
   toGrayscale,
   otsuThreshold,
   contrastStretch,
-  sharpen,
   grayToThresholdedCanvas
 } from './imagePreprocessor';
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
-const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
@@ -58,15 +56,6 @@ const buildVariants = (img) => {
   variants.push({
     name: 'otsu',
     canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, otsu)
-  });
-
-  // V3 – Sharpened + Otsu: enhances thin features like ' and " before binarising.
-  // This helps Tesseract resolve tick/quote marks that blur into noise.
-  const sharpened = sharpen(stretched, scaled.width, scaled.height, SHARPEN_AMOUNT);
-  const sharpOtsu = otsuThreshold(sharpened);
-  variants.push({
-    name: 'sharp-otsu',
-    canvas: grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, sharpOtsu)
   });
 
   return { variants, scaleFactor: factor, width: scaled.width, height: scaled.height };
@@ -376,7 +365,7 @@ const detectFromSpatialWords = (words) => {
 
       const gap = digits[j].bbox.x0 - digits[band.length - 1].bbox.x1;
       const charW = (digits[i].bbox.x1 - digits[i].bbox.x0) / Math.max(digits[i].text.length, 1);
-      if (gap > charW * 30) continue;
+      if (gap > charW * 15) continue;
 
       band.push(digits[j]);
       bandIndices.push(j);
@@ -406,6 +395,20 @@ const detectFromSpatialWords = (words) => {
 // Line-level detection (traditional: parse each OCR line)
 // ---------------------------------------------------------------------------
 
+// Extract the dimension-bearing substring from a line that may contain a room
+// name prefix/suffix (e.g. "BEDROOM 13' 5\" × 12' 11\"").  Without the
+// character whitelist Tesseract reads room names as letters; we strip them so
+// parseDimensionLine only sees the numeric dimension text.
+const extractDimensionSubstring = (normalised) => {
+  // Match a dimension-like fragment: starts with a digit, may contain digits,
+  // tick marks, quotes, separators (x/×), spaces, commas, dots, dashes, and
+  // unit keywords — and ends with a digit, tick, or quote mark.
+  const m = normalised.match(
+    /(\d[\d'"\s.,`x-]*(?:ft|feet|in|inch|inches)?[\d'"\s.,`x-]*(?:ft|feet|in|inch|inches|'|"|\d))/
+  );
+  return m ? m[1].trim() : normalised;
+};
+
 const detectFromLines = (lines) => {
   const results = [];
   const seen = new Set();
@@ -416,7 +419,15 @@ const detectFromLines = (lines) => {
     if (!norm || seen.has(norm)) continue;
     seen.add(norm);
 
-    const parsed = parseDimensionLine(norm);
+    // Try the full normalised line first; if that fails, extract just the
+    // dimension portion (strips room names like "BEDROOM", "KITCHEN" etc.)
+    let parsed = parseDimensionLine(norm);
+    if (!parsed) {
+      const dimSub = extractDimensionSubstring(norm);
+      if (dimSub !== norm) {
+        parsed = parseDimensionLine(dimSub);
+      }
+    }
     if (!parsed) continue;
 
     const bbox = line.bbox
@@ -434,7 +445,11 @@ const detectFromLines = (lines) => {
 };
 
 // ---------------------------------------------------------------------------
-// Deduplication: merge results with similar values and overlapping bboxes
+// Deduplication: merge results with similar values and nearby / overlapping
+// bboxes.  We use two spatial checks:
+//   1. Classic IoU-style overlap (original logic).
+//   2. Center-proximity: bbox centers within a generous distance.
+// Either is sufficient when the parsed values match.
 // ---------------------------------------------------------------------------
 
 const bboxOverlap = (a, b) => {
@@ -448,9 +463,30 @@ const bboxOverlap = (a, b) => {
   return minArea > 0 && overlapArea / minArea > 0.3;
 };
 
+const bboxCentersClose = (a, b) => {
+  if (!a || !b) return false;
+  const aCx = a.x + a.width / 2;
+  const aCy = a.y + a.height / 2;
+  const bCx = b.x + b.width / 2;
+  const bCy = b.y + b.height / 2;
+  const maxDim = Math.max(a.width, a.height, b.width, b.height);
+  // If centers are within 2× the largest bbox dimension, treat as same region
+  const dist = Math.sqrt((aCx - bCx) ** 2 + (aCy - bCy) ** 2);
+  return dist < maxDim * 2;
+};
+
 const valuesClose = (a, b, tolerance = 0.05) => {
   const wDiff = Math.abs(a.width - b.width) / Math.max(a.width, 1);
   const hDiff = Math.abs(a.height - b.height) / Math.max(a.height, 1);
+  return wDiff < tolerance && hDiff < tolerance;
+};
+
+// Also treat a swapped-dimension pair as a duplicate (width↔height).
+const valuesCloseOrSwapped = (a, b, tolerance = 0.05) => {
+  if (valuesClose(a, b, tolerance)) return true;
+  // Check if width/height are swapped
+  const wDiff = Math.abs(a.width - b.height) / Math.max(a.width, 1);
+  const hDiff = Math.abs(a.height - b.width) / Math.max(a.height, 1);
   return wDiff < tolerance && hDiff < tolerance;
 };
 
@@ -460,7 +496,7 @@ const deduplicateResults = (results) => {
 
   for (const r of sorted) {
     const isDup = kept.some(k =>
-      valuesClose(k, r) && bboxOverlap(k.bbox, r.bbox)
+      valuesCloseOrSwapped(k, r) && (bboxOverlap(k.bbox, r.bbox) || bboxCentersClose(k.bbox, r.bbox))
     );
     if (!isDup) kept.push(r);
   }
@@ -483,8 +519,10 @@ const recognizeVariants = async (worker, canvases) => {
 
   // Text is always left-to-right; SPARSE_TEXT finds scattered dimension labels
   // across the floor plan without imposing a block/column structure.
+  // No character whitelist – letting Tesseract read naturally prevents it from
+  // mangling room names / disclaimers into false-positive digit strings and
+  // improves recognition of nearby dimension text.
   await worker.setParameters({
-    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
     tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
     preserve_interword_spaces: '1'
   });
@@ -533,19 +571,23 @@ const cropCanvas = (sourceCanvas, roi) => {
 };
 
 const runROIOcr = async (worker, baseCanvas, rois) => {
-  if (rois.length === 0) return { lines: [], words: [] };
+  // Limit ROIs for speed – process only the first 8 candidates
+  const limitedRois = rois.slice(0, 8);
+  if (limitedRois.length === 0) return { lines: [], words: [] };
 
   const allLines = [];
   const allWords = [];
 
-  // SINGLE_LINE mode is optimal for cropped dimension labels
+  // SINGLE_LINE mode is optimal for cropped dimension labels.
+  // Use whitelist only for ROI crops where we know text is a dimension –
+  // this helps Tesseract resolve ambiguous ' and " symbols.
   await worker.setParameters({
     tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
     tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
     preserve_interword_spaces: '1'
   });
 
-  for (const roi of rois) {
+  for (const roi of limitedRois) {
     const cropped = cropCanvas(baseCanvas, roi);
     const result = await worker.recognize(cropped, {}, { blocks: true });
     const { lines, words } = collectLinesAndWords(result);
@@ -666,4 +708,4 @@ export const detectAllDimensions = async (imageDataUrl) => {
 };
 
 // Exported for unit-testing the parsing layer without a live OCR engine.
-export { normalizeOcrText, parseSingleToken, parseDimensionLine };
+export { normalizeOcrText, parseSingleToken, parseDimensionLine, extractDimensionSubstring };
