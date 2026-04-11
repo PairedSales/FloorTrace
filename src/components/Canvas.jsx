@@ -46,6 +46,7 @@ const Canvas = forwardRef(({
   eraserBrushSize,
   onEraserBrushSizeChange,
   cropToolActive,
+  onCropToolToggle,
   onImageUpdate,
 }, ref) => {
   const stageRef = useRef(null);
@@ -689,8 +690,10 @@ const Canvas = forwardRef(({
 
     const dataUrl = canvas.toDataURL('image/png');
     onImageUpdate(dataUrl);
+    // Deselect the crop tool – we only want to crop once per activation
+    if (onCropToolToggle) onCropToolToggle();
     return true;
-  }, [imageObj, cropSelection, onImageUpdate, resetCropState]);
+  }, [imageObj, cropSelection, onImageUpdate, onCropToolToggle, resetCropState]);
 
   // Handle double-click to close custom shape or add perimeter vertex
   const handleStageDoubleClick = (e) => {
@@ -1123,8 +1126,14 @@ const Canvas = forwardRef(({
   
   // Handle right click on the stage background.
   // If the line tool is active and a line is in progress, right-click cancels it.
+  // If the crop tool is active and a selection is in progress, right-click cancels it.
   const handleStageContextMenu = (e) => {
     e.evt.preventDefault();
+
+    if (cropToolActive && isCroppingRef.current) {
+      resetCropState();
+      return;
+    }
 
     if (lineToolActive && currentMeasurementLine && onMeasurementLineUpdate) {
       onMeasurementLineUpdate(null);
