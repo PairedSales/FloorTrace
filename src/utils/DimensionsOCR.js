@@ -13,6 +13,10 @@ const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
 const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
+// Tesseract character whitelist – includes × (U+00D7) because Matterport
+// (and many other) floor plans use the multiplication sign as the separator.
+const OCR_CHAR_WHITELIST = "0123456789'\"ftxXby .,-\u00D7";
+
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
 // ---------------------------------------------------------------------------
@@ -265,9 +269,9 @@ const parseDimensionLine = (line) => {
     // garbage before the actual dimension value (e.g. "x1t,.. 10' 9").
     // Walk forward to each digit start and attempt a parse.
     if (!lp) {
-      for (let k = 1; k < left.length; k++) {
-        if (!/[0-9]/.test(left[k])) continue;
-        const sub = left.slice(k).trim();
+      for (let charIdx = 1; charIdx < left.length; charIdx++) {
+        if (!/[0-9]/.test(left[charIdx])) continue;
+        const sub = left.slice(charIdx).trim();
         if (sub) {
           const parsed = parseSingleToken(sub);
           if (parsed) { lp = parsed; break; }
@@ -511,10 +515,8 @@ const recognizeVariants = async (worker, canvases) => {
 
   // Text is always left-to-right; SPARSE_TEXT finds scattered dimension labels
   // across the floor plan without imposing a block/column structure.
-  // The whitelist includes × (U+00D7) because Matterport (and many other)
-  // floor plans use the multiplication sign as the dimension separator.
   await worker.setParameters({
-    tessedit_char_whitelist: "0123456789'\"ftxXby .,-\u00D7",
+    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
     tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
     preserve_interword_spaces: '1'
   });
@@ -570,7 +572,7 @@ const runROIOcr = async (worker, baseCanvas, rois) => {
 
   // SINGLE_LINE mode is optimal for cropped dimension labels
   await worker.setParameters({
-    tessedit_char_whitelist: "0123456789'\"ftxXby .,-\u00D7",
+    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
     tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
     preserve_interword_spaces: '1'
   });
