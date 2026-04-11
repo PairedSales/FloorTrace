@@ -13,6 +13,10 @@ const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
 const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
+// Tesseract character whitelist – includes × (U+00D7) because Matterport
+// (and many other) floor plans use the multiplication sign as the separator.
+const OCR_CHAR_WHITELIST = "0123456789'\"ftxXby .,-\u00D7";
+
 // ---------------------------------------------------------------------------
 // Image scaling – only downscale images that are very large; never upscale
 // ---------------------------------------------------------------------------
@@ -247,29 +251,45 @@ const parseDimensionLine = (line) => {
   console.log('[OCR] raw:', raw);
   console.log('[OCR] normalized:', norm);
 
-  // --- Strategy 1: split on x separator (handles both 'x' and 'X') -------
-  // normalizeOcrText already lowercases everything, so the separator is
-  // always 'x' at this point; [xX] is kept for safety.
-  const sepMatch = norm.match(SEPARATOR);
-  if (sepMatch) {
+  // --- Strategy 1: split on x separator --------------------------------
+  // Try every x position (not just the first). Room labels like "KITCHEN"
+  // get garbled through the restricted OCR whitelist and may introduce
+  // spurious x characters before the actual dimension separator.
+  for (const sepMatch of norm.matchAll(/\s*x\s*/g)) {
     const left = norm.slice(0, sepMatch.index).trim();
     const right = norm.slice(sepMatch.index + sepMatch[0].length).trim();
     console.log('[OCR] split → left:', left, '| right:', right);
-    if (left && right) {
-      const lp = parseSingleToken(left);
-      const rp = parseSingleToken(right);
-      console.log('[OCR] left format:', lp?.format, 'value:', lp?.value);
-      console.log('[OCR] right format:', rp?.format, 'value:', rp?.value);
-      if (lp && rp) {
-        const result = {
-          width: lp.value,
-          height: rp.value,
-          text: norm,
-          format: lp.format === 'inches' || rp.format === 'inches' ? 'inches' : 'decimal'
-        };
-        console.log('[OCR] parsed → width:', result.width, 'height:', result.height, 'format:', result.format);
-        return result;
+    if (!left || !right) continue;
+
+    let lp = parseSingleToken(left);
+    let rp = parseSingleToken(right);
+
+    // If the left half didn't parse, try stripping a garbled room-label
+    // prefix.  Room labels mangled by the whitelist produce non-digit
+    // garbage before the actual dimension value (e.g. "x1t,.. 10' 9").
+    // Walk forward to each digit start and attempt a parse.
+    if (!lp) {
+      for (let charIdx = 1; charIdx < left.length; charIdx++) {
+        if (!/[0-9]/.test(left[charIdx])) continue;
+        const sub = left.slice(charIdx).trim();
+        if (sub) {
+          const parsed = parseSingleToken(sub);
+          if (parsed) { lp = parsed; break; }
+        }
       }
+    }
+
+    console.log('[OCR] left format:', lp?.format, 'value:', lp?.value);
+    console.log('[OCR] right format:', rp?.format, 'value:', rp?.value);
+    if (lp && rp) {
+      const result = {
+        width: lp.value,
+        height: rp.value,
+        text: norm,
+        format: lp.format === 'inches' || rp.format === 'inches' ? 'inches' : 'decimal'
+      };
+      console.log('[OCR] parsed → width:', result.width, 'height:', result.height, 'format:', result.format);
+      return result;
     }
   }
 
@@ -331,6 +351,10 @@ const buildDigitGroups = (words) => {
   for (const word of words) {
     if (!word.text || !word.bbox) continue;
     if (word.confidence < MIN_WORD_CONFIDENCE) continue;
+    // Skip words from vertical / rotated text (bbox much taller than wide)
+    const wW = word.bbox.x1 - word.bbox.x0;
+    const wH = word.bbox.y1 - word.bbox.y0;
+    if (wH > wW * 2) continue;
     const t = normalizeOcrText(word.text);
     if (/\d/.test(t)) {
       groups.push({
@@ -411,6 +435,14 @@ const detectFromLines = (lines) => {
   const seen = new Set();
 
   for (const line of lines) {
+    // Skip vertical / rotated text – dimension text always reads left to right,
+    // so valid dimension lines are always wider than they are tall.
+    if (line.bbox) {
+      const bw = line.bbox.x1 - line.bbox.x0;
+      const bh = line.bbox.y1 - line.bbox.y0;
+      if (bh > bw) continue;
+    }
+
     const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
     const norm = normalizeOcrText(rawText);
     if (!norm || seen.has(norm)) continue;
@@ -484,7 +516,7 @@ const recognizeVariants = async (worker, canvases) => {
   // Text is always left-to-right; SPARSE_TEXT finds scattered dimension labels
   // across the floor plan without imposing a block/column structure.
   await worker.setParameters({
-    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
     tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
     preserve_interword_spaces: '1'
   });
@@ -540,7 +572,7 @@ const runROIOcr = async (worker, baseCanvas, rois) => {
 
   // SINGLE_LINE mode is optimal for cropped dimension labels
   await worker.setParameters({
-    tessedit_char_whitelist: "0123456789'\"ftxXby .,-",
+    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
     tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
     preserve_interword_spaces: '1'
   });

@@ -358,4 +358,44 @@ describe('parseDimensionLine', () => {
     expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
     expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
   });
+
+  // Kitchen-specific format
+  it("parses kitchen dimensions: 10' 9\" x 7' 11\"", () => {
+    const r = parseDimensionLine("10' 9\" x 7' 11\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 9 / 12, 5);
+    expect(r.height).toBeCloseTo(7 + 11 / 12, 5);
+    expect(r.format).toBe('inches');
+  });
+
+  // Garbled room-label prefix (OCR whitelist mangling room names)
+  describe('garbled room-label prefix handling', () => {
+    it('handles garbled KITCHEN prefix: "x1t,.. 10\' 9 x 7\' 11"', () => {
+      const r = parseDimensionLine("x1t,.. 10' 9 x 7' 11");
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(10 + 9 / 12, 5);
+      expect(r.height).toBeCloseTo(7 + 11 / 12, 5);
+    });
+
+    it('handles garbled prefix with leading x: "x 10\' 5 x 8\' 3"', () => {
+      const r = parseDimensionLine("x 10' 5 x 8' 3");
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(10 + 5 / 12, 5);
+      expect(r.height).toBeCloseTo(8 + 3 / 12, 5);
+    });
+
+    it('handles garbled BEDROOM prefix: "b..f00x 12\' 5 x 16\' 4"', () => {
+      const r = parseDimensionLine("b..f00x 12' 5 x 16' 4");
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(12 + 5 / 12, 5);
+      expect(r.height).toBeCloseTo(16 + 4 / 12, 5);
+    });
+
+    it('handles garbled prefix with multiple x before separator: "xt,x. 13\' 5 x 12\' 11"', () => {
+      const r = parseDimensionLine("xt,x. 13' 5 x 12' 11");
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
+      expect(r.height).toBeCloseTo(12 + 11 / 12, 5);
+    });
+  });
 });
