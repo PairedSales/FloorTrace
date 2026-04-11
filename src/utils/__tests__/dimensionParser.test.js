@@ -35,6 +35,15 @@ describe('normalizeOcrText', () => {
     expect(normalizeOcrText('3in')).toBe('3 in');
     expect(normalizeOcrText('12ft x 10ft')).toBe('12 ft x 10 ft');
   });
+
+  it('converts comma near digits to tick mark (blurry apostrophe)', () => {
+    expect(normalizeOcrText('10,5')).toBe("10' 5");
+    expect(normalizeOcrText('13,4')).toBe("13' 4");
+  });
+
+  it('converts backtick near digits to tick mark', () => {
+    expect(normalizeOcrText('10`5')).toBe("10'5");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -208,6 +217,23 @@ describe('parseSingleToken', () => {
       expect(r.value).toBe(10);
     });
   });
+
+  // Blurry quote: comma as tick mark
+  describe('Blurry quotes: comma/backtick misreadings', () => {
+    it('parses "10,5" as 10ft 5in (comma misread as tick)', () => {
+      const r = parseSingleToken('10,5');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(10 + 5 / 12, 5);
+      expect(r.format).toBe('inches');
+    });
+
+    it('parses "13`4" as 13ft 4in (backtick misread as tick)', () => {
+      const r = parseSingleToken('13`4');
+      expect(r).not.toBeNull();
+      expect(r.value).toBeCloseTo(13 + 4 / 12, 5);
+      expect(r.format).toBe('inches');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -316,5 +342,20 @@ describe('parseDimensionLine', () => {
   it('returns null for non-dimension text', () => {
     expect(parseDimensionLine('bedroom')).toBeNull();
     expect(parseDimensionLine('')).toBeNull();
+  });
+
+  // Blurry quotes: comma/backtick misreading across full dimension lines
+  it('parses blurry comma-tick: "10,5 x 13,4"', () => {
+    const r = parseDimensionLine('10,5 x 13,4');
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 5 / 12, 5);
+    expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
+  });
+
+  it('parses mixed: "10\'2 x 13,4" (one real tick, one comma)', () => {
+    const r = parseDimensionLine("10'2 x 13,4");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
+    expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
   });
 });
