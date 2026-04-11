@@ -1544,19 +1544,6 @@ const Canvas = forwardRef(({
               const sh = Math.abs(cropSelection.y2 - cropSelection.y1);
               return (
                 <>
-                  {/* Dimmed overlay outside selection */}
-                  {imageObj && (
-                    <>
-                      {/* Top */}
-                      <Rect x={0} y={0} width={imageObj.width} height={sy} fill="rgba(0,0,0,0.45)" listening={false} />
-                      {/* Bottom */}
-                      <Rect x={0} y={sy + sh} width={imageObj.width} height={imageObj.height - sy - sh} fill="rgba(0,0,0,0.45)" listening={false} />
-                      {/* Left */}
-                      <Rect x={0} y={sy} width={sx} height={sh} fill="rgba(0,0,0,0.45)" listening={false} />
-                      {/* Right */}
-                      <Rect x={sx + sw} y={sy} width={imageObj.width - sx - sw} height={sh} fill="rgba(0,0,0,0.45)" listening={false} />
-                    </>
-                  )}
                   {/* Selection border */}
                   <Rect
                     x={sx}
