@@ -198,7 +198,7 @@ const LeftPanel = ({
             <div className="flex items-center gap-2 pointer-events-auto">
               <button
                 type="button"
-                onClick={() => useInteriorWalls && onInteriorWallToggle(false)}
+                onClick={() => onInteriorWallToggle(false)}
                 className={`text-[11px] font-semibold cursor-pointer transition-colors duration-150 ${
                   !useInteriorWalls ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
                 }`}
@@ -207,7 +207,7 @@ const LeftPanel = ({
               </button>
               <button
                 type="button"
-                onClick={() => !useInteriorWalls && onInteriorWallToggle(true)}
+                onClick={() => onInteriorWallToggle(true)}
                 className={`text-[11px] font-semibold cursor-pointer transition-colors duration-150 ${
                   useInteriorWalls ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
                 }`}
