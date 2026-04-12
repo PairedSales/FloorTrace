@@ -436,7 +436,8 @@ describe('wall thickness detection', () => {
   });
 
   it('inner polygon is inset by actual wall thickness, not just the old 2-px default', () => {
-    // Draw a rectangle with distinctly thick walls (drawLine thickness=10 → ~21px band).
+    // drawLine with thickness=10 draws a ±10 pixel square around each point on the
+    // line centre, producing a wall band approximately 21px wide (2*10+1).
     const img = createBlankImageData(400, 300);
     const wallHalfThick = 10;
     drawLine(img, 80, 60, 320, 60, wallHalfThick);   // top
