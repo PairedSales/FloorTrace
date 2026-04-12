@@ -1,10 +1,148 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Rect, Text } from 'react-konva';
 import { formatLength } from '../../utils/unitConverter';
 import { measureSideLenWidth } from './canvasUtils';
 
 const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 const SIDE_LEN_FONT_STYLE = '500';
+
+/* ── Animation helpers ──────────────────────────────────────────────────── */
+
+const ANIM_DURATION_MS = 300;
+
+/** Ease-in-out cubic easing function. */
+const easeInOutCubic = (t) =>
+  t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+
+/**
+ * Resample a closed polygon to exactly `n` vertices evenly distributed
+ * along the perimeter by arc length.
+ */
+const resamplePolygon = (vertices, n) => {
+  if (!vertices || vertices.length === 0 || n <= 0) return [];
+  if (vertices.length === n) return vertices;
+
+  const len = vertices.length;
+  const cumLen = [0];
+  for (let i = 1; i <= len; i++) {
+    const a = vertices[i - 1];
+    const b = vertices[i % len];
+    cumLen.push(cumLen[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const totalLen = cumLen[len];
+  if (totalLen === 0) return Array.from({ length: n }, () => ({ ...vertices[0] }));
+
+  const result = [];
+  let seg = 0;
+  for (let i = 0; i < n; i++) {
+    const target = (i / n) * totalLen;
+    while (seg < len - 1 && cumLen[seg + 1] < target) seg++;
+    const segLen = cumLen[seg + 1] - cumLen[seg];
+    const t = segLen > 0 ? (target - cumLen[seg]) / segLen : 0;
+    const a = vertices[seg];
+    const b = vertices[(seg + 1) % len];
+    result.push({ x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) });
+  }
+  return result;
+};
+
+/**
+ * Detect whether a vertex change is a "mode toggle" (many vertices moved at
+ * once) rather than a single-vertex drag.
+ */
+const detectSignificantChange = (prev, next) => {
+  if (!prev || !next || prev.length < 3 || next.length < 3) return false;
+  if (prev.length !== next.length) return true;
+  let movedCount = 0;
+  for (let i = 0; i < prev.length; i++) {
+    const dx = prev[i].x - next[i].x;
+    const dy = prev[i].y - next[i].y;
+    if (dx * dx + dy * dy > 1) movedCount++;
+    if (movedCount > 1) return true;
+  }
+  return false;
+};
+
+/**
+ * Hook that smoothly interpolates polygon vertices when a bulk change is
+ * detected (e.g. toggling between interior / exterior boundary mode).
+ * Single-vertex drags are applied immediately without animation.
+ *
+ * Returns { displayVertices, isAnimating }.
+ */
+const useAnimatedVertices = (targetVertices) => {
+  const [animState, setAnimState] = useState({ displayVertices: null, isAnimating: false });
+  const prevVerticesRef = useRef(null);
+  const currentDisplayRef = useRef(null);
+  const animFrameRef = useRef(null);
+
+  useEffect(() => {
+    // Capture the vertices we are transitioning FROM.  If a previous
+    // animation was in-flight, start from its most recent visual position
+    // so that rapid toggles don't cause jumps.
+    const prev = currentDisplayRef.current || prevVerticesRef.current;
+    prevVerticesRef.current = targetVertices;
+    currentDisplayRef.current = null;
+
+    // Cancel any running animation.
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
+    // Nothing to animate from/to.
+    if (!prev || !targetVertices || prev.length < 3 || targetVertices.length < 3) {
+      setAnimState({ displayVertices: null, isAnimating: false });
+      return;
+    }
+
+    // Only animate bulk polygon swaps, not single-vertex drags.
+    if (!detectSignificantChange(prev, targetVertices)) {
+      setAnimState({ displayVertices: null, isAnimating: false });
+      return;
+    }
+
+    // Resample both polygons to the same vertex count.
+    const count = Math.max(prev.length, targetVertices.length);
+    const from = resamplePolygon(prev, count);
+    const to = resamplePolygon(targetVertices, count);
+    const startTime = performance.now();
+
+    setAnimState({ displayVertices: from, isAnimating: true });
+
+    const animate = (now) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / ANIM_DURATION_MS, 1);
+      const eased = easeInOutCubic(progress);
+
+      if (progress < 1) {
+        const interpolated = from.map((f, i) => ({
+          x: f.x + (to[i].x - f.x) * eased,
+          y: f.y + (to[i].y - f.y) * eased,
+        }));
+        currentDisplayRef.current = interpolated;
+        setAnimState({ displayVertices: interpolated, isAnimating: true });
+        animFrameRef.current = requestAnimationFrame(animate);
+      } else {
+        // End with exact target vertices.
+        currentDisplayRef.current = null;
+        setAnimState({ displayVertices: null, isAnimating: false });
+        animFrameRef.current = null;
+      }
+    };
+
+    animFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    };
+  }, [targetVertices]);
+
+  return animState;
+};
 
 /**
  * Compute label layout data for every edge of the perimeter polygon.
@@ -110,24 +248,32 @@ const PerimeterLayer = ({
   onDeletePerimeterVertex,
   onDoubleClick,
 }) => {
+  const targetVertices = perimeterOverlay?.vertices;
+
+  // Animate between bulk polygon changes (interior ↔ exterior toggle).
+  // Hooks must be called before any early return (rules of hooks).
+  const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
+
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
-  // Hook must be called before any early return (rules of hooks).
-  const vertices = perimeterOverlay?.vertices;
+  // Skip label computation during animation for performance.
   const labelLayouts = useMemo(
-    () => (showSideLengths && pixelsPerFoot && vertices)
-      ? computeLabelLayouts(vertices, scale, pixelsPerFoot, detectedDimensions)
+    () => (showSideLengths && pixelsPerFoot && targetVertices && !isAnimating)
+      ? computeLabelLayouts(targetVertices, scale, pixelsPerFoot, detectedDimensions)
       : [],
-    [vertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions]
+    [targetVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, isAnimating]
   );
 
-  if (!perimeterOverlay || !vertices) return null;
+  if (!perimeterOverlay || !targetVertices) return null;
+
+  // During animation, render the interpolated path; otherwise the target.
+  const renderVertices = displayVertices || targetVertices;
 
   return (
     <>
       {/* Perimeter Outline */}
       <Line
-        points={perimeterOverlay.vertices.flatMap(v => [v.x, v.y])}
+        points={renderVertices.flatMap(v => [v.x, v.y])}
         stroke="#BD93F9"
         strokeWidth={2 / scale}
         closed={true}
@@ -136,8 +282,8 @@ const PerimeterLayer = ({
         onDblTap={onDoubleClick}
       />
 
-      {/* Perimeter Vertices */}
-      {perimeterOverlay.vertices.map((vertex, i) => (
+      {/* Perimeter Vertices – hidden during animation for visual clarity */}
+      {!isAnimating && targetVertices.map((vertex, i) => (
         <React.Fragment key={i}>
           <Circle
             x={vertex.x}
