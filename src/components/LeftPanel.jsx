@@ -190,9 +190,33 @@ const LeftPanel = ({
 
       {/* Area Display */}
       <section className="px-3 py-3">
-        <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-          Area
-        </h3>
+        <div className="flex items-center justify-between mb-2.5">
+          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+            Area
+          </h3>
+          {perimeterOverlay && (
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => onInteriorWallToggle(false)}
+                className={`text-[11px] font-semibold cursor-pointer transition-colors duration-150 ${
+                  !useInteriorWalls ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Exterior
+              </button>
+              <button
+                type="button"
+                onClick={() => onInteriorWallToggle(true)}
+                className={`text-[11px] font-semibold cursor-pointer transition-colors duration-150 ${
+                  useInteriorWalls ? 'text-accent' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Interior
+              </button>
+            </div>
+          )}
+        </div>
         <div className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2">
         <div className="font-mono font-bold text-accent leading-none text-center" style={{
             fontSize: areaText.length <= 7 ? '1.75rem' : areaText.length <= 9 ? '1.375rem' : '1.125rem',
@@ -223,11 +247,6 @@ const LeftPanel = ({
                   label="Auto Snap"
                   checked={autoSnapEnabled}
                   onChange={onAutoSnapChange}
-                />
-                <Toggle
-                  label="Measure Interior"
-                  checked={useInteriorWalls}
-                  onChange={onInteriorWallToggle}
                 />
               </section>
               <div className="panel-divider mx-3" />
