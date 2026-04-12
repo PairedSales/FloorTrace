@@ -9,7 +9,8 @@ import {
 } from './imagePreprocessor';
 
 const MIN_DIMENSION_FEET = 1;
-const MAX_DIMENSION_FEET = 250;
+const MAX_DIMENSION_FEET = 60;
+const MAX_ASPECT_RATIO = 4; // reject pairs where one dim is > 4× the other
 const MIN_WORD_CONFIDENCE = 20;
 const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
@@ -73,6 +74,14 @@ const buildVariants = (img) => {
     canvas: grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, sharpOtsu)
   });
 
+  // V4 – Fixed high-contrast binary: uses threshold 128 since floorplans are
+  // "always black on white".  Recovers text that Otsu misses in low-contrast
+  // regions or where Otsu picks a threshold that merges thin strokes with BG.
+  variants.push({
+    name: 'fixed-binary',
+    canvas: grayToThresholdedCanvas(stretched, scaled.width, scaled.height, 128)
+  });
+
   return { variants, scaleFactor: factor, width: scaled.width, height: scaled.height };
 };
 
@@ -114,6 +123,11 @@ const normalizeOcrText = (text) => {
   s = s.replace(/([0-9])b([0-9])/g, '$18$2');
   s = s.replace(/([0-9])z([0-9])/g, '$12$2');
 
+  // g/q near digits → 9 (common Tesseract confusion).
+  // Negative lookahead (?![a-z]) prevents replacing 'g' in words like "kg".
+  s = s.replace(/([0-9])[gq](?![a-z])/g, '$19');
+  s = s.replace(/[gq](?![a-z])([0-9])/g, '9$1');
+
   // Pipes that look like 1
   s = s.replace(/\|/g, '1');
 
@@ -136,6 +150,10 @@ const normalizeOcrText = (text) => {
 // ---------------------------------------------------------------------------
 
 const isReasonable = (v) => Number.isFinite(v) && v >= MIN_DIMENSION_FEET && v <= MAX_DIMENSION_FEET;
+
+const isPairReasonable = (w, h) =>
+  isReasonable(w) && isReasonable(h) &&
+  Math.max(w, h) / Math.max(Math.min(w, h), 0.1) <= MAX_ASPECT_RATIO;
 
 // After normalizeOcrText the separator is always lowercase 'x'; keep [xX] as
 // a safety net in case parseSingleToken is called with un-normalised input.
@@ -282,6 +300,7 @@ const parseDimensionLine = (line) => {
     console.log('[OCR] left format:', lp?.format, 'value:', lp?.value);
     console.log('[OCR] right format:', rp?.format, 'value:', rp?.value);
     if (lp && rp) {
+      if (!isPairReasonable(lp.value, rp.value)) continue;
       const result = {
         width: lp.value,
         height: rp.value,
@@ -301,7 +320,7 @@ const parseDimensionLine = (line) => {
   if (twoFi) {
     const w = parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12;
     const h = parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12;
-    if (isReasonable(w) && isReasonable(h)) {
+    if (isReasonable(w) && isReasonable(h) && isPairReasonable(w, h)) {
       console.log('[OCR] strategy 2 (two ft+in groups) → width:', w, 'height:', h);
       return { width: w, height: h, text: twoFi[0], format: 'inches' };
     }
@@ -314,7 +333,7 @@ const parseDimensionLine = (line) => {
   if (decFt) {
     const w = parseFloat(decFt[1]);
     const h = parseFloat(decFt[2]);
-    if (isReasonable(w) && isReasonable(h)) {
+    if (isReasonable(w) && isReasonable(h) && isPairReasonable(w, h)) {
       console.log('[OCR] strategy 3 (decimal ft pairs) → width:', w, 'height:', h);
       return { width: w, height: h, text: decFt[0], format: 'decimal' };
     }
@@ -521,40 +540,80 @@ const recognizeVariants = async (worker, canvases) => {
     preserve_interword_spaces: '1'
   });
 
-  // Optimization: run the best variant (Otsu-thresholded) first.
-  // Only fall back to additional variants if the first pass yields
-  // too few confident results (< 2 dimension candidates).
-  const MIN_CONFIDENT_RESULTS = 2;
-  const CONFIDENCE_THRESHOLD = 50;
-
-  // Prefer Otsu variant (index 1) if available; otherwise use first.
-  const orderedCanvases = [...canvases];
-  const otsuIdx = orderedCanvases.findIndex(v => v.name === 'otsu');
-  if (otsuIdx > 0) {
-    const [otsu] = orderedCanvases.splice(otsuIdx, 1);
-    orderedCanvases.unshift(otsu);
-  }
-
-  // Pass 1: best variant only
-  const first = orderedCanvases[0];
-  const result = await worker.recognize(first.canvas, {}, { blocks: true });
-  const { lines, words } = collectLinesAndWords(result);
-  allLines.push(...lines);
-  allWords.push(...words);
-
-  // Check if first pass found enough high-confidence dimension text
-  const confidentWords = words.filter(w => w.confidence >= CONFIDENCE_THRESHOLD && /\d/.test(w.text || ''));
-  if (confidentWords.length < MIN_CONFIDENT_RESULTS && orderedCanvases.length > 1) {
-    // Fallback: run remaining variants
-    for (let i = 1; i < orderedCanvases.length; i += 1) {
-      const extra = await worker.recognize(orderedCanvases[i].canvas, {}, { blocks: true });
-      const { lines: extraLines, words: extraWords } = collectLinesAndWords(extra);
-      allLines.push(...extraLines);
-      allWords.push(...extraWords);
-    }
+  // Always run all variants and deduplicate – the early-exit optimization
+  // caused missed rooms when the first variant found *some* confident
+  // words but not all dimension labels.
+  for (const variant of canvases) {
+    const result = await worker.recognize(variant.canvas, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    allLines.push(...lines);
+    allWords.push(...words);
   }
 
   return { lines: allLines, words: allWords };
+};
+
+// ---------------------------------------------------------------------------
+// Unrestricted discovery pass – run Tesseract with NO whitelist so room names
+// and dimension text are read cleanly.  Then extract dimension-like lines
+// via regex and create ROIs for those regions that the whitelist pass missed.
+// ---------------------------------------------------------------------------
+
+// Regex to find dimension-like patterns in unrestricted OCR text.
+// Structure: <feet_digits> <opt_foot_mark> <opt_inches> <opt_inch_mark> <separator> <feet_digits> <opt_foot_mark> <opt_inches> <opt_inch_mark>
+// Foot marks: ' ' ' ′ `  and smart quotes \u2018 \u2019
+// Inch marks: " " " ″  and smart quotes \u201C \u201D
+// Separators: x X × \u00D7
+// Matches: 13' 4" x 8' 7", 23' 0" × 13' 6", 10'10" x 7'3", smart quotes, etc.
+const DIMENSION_PATTERN = /\d{1,3}\s*['''\u2018\u2019\u2032`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D\u2033]?\s*[xX\u00D7]\s*\d{1,3}\s*['''\u2018\u2019\u2032`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D\u2033]?/;
+
+const extractDimensionLineFromText = (text) => {
+  if (!text) return null;
+  const match = text.match(DIMENSION_PATTERN);
+  return match ? match[0] : null;
+};
+
+const runUnrestrictedDiscovery = async (worker, baseCanvas) => {
+  // Run with no whitelist to let Tesseract read all characters naturally
+  await worker.setParameters({
+    tessedit_char_whitelist: '',
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1'
+  });
+
+  const result = await worker.recognize(baseCanvas, {}, { blocks: true });
+  const { lines } = collectLinesAndWords(result);
+
+  const discovered = [];
+  for (const line of lines) {
+    if (!line.bbox) continue;
+
+    // Skip vertical / rotated text
+    const bw = line.bbox.x1 - line.bbox.x0;
+    const bh = line.bbox.y1 - line.bbox.y0;
+    if (bh > bw) continue;
+
+    const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
+    const dimText = extractDimensionLineFromText(rawText);
+    if (!dimText) continue;
+
+    // Try to parse the dimension text
+    const parsed = parseDimensionLine(dimText);
+    if (parsed) {
+      const bbox = {
+        x: line.bbox.x0,
+        y: line.bbox.y0,
+        width: line.bbox.x1 - line.bbox.x0,
+        height: line.bbox.y1 - line.bbox.y0
+      };
+      const avgConf = line.words
+        ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+        : 50;
+      discovered.push({ ...parsed, bbox, confidence: avgConf });
+    }
+  }
+
+  return discovered;
 };
 
 // ---------------------------------------------------------------------------
@@ -648,8 +707,97 @@ const runROIOcr = async (worker, baseCanvas, rois) => {
 };
 
 // ---------------------------------------------------------------------------
-// Format inference – pick the dominant format across all detected dimensions
+// Grid-based ROI discovery – divide the image into overlapping tiles and OCR
+// any tile that doesn't overlap with an already-detected dimension bbox.
+// Uses unrestricted text mode to catch rooms missed by the whitelist pass.
 // ---------------------------------------------------------------------------
+
+const tileOverlapsDetected = (tile, detected) => {
+  for (const d of detected) {
+    if (!d.bbox) continue;
+    const overlapX = Math.max(0,
+      Math.min(tile.x + tile.w, d.bbox.x + d.bbox.width) - Math.max(tile.x, d.bbox.x));
+    const overlapY = Math.max(0,
+      Math.min(tile.y + tile.h, d.bbox.y + d.bbox.height) - Math.max(tile.y, d.bbox.y));
+    const overlapArea = overlapX * overlapY;
+    const dArea = d.bbox.width * d.bbox.height;
+    // If most of the detection bbox is inside this tile, skip the tile
+    if (dArea > 0 && overlapArea / dArea > 0.5) return true;
+  }
+  return false;
+};
+
+const MIN_TILE_SIZE = 20; // Minimum tile dimension in pixels to be worth OCR-ing
+
+const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected) => {
+  const GRID_COLS = 3;
+  // Scale rows to maintain roughly square tiles based on image aspect ratio
+  const GRID_ROWS = Math.max(3, Math.round((imgH / imgW) * GRID_COLS));
+  const OVERLAP_FRAC = 0.15;
+
+  const tileW = Math.round(imgW / GRID_COLS);
+  const tileH = Math.round(imgH / GRID_ROWS);
+  const overlapX = Math.round(tileW * OVERLAP_FRAC);
+  const overlapY = Math.round(tileH * OVERLAP_FRAC);
+
+  const tiles = [];
+  for (let row = 0; row < GRID_ROWS; row++) {
+    for (let col = 0; col < GRID_COLS; col++) {
+      const x = Math.max(0, col * tileW - overlapX);
+      const y = Math.max(0, row * tileH - overlapY);
+      const w = Math.min(imgW - x, tileW + overlapX * 2);
+      const h = Math.min(imgH - y, tileH + overlapY * 2);
+      if (w > MIN_TILE_SIZE && h > MIN_TILE_SIZE) {
+        tiles.push({ x, y, w, h });
+      }
+    }
+  }
+
+  // Filter out tiles that already contain a detected dimension
+  const uncoveredTiles = tiles.filter(t => !tileOverlapsDetected(t, alreadyDetected));
+  if (uncoveredTiles.length === 0) return [];
+
+  // Use unrestricted text mode for grid scanning
+  await worker.setParameters({
+    tessedit_char_whitelist: '',
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1'
+  });
+
+  const results = [];
+  for (const tile of uncoveredTiles) {
+    const cropped = cropCanvas(baseCanvas, tile);
+    const result = await worker.recognize(cropped, {}, { blocks: true });
+    const { lines } = collectLinesAndWords(result);
+
+    for (const line of lines) {
+      if (!line.bbox) continue;
+      const bw = line.bbox.x1 - line.bbox.x0;
+      const bh = line.bbox.y1 - line.bbox.y0;
+      if (bh > bw) continue;
+
+      const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
+      const dimText = extractDimensionLineFromText(rawText);
+      if (!dimText) continue;
+
+      const parsed = parseDimensionLine(dimText);
+      if (parsed) {
+        const bbox = {
+          x: line.bbox.x0 + tile.x,
+          y: line.bbox.y0 + tile.y,
+          width: bw,
+          height: bh
+        };
+        const avgConf = line.words
+          ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+          : 50;
+        results.push({ ...parsed, bbox, confidence: avgConf });
+      }
+    }
+  }
+
+  return results;
+};
 
 /**
  * Infer the dominant dimension format ('inches' or 'decimal') from an array
@@ -688,7 +836,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
 
     const worker = await createConfiguredWorker();
 
-    // Pass 1: broad SPARSE_TEXT scan across all preprocessing variants
+    // Pass 1: broad SPARSE_TEXT scan across all preprocessing variants (with whitelist)
     const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
 
     // Initial detection from broad scan
@@ -705,12 +853,29 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const roiCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
     const { lines: roiLines, words: roiWords } = await runROIOcr(worker, roiCanvas, rois);
 
+    // Merge whitelist-based results
+    const roiLineResults = detectFromLines(roiLines);
+    const roiSpatialResults = detectFromSpatialWords(roiWords);
+    const whitelistResults = [...pass1, ...roiLineResults, ...roiSpatialResults];
+
+    // Pass 3: unrestricted discovery – run Tesseract WITHOUT a character
+    // whitelist on the Otsu variant.  This reads room names and dimensions
+    // cleanly, avoiding the whitelist-induced hallucination that garbles
+    // room labels into false separators and drops digits.
+    const discoveryCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
+    const discoveryResults = await runUnrestrictedDiscovery(worker, discoveryCanvas);
+
+    // Pass 4: grid-based ROI scanning for missed regions.
+    // Divide the image into tiles and OCR any tile that doesn't overlap
+    // with an already-detected dimension.  Uses unrestricted text mode
+    // to catch rooms that both the whitelist pass and discovery pass missed.
+    const allSoFar = deduplicateResults([...whitelistResults, ...discoveryResults]);
+    const gridResults = await runGridDiscovery(worker, discoveryCanvas, scaledW, scaledH, allSoFar);
+
     await worker.terminate();
 
     // Merge all detection results
-    const roiLineResults = detectFromLines(roiLines);
-    const roiSpatialResults = detectFromSpatialWords(roiWords);
-    const merged = [...pass1, ...roiLineResults, ...roiSpatialResults];
+    const merged = [...whitelistResults, ...discoveryResults, ...gridResults];
     const deduped = deduplicateResults(merged);
 
     // Scale bboxes back to original image coordinates
@@ -754,4 +919,4 @@ export const detectAllDimensions = async (imageDataUrl) => {
 };
 
 // Exported for unit-testing the parsing layer without a live OCR engine.
-export { normalizeOcrText, parseSingleToken, parseDimensionLine };
+export { normalizeOcrText, parseSingleToken, parseDimensionLine, extractDimensionLineFromText };
