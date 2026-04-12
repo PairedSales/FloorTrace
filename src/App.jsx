@@ -206,9 +206,9 @@ function App() {
           if (detectedFormat && unit !== detectedFormat) {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
-            console.log('Manual Mode - setUnit called with:', detectedFormat);
-          } else {
-            console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
+            const label = detectedFormat === 'inches' ? 'feet-inches' : 'decimal feet';
+            setNotification({ show: true, message: `Switched to ${label} mode based on detected dimensions.` });
+            setTimeout(() => setNotification({ show: false, message: '' }), 3000);
           }
         }
       } catch (error) {
