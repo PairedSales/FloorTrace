@@ -407,7 +407,7 @@ const scanEdgeInward = (wallMask, width, height) => {
 };
 
 /**
- * Build a footprint mask from pre-computed edge-scan profiles.
+ * Build a footprint mask from provided edge-scan profiles.
  * A pixel is inside the footprint if it falls within the first-wall
  * boundaries from all 4 edges.  This efficiently outlines the exterior
  * perimeter, correctly handling rectangular polygons with concavities
