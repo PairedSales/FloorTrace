@@ -38,6 +38,8 @@ const Canvas = React.memo(forwardRef(({
   onDeletePerimeterVertex,
   onLineToolToggle,
   autoSnapEnabled,
+  debugDetection,
+  detectionDebugData,
   onSaveUndoPoint,
   onCancelUndoSave,
   eraserToolActive,
@@ -1468,9 +1470,21 @@ const Canvas = React.memo(forwardRef(({
             <RoomOverlayLayer
               roomOverlay={roomOverlay}
               scale={scale}
+              debugDetection={debugDetection}
               onRoomMouseDown={handleRoomMouseDown}
               onRoomCornerMouseDown={handleRoomCornerMouseDown}
             />
+
+            {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
+              <Text
+                x={10}
+                y={34}
+                text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
+                fontSize={12 / scale}
+                fill="#8BE9FD"
+                listening={false}
+              />
+            )}
 
             {/* Manual Mode - Detected Dimensions Highlights */}
             <DimensionOverlay
