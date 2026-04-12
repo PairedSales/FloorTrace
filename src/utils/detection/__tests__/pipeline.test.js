@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { estimateDominantOrientations } from '../orientation';
-import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../pipeline';
+import {
+  detectRoomFromClickCore,
+  traceFloorplanBoundaryCore,
+  measureWallThicknessFromEdge,
+  computeRobustWallThickness,
+} from '../pipeline';
 
 const createBlankImageData = (width, height, value = 255) => {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -332,5 +337,127 @@ describe('detection pipeline', () => {
     const area = polygonArea(outerPoly);
     expect(area).toBeLessThan(fullRectArea);
     expect(area).toBeGreaterThan(fullRectArea * 0.85);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wall-thickness detection unit tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('wall thickness detection', () => {
+  /** Build a binary wall mask for a rectangle whose walls are exactly `wallT` pixels thick. */
+  const makeRectMask = (width, height, wallT) => {
+    const mask = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (y < wallT || y >= height - wallT || x < wallT || x >= width - wallT) {
+          mask[y * width + x] = 1;
+        }
+      }
+    }
+    return mask;
+  };
+
+  /** Build edge-scan profiles manually from a wall mask. */
+  const buildProfiles = (mask, width, height) => {
+    const topProfile = new Int32Array(width).fill(height);
+    const bottomProfile = new Int32Array(width).fill(-1);
+    const leftProfile = new Int32Array(height).fill(width);
+    const rightProfile = new Int32Array(height).fill(-1);
+
+    for (let x = 0; x < width; x += 1) {
+      for (let y = 0; y < height; y += 1) {
+        if (mask[y * width + x]) { topProfile[x] = y; break; }
+      }
+      for (let y = height - 1; y >= 0; y -= 1) {
+        if (mask[y * width + x]) { bottomProfile[x] = y; break; }
+      }
+    }
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (mask[y * width + x]) { leftProfile[y] = x; break; }
+      }
+      for (let x = width - 1; x >= 0; x -= 1) {
+        if (mask[y * width + x]) { rightProfile[y] = x; break; }
+      }
+    }
+    return { topProfile, bottomProfile, leftProfile, rightProfile };
+  };
+
+  it('measureWallThicknessFromEdge returns correct thickness for uniform thick walls', () => {
+    const W = 200;
+    const H = 150;
+    const wallT = 8;
+    const mask = makeRectMask(W, H, wallT);
+    const profiles = buildProfiles(mask, W, H);
+
+    const measurements = measureWallThicknessFromEdge(mask, W, H, profiles);
+
+    // Most measurements should equal wallT (corner overlap columns/rows skew a minority).
+    const normalMeasurements = measurements.filter((t) => t === wallT);
+    expect(normalMeasurements.length).toBeGreaterThan(measurements.length * 0.7);
+  });
+
+  it('computeRobustWallThickness returns mode of uniform thick-wall measurements', () => {
+    const W = 200;
+    const H = 150;
+    const wallT = 8;
+    const mask = makeRectMask(W, H, wallT);
+    const profiles = buildProfiles(mask, W, H);
+
+    const measurements = measureWallThicknessFromEdge(mask, W, H, profiles);
+    const thickness = computeRobustWallThickness(measurements);
+
+    // Mode should be exactly the wall thickness drawn.
+    expect(thickness).toBe(wallT);
+  });
+
+  it('computeRobustWallThickness ignores window/door gap outliers', () => {
+    // Simulate: most walls have thickness 10, but a few gaps report thickness 1.
+    const measurements = [
+      ...Array(80).fill(10), // dominant wall sections
+      ...Array(15).fill(1),  // window/door gaps
+      ...Array(5).fill(2),   // very thin sections
+    ];
+    const thickness = computeRobustWallThickness(measurements);
+    // Should return 10 (the dominant value), not 1 or 2.
+    expect(thickness).toBe(10);
+  });
+
+  it('computeRobustWallThickness falls back when all measurements are thin', () => {
+    const measurements = [1, 1, 2, 1, 2, 1]; // all below MIN_WALL_THICKNESS_MEASUREMENT
+    const thickness = computeRobustWallThickness(measurements);
+    // No measurement survives the filter → returns fallback (2 by default).
+    expect(thickness).toBe(2);
+  });
+
+  it('computeRobustWallThickness returns supplied fallback when measurements are empty', () => {
+    expect(computeRobustWallThickness([], 5)).toBe(5);
+  });
+
+  it('inner polygon is inset by actual wall thickness, not just the old 2-px default', () => {
+    // Draw a rectangle with distinctly thick walls (drawLine thickness=10 → ~21px band).
+    const img = createBlankImageData(400, 300);
+    const wallHalfThick = 10;
+    drawLine(img, 80, 60, 320, 60, wallHalfThick);   // top
+    drawLine(img, 80, 240, 320, 240, wallHalfThick);  // bottom
+    drawLine(img, 80, 60, 80, 240, wallHalfThick);    // left
+    drawLine(img, 320, 60, 320, 240, wallHalfThick);  // right
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+    expect(traced.inner).toBeTruthy();
+
+    const outerXs = traced.outer.polygon.map((p) => p.x);
+    const innerXs = traced.inner.polygon.map((p) => p.x);
+    const insetLeft = Math.min(...innerXs) - Math.min(...outerXs);
+
+    // With the new wall-thickness detection the inset must be substantially
+    // larger than the old fixed 2-pixel erosion.
+    expect(insetLeft).toBeGreaterThan(3);
+
+    // And the inner polygon should still fit inside the outer.
+    expect(polygonArea(traced.inner.polygon)).toBeLessThan(polygonArea(traced.outer.polygon));
   });
 });
