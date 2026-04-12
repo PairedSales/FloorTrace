@@ -418,6 +418,8 @@ const smoothProfile = (profile, radius, mode, noHit) => {
   // Threshold: only correct values that deviate by more than this many
   // pixels from the window's best (outermost) value.  Small deviations
   // from gradual transitions (chamfers, L-shapes) are preserved.
+  // The multiplier (3×radius) scales proportionally with window size;
+  // the floor (8 px) ensures a minimum gap to avoid false corrections.
   const deviationThreshold = Math.max(radius * 3, 8);
 
   const out = new Int32Array(n);
@@ -710,9 +712,9 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     : edgeScanMask;
 
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
-  const smoothRadius = options.edgeScanSmoothRadius;
-  const edgeProfiles = scanEdgeInward(closedEdgeMask, w, h,
-    smoothRadius != null ? { smoothRadius } : undefined);
+  const edgeScanOpts = {};
+  if (options.edgeScanSmoothRadius != null) edgeScanOpts.smoothRadius = options.edgeScanSmoothRadius;
+  const edgeProfiles = scanEdgeInward(closedEdgeMask, w, h, edgeScanOpts);
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
