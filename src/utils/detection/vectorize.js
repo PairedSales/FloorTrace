@@ -67,43 +67,47 @@ export const labelConnectedComponents = (mask, width, height, targetValue = 1) =
   return { labels, components };
 };
 
-const perpendicularDistance = (point, start, end) => {
+const perpendicularDistanceSq = (point, start, end) => {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   if (dx === 0 && dy === 0) {
     const px = point.x - start.x;
     const py = point.y - start.y;
-    return Math.sqrt(px * px + py * py);
+    return px * px + py * py;
   }
   const t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy);
-  const projX = start.x + t * dx;
-  const projY = start.y + t * dy;
-  const pdx = point.x - projX;
-  const pdy = point.y - projY;
-  return Math.sqrt(pdx * pdx + pdy * pdy);
+  const pdx = point.x - (start.x + t * dx);
+  const pdy = point.y - (start.y + t * dy);
+  return pdx * pdx + pdy * pdy;
+};
+
+// Index-based recursive RDP to avoid array slice/concat allocations.
+const rdpCollect = (points, lo, hi, epsSq, keep) => {
+  if (hi - lo < 2) return;
+  let maxDistSq = 0;
+  let index = -1;
+  for (let i = lo + 1; i < hi; i += 1) {
+    const d = perpendicularDistanceSq(points[i], points[lo], points[hi]);
+    if (d > maxDistSq) {
+      maxDistSq = d;
+      index = i;
+    }
+  }
+  if (maxDistSq > epsSq && index !== -1) {
+    rdpCollect(points, lo, index, epsSq, keep);
+    keep.push(index);
+    rdpCollect(points, index, hi, epsSq, keep);
+  }
 };
 
 export const simplifyRdp = (points, epsilon = 1.5) => {
   if (!points || points.length < 3) return points ?? [];
-
-  let maxDist = 0;
-  let index = -1;
-  const end = points.length - 1;
-  for (let i = 1; i < end; i += 1) {
-    const dist = perpendicularDistance(points[i], points[0], points[end]);
-    if (dist > maxDist) {
-      maxDist = dist;
-      index = i;
-    }
-  }
-
-  if (maxDist > epsilon && index !== -1) {
-    const left = simplifyRdp(points.slice(0, index + 1), epsilon);
-    const right = simplifyRdp(points.slice(index), epsilon);
-    return left.slice(0, -1).concat(right);
-  }
-
-  return [points[0], points[end]];
+  const epsSq = epsilon * epsilon;
+  const keep = [0];
+  rdpCollect(points, 0, points.length - 1, epsSq, keep);
+  keep.push(points.length - 1);
+  keep.sort((a, b) => a - b);
+  return keep.map((i) => points[i]);
 };
 
 export const snapPolygonAngles = (polygon, bins = []) => {

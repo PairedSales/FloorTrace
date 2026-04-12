@@ -2,12 +2,7 @@ const DEFAULT_BINS = [0, 30, 45, 60, 90, 120, 135, 150];
 
 const toDegrees = (radians) => (radians * 180) / Math.PI;
 
-const foldOrientation = (deg) => {
-  let folded = deg;
-  while (folded < 0) folded += 180;
-  while (folded >= 180) folded -= 180;
-  return folded;
-};
+const foldOrientation = (deg) => ((deg % 180) + 180) % 180;
 
 export const estimateDominantOrientations = (gray, width, height, options = {}) => {
   const bins = options.bins ?? DEFAULT_BINS;

@@ -11,7 +11,13 @@ export default defineConfig({
         // Add hash to filenames for cache busting
         entryFileNames: `assets/[name].[hash].js`,
         chunkFileNames: `assets/[name].[hash].js`,
-        assetFileNames: `assets/[name].[hash].[ext]`
+        assetFileNames: `assets/[name].[hash].[ext]`,
+        // Split heavy dependencies into separate chunks for faster initial load
+        manualChunks: {
+          'tesseract': ['tesseract.js'],
+          'tensorflow': ['@tensorflow/tfjs'],
+          'konva': ['konva', 'react-konva'],
+        }
       }
     }
   }
