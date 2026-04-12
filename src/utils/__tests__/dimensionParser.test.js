@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeOcrText, parseSingleToken, parseDimensionLine } from '../DimensionsOCR';
+import { normalizeOcrText, parseSingleToken, parseDimensionLine, inferDominantFormat } from '../DimensionsOCR';
 
 // ---------------------------------------------------------------------------
 // normalizeOcrText
@@ -397,5 +397,56 @@ describe('parseDimensionLine', () => {
       expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
       expect(r.height).toBeCloseTo(12 + 11 / 12, 5);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inferDominantFormat
+// ---------------------------------------------------------------------------
+
+describe('inferDominantFormat', () => {
+  it('returns null for empty array', () => {
+    expect(inferDominantFormat([])).toBeNull();
+  });
+
+  it('returns null for null input', () => {
+    expect(inferDominantFormat(null)).toBeNull();
+  });
+
+  it('returns null when no formats match inches or decimal', () => {
+    expect(inferDominantFormat([{ format: undefined }, { format: null }])).toBeNull();
+  });
+
+  it('returns "inches" when all dimensions are feet-inches', () => {
+    const dims = [{ format: 'inches' }, { format: 'inches' }, { format: 'inches' }];
+    expect(inferDominantFormat(dims)).toBe('inches');
+  });
+
+  it('returns "decimal" when all dimensions are decimal feet', () => {
+    const dims = [{ format: 'decimal' }, { format: 'decimal' }, { format: 'decimal' }];
+    expect(inferDominantFormat(dims)).toBe('decimal');
+  });
+
+  it('returns "inches" when inches are the majority', () => {
+    const dims = [{ format: 'inches' }, { format: 'inches' }, { format: 'decimal' }];
+    expect(inferDominantFormat(dims)).toBe('inches');
+  });
+
+  it('returns "decimal" when decimal are the majority', () => {
+    const dims = [{ format: 'decimal' }, { format: 'decimal' }, { format: 'inches' }];
+    expect(inferDominantFormat(dims)).toBe('decimal');
+  });
+
+  it('returns "inches" on a tie (inches preferred)', () => {
+    const dims = [{ format: 'inches' }, { format: 'decimal' }];
+    expect(inferDominantFormat(dims)).toBe('inches');
+  });
+
+  it('handles a single inches dimension', () => {
+    expect(inferDominantFormat([{ format: 'inches' }])).toBe('inches');
+  });
+
+  it('handles a single decimal dimension', () => {
+    expect(inferDominantFormat([{ format: 'decimal' }])).toBe('decimal');
   });
 });
