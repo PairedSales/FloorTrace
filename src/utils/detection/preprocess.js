@@ -22,9 +22,10 @@ export const boxBlurGray = (gray, width, height, radius = 1) => {
     const rowOff = y * width;
     let sum = 0;
     // Seed the running sum for x = 0
-    for (let kx = 0; kx <= radius && kx < width; kx += 1) sum += gray[rowOff + kx];
+    const initRight = Math.min(radius, width - 1);
+    for (let kx = 0; kx <= initRight; kx += 1) sum += gray[rowOff + kx];
     let left = 0;               // leftmost index in window
-    let right = radius;         // rightmost index in window
+    let right = initRight;      // rightmost index in window
     let count = right - left + 1;
 
     for (let x = 0; x < width; x += 1) {
@@ -41,9 +42,10 @@ export const boxBlurGray = (gray, width, height, radius = 1) => {
   // Vertical pass → out
   for (let x = 0; x < width; x += 1) {
     let sum = 0;
-    for (let ky = 0; ky <= radius && ky < height; ky += 1) sum += tmp[ky * width + x];
+    const initBottom = Math.min(radius, height - 1);
+    for (let ky = 0; ky <= initBottom; ky += 1) sum += tmp[ky * width + x];
     let top = 0;
-    let bottom = Math.min(radius, height - 1);
+    let bottom = initBottom;
     let count = bottom - top + 1;
 
     for (let y = 0; y < height; y += 1) {
