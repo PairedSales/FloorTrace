@@ -14,8 +14,8 @@ const LeftPanel = ({
   ocrFailed,
   showSideLengths,
   onShowSideLengthsChange,
-  useInteriorWalls,
-  onInteriorWallToggle,
+  useInteriorWalls: _useInteriorWalls, // eslint-disable-line no-unused-vars
+  onInteriorWallToggle: _onInteriorWallToggle, // eslint-disable-line no-unused-vars
   autoSnapEnabled,
   onAutoSnapChange,
   perimeterOverlay,
@@ -231,11 +231,6 @@ const LeftPanel = ({
                   label="Show Lengths"
                   checked={showSideLengths}
                   onChange={onShowSideLengthsChange}
-                />
-                <Toggle
-                  label="Measure From Interior"
-                  checked={false}
-                  onChange={() => {}}
                 />
                 <Toggle
                   label="Auto Snap"

@@ -3,7 +3,7 @@ import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
 
-const Canvas = forwardRef(({
+const Canvas = React.memo(forwardRef(({
   image,
   roomOverlay,
   perimeterOverlay,
@@ -328,18 +328,25 @@ const Canvas = forwardRef(({
     // Initial measurement after layout
     const raf = requestAnimationFrame(measure);
 
-    // Observe future size changes
-    const ro = new ResizeObserver(measure);
+    // Debounced measure to avoid excessive re-renders during resize
+    let resizeTimer = null;
+    const debouncedMeasure = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(measure, 100);
+    };
+
+    // Observe future size changes (debounced)
+    const ro = new ResizeObserver(debouncedMeasure);
     ro.observe(el);
 
     // Fallback on window resize as well
-    const onResize = () => measure();
-    window.addEventListener('resize', onResize);
+    window.addEventListener('resize', debouncedMeasure);
 
     return () => {
       cancelAnimationFrame(raf);
+      if (resizeTimer) clearTimeout(resizeTimer);
       ro.disconnect();
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('resize', debouncedMeasure);
     };
   }, []);
   // Expose fitToWindow method
@@ -1586,7 +1593,7 @@ const Canvas = forwardRef(({
       )}
     </div>
   );
-});
+}));
 
 Canvas.displayName = 'Canvas';
 
