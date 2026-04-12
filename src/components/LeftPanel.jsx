@@ -14,8 +14,8 @@ const LeftPanel = ({
   ocrFailed,
   showSideLengths,
   onShowSideLengthsChange,
-  useInteriorWalls: _useInteriorWalls, // eslint-disable-line no-unused-vars
-  onInteriorWallToggle: _onInteriorWallToggle, // eslint-disable-line no-unused-vars
+  useInteriorWalls,
+  onInteriorWallToggle,
   autoSnapEnabled,
   onAutoSnapChange,
   perimeterOverlay,
@@ -223,6 +223,11 @@ const LeftPanel = ({
                   label="Auto Snap"
                   checked={autoSnapEnabled}
                   onChange={onAutoSnapChange}
+                />
+                <Toggle
+                  label="Measure Interior"
+                  checked={useInteriorWalls}
+                  onChange={onInteriorWallToggle}
                 />
               </section>
               <div className="panel-divider mx-3" />

@@ -407,15 +407,14 @@ const scanEdgeInward = (wallMask, width, height) => {
 };
 
 /**
- * Build a footprint mask from edge-scan profiles.
+ * Build a footprint mask from provided edge-scan profiles.
  * A pixel is inside the footprint if it falls within the first-wall
  * boundaries from all 4 edges.  This efficiently outlines the exterior
  * perimeter, correctly handling rectangular polygons with concavities
  * and 45-degree angles.
  */
-const buildEdgeScanFootprint = (wallMask, width, height) => {
-  const { topProfile, bottomProfile, leftProfile, rightProfile } =
-    scanEdgeInward(wallMask, width, height);
+const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
+  const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
   const footprint = new Uint8Array(width * height);
 
   for (let y = 0; y < height; y += 1) {
@@ -430,6 +429,116 @@ const buildEdgeScanFootprint = (wallMask, width, height) => {
   }
 
   return footprint;
+};
+
+/**
+ * Measure wall thickness at each exterior wall position by scanning inward
+ * through the first dark pixel until the wall ends (transitions to white).
+ *
+ * Each edge profile records where the exterior wall begins; this function
+ * continues scanning inward from those positions to measure how thick the
+ * wall band is at each row/column.  Short measurements from windows, doors,
+ * or dashes are included but can be filtered by the caller.
+ *
+ * @param {Uint8Array} wallMask  Binary wall mask (1 = dark/wall, 0 = light/space).
+ * @param {number}     width     Mask width in pixels.
+ * @param {number}     height    Mask height in pixels.
+ * @param {object}     profiles  Edge-scan profiles from scanEdgeInward().
+ * @returns {number[]} Array of per-row/column wall thickness measurements (px).
+ */
+export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) => {
+  const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
+  const measurements = [];
+
+  // Top edge: scan downward from topProfile[x] through the wall.
+  for (let x = 0; x < width; x += 1) {
+    const y0 = topProfile[x];
+    if (y0 >= height) continue;
+    let t = 0;
+    for (let y = y0; y < height; y += 1) {
+      if (wallMask[y * width + x]) t += 1;
+      else break;
+    }
+    if (t > 0) measurements.push(t);
+  }
+
+  // Bottom edge: scan upward from bottomProfile[x] through the wall.
+  for (let x = 0; x < width; x += 1) {
+    const y0 = bottomProfile[x];
+    if (y0 < 0) continue;
+    let t = 0;
+    for (let y = y0; y >= 0; y -= 1) {
+      if (wallMask[y * width + x]) t += 1;
+      else break;
+    }
+    if (t > 0) measurements.push(t);
+  }
+
+  // Left edge: scan rightward from leftProfile[y] through the wall.
+  for (let y = 0; y < height; y += 1) {
+    const x0 = leftProfile[y];
+    if (x0 >= width) continue;
+    let t = 0;
+    for (let x = x0; x < width; x += 1) {
+      if (wallMask[y * width + x]) t += 1;
+      else break;
+    }
+    if (t > 0) measurements.push(t);
+  }
+
+  // Right edge: scan leftward from rightProfile[y] through the wall.
+  for (let y = 0; y < height; y += 1) {
+    const x0 = rightProfile[y];
+    if (x0 < 0) continue;
+    let t = 0;
+    for (let x = x0; x >= 0; x -= 1) {
+      if (wallMask[y * width + x]) t += 1;
+      else break;
+    }
+    if (t > 0) measurements.push(t);
+  }
+
+  return measurements;
+};
+
+// Minimum thickness (px) to treat a measurement as a solid wall section.
+// Values below this are likely window/door gaps or thin decorative lines.
+const MIN_WALL_THICKNESS_MEASUREMENT = 3;
+
+/**
+ * Derive a single robust wall-thickness estimate from an array of
+ * per-row/column measurements, ignoring thin outliers (windows, doors).
+ *
+ * Filters out measurements below MIN_WALL_THICKNESS_MEASUREMENT, then
+ * returns the mode (most frequent value) of the remaining distribution.
+ * Ties are broken in favour of the larger value to prefer the dominant
+ * thick-wall sections over incidental thin ones.
+ *
+ * @param {number[]} measurements  Output of measureWallThicknessFromEdge().
+ * @param {number}   [fallback=2]  Returned when no measurements survive filtering.
+ * @returns {number} Estimated wall thickness in pixels.
+ */
+export const computeRobustWallThickness = (measurements, fallback = 2) => {
+  const thick = measurements.filter((t) => t >= MIN_WALL_THICKNESS_MEASUREMENT);
+  if (thick.length === 0) return fallback;
+
+  // Build frequency histogram.
+  const hist = new Map();
+  for (const t of thick) {
+    hist.set(t, (hist.get(t) ?? 0) + 1);
+  }
+
+  // Return mode; ties broken in favour of the larger value.
+  let modeVal = fallback;
+  let modeCount = 0;
+  for (const [val, count] of hist) {
+    if (count > modeCount || (count === modeCount && val > modeVal)) {
+      modeCount = count;
+      modeVal = val;
+    }
+  }
+
+  return modeVal;
 };
 
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
@@ -458,7 +567,9 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
   }
 
-  let footprint = buildEdgeScanFootprint(edgeScanMask, w, h);
+  // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
+  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
   // Verify footprint is non-trivial.
@@ -476,12 +587,17 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   }
 
   /* --- Step 4: Extract outer and inner boundary polygons ---
-   * The largest connected component of the footprint gives the outer
-   * boundary.  Eroding the footprint approximates the inner wall edge.  */
+   * Measure actual wall thickness from edge profiles so the inner boundary
+   * reflects the true interior wall face, not just a fixed 2-pixel erosion.  */
+  const wallThicknessMeasurements = measureWallThicknessFromEdge(edgeScanMask, w, h, edgeProfiles);
+  const wallThickness = options.innerErode != null
+    ? options.innerErode
+    : computeRobustWallThickness(wallThicknessMeasurements);
+
   const outerResult = getLargestComponentPolygon(
     footprint, preprocess, orientation, options,
   );
-  const innerFootprint = erode(footprint, w, h, options.innerErode ?? 2);
+  const innerFootprint = erode(footprint, w, h, wallThickness);
   const innerResult = getLargestComponentPolygon(
     innerFootprint, preprocess, orientation, options,
   );
@@ -520,6 +636,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       hasOuter: Boolean(outerPolygon),
       hasInner: Boolean(innerPolygon),
       usedEdgeScan,
+      wallThickness,
     },
   };
 };
