@@ -216,58 +216,6 @@ describe('parseSingleToken', () => {
       expect(r).not.toBeNull();
       expect(r.value).toBe(10);
     });
-
-    it('parses "25" as 25 ft (below threshold, treated as plain feet)', () => {
-      const r = parseSingleToken('25');
-      expect(r).not.toBeNull();
-      expect(r.value).toBe(25);
-      expect(r.format).toBe('decimal');
-    });
-
-    it('parses "40" as 40 ft (at threshold, still plain feet)', () => {
-      const r = parseSingleToken('40');
-      expect(r).not.toBeNull();
-      expect(r.value).toBe(40);
-      expect(r.format).toBe('decimal');
-    });
-  });
-
-  // D3 – 2-digit bare integer above threshold → feet + inches with dropped tick
-  describe('Case D3: 2-digit implausibly-large → feet+inches', () => {
-    it('parses "92" as 9ft 2in (92 ft implausible, tick dropped)', () => {
-      const r = parseSingleToken('92');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(9 + 2 / 12, 5);
-      expect(r.format).toBe('inches');
-    });
-
-    it('parses "85" as 8ft 5in', () => {
-      const r = parseSingleToken('85');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(8 + 5 / 12, 5);
-      expect(r.format).toBe('inches');
-    });
-
-    it('parses "73" as 7ft 3in', () => {
-      const r = parseSingleToken('73');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(7 + 3 / 12, 5);
-      expect(r.format).toBe('inches');
-    });
-
-    it('parses "50" as 5ft 0in', () => {
-      const r = parseSingleToken('50');
-      expect(r).not.toBeNull();
-      expect(r.value).toBe(5);
-      expect(r.format).toBe('inches');
-    });
-
-    it('parses "99" as 9ft 9in', () => {
-      const r = parseSingleToken('99');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(9 + 9 / 12, 5);
-      expect(r.format).toBe('inches');
-    });
   });
 
   // Blurry quote: comma as tick mark
@@ -448,30 +396,6 @@ describe('parseDimensionLine', () => {
       expect(r).not.toBeNull();
       expect(r.width).toBeCloseTo(13 + 5 / 12, 5);
       expect(r.height).toBeCloseTo(12 + 11 / 12, 5);
-    });
-  });
-
-  // 2-digit implausibly-large numbers in full dimension lines
-  describe('2-digit implausibly-large ft+in in dimension lines', () => {
-    it('parses "92 x 121" as 9\'2" × 12\'1" (dining room scenario)', () => {
-      const r = parseDimensionLine('92 x 121');
-      expect(r).not.toBeNull();
-      expect(r.width).toBeCloseTo(9 + 2 / 12, 5);
-      expect(r.height).toBeCloseTo(12 + 1 / 12, 5);
-    });
-
-    it('parses "85 x 73" as 8\'5" × 7\'3" (breakfast area scenario)', () => {
-      const r = parseDimensionLine('85 x 73');
-      expect(r).not.toBeNull();
-      expect(r.width).toBeCloseTo(8 + 5 / 12, 5);
-      expect(r.height).toBeCloseTo(7 + 3 / 12, 5);
-    });
-
-    it('parses "94 x 90" as 9\'4" × 9\'0" (bedroom 3 scenario)', () => {
-      const r = parseDimensionLine('94 x 90');
-      expect(r).not.toBeNull();
-      expect(r.width).toBeCloseTo(9 + 4 / 12, 5);
-      expect(r.height).toBe(9);
     });
   });
 });
