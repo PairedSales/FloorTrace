@@ -123,7 +123,8 @@ const normalizeOcrText = (text) => {
   s = s.replace(/([0-9])b([0-9])/g, '$18$2');
   s = s.replace(/([0-9])z([0-9])/g, '$12$2');
 
-  // g/q near digits → 9 (common Tesseract confusion)
+  // g/q near digits → 9 (common Tesseract confusion).
+  // Negative lookahead (?![a-z]) prevents replacing 'g' in words like "kg".
   s = s.replace(/([0-9])[gq](?![a-z])/g, '$19');
   s = s.replace(/[gq](?![a-z])([0-9])/g, '9$1');
 
@@ -559,9 +560,12 @@ const recognizeVariants = async (worker, canvases) => {
 // ---------------------------------------------------------------------------
 
 // Regex to find dimension-like patterns in unrestricted OCR text.
-// Matches patterns like: 13' 4" x 8' 7", 23' 0" x 13' 6", 10' 10" x 7' 3"
-// Also matches: 13'4" x 8'7", 10.5 x 12.3, 15' x 12', smart quotes, etc.
-const DIMENSION_PATTERN = /\d{1,3}\s*['''\u2018\u2019′`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D″]?\s*[xX×\u00D7]\s*\d{1,3}\s*['''\u2018\u2019′`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D″]?/;
+// Structure: <feet_digits> <opt_foot_mark> <opt_inches> <opt_inch_mark> <separator> <feet_digits> <opt_foot_mark> <opt_inches> <opt_inch_mark>
+// Foot marks: ' ' ' ′ `  and smart quotes \u2018 \u2019
+// Inch marks: " " " ″  and smart quotes \u201C \u201D
+// Separators: x X × \u00D7
+// Matches: 13' 4" x 8' 7", 23' 0" × 13' 6", 10'10" x 7'3", smart quotes, etc.
+const DIMENSION_PATTERN = /\d{1,3}\s*['''\u2018\u2019\u2032`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D\u2033]?\s*[xX\u00D7]\s*\d{1,3}\s*['''\u2018\u2019\u2032`]?\s*-?\s*\d{0,2}\s*["""\u201C\u201D\u2033]?/;
 
 const extractDimensionLineFromText = (text) => {
   if (!text) return null;
@@ -723,8 +727,11 @@ const tileOverlapsDetected = (tile, detected) => {
   return false;
 };
 
+const MIN_TILE_SIZE = 20; // Minimum tile dimension in pixels to be worth OCR-ing
+
 const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected) => {
   const GRID_COLS = 3;
+  // Scale rows to maintain roughly square tiles based on image aspect ratio
   const GRID_ROWS = Math.max(3, Math.round((imgH / imgW) * GRID_COLS));
   const OVERLAP_FRAC = 0.15;
 
@@ -740,7 +747,7 @@ const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected)
       const y = Math.max(0, row * tileH - overlapY);
       const w = Math.min(imgW - x, tileW + overlapX * 2);
       const h = Math.min(imgH - y, tileH + overlapY * 2);
-      if (w > 20 && h > 20) {
+      if (w > MIN_TILE_SIZE && h > MIN_TILE_SIZE) {
         tiles.push({ x, y, w, h });
       }
     }

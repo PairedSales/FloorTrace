@@ -504,7 +504,7 @@ describe('tightened bounds (Fix 3)', () => {
     expect(r).toBeNull();
   });
 
-  it('parses "250 x 10" as 25\' 0" x 10 (D2 noisy OCR splits 250 as 25ft 0in)', () => {
+  it('parses "250 x 10" as 25\' 0" x 10 (noisy OCR splits 250 as 25ft 0in)', () => {
     const r = parseDimensionLine('250 x 10');
     // "250" → D2 noisy OCR → 25ft 0in = 25.0
     expect(r).not.toBeNull();
