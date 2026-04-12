@@ -148,7 +148,7 @@ const useAnimatedVertices = (targetVertices) => {
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
-const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions) => {
+const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit) => {
   return vertices.map((vertex, i) => {
     const nextVertex = vertices[(i + 1) % vertices.length];
 
@@ -156,7 +156,7 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions)
     const dy = nextVertex.y - vertex.y;
     const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
     const lengthInFeet = lengthInPixels * pixelsPerFoot;
-    const formattedLength = formatLength(lengthInFeet, 'decimal');
+    const formattedLength = formatLength(lengthInFeet, unit);
 
     const midX = (vertex.x + nextVertex.x) / 2;
     const midY = (vertex.y + nextVertex.y) / 2;
@@ -242,6 +242,7 @@ const PerimeterLayer = ({
   showSideLengths,
   pixelsPerFoot,
   detectedDimensions,
+  unit,
   onVertexDragStart,
   onVertexDrag,
   onVertexDragEnd,
@@ -262,9 +263,9 @@ const PerimeterLayer = ({
   // Use renderVertices so labels follow the animation in real time.
   const labelLayouts = useMemo(
     () => (showSideLengths && pixelsPerFoot && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions)
+      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit)
       : [],
-    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions]
+    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit]
   );
 
   if (!perimeterOverlay || !targetVertices) return null;

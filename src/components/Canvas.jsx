@@ -1459,6 +1459,7 @@ const Canvas = React.memo(forwardRef(({
               showSideLengths={showSideLengths}
               pixelsPerFoot={pixelsPerFoot}
               detectedDimensions={detectedDimensions}
+              unit={unit}
               onVertexDragStart={handleVertexDragStart}
               onVertexDrag={handleVertexDrag}
               onVertexDragEnd={handleVertexDragEnd}
