@@ -369,15 +369,100 @@ const DARK_PIXEL_THRESHOLD = 200;
  */
 
 /**
+ * Check whether a candidate wall pixel has perpendicular continuity —
+ * at least one neighbouring dark pixel within ±1 in the perpendicular
+ * direction.  This rejects isolated noise pixels while still accepting
+ * thin (1 px) lines that have lateral extent.
+ *
+ * @param {Uint8Array} mask   Binary wall mask.
+ * @param {number}     x      Column of the candidate.
+ * @param {number}     y      Row of the candidate.
+ * @param {number}     w      Mask width.
+ * @param {number}     h      Mask height.
+ * @param {boolean}    perpIsX  true → check x ± 1 (when scanning vertically);
+ *                              false → check y ± 1 (when scanning horizontally).
+ */
+const hasPerpendicularSupport = (mask, x, y, w, h, perpIsX) => {
+  if (perpIsX) {
+    if (x > 0 && mask[y * w + x - 1]) return true;
+    if (x < w - 1 && mask[y * w + x + 1]) return true;
+  } else {
+    if (y > 0 && mask[(y - 1) * w + x]) return true;
+    if (y < h - 1 && mask[(y + 1) * w + x]) return true;
+  }
+  return false;
+};
+
+/**
+ * Apply a 1-D min or max sliding-window filter to smooth edge-scan
+ * profiles, bridging gaps caused by dashed or irregular lines.
+ *
+ * Only corrects positions where the raw value deviates significantly
+ * from the neighbourhood consensus (indicating a gap artifact).
+ * Gradual transitions (e.g. chamfers, L-shaped concavities) are
+ * preserved because adjacent columns agree on the progressive change.
+ *
+ * For top/left profiles (where smaller = more outward), use `min`.
+ * For bottom/right profiles (where larger = more outward), use `max`.
+ *
+ * @param {Int32Array} profile   Raw profile from scanEdgeInward.
+ * @param {number}     radius    Half-window size (window = 2*radius+1).
+ * @param {'min'|'max'} mode     'min' for top/left, 'max' for bottom/right.
+ * @param {number}     noHit     Sentinel value for "no wall found" entries.
+ * @returns {Int32Array} Smoothed profile (same length).
+ */
+const smoothProfile = (profile, radius, mode, noHit) => {
+  const n = profile.length;
+  if (radius <= 0 || n === 0) return profile;
+
+  // Threshold: only correct values that deviate by more than this many
+  // pixels from the window's best (outermost) value.  Small deviations
+  // from gradual transitions (chamfers, L-shapes) are preserved.
+  const deviationThreshold = Math.max(radius * 3, 8);
+
+  const out = new Int32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    // Don't extend profiles into positions where no wall was ever detected.
+    if (profile[i] === noHit) { out[i] = noHit; continue; }
+
+    const lo = Math.max(0, i - radius);
+    const hi = Math.min(n - 1, i + radius);
+    let best = profile[i];
+    for (let j = lo; j <= hi; j += 1) {
+      const v = profile[j];
+      if (v === noHit) continue;
+      if (mode === 'min' ? v < best : v > best) best = v;
+    }
+
+    // Only replace the raw value if it deviates significantly from the
+    // outermost neighbour value — this indicates a gap/dash artefact.
+    const deviation = Math.abs(profile[i] - best);
+    out[i] = deviation > deviationThreshold ? best : profile[i];
+  }
+  return out;
+};
+
+/**
  * Edge-inward scanning for exterior wall detection.
  * Scans from all 4 edges of the image towards the center, recording
  * the position of the first wall (black) pixel encountered in each
  * row/column.  Returns 4 profile arrays.
  *
- * For clean, preprocessed inputs this directly identifies the exterior
- * wall positions without any line detection or segment merging.
+ * Includes a perpendicular-continuity check: the first dark pixel must
+ * have at least one dark neighbour in the perpendicular direction
+ * (within ±1).  Isolated noise pixels are skipped, but the algorithm
+ * falls back to the first dark pixel if no supported candidate exists.
+ *
+ * After the raw scan, profiles are smoothed with a min/max sliding
+ * window to bridge gaps from dashed or irregular wall lines.
+ *
+ * @param {Uint8Array} wallMask  Binary mask (1 = wall).
+ * @param {number}     width     Mask width.
+ * @param {number}     height    Mask height.
+ * @param {object}     [opts]    Optional settings.
+ * @param {number}     [opts.smoothRadius=4]  Half-window for profile smoothing.
  */
-const scanEdgeInward = (wallMask, width, height) => {
+const scanEdgeInward = (wallMask, width, height, opts = {}) => {
   const topProfile = new Int32Array(width).fill(height);
   const bottomProfile = new Int32Array(width).fill(-1);
   const leftProfile = new Int32Array(height).fill(width);
@@ -385,25 +470,74 @@ const scanEdgeInward = (wallMask, width, height) => {
 
   // Top & bottom profiles: scan each column vertically.
   for (let x = 0; x < width; x += 1) {
+    // Top: scan downward — first dark pixel with perpendicular support.
+    let fallback = -1;
     for (let y = 0; y < height; y += 1) {
-      if (wallMask[y * width + x]) { topProfile[x] = y; break; }
+      if (wallMask[y * width + x]) {
+        if (fallback < 0) fallback = y;
+        if (hasPerpendicularSupport(wallMask, x, y, width, height, true)) {
+          topProfile[x] = y;
+          fallback = -1; // consumed
+          break;
+        }
+      }
     }
+    if (fallback >= 0) topProfile[x] = fallback; // use first hit if no supported pixel
+
+    // Bottom: scan upward.
+    fallback = -1;
     for (let y = height - 1; y >= 0; y -= 1) {
-      if (wallMask[y * width + x]) { bottomProfile[x] = y; break; }
+      if (wallMask[y * width + x]) {
+        if (fallback < 0) fallback = y;
+        if (hasPerpendicularSupport(wallMask, x, y, width, height, true)) {
+          bottomProfile[x] = y;
+          fallback = -1;
+          break;
+        }
+      }
     }
+    if (fallback >= 0) bottomProfile[x] = fallback;
   }
 
   // Left & right profiles: scan each row horizontally.
   for (let y = 0; y < height; y += 1) {
+    // Left: scan rightward.
+    let fallback = -1;
     for (let x = 0; x < width; x += 1) {
-      if (wallMask[y * width + x]) { leftProfile[y] = x; break; }
+      if (wallMask[y * width + x]) {
+        if (fallback < 0) fallback = x;
+        if (hasPerpendicularSupport(wallMask, x, y, width, height, false)) {
+          leftProfile[y] = x;
+          fallback = -1;
+          break;
+        }
+      }
     }
+    if (fallback >= 0) leftProfile[y] = fallback;
+
+    // Right: scan leftward.
+    fallback = -1;
     for (let x = width - 1; x >= 0; x -= 1) {
-      if (wallMask[y * width + x]) { rightProfile[y] = x; break; }
+      if (wallMask[y * width + x]) {
+        if (fallback < 0) fallback = x;
+        if (hasPerpendicularSupport(wallMask, x, y, width, height, false)) {
+          rightProfile[y] = x;
+          fallback = -1;
+          break;
+        }
+      }
     }
+    if (fallback >= 0) rightProfile[y] = fallback;
   }
 
-  return { topProfile, bottomProfile, leftProfile, rightProfile };
+  // Smooth profiles with a min/max sliding window to bridge dash gaps.
+  const smoothR = opts.smoothRadius ?? 4;
+  return {
+    topProfile: smoothProfile(topProfile, smoothR, 'min', height),
+    bottomProfile: smoothProfile(bottomProfile, smoothR, 'max', -1),
+    leftProfile: smoothProfile(leftProfile, smoothR, 'min', width),
+    rightProfile: smoothProfile(rightProfile, smoothR, 'max', -1),
+  };
 };
 
 /**
@@ -567,8 +701,18 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
   }
 
+  // Apply a small morphological close to bridge tiny gaps in dashed or
+  // irregular wall lines (1–2 px).  This makes dashes appear as continuous
+  // segments to the edge scanner without merging separate wall features.
+  const gapCloseRadius = options.edgeScanCloseRadius ?? 2;
+  const closedEdgeMask = gapCloseRadius > 0
+    ? closeMask(edgeScanMask, w, h, gapCloseRadius)
+    : edgeScanMask;
+
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
-  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  const smoothRadius = options.edgeScanSmoothRadius;
+  const edgeProfiles = scanEdgeInward(closedEdgeMask, w, h,
+    smoothRadius != null ? { smoothRadius } : undefined);
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
