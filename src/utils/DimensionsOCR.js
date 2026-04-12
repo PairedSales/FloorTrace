@@ -754,4 +754,4 @@ export const detectAllDimensions = async (imageDataUrl) => {
 };
 
 // Exported for unit-testing the parsing layer without a live OCR engine.
-export { normalizeOcrText, parseSingleToken, parseDimensionLine, inferDominantFormat };
+export { normalizeOcrText, parseSingleToken, parseDimensionLine };
