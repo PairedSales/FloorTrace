@@ -622,6 +622,36 @@ const runROIOcr = async (worker, baseCanvas, rois) => {
 };
 
 // ---------------------------------------------------------------------------
+// Format inference – pick the dominant format across all detected dimensions
+// ---------------------------------------------------------------------------
+
+/**
+ * Infer the dominant dimension format ('inches' or 'decimal') from an array
+ * of detected dimension objects by majority vote.
+ *
+ * - 'inches' covers feet-inches notation  (5'10", 6ft 5in, 10' 5", …)
+ * - 'decimal' covers decimal-feet notation (12.5ft, 10.6 ft, 50.0 feet, …)
+ *
+ * Ties are resolved in favour of 'inches' because feet-inches floor plans are
+ * more common and a false-positive switch to inches is easier to correct than
+ * silently losing the fractional part.
+ *
+ * @param {Array<{format: string}>} dimensions
+ * @returns {'inches'|'decimal'|null}
+ */
+export const inferDominantFormat = (dimensions) => {
+  if (!dimensions || dimensions.length === 0) return null;
+  let inches = 0;
+  let decimal = 0;
+  for (const d of dimensions) {
+    if (d.format === 'inches') inches++;
+    else if (d.format === 'decimal') decimal++;
+  }
+  if (inches === 0 && decimal === 0) return null;
+  return inches >= decimal ? 'inches' : 'decimal';
+};
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -688,7 +718,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
       };
     });
 
-    const detectedFormat = dimensions.length > 0 ? dimensions[0].format : null;
+    const detectedFormat = inferDominantFormat(dimensions);
 
     return { dimensions, detectedFormat };
   } catch (error) {
@@ -698,4 +728,4 @@ export const detectAllDimensions = async (imageDataUrl) => {
 };
 
 // Exported for unit-testing the parsing layer without a live OCR engine.
-export { normalizeOcrText, parseSingleToken, parseDimensionLine };
+export { normalizeOcrText, parseSingleToken, parseDimensionLine, inferDominantFormat };
