@@ -19,7 +19,6 @@ const LeftPanel = ({
   autoSnapEnabled,
   onAutoSnapChange,
   perimeterOverlay,
-
   showOptions,
   saveOnExit,
   onSaveOnExitChange,
