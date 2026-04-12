@@ -207,6 +207,9 @@ function App() {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
             console.log('Manual Mode - setUnit called with:', detectedFormat);
+            const label = detectedFormat === 'inches' ? 'feet-inches' : 'decimal feet';
+            setNotification({ show: true, message: `Switched to ${label} mode based on OCR reading.` });
+            setTimeout(() => setNotification({ show: false, message: '' }), 3000);
           } else {
             console.log(`Manual Mode - Unit already matches (${unit}) or no format detected`);
           }
