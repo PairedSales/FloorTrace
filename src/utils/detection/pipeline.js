@@ -567,21 +567,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
   }
 
-  /* --- Bridge gaps in dashed / thin exterior walls ---
-   * Apply a small morphological close (dilate → erode) to the edge-scan
-   * mask before scanning.  This fills gaps of up to 2×radius pixels in
-   * dashed or low-resolution wall lines so that the edge-inward scan
-   * finds the true exterior wall instead of skipping through a gap and
-   * hitting an interior structure.
-   *
-   * The original (unclosed) mask is preserved for wall-thickness
-   * measurement so that thickness values remain accurate.               */
-  const edgeCloseRadius = options.edgeCloseRadius ??
-    Math.max(2, Math.round(Math.min(w, h) * 0.005));
-  const closedEdgeScanMask = closeMask(edgeScanMask, w, h, edgeCloseRadius);
-
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
-  const edgeProfiles = scanEdgeInward(closedEdgeScanMask, w, h);
+  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
@@ -594,7 +581,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   if (fpSize < w * h * 0.02) {
     // Fallback: flood-fill from edges.
     footprint = getFloorplanFootprint(
-      dilate(closedEdgeScanMask, w, h, options.outerDilate ?? 2), w, h,
+      dilate(edgeScanMask, w, h, options.outerDilate ?? 2), w, h,
     );
     usedEdgeScan = false;
   }
@@ -650,7 +637,6 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       hasInner: Boolean(innerPolygon),
       usedEdgeScan,
       wallThickness,
-      edgeCloseRadius,
     },
   };
 };
