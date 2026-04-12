@@ -44,8 +44,6 @@ function App() {
   const currentCustomShape = useAppStore((s) => s.currentCustomShape);
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
-  const debugDetection = useAppStore((s) => s.debugDetection);
-  const detectionDebugData = useAppStore((s) => s.detectionDebugData);
   const notification = useAppStore((s) => s.notification);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
@@ -74,14 +72,12 @@ function App() {
   const setCurrentCustomShape = useAppStore((s) => s.setCurrentCustomShape);
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
-  const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
   const setNotification = useAppStore((s) => s.setNotification);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
   const setHasRestoredState = useAppStore((s) => s.setHasRestoredState);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
-  const setDebugDetection = useAppStore((s) => s.setDebugDetection);
   const setEraserToolActive = useAppStore((s) => s.setEraserToolActive);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const setCropToolActive = useAppStore((s) => s.setCropToolActive);
@@ -354,7 +350,6 @@ function App() {
       }
 
       setTracedBoundaries(traced);
-      setDetectionDebugData(traced.debug ?? null);
       const applied = applyTracedBoundary(traced, useInteriorWalls);
 
       if (!applied) {
@@ -625,7 +620,6 @@ function App() {
       });
       if (!traced) return;
       setTracedBoundaries(traced);
-      setDetectionDebugData({ ...(useAppStore.getState().detectionDebugData ?? {}), ...(traced.debug ?? {}) });
 
       const activeBoundary = getBoundaryForMode(traced, useInteriorWalls);
       if (!activeBoundary?.polygon?.length) return;
@@ -682,7 +676,6 @@ function App() {
           polygon: roomResult.polygon,
           confidence: roomResult.confidence,
         };
-        setDetectionDebugData(roomResult.debug ?? null);
       }
     } catch (error) {
       console.error('Room enclosure detection failed:', error);
@@ -735,7 +728,6 @@ function App() {
             polygon: roomResult.polygon,
             confidence: roomResult.confidence,
           };
-          setDetectionDebugData(roomResult.debug ?? null);
         }
       } catch (error) {
         console.error('Manual room detection fallback failed:', error);
@@ -816,8 +808,6 @@ function App() {
           state.currentCustomShape === prevState.currentCustomShape &&
           state.perimeterVertices === prevState.perimeterVertices &&
           state.tracedBoundaries === prevState.tracedBoundaries &&
-          state.debugDetection === prevState.debugDetection &&
-          state.detectionDebugData === prevState.detectionDebugData &&
           state.eraserToolActive === prevState.eraserToolActive &&
           state.eraserBrushSize === prevState.eraserBrushSize &&
           state.cropToolActive === prevState.cropToolActive) {
@@ -1019,8 +1009,6 @@ function App() {
             onAddPerimeterVertex={handleAddPerimeterVertex}
             onClosePerimeter={handleClosePerimeter}
             autoSnapEnabled={autoSnapEnabled}
-            debugDetection={debugDetection}
-            detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onSaveUndoPoint={handleSaveUndoPoint}
@@ -1050,8 +1038,6 @@ function App() {
           autoSnapEnabled={autoSnapEnabled}
           onAutoSnapChange={setAutoSnapEnabled}
           perimeterOverlay={perimeterOverlay}
-          debugDetection={debugDetection}
-          onDebugDetectionChange={setDebugDetection}
           showOptions={showPanelOptions}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
