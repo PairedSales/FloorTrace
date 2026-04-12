@@ -207,19 +207,6 @@ const LeftPanel = ({
 
       {showOptions && (
         <>
-          <section className="px-3 py-3 pointer-events-auto">
-            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-              Detection
-            </h3>
-            <Toggle
-              label="Debug Overlays"
-              checked={debugDetection}
-              onChange={onDebugDetectionChange}
-            />
-          </section>
-
-          <div className="panel-divider mx-3" />
-
           {/* Options */}
           {perimeterOverlay && (
             <>
