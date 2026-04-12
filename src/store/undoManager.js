@@ -7,6 +7,13 @@ let redoStack = [];
 let savedRedoStackForCancel = null; // Saved redo stack before last save, for cancelLastSave
 
 /**
+ * Return the image reference from the most recent snapshot, or null.
+ * Used by createSnapshot to decide whether the image needs deep-cloning.
+ */
+const lastSnapshotImage = () =>
+  undoStack.length > 0 ? undoStack[undoStack.length - 1].image : null;
+
+/**
  * Save the current state as an undo point.
  * Call this at the start of a user action, BEFORE making changes.
  * No-op if no image is loaded.
@@ -17,7 +24,7 @@ export function save() {
   if (!state.image) return;
   if (undoStack.length >= MAX_UNDO) undoStack.shift();
   savedRedoStackForCancel = redoStack;
-  undoStack.push(state.createSnapshot());
+  undoStack.push(state.createSnapshot(lastSnapshotImage()));
   redoStack = [];
 }
 
@@ -39,7 +46,7 @@ export function cancelLastSave() {
  */
 export function undo() {
   if (undoStack.length === 0) return false;
-  redoStack.push(useAppStore.getState().createSnapshot());
+  redoStack.push(useAppStore.getState().createSnapshot(lastSnapshotImage()));
   useAppStore.getState().applySnapshot(undoStack.pop());
   return true;
 }
@@ -51,7 +58,7 @@ export function undo() {
 export function redo() {
   if (redoStack.length === 0) return false;
   if (undoStack.length >= MAX_UNDO) undoStack.shift();
-  undoStack.push(useAppStore.getState().createSnapshot());
+  undoStack.push(useAppStore.getState().createSnapshot(lastSnapshotImage()));
   useAppStore.getState().applySnapshot(redoStack.pop());
   return true;
 }

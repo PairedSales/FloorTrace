@@ -521,11 +521,37 @@ const recognizeVariants = async (worker, canvases) => {
     preserve_interword_spaces: '1'
   });
 
-  for (const { canvas } of canvases) {
-    const result = await worker.recognize(canvas, {}, { blocks: true });
-    const { lines, words } = collectLinesAndWords(result);
-    allLines.push(...lines);
-    allWords.push(...words);
+  // Optimization: run the best variant (Otsu-thresholded) first.
+  // Only fall back to additional variants if the first pass yields
+  // too few confident results (< 2 dimension candidates).
+  const MIN_CONFIDENT_RESULTS = 2;
+  const CONFIDENCE_THRESHOLD = 50;
+
+  // Prefer Otsu variant (index 1) if available; otherwise use first.
+  const orderedCanvases = [...canvases];
+  const otsuIdx = orderedCanvases.findIndex(v => v.name === 'otsu');
+  if (otsuIdx > 0) {
+    const [otsu] = orderedCanvases.splice(otsuIdx, 1);
+    orderedCanvases.unshift(otsu);
+  }
+
+  // Pass 1: best variant only
+  const first = orderedCanvases[0];
+  const result = await worker.recognize(first.canvas, {}, { blocks: true });
+  const { lines, words } = collectLinesAndWords(result);
+  allLines.push(...lines);
+  allWords.push(...words);
+
+  // Check if first pass found enough high-confidence dimension text
+  const confidentWords = words.filter(w => w.confidence >= CONFIDENCE_THRESHOLD && /\d/.test(w.text || ''));
+  if (confidentWords.length < MIN_CONFIDENT_RESULTS && orderedCanvases.length > 1) {
+    // Fallback: run remaining variants
+    for (let i = 1; i < orderedCanvases.length; i += 1) {
+      const extra = await worker.recognize(orderedCanvases[i].canvas, {}, { blocks: true });
+      const { lines: extraLines, words: extraWords } = collectLinesAndWords(extra);
+      allLines.push(...extraLines);
+      allWords.push(...extraWords);
+    }
   }
 
   return { lines: allLines, words: allWords };
