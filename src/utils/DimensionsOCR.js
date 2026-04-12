@@ -241,12 +241,12 @@ const parseSingleToken = (token) => {
   //     A single room dimension > 40 ft is extremely unlikely on
   //     residential floor plans, so prefer the feet+inches reading.
   // ------------------------------------------------------------------
-  const twoDigitFtIn = t.match(/^(\d)(\d)$/);
-  if (twoDigitFtIn) {
+  const bareDigitMatch = t.match(/^(\d)(\d)$/);
+  if (bareDigitMatch) {
     const combined = parseInt(t, 10);
     if (combined > MAX_PLAIN_FEET) {
-      const feet = parseInt(twoDigitFtIn[1], 10);
-      const inches = parseInt(twoDigitFtIn[2], 10);
+      const feet = parseInt(bareDigitMatch[1], 10);
+      const inches = parseInt(bareDigitMatch[2], 10);
       const val = feet + inches / 12;
       if (isReasonable(val)) return { value: val, format: 'inches' };
     }
@@ -528,6 +528,10 @@ const createConfiguredWorker = async () => {
   return worker;
 };
 
+/** Pick a canvas by name, falling back to the first available. */
+const getPreferredVariant = (canvases, preferredName) =>
+  canvases.find(v => v.name === preferredName)?.canvas ?? canvases[0].canvas;
+
 const recognizeVariants = async (worker, canvases) => {
   const allLines = [];
   const allWords = [];
@@ -700,7 +704,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
     // that Tesseract's layout analysis would group into blocks (e.g.
     // room-name + dimension pairs stacked vertically).  A single AUTO
     // pass adds little overhead and significantly improves recall.
-    const autoCanvas = variants.find(v => v.name === 'otsu')?.canvas ?? variants[0].canvas;
+    const autoCanvas = getPreferredVariant(variants, 'otsu');
     await worker.setParameters({
       tessedit_char_whitelist: OCR_CHAR_WHITELIST,
       tessedit_pageseg_mode: Tesseract.PSM.AUTO,
@@ -720,9 +724,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
     // This gives Tesseract a much better chance at reading ' and " accurately
     // because it can focus on a single line of text with less noise.
     const rois = extractROIs(deduplicateResults(pass1), scaledW, scaledH);
-    // Use the Otsu-thresholded variant (index 1) for ROI crops – clean binary
+    // Use the Otsu-thresholded variant for ROI crops – clean binary
     // image gives SINGLE_LINE mode the best input.
-    const roiCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
+    const roiCanvas = getPreferredVariant(variants, 'otsu');
     const { lines: roiLines, words: roiWords } = await runROIOcr(worker, roiCanvas, rois);
 
     await worker.terminate();
