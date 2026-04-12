@@ -636,3 +636,65 @@ describe('real floorplan dimension strings', () => {
     expect(r.height).toBeCloseTo(12 + 8 / 12, 5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// parseDimensionLine – room label prefix handling
+// ---------------------------------------------------------------------------
+
+describe('parseDimensionLine with room label prefixes', () => {
+  it('parses "Living Room 23\' 0" x 13\' 6"" with room label prefix', () => {
+    const r = parseDimensionLine("Living Room 23' 0\" x 13' 6\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(23 + 0 / 12, 5);
+    expect(r.height).toBeCloseTo(13 + 6 / 12, 5);
+  });
+
+  it('parses "Sun Room 13\' 4" x 8\' 7"" with room label prefix', () => {
+    const r = parseDimensionLine("Sun Room 13' 4\" x 8' 7\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(13 + 4 / 12, 5);
+    expect(r.height).toBeCloseTo(8 + 7 / 12, 5);
+  });
+
+  it('parses "Master Bedroom 14\' 2" x 12\' 1"" with room label prefix', () => {
+    const r = parseDimensionLine("Master Bedroom 14' 2\" x 12' 1\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(14 + 2 / 12, 5);
+    expect(r.height).toBeCloseTo(12 + 1 / 12, 5);
+  });
+
+  it('parses "Foyer 11\' 1" x 7\' 9"" with room label prefix', () => {
+    const r = parseDimensionLine("Foyer 11' 1\" x 7' 9\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(11 + 1 / 12, 5);
+    expect(r.height).toBeCloseTo(7 + 9 / 12, 5);
+  });
+
+  it('parses "Bedroom 2 10\' 7" x 10\' 5"" with room+number label prefix', () => {
+    const r = parseDimensionLine("Bedroom 2 10' 7\" x 10' 5\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 7 / 12, 5);
+    expect(r.height).toBeCloseTo(10 + 5 / 12, 5);
+  });
+
+  it('parses "Dining Room 19\' 2" x 12\' 1"" with room label prefix', () => {
+    const r = parseDimensionLine("Dining Room 19' 2\" x 12' 1\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(19 + 2 / 12, 5);
+    expect(r.height).toBeCloseTo(12 + 1 / 12, 5);
+  });
+
+  it('parses "Breakfast Area 10\' 10" x 7\' 3"" with room label prefix', () => {
+    const r = parseDimensionLine("Breakfast Area 10' 10\" x 7' 3\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(10 + 10 / 12, 5);
+    expect(r.height).toBeCloseTo(7 + 3 / 12, 5);
+  });
+
+  it('parses "Bedroom 3 9\' 4" x 9\' 0"" with room+number label prefix', () => {
+    const r = parseDimensionLine("Bedroom 3 9' 4\" x 9' 0\"");
+    expect(r).not.toBeNull();
+    expect(r.width).toBeCloseTo(9 + 4 / 12, 5);
+    expect(r.height).toBeCloseTo(9 + 0 / 12, 5);
+  });
+});
