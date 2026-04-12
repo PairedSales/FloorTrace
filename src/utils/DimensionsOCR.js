@@ -10,6 +10,7 @@ import {
 
 const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
+const MAX_PLAIN_FEET = 40; // 2-digit numbers above this are treated as feet+inches (tick dropped by OCR)
 const MIN_WORD_CONFIDENCE = 20;
 const SHARPEN_AMOUNT = 2.0; // Stronger than default 1.5 to recover blurred tick marks
 
@@ -231,6 +232,24 @@ const parseSingleToken = (token) => {
     // Inches digit was ≥ 12 (e.g. "139") – fall back to plain feet.
     const plain = parseInt(num, 10);
     if (isReasonable(plain)) return { value: plain, format: 'decimal' };
+  }
+
+  // ------------------------------------------------------------------
+  // D3: 2-digit bare integer where the value is implausibly large as
+  //     plain feet.  Try interpreting as feet + inches with a dropped
+  //     tick mark: "92" → 9' 2" = 9.17 ft, "85" → 8' 5" = 8.42 ft.
+  //     A single room dimension > 40 ft is extremely unlikely on
+  //     residential floor plans, so prefer the feet+inches reading.
+  // ------------------------------------------------------------------
+  const twoDigitFtIn = t.match(/^(\d)(\d)$/);
+  if (twoDigitFtIn) {
+    const combined = parseInt(t, 10);
+    if (combined > MAX_PLAIN_FEET) {
+      const feet = parseInt(twoDigitFtIn[1], 10);
+      const inches = parseInt(twoDigitFtIn[2], 10);
+      const val = feet + inches / 12;
+      if (isReasonable(val)) return { value: val, format: 'inches' };
+    }
   }
 
   // ------------------------------------------------------------------
@@ -521,13 +540,10 @@ const recognizeVariants = async (worker, canvases) => {
     preserve_interword_spaces: '1'
   });
 
-  // Optimization: run the best variant (Otsu-thresholded) first.
-  // Only fall back to additional variants if the first pass yields
-  // too few confident results (< 2 dimension candidates).
-  const MIN_CONFIDENT_RESULTS = 2;
-  const CONFIDENCE_THRESHOLD = 50;
-
-  // Prefer Otsu variant (index 1) if available; otherwise use first.
+  // Prefer Otsu variant first for consistency, then run ALL remaining
+  // variants.  The previous short-circuit (stop after 2 confident words)
+  // caused rooms whose text was only readable in other preprocessing
+  // variants to be missed entirely.
   const orderedCanvases = [...canvases];
   const otsuIdx = orderedCanvases.findIndex(v => v.name === 'otsu');
   if (otsuIdx > 0) {
@@ -535,23 +551,11 @@ const recognizeVariants = async (worker, canvases) => {
     orderedCanvases.unshift(otsu);
   }
 
-  // Pass 1: best variant only
-  const first = orderedCanvases[0];
-  const result = await worker.recognize(first.canvas, {}, { blocks: true });
-  const { lines, words } = collectLinesAndWords(result);
-  allLines.push(...lines);
-  allWords.push(...words);
-
-  // Check if first pass found enough high-confidence dimension text
-  const confidentWords = words.filter(w => w.confidence >= CONFIDENCE_THRESHOLD && /\d/.test(w.text || ''));
-  if (confidentWords.length < MIN_CONFIDENT_RESULTS && orderedCanvases.length > 1) {
-    // Fallback: run remaining variants
-    for (let i = 1; i < orderedCanvases.length; i += 1) {
-      const extra = await worker.recognize(orderedCanvases[i].canvas, {}, { blocks: true });
-      const { lines: extraLines, words: extraWords } = collectLinesAndWords(extra);
-      allLines.push(...extraLines);
-      allWords.push(...extraWords);
-    }
+  for (const variant of orderedCanvases) {
+    const result = await worker.recognize(variant.canvas, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    allLines.push(...lines);
+    allWords.push(...words);
   }
 
   return { lines: allLines, words: allWords };
@@ -690,6 +694,22 @@ export const detectAllDimensions = async (imageDataUrl) => {
 
     // Pass 1: broad SPARSE_TEXT scan across all preprocessing variants
     const { lines: allLines, words: allWords } = await recognizeVariants(worker, variants);
+
+    // Pass 1b: supplementary AUTO page-segmentation scan on the Otsu
+    // variant.  SPARSE_TEXT excels at scattered labels but can miss text
+    // that Tesseract's layout analysis would group into blocks (e.g.
+    // room-name + dimension pairs stacked vertically).  A single AUTO
+    // pass adds little overhead and significantly improves recall.
+    const autoCanvas = variants.find(v => v.name === 'otsu')?.canvas ?? variants[0].canvas;
+    await worker.setParameters({
+      tessedit_char_whitelist: OCR_CHAR_WHITELIST,
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+      preserve_interword_spaces: '1'
+    });
+    const autoResult = await worker.recognize(autoCanvas, {}, { blocks: true });
+    const { lines: autoLines, words: autoWords } = collectLinesAndWords(autoResult);
+    allLines.push(...autoLines);
+    allWords.push(...autoWords);
 
     // Initial detection from broad scan
     const lineResults = detectFromLines(allLines);
