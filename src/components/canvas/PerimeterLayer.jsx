@@ -8,7 +8,7 @@ const SIDE_LEN_FONT_STYLE = '500';
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
-const ANIM_DURATION_MS = 300;
+const ANIM_DURATION_MS = 150;
 
 /** Ease-in-out cubic easing function. */
 const easeInOutCubic = (t) =>
@@ -254,20 +254,20 @@ const PerimeterLayer = ({
   // Hooks must be called before any early return (rules of hooks).
   const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
 
+  // During animation, render the interpolated path; otherwise the target.
+  const renderVertices = displayVertices || targetVertices;
+
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
-  // Skip label computation during animation for performance.
+  // Use renderVertices so labels follow the animation in real time.
   const labelLayouts = useMemo(
-    () => (showSideLengths && pixelsPerFoot && targetVertices && !isAnimating)
-      ? computeLabelLayouts(targetVertices, scale, pixelsPerFoot, detectedDimensions)
+    () => (showSideLengths && pixelsPerFoot && renderVertices)
+      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions)
       : [],
-    [targetVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, isAnimating]
+    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions]
   );
 
   if (!perimeterOverlay || !targetVertices) return null;
-
-  // During animation, render the interpolated path; otherwise the target.
-  const renderVertices = displayVertices || targetVertices;
 
   return (
     <>
