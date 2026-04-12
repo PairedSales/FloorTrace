@@ -605,6 +605,8 @@ const runUnrestrictedDiscovery = async (worker, baseCanvas) => {
     // Strategy B: try parseDimensionLine directly on the full line text.
     // parseDimensionLine already handles garbled room-label prefixes by
     // stripping non-dimension text before the actual numbers.
+    // We try dimText first (cleaner input) and fall back to rawText only
+    // if dimText either wasn't found or failed to parse.
     const candidates = dimText ? [dimText, rawText] : [rawText];
 
     for (const candidate of candidates) {
@@ -796,7 +798,8 @@ const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected)
       const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
       const dimText = extractDimensionLineFromText(rawText);
 
-      // Try regex-extracted dimension first, then fall back to full line text
+      // Try regex-extracted dimension first (cleaner input), fall back to
+      // full line text which parseDimensionLine can handle via prefix stripping.
       const candidates = dimText ? [dimText, rawText] : [rawText];
 
       for (const candidate of candidates) {
@@ -899,8 +902,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
     // whitelist on multiple variants.  This reads room names and dimensions
     // cleanly, avoiding the whitelist-induced hallucination that garbles
     // room labels into false separators and drops digits.
-    // Run on Otsu (best for most text) and original (catches text that
-    // Otsu's binarisation destroys, e.g. light-coloured labels).
+    // Variant order: Otsu (idx 1, best for most text), original (idx 0,
+    // catches text Otsu's binarisation destroys), sharp-otsu (idx 2,
+    // recovers thin strokes lost in standard Otsu).
     const discoveryVariantIndices = [1, 0, 2].filter(i => i < variants.length);
     const allDiscoveryResults = [];
     for (const vi of discoveryVariantIndices) {
