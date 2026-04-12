@@ -30,7 +30,6 @@ const WORKING_STATE_DEFAULTS = {
   currentCustomShape: null,
   perimeterVertices: null,
   tracedBoundaries: null,
-
   eraserToolActive: false,
   eraserBrushSize: 20,
   cropToolActive: false,
@@ -115,7 +114,6 @@ const useAppStore = create((set, get) => ({
   setCurrentCustomShape: (v) => set({ currentCustomShape: v }),
   setPerimeterVertices: (v) => set({ perimeterVertices: v }),
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
-
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
