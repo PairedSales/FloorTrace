@@ -518,7 +518,7 @@ function App() {
 
 
   // Update scale based on room dimensions and overlay
-  const updateScale = (dimensions, overlay) => {
+  const updateScale = useCallback((dimensions, overlay) => {
     if (!dimensions.width || !dimensions.height || !overlay) return;
     
     const dimWidth = parseFloat(dimensions.width);
@@ -534,11 +534,12 @@ function App() {
     setScale(newScale);
     
     // If perimeter already exists, recalculate area with new scale (only if room overlay exists)
-    if (perimeterOverlay && perimeterOverlay.vertices && overlay) {
-      const calculatedArea = calculateArea(perimeterOverlay.vertices, newScale);
+    const currentPerimeter = useAppStore.getState().perimeterOverlay;
+    if (currentPerimeter && currentPerimeter.vertices && overlay) {
+      const calculatedArea = calculateArea(currentPerimeter.vertices, newScale);
       setArea(calculatedArea);
     }
-  };
+  }, [setScale, setArea]);
 
   // Update room overlay position
   const updateRoomOverlay = (overlay, saveAction = true) => {
@@ -923,6 +924,39 @@ function App() {
     return () => window.removeEventListener('contextmenu', handleContextMenu);
   }, []);
 
+  // ── Stable callback wrappers for inline handlers (avoids re-creating on every render) ──
+  const handleFileOpen = useCallback(() => fileInputRef.current?.click(), []);
+  const handleOptionsToggle = useCallback(() => {
+    const s = useAppStore.getState();
+    s.setShowPanelOptions(!s.showPanelOptions);
+  }, []);
+  const handleHelpOpen = useCallback(() => {
+    const s = useAppStore.getState();
+    s.setShowHelpModal(!s.showHelpModal);
+  }, []);
+  const handleDimensionsChange = useCallback((dims) => {
+    setRoomDimensions(dims);
+    if (useAppStore.getState().roomOverlay) {
+      updateScale(dims, useAppStore.getState().roomOverlay);
+    }
+  }, [setRoomDimensions, updateScale]);
+  const handleUnitChange = useCallback((u) => {
+    undoManager.save();
+    setUnit(u);
+  }, [setUnit]);
+  const handleDimensionFocus = useCallback(() => {
+    if (!dimensionEditActiveRef.current) {
+      dimensionEditActiveRef.current = true;
+      undoManager.save();
+    }
+  }, []);
+  const handleDimensionBlur = useCallback(() => {
+    setTimeout(() => { dimensionEditActiveRef.current = false; }, 0);
+  }, []);
+  const handleHelpClose = useCallback(() => setShowHelpModal(false), [setShowHelpModal]);
+  const handleSaveUndoPoint = useCallback(() => undoManager.save(), []);
+  const handleCancelUndoSave = useCallback(() => undoManager.cancelLastSave(), []);
+
   // Desktop UI
   return (
     <div
@@ -934,18 +968,18 @@ function App() {
       <Toolbar
         image={image}
         isProcessing={isProcessing}
-        onFileOpen={() => fileInputRef.current?.click()}
+        onFileOpen={handleFileOpen}
         onSaveImage={handleSaveImage}
         onTracePerimeter={handleTracePerimeter}
         onFitToWindow={handleFitToWindow}
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
-        onOptionsToggle={() => { const s = useAppStore.getState(); s.setShowPanelOptions(!s.showPanelOptions); }}
+        onOptionsToggle={handleOptionsToggle}
         hasAutoDetection={!!tracedBoundaries}
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
         onStartOver={handleStartOver}
-        onHelpOpen={() => { const s = useAppStore.getState(); s.setShowHelpModal(!s.showHelpModal); }}
+        onHelpOpen={handleHelpOpen}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -989,8 +1023,8 @@ function App() {
             detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
-            onSaveUndoPoint={() => undoManager.save()}
-            onCancelUndoSave={() => undoManager.cancelLastSave()}
+            onSaveUndoPoint={handleSaveUndoPoint}
+            onCancelUndoSave={handleCancelUndoSave}
             eraserToolActive={eraserToolActive}
             eraserBrushSize={eraserBrushSize}
             onEraserBrushSizeChange={setEraserBrushSize}
@@ -1002,19 +1036,11 @@ function App() {
 
         <LeftPanel
           roomDimensions={roomDimensions}
-          onDimensionsChange={(dims) => {
-            setRoomDimensions(dims);
-            if (roomOverlay) {
-              updateScale(dims, roomOverlay);
-            }
-          }}
+          onDimensionsChange={handleDimensionsChange}
           area={area}
           mode={mode}
           unit={unit}
-          onUnitChange={(u) => {
-            undoManager.save();
-            setUnit(u);
-          }}
+          onUnitChange={handleUnitChange}
           isProcessing={isProcessing}
           ocrFailed={ocrFailed}
           showSideLengths={showSideLengths}
@@ -1029,15 +1055,8 @@ function App() {
           showOptions={showPanelOptions}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
-          onDimensionFocus={() => {
-            if (!dimensionEditActiveRef.current) {
-              dimensionEditActiveRef.current = true;
-              undoManager.save();
-            }
-          }}
-          onDimensionBlur={() => {
-            setTimeout(() => { dimensionEditActiveRef.current = false; }, 0);
-          }}
+          onDimensionFocus={handleDimensionFocus}
+          onDimensionBlur={handleDimensionBlur}
         />
 
         {image && (
@@ -1068,7 +1087,7 @@ function App() {
         )}
 
         {showHelpModal && (
-          <HelpModal onClose={() => setShowHelpModal(false)} />
+          <HelpModal onClose={handleHelpClose} />
         )}
 
       </div>
