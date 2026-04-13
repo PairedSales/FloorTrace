@@ -548,13 +548,6 @@ const scanEdgeInward = (wallMask, width, height, opts = {}) => {
  * boundaries from all 4 edges.  This efficiently outlines the exterior
  * perimeter, correctly handling rectangular polygons with concavities
  * and 45-degree angles.
- *
- * When the left/right profiles have no-hit entries for a row (no wall
- * was found scanning from either lateral edge), the row is still
- * included using top/bottom profile constraints alone.  This captures
- * building appendages (stairwells, bathrooms, utility rooms) that are
- * separated from the main body by white space or that don't extend
- * to the image edges.
  */
 const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
   const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
@@ -563,14 +556,8 @@ const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
   for (let y = 0; y < height; y += 1) {
     const xLeft = leftProfile[y];
     const xRight = rightProfile[y];
-    const hasLR = xLeft < width && xRight >= 0 && xLeft <= xRight;
-
-    // When left/right profiles have valid entries, use them as x-range.
-    // Otherwise fall back to full-width scan constrained by top/bottom.
-    const xStart = hasLR ? xLeft : 0;
-    const xEnd = hasLR ? xRight : width - 1;
-
-    for (let x = xStart; x <= xEnd; x += 1) {
+    if (xLeft >= width || xRight < 0 || xLeft > xRight) continue;
+    for (let x = xLeft; x <= xRight; x += 1) {
       if (y >= topProfile[x] && y <= bottomProfile[x]) {
         footprint[y * width + x] = 1;
       }
@@ -729,22 +716,6 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   if (options.edgeScanSmoothRadius != null) edgeScanOpts.smoothRadius = options.edgeScanSmoothRadius;
   const edgeProfiles = scanEdgeInward(closedEdgeMask, w, h, edgeScanOpts);
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
-
-  // Apply a moderate morphological close to the footprint to bridge small
-  // gaps between building sections (e.g., where a stairwell or vestibule
-  // separates the main building body from an appendage).
-  //
-  // The radius of 1.5% of the shorter image dimension was chosen to bridge
-  // gaps of up to ~30 px at the default 1400 px working resolution.  This
-  // corresponds to about 20–40 original pixels — large enough to connect
-  // sections separated by a doorway-width gap or a few rows of white space
-  // (common when appendages like bathrooms or stairwells have thin walls
-  // that fall below the brightness threshold), but small enough not to
-  // fill in legitimate L-shaped concavities in the building outline.
-  const FOOTPRINT_CLOSE_RATIO = 0.015;
-  const footprintCloseRadius = options.footprintCloseRadius ?? Math.max(4, Math.round(Math.min(w, h) * FOOTPRINT_CLOSE_RATIO));
-  footprint = closeMask(footprint, w, h, footprintCloseRadius);
-
   let usedEdgeScan = true;
 
   // Verify footprint is non-trivial.
@@ -769,13 +740,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     ? options.innerErode
     : computeRobustWallThickness(wallThicknessMeasurements);
 
-  // Use a slightly larger simplification epsilon for the exterior boundary
-  // to avoid tiny zigzag artifacts from the footprint's irregular edges.
-  const exteriorSimplifyEpsilon = options.simplifyEpsilon ?? 4;
-  const exteriorOptions = { ...options, simplifyEpsilon: exteriorSimplifyEpsilon };
-
   const outerResult = getLargestComponentPolygon(
-    footprint, preprocess, orientation, exteriorOptions,
+    footprint, preprocess, orientation, options,
   );
   const innerFootprint = erode(footprint, w, h, wallThickness);
   const innerResult = getLargestComponentPolygon(
