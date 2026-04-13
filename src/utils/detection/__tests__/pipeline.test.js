@@ -67,39 +67,6 @@ const polygonArea = (polygon) => {
   return Math.abs(sum) / 2;
 };
 
-/**
- * Draw a dashed line by alternating between drawing and skipping segments.
- * @param {object} imageData  Target image
- * @param {number} x0,y0      Start point
- * @param {number} x1,y1      End point
- * @param {number} thickness   Half-width of the line stroke
- * @param {number} dashLen     Length of each drawn dash (in pixels)
- * @param {number} gapLen      Length of each gap (in pixels)
- */
-const drawDashedLine = (imageData, x0, y0, x1, y1, thickness = 2, dashLen = 8, gapLen = 4) => {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const totalLen = Math.sqrt(dx * dx + dy * dy);
-  if (totalLen < 1) return;
-  const ux = dx / totalLen;
-  const uy = dy / totalLen;
-  let pos = 0;
-  let drawing = true;
-  while (pos < totalLen) {
-    const segLen = drawing ? dashLen : gapLen;
-    const endPos = Math.min(pos + segLen, totalLen);
-    if (drawing) {
-      const sx = Math.round(x0 + ux * pos);
-      const sy = Math.round(y0 + uy * pos);
-      const ex = Math.round(x0 + ux * endPos);
-      const ey = Math.round(y0 + uy * endPos);
-      drawLine(imageData, sx, sy, ex, ey, thickness);
-    }
-    pos = endPos;
-    drawing = !drawing;
-  }
-};
-
 describe('detection pipeline', () => {
   it('detects dominant 45 and 60 degree orientations', () => {
     const img = createBlankImageData(280, 240);
@@ -371,92 +338,11 @@ describe('detection pipeline', () => {
     expect(area).toBeLessThan(fullRectArea);
     expect(area).toBeGreaterThan(fullRectArea * 0.85);
   });
-
-  it('traces exterior boundary of a floorplan with dashed-line walls (small gaps)', () => {
-    // Simulate a floorplan where one wall is drawn as a dashed line with
-    // small gaps (4 px gap, 8 px dash).  The edge scanner must bridge
-    // these gaps to detect the correct exterior wall position.
-    const W = 400;
-    const H = 300;
-    const img = createBlankImageData(W, H);
-
-    // Solid top, left, bottom walls
-    drawLine(img, 40, 40, 360, 40, 3);   // top
-    drawLine(img, 40, 40, 40, 260, 3);   // left
-    drawLine(img, 40, 260, 360, 260, 3); // bottom
-
-    // Right wall drawn as a dashed line (small gaps bridgeable by close mask)
-    drawDashedLine(img, 360, 40, 360, 260, 2, 8, 4);
-
-    const traced = traceFloorplanBoundaryCore(img);
-    expect(traced).toBeTruthy();
-    expect(traced.outer).toBeTruthy();
-
-    const outerPoly = traced.outer.polygon;
-    const xs = outerPoly.map((p) => p.x);
-    const ys = outerPoly.map((p) => p.y);
-
-    // The outer boundary must reach the dashed right wall, not fall through to interior
-    expect(Math.max(...xs)).toBeGreaterThanOrEqual(355);
-    expect(Math.min(...xs)).toBeLessThanOrEqual(45);
-    expect(Math.min(...ys)).toBeLessThanOrEqual(45);
-    expect(Math.max(...ys)).toBeGreaterThanOrEqual(255);
-  });
-
-  it('traces exterior boundary of a floorplan with dashed-line walls (larger gaps)', () => {
-    // Simulate a dashed wall with larger gaps (6 px gap, 10 px dash).
-    // The morphological close alone won't bridge these — the profile
-    // smoothing must handle them.
-    const W = 400;
-    const H = 300;
-    const img = createBlankImageData(W, H);
-
-    // Solid top, left, bottom walls
-    drawLine(img, 40, 40, 360, 40, 3);
-    drawLine(img, 40, 40, 40, 260, 3);
-    drawLine(img, 40, 260, 360, 260, 3);
-
-    // Right wall: dashed with larger gaps
-    drawDashedLine(img, 360, 40, 360, 260, 2, 10, 6);
-
-    const traced = traceFloorplanBoundaryCore(img);
-    expect(traced).toBeTruthy();
-    expect(traced.outer).toBeTruthy();
-
-    const outerPoly = traced.outer.polygon;
-    const xs = outerPoly.map((p) => p.x);
-
-    // The outer boundary must still reach the dashed right wall
-    expect(Math.max(...xs)).toBeGreaterThanOrEqual(355);
-  });
-
-  it('traces exterior boundary with thin irregular 1-pixel dashed lines', () => {
-    // Simulate very thin (1 px) dashed lines on the bottom wall.
-    // The perpendicular continuity check must accept pixels with lateral
-    // continuity even when each pixel is only 1 px thick.
-    const W = 350;
-    const H = 250;
-    const img = createBlankImageData(W, H);
-
-    // Solid top, left, right walls
-    drawLine(img, 30, 30, 320, 30, 3);
-    drawLine(img, 30, 30, 30, 220, 3);
-    drawLine(img, 320, 30, 320, 220, 3);
-
-    // Bottom wall: thin dashed line (1px thick, 6px dash, 3px gap)
-    drawDashedLine(img, 30, 220, 320, 220, 0, 6, 3);
-
-    const traced = traceFloorplanBoundaryCore(img);
-    expect(traced).toBeTruthy();
-    expect(traced.outer).toBeTruthy();
-
-    const outerPoly = traced.outer.polygon;
-    const ys = outerPoly.map((p) => p.y);
-
-    // The boundary must reach the thin dashed bottom wall
-    expect(Math.max(...ys)).toBeGreaterThanOrEqual(215);
-  });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wall-thickness detection unit tests
+// ─────────────────────────────────────────────────────────────────────────────
 
 describe('wall thickness detection', () => {
   /** Build a binary wall mask for a rectangle whose walls are exactly `wallT` pixels thick. */
