@@ -1,4 +1,5 @@
-# FloorTrace - Automatically Calculate the Area of a Floorplan Sketch
+# FloorTrace 
+### Automatically Calculate the Area of a Floorplan Sketch
 
 Upload a floorplan sketch. FloorTrace instantly reads the room dimensions, automatically sets the scale, traces the outer walls, and calculates the area with precision. Built for real estate professionals.
 
