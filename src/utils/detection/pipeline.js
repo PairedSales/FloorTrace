@@ -732,11 +732,17 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   // Apply a moderate morphological close to the footprint to bridge small
   // gaps between building sections (e.g., where a stairwell or vestibule
-  // separates the main building body from an appendage).  The radius is
-  // proportional to the image size — about 1.5% of the shorter dimension —
-  // which bridges gaps up to ~30 px at typical resolution without
-  // significantly altering the building outline.
-  const footprintCloseRadius = options.footprintCloseRadius ?? Math.max(4, Math.round(Math.min(w, h) * 0.015));
+  // separates the main building body from an appendage).
+  //
+  // The radius of 1.5% of the shorter image dimension was chosen to bridge
+  // gaps of up to ~30 px at the default 1400 px working resolution.  This
+  // corresponds to about 20–40 original pixels — large enough to connect
+  // sections separated by a doorway-width gap or a few rows of white space
+  // (common when appendages like bathrooms or stairwells have thin walls
+  // that fall below the brightness threshold), but small enough not to
+  // fill in legitimate L-shaped concavities in the building outline.
+  const FOOTPRINT_CLOSE_RATIO = 0.015;
+  const footprintCloseRadius = options.footprintCloseRadius ?? Math.max(4, Math.round(Math.min(w, h) * FOOTPRINT_CLOSE_RATIO));
   footprint = closeMask(footprint, w, h, footprintCloseRadius);
 
   let usedEdgeScan = true;
