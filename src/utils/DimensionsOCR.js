@@ -365,7 +365,7 @@ const collectLinesAndWords = (result) => {
   return { lines, words };
 };
 
-const buildDigitGroups = (words, { includeSeparators = false } = {}) => {
+const buildDigitGroups = (words) => {
   const groups = [];
   for (const word of words) {
     if (!word.text || !word.bbox) continue;
@@ -375,11 +375,7 @@ const buildDigitGroups = (words, { includeSeparators = false } = {}) => {
     const wH = word.bbox.y1 - word.bbox.y0;
     if (wH > wW * 2) continue;
     const t = normalizeOcrText(word.text);
-    const hasDigit = /\d/.test(t);
-    // Optionally include separator words (x, ×) so spatial grouping can
-    // reconstruct "13' 4" x 8' 7"" when "x" is a standalone word.
-    const isSep = includeSeparators && /^[xX\u00D7×]$/.test(t.trim());
-    if (hasDigit || isSep) {
+    if (/\d/.test(t)) {
       groups.push({
         text: t,
         bbox: word.bbox,
@@ -404,8 +400,8 @@ const tryParsePairFromWords = (wordGroup) => {
   return parseDimensionLine(combined);
 };
 
-const detectFromSpatialWords = (words, { includeSeparators = false } = {}) => {
-  const digits = buildDigitGroups(words, { includeSeparators });
+const detectFromSpatialWords = (words) => {
+  const digits = buildDigitGroups(words);
   if (digits.length < 2) return [];
 
   const results = [];
@@ -586,7 +582,7 @@ const runUnrestrictedDiscovery = async (worker, baseCanvas) => {
   });
 
   const result = await worker.recognize(baseCanvas, {}, { blocks: true });
-  const { lines, words } = collectLinesAndWords(result);
+  const { lines } = collectLinesAndWords(result);
 
   const discovered = [];
   for (const line of lines) {
@@ -598,39 +594,24 @@ const runUnrestrictedDiscovery = async (worker, baseCanvas) => {
     if (bh > bw) continue;
 
     const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
-
-    // Strategy A: extract dimension-like pattern via regex
     const dimText = extractDimensionLineFromText(rawText);
+    if (!dimText) continue;
 
-    // Strategy B: try parseDimensionLine directly on the full line text.
-    // parseDimensionLine already handles garbled room-label prefixes by
-    // stripping non-dimension text before the actual numbers.
-    // We try dimText first (cleaner input) and fall back to rawText only
-    // if dimText either wasn't found or failed to parse.
-    const candidates = dimText ? [dimText, rawText] : [rawText];
-
-    for (const candidate of candidates) {
-      const parsed = parseDimensionLine(candidate);
-      if (parsed) {
-        const bbox = {
-          x: line.bbox.x0,
-          y: line.bbox.y0,
-          width: bw,
-          height: bh
-        };
-        const avgConf = line.words
-          ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
-          : 50;
-        discovered.push({ ...parsed, bbox, confidence: avgConf });
-        break; // first successful parse wins for this line
-      }
+    // Try to parse the dimension text
+    const parsed = parseDimensionLine(dimText);
+    if (parsed) {
+      const bbox = {
+        x: line.bbox.x0,
+        y: line.bbox.y0,
+        width: line.bbox.x1 - line.bbox.x0,
+        height: line.bbox.y1 - line.bbox.y0
+      };
+      const avgConf = line.words
+        ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+        : 50;
+      discovered.push({ ...parsed, bbox, confidence: avgConf });
     }
   }
-
-  // Also run spatial word detection on unrestricted words – catches
-  // dimensions that Tesseract split across multiple lines / blocks.
-  const spatialResults = detectFromSpatialWords(words, { includeSeparators: true });
-  discovered.push(...spatialResults);
 
   return discovered;
 };
@@ -787,7 +768,7 @@ const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected)
   for (const tile of uncoveredTiles) {
     const cropped = cropCanvas(baseCanvas, tile);
     const result = await worker.recognize(cropped, {}, { blocks: true });
-    const { lines, words } = collectLinesAndWords(result);
+    const { lines } = collectLinesAndWords(result);
 
     for (const line of lines) {
       if (!line.bbox) continue;
@@ -797,42 +778,21 @@ const runGridDiscovery = async (worker, baseCanvas, imgW, imgH, alreadyDetected)
 
       const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
       const dimText = extractDimensionLineFromText(rawText);
+      if (!dimText) continue;
 
-      // Try regex-extracted dimension first (cleaner input), fall back to
-      // full line text which parseDimensionLine can handle via prefix stripping.
-      const candidates = dimText ? [dimText, rawText] : [rawText];
-
-      for (const candidate of candidates) {
-        const parsed = parseDimensionLine(candidate);
-        if (parsed) {
-          const bbox = {
-            x: line.bbox.x0 + tile.x,
-            y: line.bbox.y0 + tile.y,
-            width: bw,
-            height: bh
-          };
-          const avgConf = line.words
-            ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
-            : 50;
-          results.push({ ...parsed, bbox, confidence: avgConf });
-          break;
-        }
-      }
-    }
-
-    // Spatial word detection within this tile – catches dimensions split
-    // across multiple Tesseract lines / blocks within the tile.
-    const tileSpatial = detectFromSpatialWords(words, { includeSeparators: true });
-    for (const sp of tileSpatial) {
-      if (sp.bbox) {
-        sp.bbox = {
-          x: sp.bbox.x + tile.x,
-          y: sp.bbox.y + tile.y,
-          width: sp.bbox.width,
-          height: sp.bbox.height
+      const parsed = parseDimensionLine(dimText);
+      if (parsed) {
+        const bbox = {
+          x: line.bbox.x0 + tile.x,
+          y: line.bbox.y0 + tile.y,
+          width: bw,
+          height: bh
         };
+        const avgConf = line.words
+          ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+          : 50;
+        results.push({ ...parsed, bbox, confidence: avgConf });
       }
-      results.push(sp);
     }
   }
 
@@ -881,7 +841,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
 
     // Initial detection from broad scan
     const lineResults = detectFromLines(allLines);
-    const spatialResults = detectFromSpatialWords(allWords, { includeSeparators: true });
+    const spatialResults = detectFromSpatialWords(allWords);
     const pass1 = [...lineResults, ...spatialResults];
 
     // Pass 2: targeted SINGLE_LINE OCR on cropped ROIs from the best variant.
@@ -895,31 +855,22 @@ export const detectAllDimensions = async (imageDataUrl) => {
 
     // Merge whitelist-based results
     const roiLineResults = detectFromLines(roiLines);
-    const roiSpatialResults = detectFromSpatialWords(roiWords, { includeSeparators: true });
+    const roiSpatialResults = detectFromSpatialWords(roiWords);
     const whitelistResults = [...pass1, ...roiLineResults, ...roiSpatialResults];
 
     // Pass 3: unrestricted discovery – run Tesseract WITHOUT a character
-    // whitelist on multiple variants.  This reads room names and dimensions
+    // whitelist on the Otsu variant.  This reads room names and dimensions
     // cleanly, avoiding the whitelist-induced hallucination that garbles
     // room labels into false separators and drops digits.
-    // Variant order: Otsu (idx 1, best for most text), original (idx 0,
-    // catches text Otsu's binarisation destroys), sharp-otsu (idx 2,
-    // recovers thin strokes lost in standard Otsu).
-    const discoveryVariantIndices = [1, 0, 2].filter(i => i < variants.length);
-    const allDiscoveryResults = [];
-    for (const vi of discoveryVariantIndices) {
-      const results = await runUnrestrictedDiscovery(worker, variants[vi].canvas);
-      allDiscoveryResults.push(...results);
-    }
-    const discoveryResults = deduplicateResults(allDiscoveryResults);
+    const discoveryCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
+    const discoveryResults = await runUnrestrictedDiscovery(worker, discoveryCanvas);
 
     // Pass 4: grid-based ROI scanning for missed regions.
     // Divide the image into tiles and OCR any tile that doesn't overlap
     // with an already-detected dimension.  Uses unrestricted text mode
     // to catch rooms that both the whitelist pass and discovery pass missed.
     const allSoFar = deduplicateResults([...whitelistResults, ...discoveryResults]);
-    const gridCanvas = variants.length > 1 ? variants[1].canvas : variants[0].canvas;
-    const gridResults = await runGridDiscovery(worker, gridCanvas, scaledW, scaledH, allSoFar);
+    const gridResults = await runGridDiscovery(worker, discoveryCanvas, scaledW, scaledH, allSoFar);
 
     await worker.terminate();
 
