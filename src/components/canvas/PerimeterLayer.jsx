@@ -8,7 +8,7 @@ const SIDE_LEN_FONT_STYLE = '500';
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
-const ANIM_DURATION_MS = 150;
+const ANIM_DURATION_MS = 75;
 
 /** Ease-in-out cubic easing function. */
 const easeInOutCubic = (t) =>
