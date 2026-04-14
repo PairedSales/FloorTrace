@@ -859,6 +859,22 @@ function App() {
           setEraserBrushSize(Math.min(200, eraserBrushSize + 4));
           return;
         }
+        if (e.key.toLowerCase() === 'o') {
+          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+            const s = useAppStore.getState();
+            s.setShowPanelOptions(!s.showPanelOptions);
+            return;
+          }
+        }
+        if (e.key.toLowerCase() === 'l') {
+          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+            const s = useAppStore.getState();
+            s.setShowSideLengths(!s.showSideLengths);
+            return;
+          }
+        }
       }
 
       if (e.ctrlKey || e.metaKey) {

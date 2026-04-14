@@ -5,6 +5,8 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const mod = isMac ? '⌘' : 'Ctrl';
 
 const shortcuts = [
+  { keys: 'O', description: 'Toggle options menu' },
+  { keys: 'L', description: 'Toggle show lengths' },
   { keys: 'Right-click', description: 'Delete a vertex' },
   { keys: `${mod} + O`, description: 'Open image' },
   { keys: `${mod} + V`, description: 'Paste image from clipboard' },
