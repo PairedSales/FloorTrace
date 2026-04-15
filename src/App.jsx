@@ -389,64 +389,80 @@ function App() {
     }
   };
 
+  const activateTool = useCallback((tool) => {
+    undoManager.save();
+    setLineToolActive(false);
+    setCurrentMeasurementLine(null);
+    setDrawAreaActive(false);
+    setCurrentCustomShape(null);
+    setEraserToolActive(false);
+    setCropToolActive(false);
+
+    switch (tool) {
+      case 'line':
+        setLineToolActive(true);
+        break;
+      case 'drawArea':
+        setDrawAreaActive(true);
+        break;
+      case 'eraser':
+        setEraserToolActive(true);
+        break;
+      case 'crop':
+        setCropToolActive(true);
+        break;
+      default:
+        break;
+    }
+  }, [
+    setCropToolActive,
+    setCurrentCustomShape,
+    setCurrentMeasurementLine,
+    setDrawAreaActive,
+    setEraserToolActive,
+    setLineToolActive,
+  ]);
+
   // Toggle line tool
   const handleLineToolToggle = () => {
-    undoManager.save();
-    const newState = !lineToolActive;
-    setLineToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when line tool is activated
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setEraserToolActive(false);
-      setCropToolActive(false);
-    } else {
-      setCurrentMeasurementLine(null); // Stop drawing line
+    if (lineToolActive) {
+      undoManager.save();
+      setLineToolActive(false);
+      setCurrentMeasurementLine(null);
+      return;
     }
+    activateTool('line');
   };
 
   // Toggle draw area tool
   const handleDrawAreaToggle = () => {
-    undoManager.save();
-    const newState = !drawAreaActive;
-    setDrawAreaActive(newState);
-    if (newState) {
-      // Deactivate other tools when draw area tool is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setEraserToolActive(false);
-      setCropToolActive(false);
-    } else {
-      setCurrentCustomShape(null); // Stop drawing custom shape
+    if (drawAreaActive) {
+      undoManager.save();
+      setDrawAreaActive(false);
+      setCurrentCustomShape(null);
+      return;
     }
+    activateTool('drawArea');
   };
 
   // Toggle eraser tool
   const handleEraserToolToggle = () => {
-    const newState = !eraserToolActive;
-    setEraserToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when eraser is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setCropToolActive(false);
+    if (eraserToolActive) {
+      undoManager.save();
+      setEraserToolActive(false);
+      return;
     }
+    activateTool('eraser');
   };
 
   // Toggle crop tool
   const handleCropToolToggle = () => {
-    const newState = !cropToolActive;
-    setCropToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when crop is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setEraserToolActive(false);
+    if (cropToolActive) {
+      undoManager.save();
+      setCropToolActive(false);
+      return;
     }
+    activateTool('crop');
   };
 
   // Clear all lines and custom shapes
