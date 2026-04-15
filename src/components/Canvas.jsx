@@ -81,6 +81,7 @@ const Canvas = React.memo(forwardRef(({
   const eraserCanvasRef = useRef(null); // Offscreen canvas for erasing
   const isErasingRef = useRef(false);
   const eraserStartPosRef = useRef(null); // For shift-constrained erasing
+  const eraserLastPosRef = useRef(null); // Track previous draw position for interpolation
   const eraserAxisRef = useRef(null); // 'h' or 'v' or null
 
   // Crop tool state
@@ -592,14 +593,19 @@ const Canvas = React.memo(forwardRef(({
     return canvas;
   }, [imageObj]);
 
-  /** Paint a white rectangle centred at (x, y) on the offscreen eraser canvas. */
-  const eraseAt = useCallback((x, y, brushSize) => {
+  /** Erase continuously between two points on the offscreen eraser canvas. */
+  const eraseSegment = useCallback((x0, y0, x1, y1, brushSize) => {
     const canvas = eraserCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const half = brushSize / 2;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(x - half, y - half, brushSize, brushSize);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'square';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
   }, []);
 
   /** Commit the eraser canvas back to the store image and refresh the Konva node. */
@@ -621,10 +627,11 @@ const Canvas = React.memo(forwardRef(({
     eraserCanvasRef.current = initEraserCanvas();
     isErasingRef.current = true;
     eraserStartPosRef.current = pos;
+    eraserLastPosRef.current = pos;
     eraserAxisRef.current = null;
 
     // Paint first stroke
-    eraseAt(pos.x, pos.y, eraserBrushSize);
+    eraseSegment(pos.x, pos.y, pos.x, pos.y, eraserBrushSize);
 
     // Update Konva image from offscreen canvas for immediate visual feedback
     if (stageRef.current) {
@@ -636,7 +643,7 @@ const Canvas = React.memo(forwardRef(({
     }
 
     return true;
-  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseAt]);
+  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseSegment]);
 
   /** Handle eraser mousemove: continue erasing along the drag path. */
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
@@ -665,7 +672,9 @@ const Canvas = React.memo(forwardRef(({
       eraserAxisRef.current = null;
     }
 
-    eraseAt(drawX, drawY, eraserBrushSize);
+    const previousPos = eraserLastPosRef.current ?? { x: drawX, y: drawY };
+    eraseSegment(previousPos.x, previousPos.y, drawX, drawY, eraserBrushSize);
+    eraserLastPosRef.current = { x: drawX, y: drawY };
 
     // Update Konva image live
     if (stageRef.current) {
@@ -677,13 +686,14 @@ const Canvas = React.memo(forwardRef(({
     }
 
     return true;
-  }, [eraserBrushSize, eraseAt]);
+  }, [eraserBrushSize, eraseSegment]);
 
   /** Handle eraser mouseup: commit the erased image to the store. */
   const handleEraserMouseUp = useCallback(() => {
     if (!isErasingRef.current) return false;
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
+    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
     commitEraserCanvas();
     return true;
@@ -1376,6 +1386,7 @@ const Canvas = React.memo(forwardRef(({
           isErasingRef.current = false;
           eraserCanvasRef.current = null;
           eraserStartPosRef.current = null;
+          eraserLastPosRef.current = null;
           eraserAxisRef.current = null;
           // Restore original image object on the Konva Image node
           if (stageRef.current && imageObj) {
