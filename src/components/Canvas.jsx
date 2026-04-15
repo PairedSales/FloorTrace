@@ -86,6 +86,10 @@ const Canvas = React.memo(forwardRef(({
   const isCroppingRef = useRef(false);
   const cropStartRef = useRef(null);
 
+  // Track the previous imageObj dimensions so fitToWindow is only triggered
+  // when the image actually changes size (not after same-size eraser/crop edits).
+  const prevImageDimsRef = useRef(null);
+
   useEffect(() => {
     if (selectedMeasurementLineIndex !== null && selectedMeasurementLineIndex >= measurementLines.length) {
       setSelectedMeasurementLineIndex(null);
@@ -307,12 +311,23 @@ const Canvas = React.memo(forwardRef(({
   }, [findHorizontalSnap, findVerticalSnap]);
   useEffect(() => {
     if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
-      // Small delay to ensure the layout is stable
-      const timeoutId = setTimeout(() => {
-        fitToWindow();
-      }, 100);
+      const prev = prevImageDimsRef.current;
+      const sameSize =
+        prev &&
+        prev.width === imageObj.width &&
+        prev.height === imageObj.height;
 
-      return () => clearTimeout(timeoutId);
+      // Only refit when the image dimensions genuinely changed (new file loaded).
+      // Skip when the same-size image is produced by the eraser or crop tools,
+      // so those tools don't snap the canvas position back to center.
+      if (!sameSize) {
+        prevImageDimsRef.current = { width: imageObj.width, height: imageObj.height };
+        // Small delay to ensure the layout is stable
+        const timeoutId = setTimeout(() => {
+          fitToWindow();
+        }, 100);
+        return () => clearTimeout(timeoutId);
+      }
     }
   }, [dimensions, imageObj, fitToWindow]);
   useEffect(() => {
