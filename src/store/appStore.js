@@ -130,14 +130,21 @@ const useAppStore = create((set, get) => ({
 
   /**
    * Return a snapshot of the current undo-able state.
-   * The image field is stored as a plain reference; it is only deep-cloned
-   * when it differs from the previous snapshot's image (see undoManager).
+   *
+   * Two-layer memory strategy:
+   *  1. Reference-equality short-circuit (here): if the image string reference
+   *     hasn't changed since the last snapshot, we skip the full clone and reuse
+   *     the same reference. This covers the common case of non-image edits.
+   *  2. Content-hash intern pool (undoManager.js): after this snapshot is
+   *     handed to undoManager, `internSnapshot()` replaces `image` with a pool
+   *     key so that N snapshots pointing to the same image string share exactly
+   *     ONE copy in the heap, regardless of reference identity.
    */
   createSnapshot: (prevImage) => {
     const state = get();
     const lightweight = cloneSnapshot(pickFields(state, SNAPSHOT_FIELDS_NO_IMAGE));
-    // Only deep-clone the image when it actually changed (crop/erase).
-    // Otherwise reuse the same string reference → ~90% memory savings.
+    // Fast path: reuse the same string reference when image hasn't changed.
+    // undoManager's intern pool will deduplicate across reference boundaries.
     if (state.image === prevImage) {
       lightweight.image = prevImage;
     } else {
