@@ -74,6 +74,8 @@ const Canvas = React.memo(forwardRef(({
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   const imageSnapAnalyzerRef = useRef(null);
+  const imageSnapAnalyzerSourceRef = useRef(null);
+  const imageSnapAnalyzerLoadingRef = useRef(null);
 
   // Eraser tool state
   const eraserCanvasRef = useRef(null); // Offscreen canvas for erasing
@@ -202,73 +204,93 @@ const Canvas = React.memo(forwardRef(({
 
 
   useEffect(() => {
-    let cancelled = false;
+    imageSnapAnalyzerRef.current = null;
+    imageSnapAnalyzerSourceRef.current = null;
+    imageSnapAnalyzerLoadingRef.current = null;
+  }, [image]);
 
-    const loadAnalyzer = async () => {
-      if (!image) {
-        imageSnapAnalyzerRef.current = null;
-        return;
-      }
+  const ensureImageSnapAnalyzer = useCallback(() => {
+    if (!autoSnapEnabled || !image) {
+      return;
+    }
 
-      try {
-        const analyzer = await createImageSnapAnalyzer(image);
-        if (!cancelled) {
-          imageSnapAnalyzerRef.current = analyzer;
+    const hasCurrentAnalyzer =
+      imageSnapAnalyzerRef.current &&
+      imageSnapAnalyzerSourceRef.current === image;
+    if (hasCurrentAnalyzer) {
+      return;
+    }
+
+    const isCurrentImageLoading =
+      imageSnapAnalyzerLoadingRef.current &&
+      imageSnapAnalyzerSourceRef.current === image;
+    if (isCurrentImageLoading) {
+      return;
+    }
+
+    imageSnapAnalyzerSourceRef.current = image;
+    imageSnapAnalyzerLoadingRef.current = createImageSnapAnalyzer(image)
+      .then((analyzer) => {
+        // Ignore stale resolutions from previous image values.
+        if (imageSnapAnalyzerSourceRef.current !== image) {
+          return;
         }
-      } catch (error) {
+        imageSnapAnalyzerRef.current = analyzer;
+      })
+      .catch((error) => {
         console.error('Failed to prepare image snap analyzer:', error);
-        if (!cancelled) {
+        if (imageSnapAnalyzerSourceRef.current === image) {
           imageSnapAnalyzerRef.current = null;
         }
-      }
-    };
-
-    loadAnalyzer();
-
-    return () => {
-      cancelled = true;
-      imageSnapAnalyzerRef.current = null;
-    };
-  }, [image]);
+      })
+      .finally(() => {
+        if (imageSnapAnalyzerSourceRef.current === image) {
+          imageSnapAnalyzerLoadingRef.current = null;
+        }
+      });
+  }, [autoSnapEnabled, image]);
 
   const findVertexSnapPoint = useCallback((point) => {
     if (!autoSnapEnabled || !point) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findCornerSnap(point);
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findVerticalWall(targetX, y1, y2, { searchRadius });
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findHorizontalWall(targetY, x1, x2, { searchRadius });
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const snapRoomOverlayPosition = useCallback((overlay) => {
     const width = overlay.x2 - overlay.x1;
@@ -393,6 +415,10 @@ const Canvas = React.memo(forwardRef(({
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingRoom(true);
     if (canvasPos) {
@@ -421,6 +447,10 @@ const Canvas = React.memo(forwardRef(({
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingRoomCorner(corner);
   };
@@ -434,6 +464,10 @@ const Canvas = React.memo(forwardRef(({
     
     lastDraggedVertexRef.current = index;
     lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingVertex(index);
   };
