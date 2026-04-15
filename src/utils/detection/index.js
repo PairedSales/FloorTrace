@@ -23,11 +23,24 @@ const ensureWorker = () => {
   return detectionWorker;
 };
 
-const runWorkerRequest = (type, payload) => new Promise((resolve, reject) => {
+const runWorkerRequest = (type, payload, timeoutMs = 30_000) => new Promise((resolve, reject) => {
   const worker = ensureWorker();
   const id = nextRequestId;
   nextRequestId += 1;
-  pending.set(id, { resolve, reject });
+  const timer = setTimeout(() => {
+    pending.delete(id);
+    reject(new Error('Detection timed out'));
+  }, timeoutMs);
+  pending.set(id, {
+    resolve: (data) => {
+      clearTimeout(timer);
+      resolve(data);
+    },
+    reject: (error) => {
+      clearTimeout(timer);
+      reject(error);
+    },
+  });
   worker.postMessage({ id, type, payload });
 });
 
