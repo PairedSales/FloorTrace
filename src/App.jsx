@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { shallow } from 'zustand/shallow';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
@@ -17,6 +18,41 @@ import * as undoManager from './store/undoManager';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
+
+// Fields that, when changed, should trigger an autosave.
+// Add new state keys here — no other code needs updating.
+const AUTOSAVE_FIELDS = [
+  'image',
+  'roomOverlay',
+  'perimeterOverlay',
+  'roomDimensions',
+  'area',
+  'scale',
+  'mode',
+  'detectedDimensions',
+  'showSideLengths',
+  'useInteriorWalls',
+  'autoSnapEnabled',
+  'manualEntryMode',
+  'ocrFailed',
+  'unit',
+  'lineToolActive',
+  'measurementLines',
+  'currentMeasurementLine',
+  'drawAreaActive',
+  'customShapes',
+  'currentCustomShape',
+  'perimeterVertices',
+  'tracedBoundaries',
+  'debugDetection',
+  'detectionDebugData',
+  'eraserToolActive',
+  'eraserBrushSize',
+  'cropToolActive',
+];
+
+const autosaveSelector = (state) =>
+  AUTOSAVE_FIELDS.reduce((acc, k) => { acc[k] = state[k]; return acc; }, {});
 
 function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
@@ -784,55 +820,33 @@ function App() {
   // the old useEffect with a 24-item dependency array.
   const autosaveTimerRef = useRef(null);
   useEffect(() => {
-    const unsub = useAppStore.subscribe((state, prevState) => {
-      if (!state._hasRestoredState) return;
-      if (!saveOnExit) return;
+    const unsub = useAppStore.subscribe(
+      autosaveSelector,
+      (slice, prevSlice) => {
+        const state = useAppStore.getState();
+        if (!state._hasRestoredState) return;
+        if (!saveOnExit) return;
 
-      if (!state.image) {
-        clearAutosavedDraft();
-        return;
-      }
+        if (!slice.image) {
+          clearAutosavedDraft();
+          return;
+        }
 
-      // Skip if nothing autosave-relevant changed
-      if (state.image === prevState.image &&
-          state.roomOverlay === prevState.roomOverlay &&
-          state.perimeterOverlay === prevState.perimeterOverlay &&
-          state.roomDimensions === prevState.roomDimensions &&
-          state.area === prevState.area &&
-          state.scale === prevState.scale &&
-          state.mode === prevState.mode &&
-          state.detectedDimensions === prevState.detectedDimensions &&
-          state.showSideLengths === prevState.showSideLengths &&
-          state.useInteriorWalls === prevState.useInteriorWalls &&
-          state.autoSnapEnabled === prevState.autoSnapEnabled &&
-          state.manualEntryMode === prevState.manualEntryMode &&
-          state.ocrFailed === prevState.ocrFailed &&
-          state.unit === prevState.unit &&
-          state.lineToolActive === prevState.lineToolActive &&
-          state.measurementLines === prevState.measurementLines &&
-          state.currentMeasurementLine === prevState.currentMeasurementLine &&
-          state.drawAreaActive === prevState.drawAreaActive &&
-          state.customShapes === prevState.customShapes &&
-          state.currentCustomShape === prevState.currentCustomShape &&
-          state.perimeterVertices === prevState.perimeterVertices &&
-          state.tracedBoundaries === prevState.tracedBoundaries &&
-          state.debugDetection === prevState.debugDetection &&
-          state.detectionDebugData === prevState.detectionDebugData &&
-          state.eraserToolActive === prevState.eraserToolActive &&
-          state.eraserBrushSize === prevState.eraserBrushSize &&
-          state.cropToolActive === prevState.cropToolActive) {
-        return;
-      }
+        // shallow equality is handled by the subscription itself — if we're
+        // here, at least one autosave-relevant field changed.
+        void prevSlice; // unused but documents intent
 
-      // Debounce: wait 2 seconds of inactivity before writing to localStorage.
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-      }
+        // Debounce: wait 2 seconds of inactivity before writing to localStorage.
+        if (autosaveTimerRef.current) {
+          clearTimeout(autosaveTimerRef.current);
+        }
 
-      autosaveTimerRef.current = setTimeout(() => {
-        saveAutosavedDraft(useAppStore.getState().getAutosaveState());
-      }, 2000);
-    });
+        autosaveTimerRef.current = setTimeout(() => {
+          saveAutosavedDraft(useAppStore.getState().getAutosaveState());
+        }, 2000);
+      },
+      { equalityFn: shallow },
+    );
 
     return () => {
       unsub();
