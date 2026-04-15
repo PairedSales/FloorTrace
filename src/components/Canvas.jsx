@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
@@ -1403,6 +1403,22 @@ const Canvas = React.memo(forwardRef(({
     };
   }, [handleKeyDown]);
 
+  const canPanCanvas = useMemo(() => {
+    if (draggingRoom || draggingRoomCorner || draggingVertex !== null) return false;
+    if (manualEntryMode || eraserToolActive || cropToolActive) return false;
+    if (roomOverlay && !perimeterOverlay) return false; // Vertex placement mode
+    return !isZoomingRef.current;
+  }, [
+    draggingRoom,
+    draggingRoomCorner,
+    draggingVertex,
+    manualEntryMode,
+    eraserToolActive,
+    cropToolActive,
+    roomOverlay,
+    perimeterOverlay,
+  ]);
+
   return (
     <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
@@ -1444,7 +1460,7 @@ const Canvas = React.memo(forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !(roomOverlay && !perimeterOverlay) && !eraserToolActive && !cropToolActive}
+          draggable={canPanCanvas}
           onDragStart={handleStageDragStart}
           onDragEnd={handleStageDragEnd}
           onMouseDown={handleStageMouseDown}
