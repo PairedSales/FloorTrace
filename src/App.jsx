@@ -130,7 +130,19 @@ function App() {
   });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
+  const notifyTimerRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
+
+  const notify = useCallback((message, durationMs = 3000) => {
+    setNotification({ show: true, message });
+    if (notifyTimerRef.current) {
+      clearTimeout(notifyTimerRef.current);
+    }
+    notifyTimerRef.current = setTimeout(() => {
+      setNotification({ show: false, message: '' });
+      notifyTimerRef.current = null;
+    }, durationMs);
+  }, [setNotification]);
 
   const clearAutosavedDraft = useCallback(() => {
     localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
@@ -149,10 +161,9 @@ function App() {
       localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
-      setNotification({ show: true, message: 'Autosave unavailable (storage full or blocked).' });
-      setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+      notify('Autosave unavailable (storage full or blocked).');
     }
-  }, [setNotification]);
+  }, [notify]);
 
   // Reset entire application
   const handleRestart = () => {
@@ -213,8 +224,7 @@ function App() {
         if (dimensions.length === 0) {
           // OCR failed - automatically create 200x200 room overlay at center
           setOcrFailed(true);
-          setNotification({ show: true, message: 'No dimensions found. Please enter manually.' });
-          setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+          notify('No dimensions found. Please enter manually.');
 
           // Get image dimensions to center the overlay
           const img = new Image();
@@ -243,16 +253,14 @@ function App() {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
             const label = detectedFormat === 'inches' ? 'feet-inches' : 'decimal feet';
-            setNotification({ show: true, message: `Switched to ${label} mode based on detected dimensions.` });
-            setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+            notify(`Switched to ${label} mode based on detected dimensions.`);
           }
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
         // OCR failed - automatically create 200x200 room overlay at center
         setOcrFailed(true);
-        setNotification({ show: true, message: 'Error detecting dimensions. Please enter manually.' });
-        setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+        notify('Error detecting dimensions. Please enter manually.');
 
         // Get image dimensions to center the overlay
         const img = new Image();
@@ -277,7 +285,7 @@ function App() {
         setIsProcessing(false);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify]);
 
   // Start over: clear all overlays and re-process the current image as if freshly pasted
   const handleStartOver = useCallback(async () => {
@@ -384,8 +392,7 @@ function App() {
       });
 
       if (!traced) {
-        setNotification({ show: true, message: 'Unable to trace perimeter from this image.' });
-        setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+        notify('Unable to trace perimeter from this image.', 2500);
         return;
       }
 
@@ -394,17 +401,14 @@ function App() {
       const applied = applyTracedBoundary(traced, useInteriorWalls);
 
       if (!applied) {
-        setNotification({ show: true, message: 'No valid perimeter detected.' });
-        setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+        notify('No valid perimeter detected.', 2500);
         return;
       }
 
-      setNotification({ show: true, message: `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).` });
-      setTimeout(() => setNotification({ show: false, message: '' }), 2200);
+      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2200);
     } catch (error) {
       console.error('Perimeter detection failed:', error);
-      setNotification({ show: true, message: 'Perimeter detection failed. Try another image region.' });
-      setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+      notify('Perimeter detection failed. Try another image region.');
     } finally {
       setIsProcessing(false);
     }
@@ -425,64 +429,80 @@ function App() {
     }
   };
 
+  const activateTool = useCallback((tool) => {
+    undoManager.save();
+    setLineToolActive(false);
+    setCurrentMeasurementLine(null);
+    setDrawAreaActive(false);
+    setCurrentCustomShape(null);
+    setEraserToolActive(false);
+    setCropToolActive(false);
+
+    switch (tool) {
+      case 'line':
+        setLineToolActive(true);
+        break;
+      case 'drawArea':
+        setDrawAreaActive(true);
+        break;
+      case 'eraser':
+        setEraserToolActive(true);
+        break;
+      case 'crop':
+        setCropToolActive(true);
+        break;
+      default:
+        break;
+    }
+  }, [
+    setCropToolActive,
+    setCurrentCustomShape,
+    setCurrentMeasurementLine,
+    setDrawAreaActive,
+    setEraserToolActive,
+    setLineToolActive,
+  ]);
+
   // Toggle line tool
   const handleLineToolToggle = () => {
-    undoManager.save();
-    const newState = !lineToolActive;
-    setLineToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when line tool is activated
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setEraserToolActive(false);
-      setCropToolActive(false);
-    } else {
-      setCurrentMeasurementLine(null); // Stop drawing line
+    if (lineToolActive) {
+      undoManager.save();
+      setLineToolActive(false);
+      setCurrentMeasurementLine(null);
+      return;
     }
+    activateTool('line');
   };
 
   // Toggle draw area tool
   const handleDrawAreaToggle = () => {
-    undoManager.save();
-    const newState = !drawAreaActive;
-    setDrawAreaActive(newState);
-    if (newState) {
-      // Deactivate other tools when draw area tool is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setEraserToolActive(false);
-      setCropToolActive(false);
-    } else {
-      setCurrentCustomShape(null); // Stop drawing custom shape
+    if (drawAreaActive) {
+      undoManager.save();
+      setDrawAreaActive(false);
+      setCurrentCustomShape(null);
+      return;
     }
+    activateTool('drawArea');
   };
 
   // Toggle eraser tool
   const handleEraserToolToggle = () => {
-    const newState = !eraserToolActive;
-    setEraserToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when eraser is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setCropToolActive(false);
+    if (eraserToolActive) {
+      undoManager.save();
+      setEraserToolActive(false);
+      return;
     }
+    activateTool('eraser');
   };
 
   // Toggle crop tool
   const handleCropToolToggle = () => {
-    const newState = !cropToolActive;
-    setCropToolActive(newState);
-    if (newState) {
-      // Deactivate other tools when crop is activated
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      setEraserToolActive(false);
+    if (cropToolActive) {
+      undoManager.save();
+      setCropToolActive(false);
+      return;
     }
+    activateTool('crop');
   };
 
   // Clear all lines and custom shapes
@@ -678,8 +698,7 @@ function App() {
       const autoScale = Math.min(dimW, dimH) / Math.min(oW, oH);
       setArea(calculateArea(vertices, autoScale));
 
-      setNotification({ show: true, message: `Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).` });
-      setTimeout(() => setNotification({ show: false, message: '' }), 2500);
+      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2500);
     } catch (error) {
       console.error('Auto exterior tracing failed:', error);
       // Non-fatal — user can still trace manually
@@ -857,6 +876,12 @@ function App() {
   }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
 
   useEffect(() => () => terminateDetectionWorker(), []);
+  useEffect(() => () => {
+    if (notifyTimerRef.current) {
+      clearTimeout(notifyTimerRef.current);
+      notifyTimerRef.current = null;
+    }
+  }, []);
 
   // Handle keyboard shortcuts
   useEffect(() => {

@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas';
@@ -74,11 +74,14 @@ const Canvas = React.memo(forwardRef(({
   const isDraggingRef = useRef(false); // Track if any drag operation is in progress
   const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
   const imageSnapAnalyzerRef = useRef(null);
+  const imageSnapAnalyzerSourceRef = useRef(null);
+  const imageSnapAnalyzerLoadingRef = useRef(null);
 
   // Eraser tool state
   const eraserCanvasRef = useRef(null); // Offscreen canvas for erasing
   const isErasingRef = useRef(false);
   const eraserStartPosRef = useRef(null); // For shift-constrained erasing
+  const eraserLastPosRef = useRef(null); // Track previous draw position for interpolation
   const eraserAxisRef = useRef(null); // 'h' or 'v' or null
 
   // Crop tool state
@@ -202,73 +205,93 @@ const Canvas = React.memo(forwardRef(({
 
 
   useEffect(() => {
-    let cancelled = false;
+    imageSnapAnalyzerRef.current = null;
+    imageSnapAnalyzerSourceRef.current = null;
+    imageSnapAnalyzerLoadingRef.current = null;
+  }, [image]);
 
-    const loadAnalyzer = async () => {
-      if (!image) {
-        imageSnapAnalyzerRef.current = null;
-        return;
-      }
+  const ensureImageSnapAnalyzer = useCallback(() => {
+    if (!autoSnapEnabled || !image) {
+      return;
+    }
 
-      try {
-        const analyzer = await createImageSnapAnalyzer(image);
-        if (!cancelled) {
-          imageSnapAnalyzerRef.current = analyzer;
+    const hasCurrentAnalyzer =
+      imageSnapAnalyzerRef.current &&
+      imageSnapAnalyzerSourceRef.current === image;
+    if (hasCurrentAnalyzer) {
+      return;
+    }
+
+    const isCurrentImageLoading =
+      imageSnapAnalyzerLoadingRef.current &&
+      imageSnapAnalyzerSourceRef.current === image;
+    if (isCurrentImageLoading) {
+      return;
+    }
+
+    imageSnapAnalyzerSourceRef.current = image;
+    imageSnapAnalyzerLoadingRef.current = createImageSnapAnalyzer(image)
+      .then((analyzer) => {
+        // Ignore stale resolutions from previous image values.
+        if (imageSnapAnalyzerSourceRef.current !== image) {
+          return;
         }
-      } catch (error) {
+        imageSnapAnalyzerRef.current = analyzer;
+      })
+      .catch((error) => {
         console.error('Failed to prepare image snap analyzer:', error);
-        if (!cancelled) {
+        if (imageSnapAnalyzerSourceRef.current === image) {
           imageSnapAnalyzerRef.current = null;
         }
-      }
-    };
-
-    loadAnalyzer();
-
-    return () => {
-      cancelled = true;
-      imageSnapAnalyzerRef.current = null;
-    };
-  }, [image]);
+      })
+      .finally(() => {
+        if (imageSnapAnalyzerSourceRef.current === image) {
+          imageSnapAnalyzerLoadingRef.current = null;
+        }
+      });
+  }, [autoSnapEnabled, image]);
 
   const findVertexSnapPoint = useCallback((point) => {
     if (!autoSnapEnabled || !point) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findCornerSnap(point);
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findVerticalWall(targetX, y1, y2, { searchRadius });
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = 15) => {
     if (!autoSnapEnabled) {
       return null;
     }
 
+    ensureImageSnapAnalyzer();
     const analyzer = imageSnapAnalyzerRef.current;
     if (!analyzer) {
       return null;
     }
 
     return analyzer.findHorizontalWall(targetY, x1, x2, { searchRadius });
-  }, [autoSnapEnabled]);
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
 
   const snapRoomOverlayPosition = useCallback((overlay) => {
     const width = overlay.x2 - overlay.x1;
@@ -393,6 +416,10 @@ const Canvas = React.memo(forwardRef(({
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingRoom(true);
     if (canvasPos) {
@@ -421,6 +448,10 @@ const Canvas = React.memo(forwardRef(({
     if (canvasPos) {
       dragStartPosRef.current = canvasPos;
     }
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingRoomCorner(corner);
   };
@@ -434,6 +465,10 @@ const Canvas = React.memo(forwardRef(({
     
     lastDraggedVertexRef.current = index;
     lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
+
+    if (autoSnapEnabled) {
+      ensureImageSnapAnalyzer();
+    }
     
     setDraggingVertex(index);
   };
@@ -558,14 +593,19 @@ const Canvas = React.memo(forwardRef(({
     return canvas;
   }, [imageObj]);
 
-  /** Paint a white rectangle centred at (x, y) on the offscreen eraser canvas. */
-  const eraseAt = useCallback((x, y, brushSize) => {
+  /** Erase continuously between two points on the offscreen eraser canvas. */
+  const eraseSegment = useCallback((x0, y0, x1, y1, brushSize) => {
     const canvas = eraserCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const half = brushSize / 2;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(x - half, y - half, brushSize, brushSize);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'square';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
   }, []);
 
   /** Commit the eraser canvas back to the store image and refresh the Konva node. */
@@ -587,10 +627,11 @@ const Canvas = React.memo(forwardRef(({
     eraserCanvasRef.current = initEraserCanvas();
     isErasingRef.current = true;
     eraserStartPosRef.current = pos;
+    eraserLastPosRef.current = pos;
     eraserAxisRef.current = null;
 
     // Paint first stroke
-    eraseAt(pos.x, pos.y, eraserBrushSize);
+    eraseSegment(pos.x, pos.y, pos.x, pos.y, eraserBrushSize);
 
     // Update Konva image from offscreen canvas for immediate visual feedback
     if (stageRef.current) {
@@ -602,7 +643,7 @@ const Canvas = React.memo(forwardRef(({
     }
 
     return true;
-  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseAt]);
+  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseSegment]);
 
   /** Handle eraser mousemove: continue erasing along the drag path. */
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
@@ -631,7 +672,9 @@ const Canvas = React.memo(forwardRef(({
       eraserAxisRef.current = null;
     }
 
-    eraseAt(drawX, drawY, eraserBrushSize);
+    const previousPos = eraserLastPosRef.current ?? { x: drawX, y: drawY };
+    eraseSegment(previousPos.x, previousPos.y, drawX, drawY, eraserBrushSize);
+    eraserLastPosRef.current = { x: drawX, y: drawY };
 
     // Update Konva image live
     if (stageRef.current) {
@@ -643,13 +686,14 @@ const Canvas = React.memo(forwardRef(({
     }
 
     return true;
-  }, [eraserBrushSize, eraseAt]);
+  }, [eraserBrushSize, eraseSegment]);
 
   /** Handle eraser mouseup: commit the erased image to the store. */
   const handleEraserMouseUp = useCallback(() => {
     if (!isErasingRef.current) return false;
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
+    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
     commitEraserCanvas();
     return true;
@@ -1342,6 +1386,7 @@ const Canvas = React.memo(forwardRef(({
           isErasingRef.current = false;
           eraserCanvasRef.current = null;
           eraserStartPosRef.current = null;
+          eraserLastPosRef.current = null;
           eraserAxisRef.current = null;
           // Restore original image object on the Konva Image node
           if (stageRef.current && imageObj) {
@@ -1403,6 +1448,22 @@ const Canvas = React.memo(forwardRef(({
     };
   }, [handleKeyDown]);
 
+  const canPanCanvas = useMemo(() => {
+    if (draggingRoom || draggingRoomCorner || draggingVertex !== null) return false;
+    if (manualEntryMode || eraserToolActive || cropToolActive) return false;
+    if (roomOverlay && !perimeterOverlay) return false; // Vertex placement mode
+    return !isZoomingRef.current;
+  }, [
+    draggingRoom,
+    draggingRoomCorner,
+    draggingVertex,
+    manualEntryMode,
+    eraserToolActive,
+    cropToolActive,
+    roomOverlay,
+    perimeterOverlay,
+  ]);
+
   return (
     <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
@@ -1444,7 +1505,7 @@ const Canvas = React.memo(forwardRef(({
           width={dimensions.width}
           height={dimensions.height}
           onWheel={handleWheel}
-          draggable={!draggingRoom && !draggingRoomCorner && draggingVertex === null && !isZoomingRef.current && !manualEntryMode && !(roomOverlay && !perimeterOverlay) && !eraserToolActive && !cropToolActive}
+          draggable={canPanCanvas}
           onDragStart={handleStageDragStart}
           onDragEnd={handleStageDragEnd}
           onMouseDown={handleStageMouseDown}
