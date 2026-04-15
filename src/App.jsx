@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { shallow } from 'zustand/shallow';
+import { useRef, useEffect, useCallback } from 'react';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
@@ -15,44 +14,9 @@ import {
 } from './utils/detection';
 import useAppStore from './store/appStore';
 import * as undoManager from './store/undoManager';
-
-const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
-const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
-
-// Fields that, when changed, should trigger an autosave.
-// Add new state keys here — no other code needs updating.
-const AUTOSAVE_FIELDS = [
-  'image',
-  'roomOverlay',
-  'perimeterOverlay',
-  'roomDimensions',
-  'area',
-  'scale',
-  'mode',
-  'detectedDimensions',
-  'showSideLengths',
-  'useInteriorWalls',
-  'autoSnapEnabled',
-  'manualEntryMode',
-  'ocrFailed',
-  'unit',
-  'lineToolActive',
-  'measurementLines',
-  'currentMeasurementLine',
-  'drawAreaActive',
-  'customShapes',
-  'currentCustomShape',
-  'perimeterVertices',
-  'tracedBoundaries',
-  'debugDetection',
-  'detectionDebugData',
-  'eraserToolActive',
-  'eraserBrushSize',
-  'cropToolActive',
-];
-
-const autosaveSelector = (state) =>
-  AUTOSAVE_FIELDS.reduce((acc, k) => { acc[k] = state[k]; return acc; }, {});
+import { useAutosave } from './hooks/useAutosave';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useToolManager } from './hooks/useToolManager';
 
 function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
@@ -102,32 +66,23 @@ function App() {
   const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
-  const setLineToolActive = useAppStore((s) => s.setLineToolActive);
-  const setMeasurementLines = useAppStore((s) => s.setMeasurementLines);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
-  const setDrawAreaActive = useAppStore((s) => s.setDrawAreaActive);
-  const setCustomShapes = useAppStore((s) => s.setCustomShapes);
+  const setMeasurementLines = useAppStore((s) => s.setMeasurementLines);
   const setCurrentCustomShape = useAppStore((s) => s.setCurrentCustomShape);
+  const setCustomShapes = useAppStore((s) => s.setCustomShapes);
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
   const setNotification = useAppStore((s) => s.setNotification);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
-  const setHasRestoredState = useAppStore((s) => s.setHasRestoredState);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setDebugDetection = useAppStore((s) => s.setDebugDetection);
-  const setEraserToolActive = useAppStore((s) => s.setEraserToolActive);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
-  const setCropToolActive = useAppStore((s) => s.setCropToolActive);
 
   const resetOverlays = useAppStore((s) => s.resetOverlays);
 
-  const [saveOnExit, setSaveOnExit] = useState(() => {
-    const stored = localStorage.getItem(SAVE_ON_EXIT_KEY);
-    return stored === null ? true : stored === 'true';
-  });
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const notifyTimerRef = useRef(null);
@@ -144,26 +99,29 @@ function App() {
     }, durationMs);
   }, [setNotification]);
 
-  const clearAutosavedDraft = useCallback(() => {
-    localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
-  }, []);
+  // ── Custom hooks ─────────────────────────────────────────────────────────
 
-  const handleSaveOnExitChange = useCallback((enabled) => {
-    setSaveOnExit(enabled);
-    localStorage.setItem(SAVE_ON_EXIT_KEY, String(enabled));
-    if (!enabled) {
-      localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+  const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave(notify);
+
+  const {
+    handleLineToolToggle,
+    handleDrawAreaToggle,
+    handleEraserToolToggle,
+    handleCropToolToggle,
+    handleClearTools,
+  } = useToolManager();
+
+  // Declared after handlePasteImage / handleFileOpen (see below) so the
+  // shortcut hook can close over the stable callback references.
+
+  // ── Cleanup ──────────────────────────────────────────────────────────────
+  useEffect(() => () => terminateDetectionWorker(), []);
+  useEffect(() => () => {
+    if (notifyTimerRef.current) {
+      clearTimeout(notifyTimerRef.current);
+      notifyTimerRef.current = null;
     }
   }, []);
-
-  const saveAutosavedDraft = useCallback((snapshot) => {
-    try {
-      localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch (error) {
-      console.error('Failed to autosave local draft:', error);
-      notify('Autosave unavailable (storage full or blocked).');
-    }
-  }, [notify]);
 
   // Reset entire application
   const handleRestart = () => {
@@ -427,91 +385,6 @@ function App() {
     if (canvasRef.current) {
       canvasRef.current.fitToWindow();
     }
-  };
-
-  const activateTool = useCallback((tool) => {
-    undoManager.save();
-    setLineToolActive(false);
-    setCurrentMeasurementLine(null);
-    setDrawAreaActive(false);
-    setCurrentCustomShape(null);
-    setEraserToolActive(false);
-    setCropToolActive(false);
-
-    switch (tool) {
-      case 'line':
-        setLineToolActive(true);
-        break;
-      case 'drawArea':
-        setDrawAreaActive(true);
-        break;
-      case 'eraser':
-        setEraserToolActive(true);
-        break;
-      case 'crop':
-        setCropToolActive(true);
-        break;
-      default:
-        break;
-    }
-  }, [
-    setCropToolActive,
-    setCurrentCustomShape,
-    setCurrentMeasurementLine,
-    setDrawAreaActive,
-    setEraserToolActive,
-    setLineToolActive,
-  ]);
-
-  // Toggle line tool
-  const handleLineToolToggle = () => {
-    if (lineToolActive) {
-      undoManager.save();
-      setLineToolActive(false);
-      setCurrentMeasurementLine(null);
-      return;
-    }
-    activateTool('line');
-  };
-
-  // Toggle draw area tool
-  const handleDrawAreaToggle = () => {
-    if (drawAreaActive) {
-      undoManager.save();
-      setDrawAreaActive(false);
-      setCurrentCustomShape(null);
-      return;
-    }
-    activateTool('drawArea');
-  };
-
-  // Toggle eraser tool
-  const handleEraserToolToggle = () => {
-    if (eraserToolActive) {
-      undoManager.save();
-      setEraserToolActive(false);
-      return;
-    }
-    activateTool('eraser');
-  };
-
-  // Toggle crop tool
-  const handleCropToolToggle = () => {
-    if (cropToolActive) {
-      undoManager.save();
-      setCropToolActive(false);
-      return;
-    }
-    activateTool('crop');
-  };
-
-  // Clear all lines and custom shapes
-  const handleClearTools = () => {
-    undoManager.save();
-    setMeasurementLines([]);
-    setCurrentMeasurementLine(null);
-    setCustomShapes([]);
-    setCurrentCustomShape(null);
   };
 
   // Handle image update from eraser or crop tool (saves undo point before changing)
@@ -810,176 +683,7 @@ function App() {
     placeOverlay();
   };
 
-  // Restore locally autosaved data on startup (if save-on-exit is enabled)
-  useEffect(() => {
-    const restoreAutosavedDraft = async () => {
-      const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
-      try {
-        const savedStateRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
-        if (savedStateRaw) {
-          const savedState = JSON.parse(savedStateRaw);
-          if (savedState?.image) {
-            useAppStore.getState().restoreFromSaved(savedState);
-            setHasRestoredState(true);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('Failed to restore autosaved draft:', error);
-      }
-
-      setHasRestoredState(true);
-    };
-
-    restoreAutosavedDraft();
-  }, [setHasRestoredState]);
-
-  // Autosave draft to local storage when working state changes (debounced).
-  // Uses Zustand's subscribe to listen for ANY working-state change, replacing
-  // the old useEffect with a 24-item dependency array.
-  const autosaveTimerRef = useRef(null);
-  useEffect(() => {
-    const unsub = useAppStore.subscribe(
-      autosaveSelector,
-      (slice, prevSlice) => {
-        const state = useAppStore.getState();
-        if (!state._hasRestoredState) return;
-        if (!saveOnExit) return;
-
-        if (!slice.image) {
-          clearAutosavedDraft();
-          return;
-        }
-
-        // shallow equality is handled by the subscription itself — if we're
-        // here, at least one autosave-relevant field changed.
-        void prevSlice; // unused but documents intent
-
-        // Debounce: wait 2 seconds of inactivity before writing to localStorage.
-        if (autosaveTimerRef.current) {
-          clearTimeout(autosaveTimerRef.current);
-        }
-
-        autosaveTimerRef.current = setTimeout(() => {
-          saveAutosavedDraft(useAppStore.getState().getAutosaveState());
-        }, 2000);
-      },
-      { equalityFn: shallow },
-    );
-
-    return () => {
-      unsub();
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-      }
-    };
-  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
-
-  useEffect(() => () => terminateDetectionWorker(), []);
-  useEffect(() => () => {
-    if (notifyTimerRef.current) {
-      clearTimeout(notifyTimerRef.current);
-      notifyTimerRef.current = null;
-    }
-  }, []);
-
-  // Handle keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Eraser brush size shortcuts (no modifier keys required)
-      if (!e.ctrlKey && !e.metaKey) {
-        if (e.key === '[' && eraserToolActive) {
-          e.preventDefault();
-          setEraserBrushSize(Math.max(4, eraserBrushSize - 4));
-          return;
-        }
-        if (e.key === ']' && eraserToolActive) {
-          e.preventDefault();
-          setEraserBrushSize(Math.min(200, eraserBrushSize + 4));
-          return;
-        }
-        if (e.key.toLowerCase() === 'o') {
-          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
-            e.preventDefault();
-            const s = useAppStore.getState();
-            s.setShowPanelOptions(!s.showPanelOptions);
-            return;
-          }
-        }
-        if (e.key.toLowerCase() === 'l') {
-          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
-            e.preventDefault();
-            const s = useAppStore.getState();
-            s.setShowSideLengths(!s.showSideLengths);
-            return;
-          }
-        }
-      }
-
-      if (e.ctrlKey || e.metaKey) {
-        const key = e.key.toLowerCase();
-
-        switch (key) {
-          case 'v':
-            e.preventDefault();
-            handlePasteImage();
-            break;
-          case 'o':
-            e.preventDefault();
-            fileInputRef.current?.click();
-            break;
-          case 'z':
-            e.preventDefault();
-            if (e.shiftKey) {
-              undoManager.redo();
-            } else {
-              undoManager.undo();
-            }
-            break;
-          case 'y':
-            e.preventDefault();
-            undoManager.redo();
-            break;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePasteImage, eraserToolActive, eraserBrushSize, setEraserBrushSize]);
-
-  // Handle side mouse buttons for undo (button 3 = back) and redo (button 4 = forward)
-  useEffect(() => {
-    const handleMouseDown = (e) => {
-      if (e.button === 3) {
-        e.preventDefault();
-        undoManager.undo();
-      } else if (e.button === 4) {
-        e.preventDefault();
-        undoManager.redo();
-      }
-    };
-
-    window.addEventListener('mousedown', handleMouseDown);
-    return () => window.removeEventListener('mousedown', handleMouseDown);
-  }, []);
-
-  // Disable right-click context menu unless text is selected
-  useEffect(() => {
-    const handleContextMenu = (e) => {
-      const selection = window.getSelection();
-      const hasTextSelected = selection && selection.toString().length > 0;
-      
-      if (!hasTextSelected) {
-        e.preventDefault();
-      }
-    };
-
-    window.addEventListener('contextmenu', handleContextMenu);
-    return () => window.removeEventListener('contextmenu', handleContextMenu);
-  }, []);
-
-  // ── Stable callback wrappers for inline handlers (avoids re-creating on every render) ──
+  // ── Stable callback wrappers for inline handlers ──────────────────────────
   const handleFileOpen = useCallback(() => fileInputRef.current?.click(), []);
   const handleOptionsToggle = useCallback(() => {
     const s = useAppStore.getState();
@@ -1011,6 +715,15 @@ function App() {
   const handleHelpClose = useCallback(() => setShowHelpModal(false), [setShowHelpModal]);
   const handleSaveUndoPoint = useCallback(() => undoManager.save(), []);
   const handleCancelUndoSave = useCallback(() => undoManager.cancelLastSave(), []);
+
+  // ── Keyboard shortcuts (wired after stable callbacks are defined) ─────────
+  useKeyboardShortcuts({
+    onPaste: handlePasteImage,
+    onFileOpen: handleFileOpen,
+    eraserToolActive,
+    eraserBrushSize,
+    setEraserBrushSize,
+  });
 
   // Desktop UI
   return (
