@@ -12,6 +12,7 @@ const MIN_DIMENSION_FEET = 1;
 const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
 const SHARPEN_AMOUNT = 2.0;
+let cachedWorker = null;
 
 // Highly restricted whitelist to skip logos, long descriptive names, etc.
 // Added characters common to blurry digit approximations.
@@ -441,6 +442,21 @@ const runROIOcr = async (worker, baseCanvas, rois) => {
   return { lines: allLines, words: allWords };
 };
 
+const getWorker = async () => {
+  if (!cachedWorker) {
+    cachedWorker = await Tesseract.createWorker('eng', 1);
+  }
+
+  return cachedWorker;
+};
+
+export const terminateOcrWorker = async () => {
+  if (cachedWorker) {
+    await cachedWorker.terminate();
+    cachedWorker = null;
+  }
+};
+
 export const inferDominantFormat = (dimensions) => {
   if (!dimensions || dimensions.length === 0) return null;
   let counts = { inches: 0, decimal: 0, meters: 0 };
@@ -463,7 +479,7 @@ export const detectAllDimensions = async (imageDataUrl) => {
     const sharpened = sharpen(stretched, scaled.width, scaled.height, SHARPEN_AMOUNT);
     const optimizedCanvas = grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, otsuThreshold(sharpened));
 
-    const worker = await Tesseract.createWorker('eng', 1);
+    const worker = await getWorker();
     
     await worker.setParameters({
       tessedit_char_whitelist: OCR_CHAR_WHITELIST,
@@ -482,8 +498,6 @@ export const detectAllDimensions = async (imageDataUrl) => {
       const { lines: rl, words: rw } = await runROIOcr(worker, optimizedCanvas, rois);
       roiLines = rl; roiWords = rw;
     }
-
-    await worker.terminate();
 
     const merged = deduplicateResults([...initialResults, ...detectFromLines(roiLines), ...detectFromSpatialWords(roiWords)]);
 
