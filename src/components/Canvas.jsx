@@ -1467,7 +1467,16 @@ const Canvas = React.memo(forwardRef(({
               />
             )}
 
-            {/* Perimeter Overlay - Outline and vertices with side-length labels */}
+            {/* Room Overlay - Rendered below the exterior wall (perimeter) overlay */}
+            <RoomOverlayLayer
+              roomOverlay={roomOverlay}
+              scale={scale}
+              debugDetection={debugDetection}
+              onRoomMouseDown={handleRoomMouseDown}
+              onRoomCornerMouseDown={handleRoomCornerMouseDown}
+            />
+
+            {/* Perimeter Overlay - Outline and vertices with side-length labels (on top of room overlay) */}
             <PerimeterLayer
               perimeterOverlay={perimeterOverlay}
               scale={scale}
@@ -1480,15 +1489,6 @@ const Canvas = React.memo(forwardRef(({
               onVertexDragEnd={handleVertexDragEnd}
               onDeletePerimeterVertex={onDeletePerimeterVertex}
               onDoubleClick={handleStageDoubleClick}
-            />
-
-            {/* Room Overlay - Render above perimeter line but below perimeter vertices */}
-            <RoomOverlayLayer
-              roomOverlay={roomOverlay}
-              scale={scale}
-              debugDetection={debugDetection}
-              onRoomMouseDown={handleRoomMouseDown}
-              onRoomCornerMouseDown={handleRoomCornerMouseDown}
             />
 
             {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
