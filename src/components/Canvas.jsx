@@ -1266,7 +1266,6 @@ const Canvas = React.memo(forwardRef(({
               onVertexDrag={handleVertexDrag}
               onVertexDragEnd={handleVertexDragEnd}
               onDeletePerimeterVertex={onDeletePerimeterVertex}
-              onDoubleClick={handleStageDoubleClick}
             />
 
             {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (

@@ -247,7 +247,6 @@ const PerimeterLayer = ({
   onVertexDrag,
   onVertexDragEnd,
   onDeletePerimeterVertex,
-  onDoubleClick,
 }) => {
   const targetVertices = perimeterOverlay?.vertices;
 
@@ -273,14 +272,16 @@ const PerimeterLayer = ({
   return (
     <>
       {/* Perimeter Outline */}
+      {/* listening={false}: the filled polygon must not intercept mouse events so
+          that the room overlay Rect below it remains interactable. Double-click
+          for vertex insertion is handled at the Stage level via onDblClick. */}
       <Line
         points={renderVertices.flatMap(v => [v.x, v.y])}
         stroke="#BD93F9"
         strokeWidth={2 / scale}
         closed={true}
         fill="rgba(189, 147, 249, 0.15)"
-        onDblClick={onDoubleClick}
-        onDblTap={onDoubleClick}
+        listening={false}
       />
 
       {/* Perimeter Vertices – hidden during animation for visual clarity */}
