@@ -96,7 +96,7 @@ const Toolbar = ({
             title="Switch to manual outline mode"
           >
             <LayoutList className="w-3.5 h-3.5" />
-            <span>Manual Mode</span>
+            <span>Manual Trace</span>
           </button>
         )}
 
