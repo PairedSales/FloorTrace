@@ -136,5 +136,43 @@ export function useAutosave(notify) {
     };
   }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
 
+  // Flush current working state immediately when the tab is being hidden or
+  // unloaded so accidental exits do not lose the most recent edits.
+  useEffect(() => {
+    const flushAutosaveNow = () => {
+      const state = useAppStore.getState();
+      if (!state._hasRestoredState) return;
+
+      if (!saveOnExit) {
+        clearAutosavedDraft();
+        return;
+      }
+
+      const snapshot = state.getAutosaveState();
+      if (!snapshot.image) {
+        clearAutosavedDraft();
+        return;
+      }
+
+      saveAutosavedDraft(snapshot);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushAutosaveNow();
+      }
+    };
+
+    window.addEventListener('beforeunload', flushAutosaveNow);
+    window.addEventListener('pagehide', flushAutosaveNow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', flushAutosaveNow);
+      window.removeEventListener('pagehide', flushAutosaveNow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
+
   return { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft };
 }
