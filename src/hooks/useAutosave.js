@@ -5,6 +5,7 @@ import { AUTOSAVE_FIELDS } from '../store/appStore';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
+const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
 
 // Selector: pick only the autosave-relevant fields from the store.
 const autosaveSelector = (state) =>
@@ -24,6 +25,7 @@ const autosaveSelector = (state) =>
  */
 export function useAutosave(notify) {
   const setHasRestoredState = useAppStore((s) => s.setHasRestoredState);
+  const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
 
   // ── save-on-exit preference (persisted in localStorage) ──────────────────
   const [saveOnExit, setSaveOnExit] = useState(() => {
@@ -58,14 +60,21 @@ export function useAutosave(notify) {
     const restoreAutosavedDraft = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       try {
+        const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
         const savedStateRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
         if (savedStateRaw) {
           const savedState = JSON.parse(savedStateRaw);
           if (savedState?.image) {
             useAppStore.getState().restoreFromSaved(savedState);
+            if (typeof savedState.useInteriorWalls === 'boolean') {
+              localStorage.setItem(WALL_MODE_KEY, String(savedState.useInteriorWalls));
+            }
             setHasRestoredState(true);
             return;
           }
+        }
+        if (savedWallModeRaw === 'true' || savedWallModeRaw === 'false') {
+          setUseInteriorWalls(savedWallModeRaw === 'true');
         }
       } catch (error) {
         console.error('Failed to restore autosaved draft:', error);
@@ -74,7 +83,19 @@ export function useAutosave(notify) {
     };
 
     restoreAutosavedDraft();
-  }, [setHasRestoredState]);
+  }, [setHasRestoredState, setUseInteriorWalls]);
+
+  // Persist wall mode preference independently so it survives when no image
+  // draft is present.
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(
+      (state) => state.useInteriorWalls,
+      (value) => {
+        localStorage.setItem(WALL_MODE_KEY, String(value));
+      },
+    );
+    return () => unsub();
+  }, []);
 
   // ── Debounced autosave on working-state changes ───────────────────────────
   const autosaveTimerRef = useRef(null);
