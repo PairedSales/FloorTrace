@@ -111,11 +111,10 @@ const Canvas = React.memo(forwardRef(({
   });
 
   const eraser = useEraserTool({
-    imageObj,
+    perimeterOverlay,
     eraserToolActive,
     eraserBrushSize,
-    stageRef,
-    onImageUpdate,
+    onPerimeterUpdate,
     getCanvasCoords,
   });
 
