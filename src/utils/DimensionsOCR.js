@@ -8,13 +8,17 @@ import {
   grayToThresholdedCanvas
 } from './imagePreprocessor';
 
-const OCR_CHAR_WHITELIST = `0123456789.xXmMftFT'"`;
+const MIN_DIMENSION_FEET = 1;
+const MAX_DIMENSION_FEET = 250;
 const MIN_WORD_CONFIDENCE = 20;
-const VALID_MIN_DIMENSION = 2;
-const VALID_MAX_DIMENSION = 100;
 const SHARPEN_AMOUNT = 2.0;
 let cachedWorker = null;
 
+// Highly restricted whitelist to skip logos, long descriptive names, etc.
+// Added characters common to blurry digit approximations.
+const OCR_CHAR_WHITELIST = "0123456789'\"ftxmX .,-\\`|/I";
+
+// Limit max scale to keep operations fast
 const estimateScaleFactor = (img) => {
   const maxDim = Math.max(img.width, img.height);
   if (maxDim <= 2500) return 1.0;
@@ -34,278 +38,415 @@ const scaleCanvas = (img, factor) => {
   return canvas;
 };
 
-// A. preprocessing enhancement
-export const preprocess = (imageData, width, height, { morphCleanup = true } = {}) => {
-  const gray = toGrayscale(imageData);
-  const stretched = contrastStretch(gray);
-  const sharpened = sharpen(stretched, width, height, SHARPEN_AMOUNT);
-  const threshold = otsuThreshold(sharpened);
-  const binary = new Uint8ClampedArray(sharpened.length);
+// ---------------------------------------------------------------------------
+// OCR text normalisation
+// ---------------------------------------------------------------------------
 
-  for (let i = 0; i < sharpened.length; i++) {
-    // invert so text pixels are 255, background is 0
-    binary[i] = sharpened[i] < threshold ? 255 : 0;
-  }
-
-  if (morphCleanup) {
-    // light horizontal closing to reconnect broken characters
-    const closed = new Uint8ClampedArray(binary.length);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let maxVal = 0;
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= width) continue;
-          maxVal = Math.max(maxVal, binary[y * width + xx]);
-        }
-        closed[y * width + x] = maxVal;
-      }
-    }
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let minVal = 255;
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= width) continue;
-          minVal = Math.min(minVal, closed[y * width + xx]);
-        }
-        binary[y * width + x] = minVal;
-      }
-    }
-  }
-
-  const vis = new Uint8ClampedArray(binary.length);
-  for (let i = 0; i < binary.length; i++) vis[i] = binary[i] ? 0 : 255;
-  const canvas = grayToThresholdedCanvas(vis, width, height, 128);
-  return { binary, canvas };
-};
-
-// D. strong normalization layer
-export const normalize_text = (text) => {
+const normalizeOcrText = (text) => {
   if (!text) return '';
-  return String(text)
-    .replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'")
-    .replace(/[\u201C\u201D\u02DD]/g, '"')
-    .replace(/''/g, '"')
-    .replace(/[\u00D7\u2715\u2716]/g, 'x')
-    .replace(/\bby\b/gi, 'x')
-    .replace(/(\d)\s*,\s*(?=\d)/g, `$1' `)
-    .toLowerCase()
-    .replace(/(\d)(ft|feet|in|m)\b/g, '$1 $2')
-    .replace(/\b(ft|feet|in|m)(\d)/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim();
+
+  let s = text;
+
+  // Smart / curly quotes / backticks -> straight quotes/apostrophes
+  s = s.replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'");
+  s = s.replace(/[\u201C\u201D\u02DD]/g, '"');
+  s = s.replace(/`/g, "'");
+  // Consecutive marks to inches
+  s = s.replace(/''/g, '"');
+  s = s.replace(/,,/g, '"');
+
+  // Convert unicode multiplication signs and 'by' to standard lowercase 'x'
+  s = s.replace(/[\u00D7\u2715\u2716\u00D8]/g, 'x');
+  s = s.replace(/\b(?:by|BY|By)\b/g, 'x');
+
+  // Common OCR misreadings of the foot mark (')
+  s = s.replace(/(\d)\s*[,·]\s*(?=\d)/g, "$1' ");
+  s = s.replace(/(\d)\s*[,·]\s*$/g, "$1'");
+
+  // Lowercase everything
+  s = s.toLowerCase();
+
+  // Fix blurry artifacts where | / I l are registered inside numbers as '1'
+  s = s.replace(/([0-9])[li|I/](?![a-z])/g, '$11');
+  s = s.replace(/[li|I/](?![a-z])([0-9])/g, '1$1');
+  s = s.replace(/(?:^|\s|\b)[|/]([0-9])/g, '1$1');
+  s = s.replace(/([0-9])[|/](?:$|\s|\b)/g, '$11');
+
+  // General number typos
+  s = s.replace(/([0-9])o(?=\s|'|"|$)/g, '$10');
+  s = s.replace(/(?:^|\s)o([0-9])/g, ' 0$1');
+  s = s.replace(/([0-9])s([0-9])/g, '$15$2');
+  s = s.replace(/([0-9])b([0-9])/g, '$18$2');
+  s = s.replace(/([0-9])z([0-9])/g, '$12$2');
+
+  // Ensure a space between a digit and a unit keyword
+  s = s.replace(/(\d)(ft|feet|in|m)\b/g, '$1 $2');
+  s = s.replace(/\b(ft|feet|in|m)(\d)/g, '$1 $2');
+
+  // Collapse whitespace
+  s = s.replace(/\s+/g, ' ');
+
+  return s.trim();
 };
 
-export const normalizeOcrText = normalize_text;
+// ---------------------------------------------------------------------------
+// Dimension parsing
+// ---------------------------------------------------------------------------
 
-// B. detect text regions first (horizontal + min size)
-export const detect_text_regions = (binary, width, height) => {
-  const visited = new Uint8Array(width * height);
-  const boxes = [];
-  const minArea = Math.max(60, Math.floor((width * height) / 20000));
+const isReasonable = (v) => Number.isFinite(v) && v >= MIN_DIMENSION_FEET && v <= MAX_DIMENSION_FEET;
 
-  const queue = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      if (visited[idx] || binary[idx] === 0) continue;
+const parseSingleToken = (token) => {
+  const t = normalizeOcrText(token);
 
-      let minX = x, minY = y, maxX = x, maxY = y, area = 0;
-      visited[idx] = 1;
-      queue.push(idx);
-
-      while (queue.length) {
-        const q = queue.pop();
-        const qx = q % width;
-        const qy = (q - qx) / width;
-        area++;
-        if (qx < minX) minX = qx;
-        if (qy < minY) minY = qy;
-        if (qx > maxX) maxX = qx;
-        if (qy > maxY) maxY = qy;
-
-        for (let ny = qy - 1; ny <= qy + 1; ny++) {
-          for (let nx = qx - 1; nx <= qx + 1; nx++) {
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-            const nidx = ny * width + nx;
-            if (visited[nidx] || binary[nidx] === 0) continue;
-            visited[nidx] = 1;
-            queue.push(nidx);
-          }
-        }
-      }
-
-      if (area < minArea) continue;
-      const bw = maxX - minX + 1;
-      const bh = maxY - minY + 1;
-      if (bw <= bh || bw < 18 || bh < 8) continue;
-      boxes.push({ x: minX, y: minY, width: bw, height: bh });
+  // Feet inches with tick (4'5", 10' 2", 12'5)
+  const feetInches = t.match(/^(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?\s*$/);
+  if (feetInches) {
+    const feet = parseInt(feetInches[1], 10);
+    const inches = parseInt(feetInches[2], 10);
+    if (inches < 12) {
+      const val = feet + inches / 12;
+      if (isReasonable(val)) return { value: val, format: 'inches' };
     }
   }
 
-  boxes.sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  return boxes;
-};
-
-const cropCanvas = (srcCanvas, box) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = box.width;
-  canvas.height = box.height;
-  canvas.getContext('2d').drawImage(srcCanvas, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
-  return canvas;
-};
-
-export const ocr_region = async (worker, imageCrop) => {
-  await worker.setParameters({
-    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
-    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
-    preserve_interword_spaces: '1'
-  });
-  const result = await worker.recognize(imageCrop, {}, { blocks: false });
-  return result?.data?.text || '';
-};
-
-export const parse_dimension = (match) => {
-  const { kind } = match;
-  if (kind === 'feet_inches') {
-    const wFeet = parseFloat(match.groups[1]);
-    const wInches = parseFloat(match.groups[2] || '0');
-    const hFeet = parseFloat(match.groups[3]);
-    const hInches = parseFloat(match.groups[4] || '0');
-    return {
-      width: wFeet + (wInches / 12),
-      height: hFeet + (hInches / 12),
-      unit: 'ft'
-    };
+  // Feet only with tick (12')
+  const feetOnly = t.match(/^(\d{1,3})\s*'\s*$/);
+  if (feetOnly) {
+    const val = parseInt(feetOnly[1], 10);
+    if (isReasonable(val)) return { value: val, format: 'inches' };
   }
 
-  if (kind === 'decimal_ft') {
-    return {
-      width: parseFloat(match.groups[1]),
-      height: parseFloat(match.groups[3]),
-      unit: 'ft'
-    };
+  // Decimal feet (1.2, 12.75 ft)
+  const decimalFt = t.match(/^(\d{1,3}\.\d+)\s*(?:ft|feet|')?\s*$/);
+  if (decimalFt) {
+    const val = parseFloat(decimalFt[1]);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
   }
 
-  if (kind === 'meters') {
-    return {
-      width: parseFloat(match.groups[1]),
-      height: parseFloat(match.groups[3]),
-      unit: 'm'
-    };
+  // Integer explicit feet (12 ft)
+  const intFt = t.match(/^(\d{1,3})\s*(?:ft|feet)\s*$/);
+  if (intFt) {
+    const val = parseInt(intFt[1], 10);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
+  }
+
+  // Explicit ft/in (1 ft 3 in)
+  const explicitFtIn = t.match(/^(\d{1,3})\s*(?:ft|feet)\s+(\d{1,2})\s*(?:in|inch|inches)?\s*$/);
+  if (explicitFtIn) {
+    const feet = parseInt(explicitFtIn[1], 10);
+    const inches = parseInt(explicitFtIn[2], 10);
+    if (inches < 12) {
+      const val = feet + inches / 12;
+      if (isReasonable(val)) return { value: val, format: 'inches' };
+    }
+  }
+
+  // Meters (12.50 m)
+  const meters = t.match(/^(\d{1,3}(?:\.\d+)?)\s*(?:m|meter|meters)\s*$/);
+  if (meters) {
+    const metersVal = parseFloat(meters[1]);
+    const val = metersVal * 3.28084; // Convert meters to feet internally for drawing
+    if (isReasonable(val)) return { value: val, format: 'meters' };
+  }
+
+  // Blurry/Missing symbols
+  const spacedPair = t.match(/^(\d{1,3})\s+(\d{1,2})$/);
+  if (spacedPair) {
+    const a = parseInt(spacedPair[1], 10);
+    const b = parseInt(spacedPair[2], 10);
+    if (b < 12 && isReasonable(a + b / 12)) return { value: a + b / 12, format: 'inches' };
+  }
+
+  const noisyOcr = t.match(/^(\d{3,4})$/);
+  if (noisyOcr) {
+    const num = noisyOcr[1];
+    if (num.length === 4) {
+      const lastTwo = parseInt(num.slice(-2), 10);
+      const ftPart = parseInt(num.slice(0, -2), 10);
+      if (lastTwo < 12 && isReasonable(ftPart + lastTwo / 12)) return { value: ftPart + lastTwo / 12, format: 'inches' };
+    }
+    const lastOne = parseInt(num.slice(-1), 10);
+    const ftPart = parseInt(num.slice(0, -1), 10);
+    if (lastOne < 12 && isReasonable(ftPart + lastOne / 12)) return { value: ftPart + lastOne / 12, format: 'inches' };
+    
+    const plain = parseInt(num, 10);
+    if (isReasonable(plain)) return { value: plain, format: 'decimal' };
+  }
+
+  const plainFt = t.match(/^(\d{1,2})$/);
+  if (plainFt) {
+    const val = parseInt(plainFt[1], 10);
+    if (isReasonable(val)) return { value: val, format: 'decimal' };
   }
 
   return null;
 };
 
-// E. multi-pattern regex extraction
-export const extract_dimensions = (text) => {
-  const normalized = normalize_text(text);
-  if (!normalized.includes('x')) return [];
+const parseDimensionLine = (line) => {
+  const norm = normalizeOcrText(line);
 
-  const patterns = [
-    {
-      kind: 'feet_inches',
-      regex: /(\d+)\s*'\s*(\d+)\s*"\s*x\s*(\d+)\s*'\s*(\d+)\s*"/g
-    },
-    {
-      kind: 'feet_inches',
-      regex: /(\d+)\s*'\s*(\d+)?\s*"?\s*x\s*(\d+)\s*'\s*(\d+)?\s*"?/g
-    },
-    {
-      kind: 'decimal_ft',
-      regex: /(\d+(\.\d+)?)\s*ft\s*x\s*(\d+(\.\d+)?)\s*ft/g
-    },
-    {
-      kind: 'decimal_ft',
-      regex: /(\d+(\.\d+)?)\s*ft?\s*x\s*(\d+(\.\d+)?)\s*ft?/g
-    },
-    {
-      kind: 'feet_inches',
-      regex: /(\d+)\s*(?:ft|feet)\s*(\d+)\s*(?:in|inch|inches)\s*x\s*(\d+)\s*(?:ft|feet)\s*(\d+)\s*(?:in|inch|inches)/g
-    },
-    {
-      kind: 'meters',
-      regex: /(\d+(\.\d+)?)\s*m\s*x\s*(\d+(\.\d+)?)\s*m/g
+  // Split on separators: x, hyphen
+  for (const match of norm.matchAll(/\s*[xX\-]\s*/g)) {
+    const left = norm.slice(0, match.index).trim();
+    const right = norm.slice(match.index + match[0].length).trim();
+    if (!left || !right) continue;
+
+    let lp = parseSingleToken(left);
+    let rp = parseSingleToken(right);
+
+    // Strip garbage room-label prefixes
+    if (!lp) {
+      for (let i = 1; i < left.length; i++) {
+        if (!/[0-9]/.test(left[i])) continue;
+        const sub = left.slice(i).trim();
+        if (sub) {
+          const parsed = parseSingleToken(sub);
+          if (parsed) { lp = parsed; break; }
+        }
+      }
     }
-  ];
 
-  const out = [];
-  for (const p of patterns) {
-    for (const m of normalized.matchAll(p.regex)) {
-      const parsed = parse_dimension({ kind: p.kind, groups: m });
-      if (!parsed) continue;
-      out.push({ ...parsed, raw: m[0] });
+    if (!rp) {
+      for (let i = right.length - 2; i >= 0; i--) {
+        if (!/[0-9]/.test(right[i])) continue;
+        const sub = right.slice(0, i + 1).trim();
+        if (sub) {
+          const parsed = parseSingleToken(sub);
+          if (parsed) { rp = parsed; break; }
+        }
+      }
     }
-  }
 
-  if (out.length > 0) return out;
+    if (lp && rp) {
+      const formatGroup = [lp.format, rp.format];
+      let resolvedFormat = 'decimal';
+      if (formatGroup.includes('inches')) resolvedFormat = 'inches';
+      else if (formatGroup.includes('meters')) resolvedFormat = 'meters';
 
-  // structure-aware fallback for cases like 149 x 112 => 14'9" x 11'2"
-  const pairFallback = normalized.match(/\b(\d{3,4})\s*x\s*(\d{3,4})\b/);
-  if (pairFallback) {
-    const parsePacked = (v) => {
-      if (v.length === 3) return { ft: parseInt(v.slice(0, 2), 10), inch: parseInt(v.slice(2), 10) };
-      return { ft: parseInt(v.slice(0, 2), 10), inch: parseInt(v.slice(2), 10) };
-    };
-    const a = parsePacked(pairFallback[1]);
-    const b = parsePacked(pairFallback[2]);
-    if (a.inch < 12 && b.inch < 12) {
-      out.push({
-        width: a.ft + (a.inch / 12),
-        height: b.ft + (b.inch / 12),
-        unit: 'ft',
-        raw: pairFallback[0]
-      });
+      return {
+        width: lp.value,
+        height: rp.value,
+        text: norm,
+        format: resolvedFormat
+      };
     }
   }
 
-  return out;
+  // Backup: Space-separated two groups
+  const twoFi = norm.match(/(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?\s{1,}(\d{1,3})\s*'\s*-?\s*(\d{1,2})\s*"?/);
+  if (twoFi) {
+    const w = parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12;
+    const h = parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12;
+    if (isReasonable(w) && isReasonable(h)) {
+      return { width: w, height: h, text: twoFi[0], format: 'inches' };
+    }
+  }
+
+  const decFt = norm.match(/(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet|m)\s+(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet|m)/);
+  if (decFt) {
+    const isMeters = norm.includes('m');
+    let w = parseFloat(decFt[1]);
+    let h = parseFloat(decFt[2]);
+    if (isMeters) {
+        w *= 3.28084;
+        h *= 3.28084;
+    }
+    if (isReasonable(w) && isReasonable(h)) {
+      return { width: w, height: h, text: decFt[0], format: isMeters ? 'meters' : 'decimal' };
+    }
+  }
+
+  return null;
 };
 
-const isValidDetection = (item) => (
-  Number.isFinite(item.width) && Number.isFinite(item.height) &&
-  item.width >= VALID_MIN_DIMENSION && item.height >= VALID_MIN_DIMENSION &&
-  item.width <= VALID_MAX_DIMENSION && item.height <= VALID_MAX_DIMENSION
-);
+// ---------------------------------------------------------------------------
+// Detection Engine
+// ---------------------------------------------------------------------------
 
-// H. dedup
-export const deduplicate = (results) => {
+const collectLinesAndWords = (result) => {
+  const lines = [];
+  const words = [];
+  if (!result?.data?.blocks) return { lines, words };
+
+  for (const block of result.data.blocks) {
+    if (!block.paragraphs) continue;
+    for (const para of block.paragraphs) {
+      if (!para.lines) continue;
+      for (const line of para.lines) {
+        lines.push(line);
+        if (line.words) words.push(...line.words);
+      }
+    }
+  }
+  return { lines, words };
+};
+
+const detectFromLines = (lines) => {
+  const results = [];
   const seen = new Set();
-  const deduped = [];
-  for (const r of results) {
-    const key = `${Math.round(r.width * 10) / 10}:${Math.round(r.height * 10) / 10}:${r.unit}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push({
-      ...r,
-      width: Math.round(r.width * 10) / 10,
-      height: Math.round(r.height * 10) / 10
-    });
+
+  for (const line of lines) {
+    if (line.bbox) {
+      const bw = line.bbox.x1 - line.bbox.x0;
+      const bh = line.bbox.y1 - line.bbox.y0;
+      if (bh > bw) continue; // Ignore vertical text
+    }
+
+    const rawText = line.words ? line.words.map(w => w.text).join(' ') : (line.text || '');
+    const norm = normalizeOcrText(rawText);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+
+    const parsed = parseDimensionLine(norm);
+    if (!parsed) continue;
+
+    const bbox = line.bbox
+      ? { x: line.bbox.x0, y: line.bbox.y0, width: line.bbox.x1 - line.bbox.x0, height: line.bbox.y1 - line.bbox.y0 }
+      : null;
+
+    const avgConf = line.words
+      ? line.words.reduce((s, w) => s + (w.confidence || 0), 0) / line.words.length
+      : 50;
+
+    results.push({ ...parsed, bbox, confidence: avgConf });
   }
-  return deduped;
+
+  return results;
 };
 
-const makeSlidingWindows = (width, height) => {
-  const windows = [];
-  const w = Math.max(260, Math.floor(width * 0.35));
-  const h = Math.max(40, Math.floor(height * 0.08));
-  const stepX = Math.max(90, Math.floor(w * 0.45));
-  const stepY = Math.max(24, Math.floor(h * 0.5));
-
-  for (let y = 0; y < height - h; y += stepY) {
-    for (let x = 0; x < width - w; x += stepX) {
-      windows.push({ x, y, width: w, height: h });
+// Fast heuristic to find groups of contiguous words horizontally aligned
+const detectFromSpatialWords = (words) => {
+  const digits = [];
+  for (const word of words) {
+    if (!word.text || !word.bbox || word.confidence < MIN_WORD_CONFIDENCE) continue;
+    const wW = word.bbox.x1 - word.bbox.x0;
+    const wH = word.bbox.y1 - word.bbox.y0;
+    if (wH > wW * 2) continue; // Skip strictly vertical
+    const t = normalizeOcrText(word.text);
+    if (/\d/.test(t)) {
+      digits.push({ text: t, bbox: word.bbox, confidence: word.confidence });
     }
   }
-  return windows;
+
+  if (digits.length < 2) return [];
+
+  const results = [];
+  const used = new Set();
+  
+  const horizontalBand = (a, b) => {
+    const aCy = (a.bbox.y0 + a.bbox.y1) / 2;
+    const bCy = (b.bbox.y0 + b.bbox.y1) / 2;
+    const tolerance = Math.max(a.bbox.y1 - a.bbox.y0, b.bbox.y1 - b.bbox.y0) * 1.2;
+    return Math.abs(aCy - bCy) < tolerance;
+  };
+
+  for (let i = 0; i < digits.length; i++) {
+    if (used.has(i)) continue;
+    const band = [digits[i]];
+    const bandIndices = [i];
+
+    for (let j = i + 1; j < digits.length; j++) {
+      if (used.has(j) || !horizontalBand(digits[i], digits[j])) continue;
+      // Allow fairly wide gaps since some labels have huge spaces between numbers
+      band.push(digits[j]);
+      bandIndices.push(j);
+    }
+
+    if (band.length >= 2) {
+      const combined = band.map(w => w.text).join(' ');
+      const parsed = parseDimensionLine(combined);
+      if (parsed) {
+        const minX = Math.min(...band.map(w => w.bbox.x0));
+        const minY = Math.min(...band.map(w => w.bbox.y0));
+        const maxX = Math.max(...band.map(w => w.bbox.x1));
+        const maxY = Math.max(...band.map(w => w.bbox.y1));
+        results.push({
+          ...parsed,
+          bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+          confidence: band.reduce((s, w) => s + w.confidence, 0) / band.length
+        });
+        bandIndices.forEach(idx => used.add(idx));
+      }
+    }
+  }
+
+  return results;
+};
+
+// ---------------------------------------------------------------------------
+// Merge / Dedup / Zoom
+// ---------------------------------------------------------------------------
+
+const bboxOverlap = (a, b) => {
+  if (!a || !b) return false;
+  const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const overlapY = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  const minArea = Math.min(a.width * a.height, b.width * b.height);
+  return minArea > 0 && (overlapX * overlapY) / minArea > 0.3;
+};
+
+const deduplicateResults = (results) => {
+  const sorted = [...results].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  const kept = [];
+  for (const r of sorted) {
+    const wDiff = k => Math.abs(k.width - r.width) / Math.max(k.width, 1) < 0.05;
+    const hDiff = k => Math.abs(k.height - r.height) / Math.max(k.height, 1) < 0.05;
+    if (!kept.some(k => wDiff(k) && hDiff(k) && bboxOverlap(k.bbox, r.bbox))) kept.push(r);
+  }
+  return kept;
+};
+
+const extractROIs = (results, imgWidth, imgHeight) => {
+  const rois = [];
+  for (const r of results) {
+    if (!r.bbox) continue;
+    const padX = Math.max(10, Math.round(r.bbox.width * 0.15));
+    const padY = Math.max(6, Math.round(r.bbox.height * 0.5));
+    const x = Math.max(0, r.bbox.x - padX);
+    const y = Math.max(0, r.bbox.y - padY);
+    const w = Math.min(imgWidth, r.bbox.x + r.bbox.width + padX) - x;
+    const h = Math.min(imgHeight, r.bbox.y + r.bbox.height + padY) - y;
+    if (w > 10 && h > 5) rois.push({ x, y, w, h });
+  }
+  return rois;
+};
+
+const runROIOcr = async (worker, baseCanvas, rois) => {
+  const allLines = [], allWords = [];
+  await worker.setParameters({
+    tessedit_char_whitelist: OCR_CHAR_WHITELIST,
+    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+    preserve_interword_spaces: '1'
+  });
+
+  for (const roi of rois) {
+    const canvas = document.createElement('canvas');
+    canvas.width = roi.w;
+    canvas.height = roi.h;
+    canvas.getContext('2d').drawImage(baseCanvas, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h);
+    
+    const result = await worker.recognize(canvas, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    // Shift coords back
+    const shift = (b) => {
+        if(b) {
+            b.x0 += roi.x; b.x1 += roi.x;
+            b.y0 += roi.y; b.y1 += roi.y;
+        }
+    };
+    lines.forEach(l => { shift(l.bbox); if(l.words) l.words.forEach(w => shift(w.bbox)); });
+    words.forEach(w => shift(w.bbox));
+    allLines.push(...lines);
+    allWords.push(...words);
+  }
+  return { lines: allLines, words: allWords };
 };
 
 const getWorker = async () => {
   if (!cachedWorker) {
     cachedWorker = await Tesseract.createWorker('eng', 1);
   }
+
   return cachedWorker;
 };
 
@@ -316,177 +457,65 @@ export const terminateOcrWorker = async () => {
   }
 };
 
-export const parseSingleToken = (token) => {
-  const normalized = normalize_text(token);
-
-  const fi = normalized.match(/^\s*(\d+)\s*'\s*(\d+)?\s*"?\s*$/);
-  if (fi) {
-    const feet = parseInt(fi[1], 10);
-    const inches = parseInt(fi[2] || '0', 10);
-    if (inches < 12) return { value: feet + inches / 12, format: 'inches' };
-  }
-
-  const decFt = normalized.match(/^(\d+(?:\.\d+)?)\s*ft?$/);
-  if (decFt) return { value: parseFloat(decFt[1]), format: 'decimal' };
-
-  const decimalTick = normalized.match(/^(\d+(?:\.\d+)?)\s*'\s*$/);
-  if (decimalTick) return { value: parseFloat(decimalTick[1]), format: 'decimal' };
-
-  const explicitFtIn = normalized.match(/^(\d+)\s*(?:ft|feet)\s+(\d+)\s*(?:in|inch|inches)$/);
-  if (explicitFtIn) {
-    const feet = parseInt(explicitFtIn[1], 10);
-    const inches = parseInt(explicitFtIn[2], 10);
-    if (inches < 12) return { value: feet + inches / 12, format: 'inches' };
-  }
-
-  const spacedPair = normalized.match(/^(\d{1,3})\s+(\d{1,2})$/);
-  if (spacedPair) {
-    const feet = parseInt(spacedPair[1], 10);
-    const inches = parseInt(spacedPair[2], 10);
-    if (inches < 12) return { value: feet + inches / 12, format: 'inches' };
-  }
-
-  const meters = normalized.match(/^(\d+(?:\.\d+)?)\s*m$/);
-  if (meters) return { value: parseFloat(meters[1]) * 3.28084, format: 'meters' };
-
-  const packed = normalized.match(/^(\d{3,4})$/);
-  if (packed) {
-    const v = packed[1];
-    const feet = parseInt(v.slice(0, v.length === 4 ? 2 : v.length - 1), 10);
-    const inches = parseInt(v.slice(v.length === 4 ? 2 : v.length - 1), 10);
-    if (inches < 12) return { value: feet + inches / 12, format: 'inches' };
-  }
-
-  const plain = normalized.match(/^(\d{1,2})$/);
-  if (plain) return { value: parseInt(plain[1], 10), format: 'decimal' };
-
-  return null;
-};
-
-export const parseDimensionLine = (line) => {
-  const normalized = normalize_text(line);
-  const parsed = extract_dimensions(line)[0];
-  if (!parsed) {
-    const parts = normalized.split(/\s*x\s/);
-    if (parts.length === 2) {
-      const l = parseSingleToken(parts[0].trim());
-      const r = parseSingleToken(parts[1].trim());
-      if (l && r) {
-        return {
-          width: l.value,
-          height: r.value,
-          text: normalized,
-          format: l.format === 'inches' || r.format === 'inches' ? 'inches' : 'decimal'
-        };
-      }
-    }
-
-    const twoFi = normalized.match(/(\d+)\s*'\s*(\d+)\s*"?\s+(\d+)\s*'\s*(\d+)\s*"?/);
-    if (twoFi) {
-      return {
-        width: parseInt(twoFi[1], 10) + parseInt(twoFi[2], 10) / 12,
-        height: parseInt(twoFi[3], 10) + parseInt(twoFi[4], 10) / 12,
-        text: normalized,
-        format: 'inches'
-      };
-    }
-    return null;
-  }
-
-  return {
-    width: parsed.unit === 'm' ? parsed.width * 3.28084 : parsed.width,
-    height: parsed.unit === 'm' ? parsed.height * 3.28084 : parsed.height,
-    text: normalized,
-    format: parsed.unit === 'm' ? 'meters' : (line.includes("'") ? 'inches' : 'decimal')
-  };
-};
-
 export const inferDominantFormat = (dimensions) => {
-  if (!dimensions?.length) return null;
-  const counts = { inches: 0, decimal: 0, meters: 0 };
-  for (const d of dimensions) {
-    if (counts[d.format] !== undefined) counts[d.format] += 1;
-  }
-  if (counts.inches === 0 && counts.decimal === 0 && counts.meters === 0) return null;
-  const max = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
-  return max || null;
-};
-
-const processRegionText = (text, bbox) => {
-  const candidates = extract_dimensions(text)
-    .filter(isValidDetection)
-    .map((d) => ({
-      width: d.unit === 'm' ? d.width * 3.28084 : d.width,
-      height: d.unit === 'm' ? d.height * 3.28084 : d.height,
-      unit: d.unit,
-      raw: text,
-      bbox,
-      format: d.unit === 'm' ? 'meters' : (d.raw.includes("'") ? 'inches' : 'decimal')
-    }));
-
-  return candidates;
-};
-
-// main entry point
-export const extract_floorplan_dimensions = async (imagePathOrDataUrl) => {
-  const img = await dataUrlToImage(imagePathOrDataUrl);
-  const scaleFactor = estimateScaleFactor(img);
-  const scaled = scaleCanvas(img, scaleFactor);
-  const ctx = scaled.getContext('2d');
-  const imageData = ctx.getImageData(0, 0, scaled.width, scaled.height);
-
-  const { binary, canvas: processedCanvas } = preprocess(imageData, scaled.width, scaled.height);
-  const boxes = detect_text_regions(binary, scaled.width, scaled.height);
-
-  const worker = await getWorker();
-  const results = [];
-
-  // C. OCR per region (not full image)
-  for (const box of boxes) {
-    const crop = cropCanvas(processedCanvas, box);
-    const text = await ocr_region(worker, crop);
-    const parsed = processRegionText(text, box);
-    if (parsed.length > 0) results.push(...parsed);
-  }
-
-  // I. fallback sliding-window OCR pass for recall
-  const windows = makeSlidingWindows(scaled.width, scaled.height);
-  for (const box of windows) {
-    const crop = cropCanvas(processedCanvas, box);
-    const text = await ocr_region(worker, crop);
-    if (!text || text.length < 5) continue;
-    const parsed = processRegionText(text, box);
-    if (parsed.length > 0) results.push(...parsed);
-  }
-
-  const cleaned = deduplicate(results).map((r, idx) => {
-    const bbox = r.bbox ? {
-      x: r.bbox.x / scaleFactor,
-      y: r.bbox.y / scaleFactor,
-      width: r.bbox.width / scaleFactor,
-      height: r.bbox.height / scaleFactor
-    } : { x: img.width / 2 - 100, y: img.height * 0.25 + idx * 70, width: 200, height: 40 };
-
-    return {
-      width: r.width,
-      height: r.height,
-      unit: r.unit,
-      raw: r.raw,
-      text: r.raw,
-      bbox,
-      format: r.format
-    };
-  });
-
-  return cleaned;
+  if (!dimensions || dimensions.length === 0) return null;
+  let counts = { inches: 0, decimal: 0, meters: 0 };
+  for (const d of dimensions) counts[d.format] = (counts[d.format] || 0) + 1;
+  const maxFormat = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+  return counts[maxFormat] > 0 ? maxFormat : null;
 };
 
 export const detectAllDimensions = async (imageDataUrl) => {
   try {
-    const dimensions = await extract_floorplan_dimensions(imageDataUrl);
+    const img = await dataUrlToImage(imageDataUrl);
+    const scaleFactor = estimateScaleFactor(img);
+    const scaled = scaleCanvas(img, scaleFactor);
+    const ctx = scaled.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, scaled.width, scaled.height);
+    
+    // One rapid optimal pass
+    const gray = toGrayscale(imageData);
+    const stretched = contrastStretch(gray);
+    const sharpened = sharpen(stretched, scaled.width, scaled.height, SHARPEN_AMOUNT);
+    const optimizedCanvas = grayToThresholdedCanvas(sharpened, scaled.width, scaled.height, otsuThreshold(sharpened));
+
+    const worker = await getWorker();
+    
+    await worker.setParameters({
+      tessedit_char_whitelist: OCR_CHAR_WHITELIST,
+      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+      preserve_interword_spaces: '1'
+    });
+
+    const result = await worker.recognize(optimizedCanvas, {}, { blocks: true });
+    const { lines, words } = collectLinesAndWords(result);
+    
+    const initialResults = deduplicateResults([...detectFromLines(lines), ...detectFromSpatialWords(words)]);
+    const rois = extractROIs(initialResults, scaled.width, scaled.height);
+    
+    let roiLines = [], roiWords = [];
+    if (rois.length > 0) {
+      const { lines: rl, words: rw } = await runROIOcr(worker, optimizedCanvas, rois);
+      roiLines = rl; roiWords = rw;
+    }
+
+    const merged = deduplicateResults([...initialResults, ...detectFromLines(roiLines), ...detectFromSpatialWords(roiWords)]);
+
+    // Scale back bboxes
+    const dimensions = merged.map((d, idx) => {
+      let bbox = d.bbox;
+      if (bbox && scaleFactor !== 1) {
+        bbox = { x: bbox.x / scaleFactor, y: bbox.y / scaleFactor, width: bbox.width / scaleFactor, height: bbox.height / scaleFactor };
+      }
+      if (!bbox) bbox = { x: img.width / 2 - 100, y: img.height * 0.3 + idx * 80, width: 200, height: 50 };
+      return { width: d.width, height: d.height, text: d.text, bbox, format: d.format };
+    });
+
     return { dimensions, detectedFormat: inferDominantFormat(dimensions) };
   } catch (error) {
     console.error('DimensionsOCR error:', error);
     return { dimensions: [], detectedFormat: null };
   }
 };
+
+export { normalizeOcrText, parseSingleToken, parseDimensionLine };
