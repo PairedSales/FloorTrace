@@ -1,122 +1,97 @@
 import { useRef, useCallback } from 'react';
 
-/**
- * useEraserTool
- *
- * Owns the complete lifecycle of an eraser stroke session:
- *   1. mousedown  — initialise an offscreen canvas from the current image
- *   2. mousemove  — paint white segments onto the offscreen canvas (live preview)
- *   3. mouseup    — commit the result back to the store via onImageUpdate
- *   4. cancelErase — abort mid-stroke and restore the original Konva image node
- *
- * @param {object}          opts
- * @param {HTMLImageElement|null} opts.imageObj         - current loaded image element
- * @param {boolean}         opts.eraserToolActive       - whether the eraser mode is on
- * @param {number}          opts.eraserBrushSize        - brush diameter in image-space px
- * @param {React.RefObject} opts.stageRef               - ref to the Konva Stage node
- * @param {Function}        opts.onImageUpdate          - callback(dataUrl) to persist edits
- * @param {Function}        opts.getCanvasCoords        - (stage) => {x,y} in image-space
- * @returns {{
- *   eraserCanvasRef,
- *   isErasingRef,
- *   handleEraserMouseDown,
- *   handleEraserMouseMove,
- *   handleEraserMouseUp,
- *   cancelErase,
- * }}
- */
+const distancePointToSegment = (point, a, b) => {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = point.x - a.x;
+  const apy = point.y - a.y;
+  const abLenSq = abx * abx + aby * aby;
+
+  if (abLenSq === 0) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
+  const closestX = a.x + abx * t;
+  const closestY = a.y + aby * t;
+  return Math.hypot(point.x - closestX, point.y - closestY);
+};
+
 export function useEraserTool({
-  imageObj,
+  perimeterOverlay,
   eraserToolActive,
   eraserBrushSize,
-  stageRef,
-  onImageUpdate,
+  onPerimeterUpdate,
   getCanvasCoords,
 }) {
-  const eraserCanvasRef   = useRef(null); // offscreen <canvas> used during a stroke
-  const isErasingRef      = useRef(false);
-  const eraserStartPosRef = useRef(null); // anchor for Shift-constrained axis
-  const eraserLastPosRef  = useRef(null); // previous draw position for interpolation
-  const eraserAxisRef     = useRef(null); // 'h' | 'v' | null
+  const isErasingRef = useRef(false);
+  const eraserStartPosRef = useRef(null);
+  const eraserLastPosRef = useRef(null);
+  const eraserAxisRef = useRef(null);
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  const initialVerticesRef = useRef(null);
+  const activeVerticesRef = useRef(null);
+  const hasChangesRef = useRef(false);
 
-  /** Create an offscreen canvas pre-filled with the current image pixels. */
-  const initEraserCanvas = useCallback(() => {
-    if (!imageObj) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width  = imageObj.width;
-    canvas.height = imageObj.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(imageObj, 0, 0);
-    return canvas;
-  }, [imageObj]);
+  const eraseVerticesNearStroke = useCallback((from, to) => {
+    const vertices = activeVerticesRef.current;
+    if (!vertices || vertices.length <= 3) return;
 
-  /** Draw a white line segment between two image-space points. */
-  const eraseSegment = useCallback((x0, y0, x1, y1, brushSize) => {
-    const canvas = eraserCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth   = brushSize;
-    ctx.lineCap     = 'square';
-    ctx.lineJoin    = 'round';
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-  }, []);
+    const radius = eraserBrushSize / 2;
+    const candidates = [];
 
-  /** Push the offscreen canvas back to the Konva image node and the store. */
-  const commitEraserCanvas = useCallback(() => {
-    const canvas = eraserCanvasRef.current;
-    if (!canvas || !onImageUpdate) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    onImageUpdate(dataUrl);
-    eraserCanvasRef.current = null;
-  }, [onImageUpdate]);
-
-  /** Sync the offscreen canvas to the live Konva Image node for instant preview. */
-  const flushToKonva = useCallback(() => {
-    if (!stageRef.current || !eraserCanvasRef.current) return;
-    const imgNode = stageRef.current.findOne('Image');
-    if (imgNode) {
-      imgNode.image(eraserCanvasRef.current);
-      imgNode.getLayer()?.batchDraw();
+    for (let i = 0; i < vertices.length; i++) {
+      const distance = distancePointToSegment(vertices[i], from, to);
+      if (distance <= radius) {
+        candidates.push({ index: i, distance });
+      }
     }
-  }, [stageRef]);
 
-  // ── Public handlers ────────────────────────────────────────────────────────
+    if (candidates.length === 0) return;
 
-  /** Start a new erase session on mousedown. Returns true if consumed. */
+    const maxRemovals = vertices.length - 3;
+    if (maxRemovals <= 0) return;
+
+    candidates.sort((a, b) => a.distance - b.distance);
+    const removeSet = new Set(candidates.slice(0, maxRemovals).map((c) => c.index));
+    if (removeSet.size === 0) return;
+
+    const nextVertices = vertices.filter((_, index) => !removeSet.has(index));
+    if (nextVertices.length === vertices.length) return;
+
+    activeVerticesRef.current = nextVertices;
+    hasChangesRef.current = true;
+    onPerimeterUpdate?.(nextVertices, false);
+  }, [eraserBrushSize, onPerimeterUpdate]);
+
   const handleEraserMouseDown = useCallback((stage) => {
-    if (!eraserToolActive || !imageObj) return false;
+    if (!eraserToolActive || !perimeterOverlay?.vertices?.length) return false;
+
     const pos = getCanvasCoords(stage);
     if (!pos) return false;
 
-    eraserCanvasRef.current   = initEraserCanvas();
-    isErasingRef.current      = true;
+    isErasingRef.current = true;
     eraserStartPosRef.current = pos;
-    eraserLastPosRef.current  = pos;
-    eraserAxisRef.current     = null;
+    eraserLastPosRef.current = pos;
+    eraserAxisRef.current = null;
 
-    // Paint the very first dot so single-click erases work
-    eraseSegment(pos.x, pos.y, pos.x, pos.y, eraserBrushSize);
-    flushToKonva();
+    initialVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
+    activeVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
+    hasChangesRef.current = false;
 
+    eraseVerticesNearStroke(pos, pos);
     return true;
-  }, [eraserToolActive, imageObj, eraserBrushSize, initEraserCanvas, eraseSegment, flushToKonva, getCanvasCoords]);
+  }, [eraserToolActive, perimeterOverlay, getCanvasCoords, eraseVerticesNearStroke]);
 
-  /** Continue erasing during mouse drag. Returns true if consumed. */
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
-    if (!isErasingRef.current || !eraserCanvasRef.current) return false;
+    if (!isErasingRef.current || !activeVerticesRef.current) return false;
+
     const pos = getCanvasCoords(stage);
     if (!pos) return false;
 
     let drawX = pos.x;
     let drawY = pos.y;
 
-    // Shift constrains strokes to the dominant axis
     if (shiftKey && eraserStartPosRef.current) {
       if (!eraserAxisRef.current) {
         const dx = Math.abs(pos.x - eraserStartPosRef.current.x);
@@ -125,6 +100,7 @@ export function useEraserTool({
           eraserAxisRef.current = dx >= dy ? 'h' : 'v';
         }
       }
+
       if (eraserAxisRef.current === 'h') drawY = eraserStartPosRef.current.y;
       else if (eraserAxisRef.current === 'v') drawX = eraserStartPosRef.current.x;
     } else {
@@ -132,48 +108,51 @@ export function useEraserTool({
     }
 
     const prev = eraserLastPosRef.current ?? { x: drawX, y: drawY };
-    eraseSegment(prev.x, prev.y, drawX, drawY, eraserBrushSize);
-    eraserLastPosRef.current = { x: drawX, y: drawY };
+    const next = { x: drawX, y: drawY };
 
-    flushToKonva();
+    eraseVerticesNearStroke(prev, next);
+    eraserLastPosRef.current = next;
+
     return true;
-  }, [eraserBrushSize, eraseSegment, flushToKonva, getCanvasCoords]);
+  }, [getCanvasCoords, eraseVerticesNearStroke]);
 
-  /** Commit the erased image on mouseup. Returns true if consumed. */
   const handleEraserMouseUp = useCallback(() => {
     if (!isErasingRef.current) return false;
-    isErasingRef.current      = false;
-    eraserStartPosRef.current = null;
-    eraserLastPosRef.current  = null;
-    eraserAxisRef.current     = null;
-    commitEraserCanvas();
-    return true;
-  }, [commitEraserCanvas]);
 
-  /**
-   * Abort a mid-stroke erase (e.g. Escape key).
-   * Discards the offscreen canvas and restores the original imageObj on
-   * the Konva Image node so the user sees the pre-erase state.
-   */
+    isErasingRef.current = false;
+    eraserStartPosRef.current = null;
+    eraserLastPosRef.current = null;
+    eraserAxisRef.current = null;
+
+    if (hasChangesRef.current && activeVerticesRef.current) {
+      onPerimeterUpdate?.(activeVerticesRef.current, true);
+    }
+
+    initialVerticesRef.current = null;
+    activeVerticesRef.current = null;
+    hasChangesRef.current = false;
+
+    return true;
+  }, [onPerimeterUpdate]);
+
   const cancelErase = useCallback(() => {
     if (!isErasingRef.current) return;
-    isErasingRef.current      = false;
-    eraserCanvasRef.current   = null;
-    eraserStartPosRef.current = null;
-    eraserLastPosRef.current  = null;
-    eraserAxisRef.current     = null;
 
-    if (stageRef.current && imageObj) {
-      const imgNode = stageRef.current.findOne('Image');
-      if (imgNode) {
-        imgNode.image(imageObj);
-        imgNode.getLayer()?.batchDraw();
-      }
+    isErasingRef.current = false;
+    eraserStartPosRef.current = null;
+    eraserLastPosRef.current = null;
+    eraserAxisRef.current = null;
+
+    if (initialVerticesRef.current) {
+      onPerimeterUpdate?.(initialVerticesRef.current, false);
     }
-  }, [stageRef, imageObj]);
+
+    initialVerticesRef.current = null;
+    activeVerticesRef.current = null;
+    hasChangesRef.current = false;
+  }, [onPerimeterUpdate]);
 
   return {
-    eraserCanvasRef,
     isErasingRef,
     handleEraserMouseDown,
     handleEraserMouseMove,
