@@ -144,44 +144,205 @@ const useAnimatedVertices = (targetVertices) => {
   return animState;
 };
 
+const compute_midpoint = (line) => ({
+  mx: (line.x1 + line.x2) / 2,
+  my: (line.y1 + line.y2) / 2,
+});
+
+const compute_perpendicular = (line) => {
+  const dx = line.x2 - line.x1;
+  const dy = line.y2 - line.y1;
+  const length = Math.hypot(dx, dy);
+  if (length <= 1e-6) {
+    return { px: 0, py: -1, ex: 1, ey: 0, length: 0, dx, dy };
+  }
+  const ex = dx / length;
+  const ey = dy / length;
+  return { px: -dy / length, py: dx / length, ex, ey, length, dx, dy };
+};
+
+const rectFromCenter = (cx, cy, width, height) => ({
+  left: cx - width / 2,
+  right: cx + width / 2,
+  top: cy - height / 2,
+  bottom: cy + height / 2,
+});
+
+const rectsOverlap = (a, b, padding = 0) => !(
+  a.right + padding <= b.left ||
+  b.right + padding <= a.left ||
+  a.bottom + padding <= b.top ||
+  b.bottom + padding <= a.top
+);
+
+const pointToRectDistance = (point, rect) => {
+  const nearX = Math.max(rect.left, Math.min(point.x, rect.right));
+  const nearY = Math.max(rect.top, Math.min(point.y, rect.bottom));
+  return Math.hypot(point.x - nearX, point.y - nearY);
+};
+
+const pointToSegmentDistance = (point, line) => {
+  const dx = line.x2 - line.x1;
+  const dy = line.y2 - line.y1;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 1e-6) return Math.hypot(point.x - line.x1, point.y - line.y1);
+  const t = Math.max(0, Math.min(1, ((point.x - line.x1) * dx + (point.y - line.y1) * dy) / lengthSquared));
+  const projX = line.x1 + t * dx;
+  const projY = line.y1 + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+};
+
+const generate_label_candidates = (line, zoom, offsetBase) => {
+  const { mx, my } = compute_midpoint(line);
+  const { px, py, ex, ey } = compute_perpendicular(line);
+  const offset = offsetBase / zoom;
+  const shifts = [0, -0.18, 0.18, -0.1, 0.1];
+  const directions = [1, -1];
+  const candidates = [];
+
+  for (const direction of directions) {
+    for (const shift of shifts) {
+      const along = line.length * shift;
+      const cx = mx + ex * along + px * offset * direction;
+      const cy = my + ey * along + py * offset * direction;
+      candidates.push({ cx, cy, along, direction, offset });
+    }
+  }
+  return candidates;
+};
+
+const score_candidate = (candidate, context) => {
+  const {
+    rect,
+    vertices,
+    placedLabels,
+    edgeLine,
+    minVertexClearance,
+    minLineGap,
+    bounds,
+  } = context;
+
+  let minVertexDistance = Infinity;
+  for (const v of vertices) {
+    minVertexDistance = Math.min(minVertexDistance, pointToRectDistance(v, rect));
+  }
+
+  let minLabelDistance = Infinity;
+  for (const placed of placedLabels) {
+    const dx = candidate.cx - placed.cx;
+    const dy = candidate.cy - placed.cy;
+    minLabelDistance = Math.min(minLabelDistance, Math.hypot(dx, dy));
+    if (rectsOverlap(rect, placed.rect, 1 / context.scale)) return Number.NEGATIVE_INFINITY;
+  }
+  if (!Number.isFinite(minLabelDistance)) minLabelDistance = minVertexDistance;
+
+  const distanceFromLine = pointToSegmentDistance({ x: candidate.cx, y: candidate.cy }, edgeLine);
+  if (distanceFromLine < minLineGap) return Number.NEGATIVE_INFINITY;
+
+  const edgeMargin = Math.min(
+    rect.left - bounds.left,
+    bounds.right - rect.right,
+    rect.top - bounds.top,
+    bounds.bottom - rect.bottom
+  );
+
+  if (minVertexDistance < minVertexClearance) return Number.NEGATIVE_INFINITY;
+
+  return (
+    1.8 * minVertexDistance +
+    1.5 * minLabelDistance +
+    1.0 * distanceFromLine +
+    0.6 * edgeMargin -
+    0.5 * Math.abs(candidate.along)
+  );
+};
+
+const resolve_collisions = (layouts, scale) => {
+  const resolved = [];
+  for (const layout of layouts) {
+    const collides = resolved.some((placed) => rectsOverlap(placed.rect, layout.rect, 1 / scale));
+    if (!collides) resolved.push(layout);
+  }
+  return resolved;
+};
+
+const place_label = (line, zoom, existing_labels, context) => {
+  const candidates = generate_label_candidates(line, zoom, context.offsetBase);
+  let best = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  const { px, py } = compute_perpendicular(line);
+
+  for (const rawCandidate of candidates) {
+    let candidate = { ...rawCandidate };
+    let rect = rectFromCenter(candidate.cx, candidate.cy, context.labelWidth, context.labelHeight);
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let nearestVertexDist = Infinity;
+      for (const v of context.vertices) {
+        nearestVertexDist = Math.min(nearestVertexDist, pointToRectDistance(v, rect));
+      }
+      if (nearestVertexDist >= context.minVertexClearance) break;
+      candidate = {
+        ...candidate,
+        cx: candidate.cx + px * context.vertexPushStep,
+        cy: candidate.cy + py * context.vertexPushStep,
+      };
+      rect = rectFromCenter(candidate.cx, candidate.cy, context.labelWidth, context.labelHeight);
+    }
+
+    const score = score_candidate(candidate, {
+      ...context,
+      rect,
+      edgeLine: line,
+      placedLabels: existing_labels,
+    });
+    if (score > bestScore) {
+      bestScore = score;
+      best = { ...candidate, rect, score };
+    }
+  }
+
+  return best;
+};
+
 /**
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
 const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit) => {
-  return vertices.map((vertex, i) => {
+  const bounds = vertices.reduce((acc, v) => ({
+    left: Math.min(acc.left, v.x),
+    right: Math.max(acc.right, v.x),
+    top: Math.min(acc.top, v.y),
+    bottom: Math.max(acc.bottom, v.y),
+  }), { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity });
+
+  const placements = [];
+
+  vertices.forEach((vertex, i) => {
     const nextVertex = vertices[(i + 1) % vertices.length];
+    const line = { x1: vertex.x, y1: vertex.y, x2: nextVertex.x, y2: nextVertex.y, id: i };
+    const lineMeta = compute_perpendicular(line);
+    line.length = lineMeta.length;
+    if (line.length <= 1e-6) return;
 
-    const dx = nextVertex.x - vertex.x;
-    const dy = nextVertex.y - vertex.y;
-    const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-    const lengthInFeet = lengthInPixels * pixelsPerFoot;
+    const lengthInFeet = line.length * pixelsPerFoot;
     const formattedLength = formatLength(lengthInFeet, unit);
-
-    const midX = (vertex.x + nextVertex.x) / 2;
-    const midY = (vertex.y + nextVertex.y) / 2;
-
-    const angle = Math.atan2(dy, dx);
-    const sideSign = i % 2 === 0 ? 1 : -1;
-    const shortEdge = lengthInPixels < 48;
-    const offsetDistance = sideSign * (shortEdge ? 12 / scale : 9 / scale);
-    const offsetX = Math.sin(angle) * offsetDistance;
-    const offsetY = -Math.cos(angle) * offsetDistance;
 
     const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
       ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
       : 14;
     const idealFs = Math.max(14, ocrRefScreenPx) / scale;
     const minFs = 8 / scale;
-
     const padX = 5 / scale;
     const minW = 30 / scale;
-    const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
+    const maxWByEdge = Math.max(minW, line.length * 0.9);
     const widthForFs = (fs) => measureSideLenWidth(formattedLength, fs) + padX * 2;
 
     let fontSize = idealFs;
     if (widthForFs(fontSize) > maxWByEdge) {
-      let lo = minFs, hi = fontSize;
+      let lo = minFs;
+      let hi = fontSize;
       for (let iter = 0; iter < 10; iter++) {
         const mid = (lo + hi) / 2;
         if (widthForFs(mid) > maxWByEdge) hi = mid; else lo = mid;
@@ -193,43 +354,41 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const labelHeight = Math.max(fontSize * 1.5, 16 / scale);
     const cornerR = labelHeight / 2;
 
-    const cx0 = midX + offsetX;
-    const cy0 = midY + offsetY;
+    const placed = place_label(line, scale, placements, {
+      vertices,
+      bounds,
+      labelWidth,
+      labelHeight,
+      minVertexClearance: 8 / scale,
+      minLineGap: Math.max(6 / scale, labelHeight * 0.35),
+      offsetBase: Math.max(22, Math.min(36, 28 + labelHeight * 0.25)),
+      vertexPushStep: 5 / scale,
+      scale,
+    });
 
-    const len = lengthInPixels;
-    const ex = len > 0 ? dx / len : 1;
-    const ey = len > 0 ? dy / len : 0;
-    const halfAlong = (labelWidth * Math.abs(ex) + labelHeight * Math.abs(ey)) / 2;
-    const vertexClearance = 8 / scale;
-    const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
+    const fallback = compute_midpoint(line);
+    const finalCx = placed?.cx ?? fallback.mx;
+    const finalCy = placed?.cy ?? (fallback.my - 10 / scale);
+    const rect = placed?.rect ?? rectFromCenter(finalCx, finalCy, labelWidth, labelHeight);
 
-    let edgeShift = 0;
-    for (const v of vertices) {
-      const pcx = cx0 + edgeShift * ex;
-      const pcy = cy0 + edgeShift * ey;
-      const nearX = Math.max(pcx - labelWidth / 2, Math.min(v.x, pcx + labelWidth / 2));
-      const nearY = Math.max(pcy - labelHeight / 2, Math.min(v.y, pcy + labelHeight / 2));
-      const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
-      if (dist2 < vertexClearance * vertexClearance) {
-        const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
-        const required = halfAlong + vertexClearance - Math.abs(projEdge);
-        if (required > 0) {
-          const dir = projEdge > 0 ? -1 : 1;
-          edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
-        }
-      }
-    }
-
-    return {
+    placements.push({
+      id: i,
+      anchor_line: line.id,
+      text: formattedLength,
       formattedLength,
       fontSize,
       labelWidth,
       labelHeight,
       cornerR,
-      finalCx: cx0 + edgeShift * ex,
-      finalCy: cy0 + edgeShift * ey,
-    };
+      finalCx,
+      finalCy,
+      cx: finalCx,
+      cy: finalCy,
+      rect,
+    });
   });
+
+  return resolve_collisions(placements, scale);
 };
 
 /**
