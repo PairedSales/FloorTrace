@@ -9,8 +9,15 @@ const SQ_FEET_TO_SQ_METERS = FEET_TO_METERS * FEET_TO_METERS;
  * @returns {object} - { feet: number, inches: number }
  */
 export const decimalToFeetInches = (decimalFeet) => {
-  const feet = Math.floor(decimalFeet);
-  const inches = Math.round((decimalFeet - feet) * 12);
+  let feet = Math.floor(decimalFeet);
+  let inches = Math.round((decimalFeet - feet) * 12);
+
+  // Normalize values so we never emit 12" (e.g., 0' 12" becomes 1' 0")
+  if (inches >= 12) {
+    feet += Math.floor(inches / 12);
+    inches %= 12;
+  }
+
   return { feet, inches };
 };
 
