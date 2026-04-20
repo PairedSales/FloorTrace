@@ -84,6 +84,11 @@ describe('formatLength – metric', () => {
     expect(formatLength(12.4, 'decimal')).toBe('12.4 ft');
     expect(formatLength(12.5, 'inches')).toBe("12' 6\"");
   });
+
+  it('normalizes 12 inches into the next foot', () => {
+    // 0.999 feet rounds to 12 inches; should display as 1' 0"
+    expect(formatLength(0.999, 'inches')).toBe("1' 0\"");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -136,5 +141,10 @@ describe('formatDimensionInput – metric', () => {
   it('still works for decimal and inches', () => {
     expect(formatDimensionInput(12.4, 'decimal')).toBe('12.4');
     expect(formatDimensionInput(12.5, 'inches')).toBe("12' 6\"");
+  });
+
+  it('normalizes 12 inches into the next foot for display', () => {
+    // 5.999 feet rounds to 6' 0", not 5' 12"
+    expect(formatDimensionInput(5.999, 'inches')).toBe("6' 0\"");
   });
 });
