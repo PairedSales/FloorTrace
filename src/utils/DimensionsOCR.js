@@ -460,8 +460,10 @@ export const terminateOcrWorker = async () => {
 export const inferDominantFormat = (dimensions) => {
   if (!dimensions || dimensions.length === 0) return null;
   let counts = { inches: 0, decimal: 0, meters: 0 };
-  for (const d of dimensions) counts[d.format] = (counts[d.format] || 0) + 1;
-  const maxFormat = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+  for (const d of dimensions) {
+    if (d.format in counts) counts[d.format]++;
+  }
+  const maxFormat = Object.keys(counts).reduce((a, b) => counts[a] >= counts[b] ? a : b);
   return counts[maxFormat] > 0 ? maxFormat : null;
 };
 

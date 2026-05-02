@@ -38,14 +38,15 @@ export const LINE_COLORS = [
 
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
  *  @param {object} options
- *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). */
-export const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove = false } = {}) => {
+ *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). 
+ *  @param {string|null} [options.unitStyle=null] Specific format style inferred from OCR. */
+export const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove = false, unitStyle = null } = {}) => {
   const { formatLength } = getMeasurementLineLayout._deps;
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const lenPx = Math.sqrt(dx * dx + dy * dy);
   const lengthFeet = lenPx * pixelsPerFoot;
-  const textStr = `${formatLength(lengthFeet, unit)}`;
+  const textStr = `${formatLength(lengthFeet, unit, unitStyle)}`;
   const fontSize = 12 / scale;
   const ux = lenPx > 1e-6 ? dx / lenPx : 1;
   const uy = lenPx > 1e-6 ? dy / lenPx : 0;

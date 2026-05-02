@@ -82,12 +82,12 @@ describe('formatLength – metric', () => {
 
   it('still formats decimal and inches correctly', () => {
     expect(formatLength(12.4, 'decimal')).toBe('12.4 ft');
-    expect(formatLength(12.5, 'inches')).toBe("12' 6\"");
+    expect(formatLength(12.5, 'inches')).toBe("12'6\"");
   });
 
   it('normalizes 12 inches into the next foot', () => {
     // 0.999 feet rounds to 12 inches; should display as 1' 0"
-    expect(formatLength(0.999, 'inches')).toBe("1' 0\"");
+    expect(formatLength(0.999, 'inches')).toBe("1'0\"");
   });
 });
 

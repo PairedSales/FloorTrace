@@ -13,6 +13,7 @@ const MeasurementLayer = ({
   scale,
   pixelsPerFoot,
   unit,
+  unitStyle,
   selectedMeasurementLineIndex,
   onMeasurementLineSelect,
   onMeasurementLineDragEnd,
@@ -24,7 +25,7 @@ const MeasurementLayer = ({
       {measurementLines && measurementLines.length > 0 && (
         <Layer>
           {measurementLines.map((line, index) => {
-            const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit);
+            const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit, { unitStyle });
             const colors = LINE_COLORS[index % LINE_COLORS.length];
             const strokeColor = selectedMeasurementLineIndex === index ? colors.selected : colors.normal;
             const strokeW = (selectedMeasurementLineIndex === index ? 3 : 2) / scale;
@@ -86,7 +87,7 @@ const MeasurementLayer = ({
         const minPreviewLength = 1;
         const hasLength = Math.sqrt(dx * dx + dy * dy) > minPreviewLength;
         const previewLayout = hasLength && pixelsPerFoot
-          ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit, { forceAbove: true })
+          ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit, { forceAbove: true, unitStyle })
           : null;
         return (
           <Layer>
