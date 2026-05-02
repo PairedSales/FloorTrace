@@ -406,6 +406,110 @@ const scanEdgeInward = (wallMask, width, height) => {
   return { topProfile, bottomProfile, leftProfile, rightProfile };
 };
 
+const profileToArray = (profile) => Array.from(profile);
+
+const clampProfileValue = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const regularizeProfile = (profile, invalidValue) => {
+  const smoothed = profile.slice();
+  for (let i = 0; i < profile.length; i += 1) {
+    const prev = profile[i - 1];
+    const curr = profile[i];
+    const next = profile[i + 1];
+    if (curr === invalidValue) continue;
+
+    const neighbors = [prev, curr, next].filter((value) => value != null && value !== invalidValue);
+    if (!neighbors.length) continue;
+    neighbors.sort((a, b) => a - b);
+    smoothed[i] = neighbors[Math.floor(neighbors.length / 2)];
+  }
+  return smoothed;
+};
+
+const buildHorizontalSegments = (profile, width, height, edge) => {
+  const segments = [];
+  const invalidValue = edge === 'top' ? height : -1;
+  let start = null;
+  let prevY = null;
+
+  const pushSegment = (endX) => {
+    if (!start || prevY == null) return;
+    segments.push({
+      edge,
+      start: { x: start.x, y: start.y },
+      end: { x: endX, y: prevY },
+    });
+  };
+
+  for (let x = 0; x < profile.length; x += 1) {
+    const y = profile[x];
+    if (y === invalidValue) {
+      pushSegment(x - 1);
+      start = null;
+      prevY = null;
+      continue;
+    }
+
+    if (!start) {
+      start = { x, y };
+      prevY = y;
+      continue;
+    }
+
+    if (Math.abs(y - prevY) > 2) {
+      pushSegment(x - 1);
+      start = { x, y };
+    }
+
+    prevY = y;
+  }
+
+  pushSegment(profile.length - 1);
+  return segments;
+};
+
+const buildVerticalSegments = (profile, width, height, edge) => {
+  const segments = [];
+  const invalidValue = edge === 'left' ? width : -1;
+  let start = null;
+  let prevX = null;
+
+  const pushSegment = (endY) => {
+    if (!start || prevX == null) return;
+    segments.push({
+      edge,
+      start: { x: start.x, y: start.y },
+      end: { x: prevX, y: endY },
+    });
+  };
+
+  for (let y = 0; y < profile.length; y += 1) {
+    const x = profile[y];
+    if (x === invalidValue) {
+      pushSegment(y - 1);
+      start = null;
+      prevX = null;
+      continue;
+    }
+
+    if (!start) {
+      start = { x, y };
+      prevX = x;
+      continue;
+    }
+
+    if (Math.abs(x - prevX) > 2) {
+      pushSegment(y - 1);
+      start = { x, y };
+    }
+
+    prevX = x;
+  }
+
+  pushSegment(profile.length - 1);
+  return segments;
+};
+
 /**
  * Build a footprint mask from provided edge-scan profiles.
  * A pixel is inside the footprint if it falls within the first-wall
@@ -569,6 +673,24 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
   const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  const rawProfiles = {
+    top: profileToArray(edgeProfiles.topProfile),
+    bottom: profileToArray(edgeProfiles.bottomProfile),
+    left: profileToArray(edgeProfiles.leftProfile),
+    right: profileToArray(edgeProfiles.rightProfile),
+  };
+  const regularizedProfiles = {
+    top: regularizeProfile(rawProfiles.top, h).map((value) => clampProfileValue(value, 0, h)),
+    bottom: regularizeProfile(rawProfiles.bottom, -1).map((value) => clampProfileValue(value, -1, h - 1)),
+    left: regularizeProfile(rawProfiles.left, w).map((value) => clampProfileValue(value, 0, w)),
+    right: regularizeProfile(rawProfiles.right, -1).map((value) => clampProfileValue(value, -1, w - 1)),
+  };
+  const correctedEnvelopeSegments = [
+    ...buildHorizontalSegments(regularizedProfiles.top, w, h, 'top'),
+    ...buildHorizontalSegments(regularizedProfiles.bottom, w, h, 'bottom'),
+    ...buildVerticalSegments(regularizedProfiles.left, w, h, 'left'),
+    ...buildVerticalSegments(regularizedProfiles.right, w, h, 'right'),
+  ];
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
@@ -637,6 +759,11 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       hasInner: Boolean(innerPolygon),
       usedEdgeScan,
       wallThickness,
+      edgeProfiles: {
+        raw: rawProfiles,
+        regularized: regularizedProfiles,
+      },
+      correctedEnvelopeSegments,
     },
   };
 };
