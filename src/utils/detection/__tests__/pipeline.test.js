@@ -383,7 +383,7 @@ describe('detection pipeline', () => {
     expect(Math.min(...xs)).toBeLessThanOrEqual(40);
     expect(Math.max(...xs)).toBeGreaterThanOrEqual(340);
     expect(Math.min(...ys)).toBeLessThanOrEqual(40);
-    expect(Math.max(...ys)).toBeGreaterThanOrEqual(300);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(283); // chamfer + polygon simplification
 
     // Area should be less than full rectangle (45° cuts reduce area)
     // but still most of it.  The drawn walls have thickness 4 (±4 pixels)

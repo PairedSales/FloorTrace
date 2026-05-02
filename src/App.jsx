@@ -245,14 +245,37 @@ function App() {
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit, notify]);
 
-  // Start over: clear all overlays and re-process the current image as if freshly pasted
-  const handleStartOver = useCallback(async () => {
+  // Find room size: non-destructively re-scan dimensions from the image
+  const handleFindRoomSize = useCallback(async () => {
     if (!image) return;
+
+    if (roomOverlay || perimeterOverlay) {
+      const confirmed = window.confirm(
+        'Scanning for room size will clear your existing room and perimeter overlays. Are you sure?'
+      );
+      if (!confirmed) return;
+    }
+
     undoManager.save();
-    const currentImage = image;
-    resetOverlays();
-    await handleManualMode(currentImage, true);
-  }, [image, resetOverlays, handleManualMode]);
+    
+    setRoomOverlay(null);
+    setPerimeterOverlay(null);
+    setArea(0);
+    setPerimeterVertices(null);
+    setDetectedDimensions([]);
+
+    await handleManualMode(image, true);
+  }, [
+    image,
+    roomOverlay,
+    perimeterOverlay,
+    setRoomOverlay,
+    setPerimeterOverlay,
+    setArea,
+    setPerimeterVertices,
+    setDetectedDimensions,
+    handleManualMode,
+  ]);
 
   // Handle file upload
   const handleFileUpload = useCallback(async (event) => {
@@ -746,7 +769,7 @@ function App() {
         hasAutoDetection={!!tracedBoundaries}
         onManualMode={handleManualOutlineMode}
         perimeterOverlay={perimeterOverlay}
-        onStartOver={handleStartOver}
+        onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}
       />
 

@@ -5,7 +5,7 @@ import {
   Maximize,
   SlidersHorizontal,
   LayoutList,
-  RotateCcw,
+  ScanText,
   CircleHelp,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
@@ -23,7 +23,7 @@ const Toolbar = ({
   hasAutoDetection,
   onManualMode,
   perimeterOverlay,
-  onStartOver,
+  onFindRoomSize,
   onHelpOpen,
 }) => {
   return (
@@ -70,16 +70,6 @@ const Toolbar = ({
       {/* Canvas tools */}
       <div className="flex items-center gap-1">
         <button
-          onClick={onTracePerimeter}
-          disabled={!image || isProcessing}
-          className="toolbar-btn"
-          title="Auto-detect perimeter"
-        >
-          <ScanSearch className="w-3.5 h-3.5" />
-          <span>Find Perimeter</span>
-        </button>
-
-        <button
           onClick={onFitToWindow}
           disabled={!image}
           className="toolbar-btn"
@@ -87,6 +77,16 @@ const Toolbar = ({
         >
           <Maximize className="w-3.5 h-3.5" />
           <span>Fit</span>
+        </button>
+
+        <button
+          onClick={onTracePerimeter}
+          disabled={!image || isProcessing}
+          className="toolbar-btn"
+          title="Auto-detect perimeter"
+        >
+          <ScanSearch className="w-3.5 h-3.5" />
+          <span>Find Perimeter</span>
         </button>
 
         {perimeterOverlay && hasAutoDetection && (
@@ -102,12 +102,12 @@ const Toolbar = ({
 
         {image && (
           <button
-            onClick={onStartOver}
+            onClick={onFindRoomSize}
             className="toolbar-btn"
-            title="Clear all overlays and reload the current floorplan"
+            title="Detect room dimensions from the floorplan"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Start Over</span>
+            <ScanText className="w-3.5 h-3.5" />
+            <span>Find Room Size</span>
           </button>
         )}
       </div>
