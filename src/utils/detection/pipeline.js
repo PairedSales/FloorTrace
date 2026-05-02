@@ -653,6 +653,8 @@ const buildVerticalSegments = (profile, width, height, edge) => {
 
   pushSegment(profile.length - 1);
   return segments;
+};
+
 const cloneProfiles = (profiles) => ({
   topProfile: new Int32Array(profiles.topProfile),
   bottomProfile: new Int32Array(profiles.bottomProfile),
@@ -1114,41 +1116,15 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   }
 
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
-  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
-  let correctedEdgeProfiles = edgeProfiles;
-  const useOuterEnvelopeCorrection = options.outerEnvelopeCorrection !== false;
-  if (useOuterEnvelopeCorrection) {
-    const candidateMask = dilate(edgeScanMask, w, h, options.outerEnvelopeDilate ?? 2);
-    const envelopeProfiles = getLargestComponentEnvelopeProfiles(candidateMask, w, h);
-    correctedEdgeProfiles = applyOuterEnvelopeCorrection(
-      edgeProfiles,
-      envelopeProfiles,
-      w,
-      h,
-      options,
-    );
-  }
+  //
+  // Pipeline stages (unified from PRs #160, #163, #164):
+  //   1. Raw edge-inward scan with multi-candidate scoring options (PR #164)
+  //   2. Outer envelope correction to fix short suspicious profile dips (PR #163)
+  //   3. Edge profile regularization/smoothing (PR #160)
+  //   4. Build footprint from fully post-processed profiles
 
-  let footprint = buildEdgeScanFootprintFromProfiles(correctedEdgeProfiles, w, h);
-  const rawProfiles = {
-    top: profileToArray(edgeProfiles.topProfile),
-    bottom: profileToArray(edgeProfiles.bottomProfile),
-    left: profileToArray(edgeProfiles.leftProfile),
-    right: profileToArray(edgeProfiles.rightProfile),
-  };
-  const regularizedProfiles = {
-    top: regularizeProfile(rawProfiles.top, h).map((value) => clampProfileValue(value, 0, h)),
-    bottom: regularizeProfile(rawProfiles.bottom, -1).map((value) => clampProfileValue(value, -1, h - 1)),
-    left: regularizeProfile(rawProfiles.left, w).map((value) => clampProfileValue(value, 0, w)),
-    right: regularizeProfile(rawProfiles.right, -1).map((value) => clampProfileValue(value, -1, w - 1)),
-  };
-  const correctedEnvelopeSegments = [
-    ...buildHorizontalSegments(regularizedProfiles.top, w, h, 'top'),
-    ...buildHorizontalSegments(regularizedProfiles.bottom, w, h, 'bottom'),
-    ...buildVerticalSegments(regularizedProfiles.left, w, h, 'left'),
-    ...buildVerticalSegments(regularizedProfiles.right, w, h, 'right'),
-  ];
-  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h, {
+  // Stage 1: Scan edges inward with multi-candidate scoring.
+  const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h, {
     minRunLength: options.minRunLength,
     neighborSupportRadius: options.neighborSupportRadius,
     consistencyWeight: options.consistencyWeight,
@@ -1156,18 +1132,56 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     stabilityScoreThreshold: options.stabilityScoreThreshold,
     fallbackToFirstHit: options.fallbackToFirstHit,
   });
-  const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+
+  // Stage 2: Outer envelope correction (PR #163).
+  let correctedEdgeProfiles = rawEdgeProfiles;
+  const useOuterEnvelopeCorrection = options.outerEnvelopeCorrection !== false;
+  if (useOuterEnvelopeCorrection) {
+    const candidateMask = dilate(edgeScanMask, w, h, options.outerEnvelopeDilate ?? 2);
+    const envelopeProfiles = getLargestComponentEnvelopeProfiles(candidateMask, w, h);
+    correctedEdgeProfiles = applyOuterEnvelopeCorrection(
+      rawEdgeProfiles,
+      envelopeProfiles,
+      w,
+      h,
+      options,
+    );
+  }
+
+  // Stage 3: Edge profile regularization/smoothing (PR #160).
   const smoothingOptions = options.edgeProfileSmoothing;
   const useEdgeProfileSmoothing = smoothingOptions !== false;
-  const edgeProfiles = useEdgeProfileSmoothing
+  const finalEdgeProfiles = useEdgeProfileSmoothing
     ? regularizeEdgeProfiles(
-      rawEdgeProfiles,
+      correctedEdgeProfiles,
       w,
       h,
       typeof smoothingOptions === 'object' ? smoothingOptions : {},
     )
-    : rawEdgeProfiles;
-  let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
+    : correctedEdgeProfiles;
+
+  // Debug overlay data (PR #161): simple 3-point median on raw profiles for visualization.
+  const debugRawProfiles = {
+    top: profileToArray(rawEdgeProfiles.topProfile),
+    bottom: profileToArray(rawEdgeProfiles.bottomProfile),
+    left: profileToArray(rawEdgeProfiles.leftProfile),
+    right: profileToArray(rawEdgeProfiles.rightProfile),
+  };
+  const debugRegularizedProfiles = {
+    top: regularizeProfile(debugRawProfiles.top, h).map((value) => clampProfileValue(value, 0, h)),
+    bottom: regularizeProfile(debugRawProfiles.bottom, -1).map((value) => clampProfileValue(value, -1, h - 1)),
+    left: regularizeProfile(debugRawProfiles.left, w).map((value) => clampProfileValue(value, 0, w)),
+    right: regularizeProfile(debugRawProfiles.right, -1).map((value) => clampProfileValue(value, -1, w - 1)),
+  };
+  const correctedEnvelopeSegments = [
+    ...buildHorizontalSegments(debugRegularizedProfiles.top, w, h, 'top'),
+    ...buildHorizontalSegments(debugRegularizedProfiles.bottom, w, h, 'bottom'),
+    ...buildVerticalSegments(debugRegularizedProfiles.left, w, h, 'left'),
+    ...buildVerticalSegments(debugRegularizedProfiles.right, w, h, 'right'),
+  ];
+
+  // Stage 4: Build footprint from fully post-processed profiles.
+  let footprint = buildEdgeScanFootprintFromProfiles(finalEdgeProfiles, w, h);
   let usedEdgeScan = true;
 
   // Verify footprint is non-trivial.
@@ -1187,7 +1201,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   /* --- Step 4: Extract outer and inner boundary polygons ---
    * Measure actual wall thickness from edge profiles so the inner boundary
    * reflects the true interior wall face, not just a fixed 2-pixel erosion.  */
-  const wallThicknessMeasurements = measureWallThicknessFromEdge(edgeScanMask, w, h, edgeProfiles);
+  const wallThicknessMeasurements = measureWallThicknessFromEdge(edgeScanMask, w, h, finalEdgeProfiles);
   const wallThickness = options.innerErode != null
     ? options.innerErode
     : computeRobustWallThickness(wallThicknessMeasurements);
@@ -1237,8 +1251,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       outerEnvelopeCorrection: useOuterEnvelopeCorrection,
       wallThickness,
       edgeProfiles: {
-        raw: rawProfiles,
-        regularized: regularizedProfiles,
+        raw: debugRawProfiles,
+        regularized: debugRegularizedProfiles,
       },
       correctedEnvelopeSegments,
       rawProfiles: {
@@ -1248,10 +1262,10 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
         rightProfile: profileToArray(rawEdgeProfiles.rightProfile),
       },
       regularizedProfiles: {
-        topProfile: profileToArray(edgeProfiles.topProfile),
-        bottomProfile: profileToArray(edgeProfiles.bottomProfile),
-        leftProfile: profileToArray(edgeProfiles.leftProfile),
-        rightProfile: profileToArray(edgeProfiles.rightProfile),
+        topProfile: profileToArray(finalEdgeProfiles.topProfile),
+        bottomProfile: profileToArray(finalEdgeProfiles.bottomProfile),
+        leftProfile: profileToArray(finalEdgeProfiles.leftProfile),
+        rightProfile: profileToArray(finalEdgeProfiles.rightProfile),
       },
       edgeProfileSmoothing: useEdgeProfileSmoothing,
     },
