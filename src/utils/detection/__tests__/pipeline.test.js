@@ -215,6 +215,63 @@ describe('detection pipeline', () => {
     expect(Math.max(...xs)).toBeGreaterThanOrEqual(wallOuterX - 5);
   });
 
+  it('keeps exterior extents and bounded side jitter with repeated window-like interruptions', () => {
+    const W = 420;
+    const H = 300;
+    const img = createBlankImageData(W, H);
+
+    const leftOuterX = 40;
+    const rightOuterX = 350;
+    const topOuterY = 40;
+    const bottomOuterY = 250;
+
+    // Mostly rectangular envelope.
+    drawLine(img, leftOuterX, topOuterY, rightOuterX, topOuterY, 3);
+    drawLine(img, leftOuterX, bottomOuterY, rightOuterX, bottomOuterY, 3);
+    drawLine(img, leftOuterX, topOuterY, leftOuterX, bottomOuterY, 3);
+    drawLine(img, rightOuterX, topOuterY, rightOuterX, bottomOuterY, 3);
+
+    // One long exterior wall (right side) with narrow repeated interruptions
+    // that can produce inward first-hit pixels in edge-scan profiles.
+    for (let y = topOuterY + 18; y < bottomOuterY - 10; y += 18) {
+      drawLine(img, rightOuterX - 22, y, rightOuterX, y, 1);
+    }
+
+    // Optional small offset inner line to mimic double-wall/window framing.
+    drawLine(img, rightOuterX - 12, topOuterY + 6, rightOuterX - 12, bottomOuterY - 6, 1);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      wallMask: { closeRadius: 0, openRadius: 0 },
+    });
+    expect(traced).toBeTruthy();
+    expect(traced.outer).toBeTruthy();
+
+    const outerPoly = traced.outer.polygon;
+    const xs = outerPoly.map((p) => p.x);
+    const ys = outerPoly.map((p) => p.y);
+
+    // 1) Outer polygon extents should remain aligned with true exterior lines.
+    const extentTolerance = 8;
+    expect(Math.min(...xs)).toBeLessThanOrEqual(leftOuterX + extentTolerance);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(rightOuterX - extentTolerance);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(topOuterY + extentTolerance);
+    expect(Math.max(...ys)).toBeGreaterThanOrEqual(bottomOuterY - extentTolerance);
+
+    const maxX = Math.max(...xs);
+    const rightSideBand = 30;
+    const rightSidePoints = outerPoly.filter(
+      (p) => p.x >= maxX - rightSideBand && p.y >= topOuterY - 10 && p.y <= bottomOuterY + 10
+    );
+    expect(rightSidePoints.length).toBeGreaterThan(0);
+
+    // 2) Jitter on the affected side should remain bounded (no deep inward drift).
+    const maxInwardDeviation = Math.max(...rightSidePoints.map((p) => maxX - p.x));
+    expect(maxInwardDeviation).toBeLessThanOrEqual(24);
+
+    // 3) Vertex count on the affected side should remain simplified and bounded.
+    expect(rightSidePoints.length).toBeLessThanOrEqual(28);
+  });
+
   it('traces exterior boundary of a floorplan with open interior', () => {
     // Simple rectangle with no interior walls
     const img = createBlankImageData(260, 200);

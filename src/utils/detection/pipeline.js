@@ -374,36 +374,472 @@ const DARK_PIXEL_THRESHOLD = 200;
  * the position of the first wall (black) pixel encountered in each
  * row/column.  Returns 4 profile arrays.
  *
+ * Supports multi-candidate scoring with tunable options:
+ * - minRunLength: minimum contiguous dark run considered stable.
+ * - neighborSupportRadius: how many prior rows/columns to use for local support.
+ * - consistencyWeight: penalty for diverging from previously regularized position.
+ *
  * For clean, preprocessed inputs this directly identifies the exterior
  * wall positions without any line detection or segment merging.
  */
-const scanEdgeInward = (wallMask, width, height) => {
+const collectDarkRuns1D = (length, getAt, edgeStep) => {
+  const runs = [];
+  let i = edgeStep > 0 ? 0 : length - 1;
+  while (i >= 0 && i < length) {
+    if (!getAt(i)) {
+      i += edgeStep;
+      continue;
+    }
+    const start = i;
+    let end = i;
+    while (end + edgeStep >= 0 && end + edgeStep < length && getAt(end + edgeStep)) {
+      end += edgeStep;
+    }
+    const runLength = Math.abs(end - start) + 1;
+    const edgePos = edgeStep > 0 ? Math.min(start, end) : Math.max(start, end);
+    runs.push({
+      edgePos,
+      length: runLength,
+      start: Math.min(start, end),
+      end: Math.max(start, end),
+    });
+    i = end + edgeStep;
+  }
+  return runs;
+};
+
+const scoreRunCandidate = (run, previousPos, neighborAvg, options) => {
+  const {
+    minRunLength = 2,
+    consistencyWeight = 0.75,
+    neighborSupportWeight = 1.0,
+  } = options;
+  const lengthScore = Math.max(0, run.length - minRunLength + 1);
+  const consistencyPenalty = previousPos == null
+    ? 0
+    : Math.abs(run.edgePos - previousPos) * consistencyWeight;
+  const neighborPenalty = neighborAvg == null
+    ? 0
+    : Math.abs(run.edgePos - neighborAvg) * neighborSupportWeight;
+  return lengthScore - consistencyPenalty - neighborPenalty;
+};
+
+const chooseRunByContinuity = (runs, context, options) => {
+  if (!runs.length) return null;
+  const {
+    minRunLength = 2,
+    stabilityScoreThreshold = 0.25,
+    fallbackToFirstHit = true,
+  } = options;
+
+  const stableRuns = runs.filter((run) => run.length >= minRunLength);
+  const candidates = stableRuns.length ? stableRuns : runs;
+  let bestRun = candidates[0];
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const run of candidates) {
+    const score = scoreRunCandidate(run, context.previousPos, context.neighborAvg, options);
+    if (score > bestScore || (score === bestScore && run.length > bestRun.length)) {
+      bestRun = run;
+      bestScore = score;
+    }
+  }
+
+  if (stableRuns.length && bestScore >= stabilityScoreThreshold) return bestRun;
+  if (!stableRuns.length && fallbackToFirstHit) return runs[0];
+  return bestScore >= stabilityScoreThreshold ? bestRun : (fallbackToFirstHit ? runs[0] : null);
+};
+
+const scanEdgeInward = (wallMask, width, height, options = {}) => {
   const topProfile = new Int32Array(width).fill(height);
   const bottomProfile = new Int32Array(width).fill(-1);
   const leftProfile = new Int32Array(height).fill(width);
   const rightProfile = new Int32Array(height).fill(-1);
+  const {
+    neighborSupportRadius = 2,
+  } = options;
 
   // Top & bottom profiles: scan each column vertically.
   for (let x = 0; x < width; x += 1) {
-    for (let y = 0; y < height; y += 1) {
-      if (wallMask[y * width + x]) { topProfile[x] = y; break; }
+    let topNeighborSum = 0;
+    let topNeighborCount = 0;
+    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
+      if (topProfile[nx] < height) {
+        topNeighborSum += topProfile[nx];
+        topNeighborCount += 1;
+      }
     }
-    for (let y = height - 1; y >= 0; y -= 1) {
-      if (wallMask[y * width + x]) { bottomProfile[x] = y; break; }
+    const topRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], 1);
+    const topChosen = chooseRunByContinuity(
+      topRuns,
+      {
+        previousPos: x > 0 && topProfile[x - 1] < height ? topProfile[x - 1] : null,
+        neighborAvg: topNeighborCount ? topNeighborSum / topNeighborCount : null,
+      },
+      options,
+    );
+    if (topChosen) {
+      topProfile[x] = topChosen.edgePos;
+    }
+
+    let bottomNeighborSum = 0;
+    let bottomNeighborCount = 0;
+    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
+      if (bottomProfile[nx] >= 0) {
+        bottomNeighborSum += bottomProfile[nx];
+        bottomNeighborCount += 1;
+      }
+    }
+    const bottomRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], -1);
+    const bottomChosen = chooseRunByContinuity(
+      bottomRuns,
+      {
+        previousPos: x > 0 && bottomProfile[x - 1] >= 0 ? bottomProfile[x - 1] : null,
+        neighborAvg: bottomNeighborCount ? bottomNeighborSum / bottomNeighborCount : null,
+      },
+      options,
+    );
+    if (bottomChosen) {
+      bottomProfile[x] = bottomChosen.edgePos;
     }
   }
 
   // Left & right profiles: scan each row horizontally.
   for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (wallMask[y * width + x]) { leftProfile[y] = x; break; }
+    let leftNeighborSum = 0;
+    let leftNeighborCount = 0;
+    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
+      if (leftProfile[ny] < width) {
+        leftNeighborSum += leftProfile[ny];
+        leftNeighborCount += 1;
+      }
     }
-    for (let x = width - 1; x >= 0; x -= 1) {
-      if (wallMask[y * width + x]) { rightProfile[y] = x; break; }
+    const leftRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], 1);
+    const leftChosen = chooseRunByContinuity(
+      leftRuns,
+      {
+        previousPos: y > 0 && leftProfile[y - 1] < width ? leftProfile[y - 1] : null,
+        neighborAvg: leftNeighborCount ? leftNeighborSum / leftNeighborCount : null,
+      },
+      options,
+    );
+    if (leftChosen) {
+      leftProfile[y] = leftChosen.edgePos;
+    }
+
+    let rightNeighborSum = 0;
+    let rightNeighborCount = 0;
+    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
+      if (rightProfile[ny] >= 0) {
+        rightNeighborSum += rightProfile[ny];
+        rightNeighborCount += 1;
+      }
+    }
+    const rightRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], -1);
+    const rightChosen = chooseRunByContinuity(
+      rightRuns,
+      {
+        previousPos: y > 0 && rightProfile[y - 1] >= 0 ? rightProfile[y - 1] : null,
+        neighborAvg: rightNeighborCount ? rightNeighborSum / rightNeighborCount : null,
+      },
+      options,
+    );
+    if (rightChosen) {
+      rightProfile[y] = rightChosen.edgePos;
     }
   }
 
   return { topProfile, bottomProfile, leftProfile, rightProfile };
+};
+
+const profileToArray = (profile) => Array.from(profile);
+
+const clampProfileValue = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const regularizeProfile = (profile, invalidValue) => {
+  const smoothed = profile.slice();
+  for (let i = 0; i < profile.length; i += 1) {
+    const prev = profile[i - 1];
+    const curr = profile[i];
+    const next = profile[i + 1];
+    if (curr === invalidValue) continue;
+
+    const neighbors = [prev, curr, next].filter((value) => value != null && value !== invalidValue);
+    if (!neighbors.length) continue;
+    neighbors.sort((a, b) => a - b);
+    smoothed[i] = neighbors[Math.floor(neighbors.length / 2)];
+  }
+  return smoothed;
+};
+
+const buildHorizontalSegments = (profile, width, height, edge) => {
+  const segments = [];
+  const invalidValue = edge === 'top' ? height : -1;
+  let start = null;
+  let prevY = null;
+
+  const pushSegment = (endX) => {
+    if (!start || prevY == null) return;
+    segments.push({
+      edge,
+      start: { x: start.x, y: start.y },
+      end: { x: endX, y: prevY },
+    });
+  };
+
+  for (let x = 0; x < profile.length; x += 1) {
+    const y = profile[x];
+    if (y === invalidValue) {
+      pushSegment(x - 1);
+      start = null;
+      prevY = null;
+      continue;
+    }
+
+    if (!start) {
+      start = { x, y };
+      prevY = y;
+      continue;
+    }
+
+    if (Math.abs(y - prevY) > 2) {
+      pushSegment(x - 1);
+      start = { x, y };
+    }
+
+    prevY = y;
+  }
+
+  pushSegment(profile.length - 1);
+  return segments;
+};
+
+const buildVerticalSegments = (profile, width, height, edge) => {
+  const segments = [];
+  const invalidValue = edge === 'left' ? width : -1;
+  let start = null;
+  let prevX = null;
+
+  const pushSegment = (endY) => {
+    if (!start || prevX == null) return;
+    segments.push({
+      edge,
+      start: { x: start.x, y: start.y },
+      end: { x: prevX, y: endY },
+    });
+  };
+
+  for (let y = 0; y < profile.length; y += 1) {
+    const x = profile[y];
+    if (x === invalidValue) {
+      pushSegment(y - 1);
+      start = null;
+      prevX = null;
+      continue;
+    }
+
+    if (!start) {
+      start = { x, y };
+      prevX = x;
+      continue;
+    }
+
+    if (Math.abs(x - prevX) > 2) {
+      pushSegment(y - 1);
+      start = { x, y };
+    }
+
+    prevX = x;
+  }
+
+  pushSegment(profile.length - 1);
+  return segments;
+const cloneProfiles = (profiles) => ({
+  topProfile: new Int32Array(profiles.topProfile),
+  bottomProfile: new Int32Array(profiles.bottomProfile),
+  leftProfile: new Int32Array(profiles.leftProfile),
+  rightProfile: new Int32Array(profiles.rightProfile),
+});
+
+const fillShortInvalidRuns = (profile, invalidValue, maxRunLength) => {
+  const out = new Int32Array(profile);
+  let i = 0;
+  while (i < out.length) {
+    if (out[i] !== invalidValue) {
+      i += 1;
+      continue;
+    }
+
+    const start = i;
+    while (i < out.length && out[i] === invalidValue) i += 1;
+    const end = i - 1;
+    const runLength = end - start + 1;
+    if (runLength > maxRunLength) continue;
+
+    const left = start - 1 >= 0 ? out[start - 1] : invalidValue;
+    const right = i < out.length ? out[i] : invalidValue;
+    const hasLeft = left !== invalidValue;
+    const hasRight = right !== invalidValue;
+    if (!hasLeft && !hasRight) continue;
+
+    for (let j = start; j <= end; j += 1) {
+      if (hasLeft && hasRight) {
+        const t = (j - start + 1) / (runLength + 1);
+        out[j] = Math.round(left * (1 - t) + right * t);
+      } else if (hasLeft) {
+        out[j] = left;
+      } else {
+        out[j] = right;
+      }
+    }
+  }
+  return out;
+};
+
+const medianFilterProfile = (profile, invalidValue, windowSize) => {
+  const out = new Int32Array(profile.length);
+  const radius = Math.floor(windowSize / 2);
+  for (let i = 0; i < profile.length; i += 1) {
+    if (profile[i] === invalidValue) {
+      out[i] = invalidValue;
+      continue;
+    }
+    const values = [];
+    for (let j = Math.max(0, i - radius); j <= Math.min(profile.length - 1, i + radius); j += 1) {
+      if (profile[j] !== invalidValue) values.push(profile[j]);
+    }
+    if (!values.length) {
+      out[i] = profile[i];
+      continue;
+    }
+    values.sort((a, b) => a - b);
+    out[i] = values[Math.floor(values.length / 2)];
+  }
+  return out;
+};
+
+const clampProfileDelta = (profile, invalidValue, maxDelta) => {
+  const out = new Int32Array(profile);
+  let lastIdx = -1;
+  for (let i = 0; i < out.length; i += 1) {
+    if (out[i] === invalidValue) continue;
+    if (lastIdx >= 0) {
+      const minV = out[lastIdx] - maxDelta * (i - lastIdx);
+      const maxV = out[lastIdx] + maxDelta * (i - lastIdx);
+      out[i] = Math.max(minV, Math.min(maxV, out[i]));
+    }
+    lastIdx = i;
+  }
+  return out;
+};
+
+const robustLinearFit = (xs, ys, huberDelta = 2, iterations = 4) => {
+  let slope = 0;
+  let intercept = ys.reduce((sum, y) => sum + y, 0) / ys.length;
+  let weights = new Float32Array(xs.length).fill(1);
+
+  for (let iter = 0; iter < iterations; iter += 1) {
+    let sumW = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+    for (let i = 0; i < xs.length; i += 1) {
+      const w = weights[i];
+      const x = xs[i];
+      const y = ys[i];
+      sumW += w;
+      sumX += w * x;
+      sumY += w * y;
+      sumXX += w * x * x;
+      sumXY += w * x * y;
+    }
+    const denom = (sumW * sumXX) - (sumX * sumX);
+    if (Math.abs(denom) < 1e-6) break;
+    slope = ((sumW * sumXY) - (sumX * sumY)) / denom;
+    intercept = (sumY - (slope * sumX)) / sumW;
+
+    for (let i = 0; i < xs.length; i += 1) {
+      const residual = ys[i] - (slope * xs[i] + intercept);
+      const absResidual = Math.abs(residual);
+      weights[i] = absResidual <= huberDelta ? 1 : huberDelta / absResidual;
+    }
+  }
+
+  return { slope, intercept };
+};
+
+const piecewiseLinearRegularize = (profile, invalidValue, options = {}) => {
+  const {
+    segmentLength = 64,
+    minSegmentLength = 16,
+    huberDelta = 2,
+    iterations = 4,
+  } = options;
+  const out = new Int32Array(profile);
+  let runStart = -1;
+
+  const flushRun = (runEnd) => {
+    if (runStart < 0) return;
+    const runLength = runEnd - runStart + 1;
+    if (runLength < minSegmentLength) {
+      runStart = -1;
+      return;
+    }
+    for (let segStart = runStart; segStart <= runEnd; segStart += segmentLength) {
+      const segEnd = Math.min(runEnd, segStart + segmentLength - 1);
+      const len = segEnd - segStart + 1;
+      if (len < minSegmentLength) continue;
+      const xs = new Array(len);
+      const ys = new Array(len);
+      for (let i = 0; i < len; i += 1) {
+        xs[i] = segStart + i;
+        ys[i] = out[segStart + i];
+      }
+      const fit = robustLinearFit(xs, ys, huberDelta, iterations);
+      for (let i = 0; i < len; i += 1) {
+        out[segStart + i] = Math.round(fit.slope * xs[i] + fit.intercept);
+      }
+    }
+    runStart = -1;
+  };
+
+  for (let i = 0; i < out.length; i += 1) {
+    const valid = out[i] !== invalidValue;
+    if (valid && runStart < 0) runStart = i;
+    if (!valid && runStart >= 0) flushRun(i - 1);
+  }
+  flushRun(out.length - 1);
+
+  return out;
+};
+
+const regularizeEdgeProfiles = (profiles, width, height, options = {}) => {
+  const {
+    maxInvalidRun = 6,
+    medianWindow = 7,
+    maxDeltaX = 2,
+    maxDeltaY = 2,
+    piecewiseLinear = false,
+    piecewiseOptions = {},
+  } = options;
+  const window = Math.max(3, Math.min(11, medianWindow | 1));
+  const out = cloneProfiles(profiles);
+
+  const processProfile = (profile, invalidValue, maxDelta) => {
+    let cur = fillShortInvalidRuns(profile, invalidValue, maxInvalidRun);
+    cur = medianFilterProfile(cur, invalidValue, window);
+    cur = clampProfileDelta(cur, invalidValue, maxDelta);
+    if (piecewiseLinear) {
+      cur = piecewiseLinearRegularize(cur, invalidValue, piecewiseOptions);
+    }
+    return cur;
+  };
+
+  out.leftProfile = processProfile(out.leftProfile, width, maxDeltaX);
+  out.rightProfile = processProfile(out.rightProfile, -1, maxDeltaX);
+  out.topProfile = processProfile(out.topProfile, height, maxDeltaY);
+  out.bottomProfile = processProfile(out.bottomProfile, -1, maxDeltaY);
+  return out;
 };
 
 /**
@@ -429,6 +865,116 @@ const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
   }
 
   return footprint;
+};
+
+const getLargestComponentEnvelopeProfiles = (mask, width, height) => {
+  const labeled = labelConnectedComponents(mask, width, height, 1);
+  if (!labeled.components.length) return null;
+
+  const largest = labeled.components.reduce(
+    (best, component) => (!best || component.size > best.size ? component : best),
+    null,
+  );
+  if (!largest) return null;
+
+  const topProfile = new Int32Array(width).fill(height);
+  const bottomProfile = new Int32Array(width).fill(-1);
+  const leftProfile = new Int32Array(height).fill(width);
+  const rightProfile = new Int32Array(height).fill(-1);
+
+  for (let y = largest.bbox.minY; y <= largest.bbox.maxY; y += 1) {
+    for (let x = largest.bbox.minX; x <= largest.bbox.maxX; x += 1) {
+      if (labeled.labels[y * width + x] !== largest.id) continue;
+      if (y < topProfile[x]) topProfile[x] = y;
+      if (y > bottomProfile[x]) bottomProfile[x] = y;
+      if (x < leftProfile[y]) leftProfile[y] = x;
+      if (x > rightProfile[y]) rightProfile[y] = x;
+    }
+  }
+
+  return {
+    topProfile,
+    bottomProfile,
+    leftProfile,
+    rightProfile,
+    componentSize: largest.size,
+  };
+};
+
+const replaceShortSuspiciousRuns = (source, envelope, threshold, maxSpan, inwardDelta, isValid) => {
+  const corrected = new Int32Array(source);
+  let runStart = -1;
+
+  const flushRun = (runEndExclusive) => {
+    if (runStart < 0) return;
+    const runLength = runEndExclusive - runStart;
+    if (runLength <= maxSpan) {
+      for (let i = runStart; i < runEndExclusive; i += 1) {
+        corrected[i] = envelope[i];
+      }
+    }
+    runStart = -1;
+  };
+
+  for (let i = 0; i < source.length; i += 1) {
+    if (!isValid(source[i], envelope[i])) {
+      flushRun(i);
+      continue;
+    }
+    const suspicious = inwardDelta(source[i], envelope[i]) > threshold;
+    if (suspicious) {
+      if (runStart < 0) runStart = i;
+    } else {
+      flushRun(i);
+    }
+  }
+  flushRun(source.length);
+
+  return corrected;
+};
+
+const applyOuterEnvelopeCorrection = (edgeProfiles, envelopeProfiles, width, height, options = {}) => {
+  if (!envelopeProfiles) return edgeProfiles;
+
+  const threshold = options.outerEnvelopeDeviationThreshold
+    ?? Math.max(2, Math.round(Math.min(width, height) * 0.0075));
+  const maxSpan = options.outerEnvelopeShortSpan
+    ?? Math.max(3, Math.round(Math.min(width, height) * 0.03));
+
+  return {
+    topProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.topProfile,
+      envelopeProfiles.topProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => edge - env,
+      (edge, env) => edge < height && env < height,
+    ),
+    bottomProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.bottomProfile,
+      envelopeProfiles.bottomProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => env - edge,
+      (edge, env) => edge >= 0 && env >= 0,
+    ),
+    leftProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.leftProfile,
+      envelopeProfiles.leftProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => edge - env,
+      (edge, env) => edge < width && env < width,
+    ),
+    rightProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.rightProfile,
+      envelopeProfiles.rightProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => env - edge,
+      (edge, env) => edge >= 0 && env >= 0,
+    ),
+  };
 };
 
 /**
@@ -569,6 +1115,58 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
   const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  let correctedEdgeProfiles = edgeProfiles;
+  const useOuterEnvelopeCorrection = options.outerEnvelopeCorrection !== false;
+  if (useOuterEnvelopeCorrection) {
+    const candidateMask = dilate(edgeScanMask, w, h, options.outerEnvelopeDilate ?? 2);
+    const envelopeProfiles = getLargestComponentEnvelopeProfiles(candidateMask, w, h);
+    correctedEdgeProfiles = applyOuterEnvelopeCorrection(
+      edgeProfiles,
+      envelopeProfiles,
+      w,
+      h,
+      options,
+    );
+  }
+
+  let footprint = buildEdgeScanFootprintFromProfiles(correctedEdgeProfiles, w, h);
+  const rawProfiles = {
+    top: profileToArray(edgeProfiles.topProfile),
+    bottom: profileToArray(edgeProfiles.bottomProfile),
+    left: profileToArray(edgeProfiles.leftProfile),
+    right: profileToArray(edgeProfiles.rightProfile),
+  };
+  const regularizedProfiles = {
+    top: regularizeProfile(rawProfiles.top, h).map((value) => clampProfileValue(value, 0, h)),
+    bottom: regularizeProfile(rawProfiles.bottom, -1).map((value) => clampProfileValue(value, -1, h - 1)),
+    left: regularizeProfile(rawProfiles.left, w).map((value) => clampProfileValue(value, 0, w)),
+    right: regularizeProfile(rawProfiles.right, -1).map((value) => clampProfileValue(value, -1, w - 1)),
+  };
+  const correctedEnvelopeSegments = [
+    ...buildHorizontalSegments(regularizedProfiles.top, w, h, 'top'),
+    ...buildHorizontalSegments(regularizedProfiles.bottom, w, h, 'bottom'),
+    ...buildVerticalSegments(regularizedProfiles.left, w, h, 'left'),
+    ...buildVerticalSegments(regularizedProfiles.right, w, h, 'right'),
+  ];
+  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h, {
+    minRunLength: options.minRunLength,
+    neighborSupportRadius: options.neighborSupportRadius,
+    consistencyWeight: options.consistencyWeight,
+    neighborSupportWeight: options.neighborSupportWeight,
+    stabilityScoreThreshold: options.stabilityScoreThreshold,
+    fallbackToFirstHit: options.fallbackToFirstHit,
+  });
+  const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  const smoothingOptions = options.edgeProfileSmoothing;
+  const useEdgeProfileSmoothing = smoothingOptions !== false;
+  const edgeProfiles = useEdgeProfileSmoothing
+    ? regularizeEdgeProfiles(
+      rawEdgeProfiles,
+      w,
+      h,
+      typeof smoothingOptions === 'object' ? smoothingOptions : {},
+    )
+    : rawEdgeProfiles;
   let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
@@ -636,7 +1234,26 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       hasOuter: Boolean(outerPolygon),
       hasInner: Boolean(innerPolygon),
       usedEdgeScan,
+      outerEnvelopeCorrection: useOuterEnvelopeCorrection,
       wallThickness,
+      edgeProfiles: {
+        raw: rawProfiles,
+        regularized: regularizedProfiles,
+      },
+      correctedEnvelopeSegments,
+      rawProfiles: {
+        topProfile: profileToArray(rawEdgeProfiles.topProfile),
+        bottomProfile: profileToArray(rawEdgeProfiles.bottomProfile),
+        leftProfile: profileToArray(rawEdgeProfiles.leftProfile),
+        rightProfile: profileToArray(rawEdgeProfiles.rightProfile),
+      },
+      regularizedProfiles: {
+        topProfile: profileToArray(edgeProfiles.topProfile),
+        bottomProfile: profileToArray(edgeProfiles.bottomProfile),
+        leftProfile: profileToArray(edgeProfiles.leftProfile),
+        rightProfile: profileToArray(edgeProfiles.rightProfile),
+      },
+      edgeProfileSmoothing: useEdgeProfileSmoothing,
     },
   };
 };
