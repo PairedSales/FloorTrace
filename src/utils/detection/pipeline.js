@@ -406,6 +406,197 @@ const scanEdgeInward = (wallMask, width, height) => {
   return { topProfile, bottomProfile, leftProfile, rightProfile };
 };
 
+const profileToArray = (profile) => Array.from(profile);
+
+const cloneProfiles = (profiles) => ({
+  topProfile: new Int32Array(profiles.topProfile),
+  bottomProfile: new Int32Array(profiles.bottomProfile),
+  leftProfile: new Int32Array(profiles.leftProfile),
+  rightProfile: new Int32Array(profiles.rightProfile),
+});
+
+const fillShortInvalidRuns = (profile, invalidValue, maxRunLength) => {
+  const out = new Int32Array(profile);
+  let i = 0;
+  while (i < out.length) {
+    if (out[i] !== invalidValue) {
+      i += 1;
+      continue;
+    }
+
+    const start = i;
+    while (i < out.length && out[i] === invalidValue) i += 1;
+    const end = i - 1;
+    const runLength = end - start + 1;
+    if (runLength > maxRunLength) continue;
+
+    const left = start - 1 >= 0 ? out[start - 1] : invalidValue;
+    const right = i < out.length ? out[i] : invalidValue;
+    const hasLeft = left !== invalidValue;
+    const hasRight = right !== invalidValue;
+    if (!hasLeft && !hasRight) continue;
+
+    for (let j = start; j <= end; j += 1) {
+      if (hasLeft && hasRight) {
+        const t = (j - start + 1) / (runLength + 1);
+        out[j] = Math.round(left * (1 - t) + right * t);
+      } else if (hasLeft) {
+        out[j] = left;
+      } else {
+        out[j] = right;
+      }
+    }
+  }
+  return out;
+};
+
+const medianFilterProfile = (profile, invalidValue, windowSize) => {
+  const out = new Int32Array(profile.length);
+  const radius = Math.floor(windowSize / 2);
+  for (let i = 0; i < profile.length; i += 1) {
+    if (profile[i] === invalidValue) {
+      out[i] = invalidValue;
+      continue;
+    }
+    const values = [];
+    for (let j = Math.max(0, i - radius); j <= Math.min(profile.length - 1, i + radius); j += 1) {
+      if (profile[j] !== invalidValue) values.push(profile[j]);
+    }
+    if (!values.length) {
+      out[i] = profile[i];
+      continue;
+    }
+    values.sort((a, b) => a - b);
+    out[i] = values[Math.floor(values.length / 2)];
+  }
+  return out;
+};
+
+const clampProfileDelta = (profile, invalidValue, maxDelta) => {
+  const out = new Int32Array(profile);
+  let lastIdx = -1;
+  for (let i = 0; i < out.length; i += 1) {
+    if (out[i] === invalidValue) continue;
+    if (lastIdx >= 0) {
+      const minV = out[lastIdx] - maxDelta * (i - lastIdx);
+      const maxV = out[lastIdx] + maxDelta * (i - lastIdx);
+      out[i] = Math.max(minV, Math.min(maxV, out[i]));
+    }
+    lastIdx = i;
+  }
+  return out;
+};
+
+const robustLinearFit = (xs, ys, huberDelta = 2, iterations = 4) => {
+  let slope = 0;
+  let intercept = ys.reduce((sum, y) => sum + y, 0) / ys.length;
+  let weights = new Float32Array(xs.length).fill(1);
+
+  for (let iter = 0; iter < iterations; iter += 1) {
+    let sumW = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+    for (let i = 0; i < xs.length; i += 1) {
+      const w = weights[i];
+      const x = xs[i];
+      const y = ys[i];
+      sumW += w;
+      sumX += w * x;
+      sumY += w * y;
+      sumXX += w * x * x;
+      sumXY += w * x * y;
+    }
+    const denom = (sumW * sumXX) - (sumX * sumX);
+    if (Math.abs(denom) < 1e-6) break;
+    slope = ((sumW * sumXY) - (sumX * sumY)) / denom;
+    intercept = (sumY - (slope * sumX)) / sumW;
+
+    for (let i = 0; i < xs.length; i += 1) {
+      const residual = ys[i] - (slope * xs[i] + intercept);
+      const absResidual = Math.abs(residual);
+      weights[i] = absResidual <= huberDelta ? 1 : huberDelta / absResidual;
+    }
+  }
+
+  return { slope, intercept };
+};
+
+const piecewiseLinearRegularize = (profile, invalidValue, options = {}) => {
+  const {
+    segmentLength = 64,
+    minSegmentLength = 16,
+    huberDelta = 2,
+    iterations = 4,
+  } = options;
+  const out = new Int32Array(profile);
+  let runStart = -1;
+
+  const flushRun = (runEnd) => {
+    if (runStart < 0) return;
+    const runLength = runEnd - runStart + 1;
+    if (runLength < minSegmentLength) {
+      runStart = -1;
+      return;
+    }
+    for (let segStart = runStart; segStart <= runEnd; segStart += segmentLength) {
+      const segEnd = Math.min(runEnd, segStart + segmentLength - 1);
+      const len = segEnd - segStart + 1;
+      if (len < minSegmentLength) continue;
+      const xs = new Array(len);
+      const ys = new Array(len);
+      for (let i = 0; i < len; i += 1) {
+        xs[i] = segStart + i;
+        ys[i] = out[segStart + i];
+      }
+      const fit = robustLinearFit(xs, ys, huberDelta, iterations);
+      for (let i = 0; i < len; i += 1) {
+        out[segStart + i] = Math.round(fit.slope * xs[i] + fit.intercept);
+      }
+    }
+    runStart = -1;
+  };
+
+  for (let i = 0; i < out.length; i += 1) {
+    const valid = out[i] !== invalidValue;
+    if (valid && runStart < 0) runStart = i;
+    if (!valid && runStart >= 0) flushRun(i - 1);
+  }
+  flushRun(out.length - 1);
+
+  return out;
+};
+
+const regularizeEdgeProfiles = (profiles, width, height, options = {}) => {
+  const {
+    maxInvalidRun = 6,
+    medianWindow = 7,
+    maxDeltaX = 2,
+    maxDeltaY = 2,
+    piecewiseLinear = false,
+    piecewiseOptions = {},
+  } = options;
+  const window = Math.max(3, Math.min(11, medianWindow | 1));
+  const out = cloneProfiles(profiles);
+
+  const processProfile = (profile, invalidValue, maxDelta) => {
+    let cur = fillShortInvalidRuns(profile, invalidValue, maxInvalidRun);
+    cur = medianFilterProfile(cur, invalidValue, window);
+    cur = clampProfileDelta(cur, invalidValue, maxDelta);
+    if (piecewiseLinear) {
+      cur = piecewiseLinearRegularize(cur, invalidValue, piecewiseOptions);
+    }
+    return cur;
+  };
+
+  out.leftProfile = processProfile(out.leftProfile, width, maxDeltaX);
+  out.rightProfile = processProfile(out.rightProfile, -1, maxDeltaX);
+  out.topProfile = processProfile(out.topProfile, height, maxDeltaY);
+  out.bottomProfile = processProfile(out.bottomProfile, -1, maxDeltaY);
+  return out;
+};
+
 /**
  * Build a footprint mask from provided edge-scan profiles.
  * A pixel is inside the footprint if it falls within the first-wall
@@ -694,6 +885,18 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   }
 
   let footprint = buildEdgeScanFootprintFromProfiles(correctedEdgeProfiles, w, h);
+  const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  const smoothingOptions = options.edgeProfileSmoothing;
+  const useEdgeProfileSmoothing = smoothingOptions !== false;
+  const edgeProfiles = useEdgeProfileSmoothing
+    ? regularizeEdgeProfiles(
+      rawEdgeProfiles,
+      w,
+      h,
+      typeof smoothingOptions === 'object' ? smoothingOptions : {},
+    )
+    : rawEdgeProfiles;
+  let footprint = buildEdgeScanFootprintFromProfiles(edgeProfiles, w, h);
   let usedEdgeScan = true;
 
   // Verify footprint is non-trivial.
@@ -762,6 +965,19 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       usedEdgeScan,
       outerEnvelopeCorrection: useOuterEnvelopeCorrection,
       wallThickness,
+      rawProfiles: {
+        topProfile: profileToArray(rawEdgeProfiles.topProfile),
+        bottomProfile: profileToArray(rawEdgeProfiles.bottomProfile),
+        leftProfile: profileToArray(rawEdgeProfiles.leftProfile),
+        rightProfile: profileToArray(rawEdgeProfiles.rightProfile),
+      },
+      regularizedProfiles: {
+        topProfile: profileToArray(edgeProfiles.topProfile),
+        bottomProfile: profileToArray(edgeProfiles.bottomProfile),
+        leftProfile: profileToArray(edgeProfiles.leftProfile),
+        rightProfile: profileToArray(edgeProfiles.rightProfile),
+      },
+      edgeProfileSmoothing: useEdgeProfileSmoothing,
     },
   };
 };
