@@ -46,7 +46,7 @@ function App() {
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const debugDetection = useAppStore((s) => s.debugDetection);
   const detectionDebugData = useAppStore((s) => s.detectionDebugData);
-  const notification = useAppStore((s) => s.notification);
+  const notifications = useAppStore((s) => s.notifications);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -73,7 +73,8 @@ function App() {
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
-  const setNotification = useAppStore((s) => s.setNotification);
+  const addNotification = useAppStore((s) => s.addNotification);
+  const removeNotification = useAppStore((s) => s.removeNotification);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
@@ -85,19 +86,15 @@ function App() {
 
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
-  const notifyTimerRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
 
   const notify = useCallback((message, durationMs = 3000) => {
-    setNotification({ show: true, message });
-    if (notifyTimerRef.current) {
-      clearTimeout(notifyTimerRef.current);
-    }
-    notifyTimerRef.current = setTimeout(() => {
-      setNotification({ show: false, message: '' });
-      notifyTimerRef.current = null;
+    const id = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    addNotification({ id, message });
+    setTimeout(() => {
+      removeNotification(id);
     }, durationMs);
-  }, [setNotification]);
+  }, [addNotification, removeNotification]);
 
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
@@ -116,12 +113,7 @@ function App() {
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
   useEffect(() => () => terminateDetectionWorker(), []);
-  useEffect(() => () => {
-    if (notifyTimerRef.current) {
-      clearTimeout(notifyTimerRef.current);
-      notifyTimerRef.current = null;
-    }
-  }, []);
+
 
   // Reset entire application
   const handleRestart = () => {
@@ -869,13 +861,23 @@ function App() {
           />
         )}
 
-        {notification.show && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in">
-              {notification.message}
+        {/* Unified Toasts Container - Rendered with very high z-index to stay above Toolbar and ToolsPanel */}
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
+          {/* Processing Message */}
+          {isProcessing && (
+            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3 shadow-xl flex items-center gap-3 animate-toast-in">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
+              <span className="text-sm text-slate-200 font-medium">{processingMessage || 'Working…'}</span>
             </div>
-          </div>
-        )}
+          )}
+          
+          {/* Notifications Stack */}
+          {notifications.map(toast => (
+            <div key={toast.id} className="pointer-events-auto bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in shadow-black/50">
+              {toast.message}
+            </div>
+          ))}
+        </div>
 
         {showHelpModal && (
           <HelpModal onClose={handleHelpClose} />
