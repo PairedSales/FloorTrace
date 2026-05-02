@@ -861,8 +861,8 @@ function App() {
           />
         )}
 
-        {/* Unified Toasts Container - Rendered with very high z-index to stay above Toolbar and ToolsPanel */}
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
+        {/* Unified Toasts Container - Positioned within the content area, below toolbar */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
           {/* Processing Message */}
           {isProcessing && (
             <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3 shadow-xl flex items-center gap-3 animate-toast-in">
