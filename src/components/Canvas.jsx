@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
 import { useCanvasZoom } from '../hooks/useCanvasZoom';
 import { useCanvasPan } from '../hooks/useCanvasPan';
 import { useEraserTool } from '../hooks/useEraserTool';
@@ -1266,6 +1266,13 @@ const Canvas = React.memo(forwardRef(({
               onVertexDragEnd={handleVertexDragEnd}
               onDeletePerimeterVertex={onDeletePerimeterVertex}
             />
+
+            {debugDetection && (
+              <DetectionDebugOverlay
+                debugData={detectionDebugData}
+                scale={scale}
+              />
+            )}
 
             {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
               <Text
