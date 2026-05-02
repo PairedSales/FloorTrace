@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Rect, Text } from 'react-konva';
-import { formatLength } from '../../utils/unitConverter';
+import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
 import { measureSideLenWidth } from './canvasUtils';
 
 const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
@@ -149,6 +149,8 @@ const useAnimatedVertices = (targetVertices) => {
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
 const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit) => {
+  const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
+
   return vertices.map((vertex, i) => {
     const nextVertex = vertices[(i + 1) % vertices.length];
 
@@ -156,7 +158,7 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const dy = nextVertex.y - vertex.y;
     const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
     const lengthInFeet = lengthInPixels * pixelsPerFoot;
-    const formattedLength = formatLength(lengthInFeet, unit);
+    const formattedLength = formatLength(lengthInFeet, unit, unitStyle);
 
     const midX = (vertex.x + nextVertex.x) / 2;
     const midY = (vertex.y + nextVertex.y) / 2;

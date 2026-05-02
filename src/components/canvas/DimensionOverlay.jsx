@@ -1,6 +1,6 @@
 import React from 'react';
 import { Line, Circle, Text, Rect } from 'react-konva';
-import { formatLength } from '../../utils/unitConverter';
+import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
 import { measureTextWidth, OCR_PILL_FONT_FAMILY, OCR_PILL_FONT_STYLE, OCR_DOT_BASE_RADIUS, OCR_DOT_MIN_RADIUS } from './canvasUtils';
 
 /**
@@ -17,12 +17,16 @@ const DimensionOverlay = ({
 }) => {
   if (mode !== 'manual' || !detectedDimensions || detectedDimensions.length === 0) return null;
 
+  const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
+
   return (
     <>
       {detectedDimensions.map((dim, i) => {
         const cx = dim.bbox.x + dim.bbox.width / 2;
         const cy = dim.bbox.y + dim.bbox.height / 2;
-        const labelText = `${formatLength(dim.width, unit)} × ${formatLength(dim.height, unit)}`;
+        const labelText = dim.text 
+          ? dim.text.replace(/x/g, '×') 
+          : `${formatLength(dim.width, unit, unitStyle)} × ${formatLength(dim.height, unit, unitStyle)}`;
         const fs = 12 / scale;
         const padX = 7 / scale;
         const padY = 3.5 / scale;

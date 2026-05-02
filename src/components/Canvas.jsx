@@ -6,6 +6,7 @@ import { useCanvasZoom } from '../hooks/useCanvasZoom';
 import { useCanvasPan } from '../hooks/useCanvasPan';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
+import { getUnitStyleFromDimensions } from '../utils/unitConverter';
 
 const Canvas = React.memo(forwardRef(({
   image,
@@ -82,6 +83,8 @@ const Canvas = React.memo(forwardRef(({
   // Track the previous imageObj dimensions so fitToWindow is only triggered
   // when the image actually changes size (not after same-size eraser/crop edits).
   const prevImageDimsRef = useRef(null);
+
+  const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
 
   // ── Composable hooks ───────────────────────────────────────────────────────
 
@@ -1329,6 +1332,7 @@ const Canvas = React.memo(forwardRef(({
             scale={scale}
             pixelsPerFoot={pixelsPerFoot}
             unit={unit}
+            unitStyle={unitStyle}
             selectedMeasurementLineIndex={selectedMeasurementLineIndex}
             onMeasurementLineSelect={handleMeasurementLineSelect}
             onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
@@ -1344,6 +1348,7 @@ const Canvas = React.memo(forwardRef(({
             scale={scale}
             pixelsPerFoot={pixelsPerFoot}
             unit={unit}
+            unitStyle={unitStyle}
             selectedCustomShapeIndex={selectedCustomShapeIndex}
             onCustomShapeSelect={handleCustomShapeSelect}
             onCustomShapeDragEnd={handleCustomShapeDragEnd}

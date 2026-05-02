@@ -59,20 +59,65 @@ export const sqFeetToSqMeters = (sqFeet) => {
 };
 
 /**
+ * Detect the dominant formatting style from a list of OCR dimensions
+ * @param {Array} dimensions - Array of detected dimensions
+ * @param {string} unit - 'decimal', 'inches', or 'metric'
+ * @returns {string|null} - The detected style string, or null
+ */
+export const getUnitStyleFromDimensions = (dimensions, unit) => {
+  if (!dimensions || dimensions.length === 0) return null;
+  const mappedFormat = unit === 'metric' ? 'meters' : unit;
+  const formatDims = dimensions.filter(d => d.format === mappedFormat);
+  if (formatDims.length === 0) return null;
+
+  const styles = {};
+  for (const d of formatDims) {
+    if (!d.text) continue;
+    let style = null;
+    if (mappedFormat === 'inches') {
+      if (d.text.includes('ft') || d.text.includes('in')) style = 'explicit';
+      else if (d.text.includes("' ")) style = 'tick-space';
+      else style = 'tick';
+    } else if (mappedFormat === 'decimal') {
+      if (d.text.includes("'")) style = 'tick';
+      else if (d.text.includes('ft') || d.text.includes('feet')) style = 'ft';
+      else style = 'bare';
+    } else if (mappedFormat === 'meters') {
+      if (d.text.includes('meters')) style = 'meters';
+      else style = 'm';
+    }
+
+    if (style) {
+      styles[style] = (styles[style] || 0) + 1;
+    }
+  }
+
+  if (Object.keys(styles).length === 0) return null;
+  return Object.keys(styles).reduce((a, b) => styles[a] > styles[b] ? a : b);
+};
+
+/**
  * Format a length value based on the selected unit system
  * @param {number} decimalFeet - Length in decimal feet
  * @param {string} unit - 'decimal', 'inches', or 'metric'
- * @returns {string} - Formatted string (e.g., "12.4 ft", "12' 4\"", or "3.8 m")
+ * @param {string|null} style - Optional specific style template to use
+ * @returns {string} - Formatted string (e.g., "12.4 ft", "12'5\"", or "3.8 m")
  */
-export const formatLength = (decimalFeet, unit = 'decimal') => {
+export const formatLength = (decimalFeet, unit = 'decimal', style = null) => {
   if (unit === 'inches') {
     const { feet, inches } = decimalToFeetInches(decimalFeet);
-    return `${feet}' ${inches}"`;
+    if (style === 'explicit') return `${feet} ft ${inches} in`;
+    if (style === 'tick-space') return `${feet}' ${inches}"`;
+    return `${feet}'${inches}"`; // Default matches e.g. 12'5"
   }
   if (unit === 'metric') {
     const meters = feetToMeters(decimalFeet);
+    if (style === 'meters') return `${meters.toFixed(2)} meters`;
     return `${meters.toFixed(2)} m`;
   }
+  
+  if (style === 'tick') return `${decimalFeet.toFixed(1)}'`;
+  if (style === 'bare') return `${decimalFeet.toFixed(1)}`;
   return `${decimalFeet.toFixed(1)} ft`;
 };
 
