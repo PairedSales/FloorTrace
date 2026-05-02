@@ -867,6 +867,116 @@ const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
   return footprint;
 };
 
+const getLargestComponentEnvelopeProfiles = (mask, width, height) => {
+  const labeled = labelConnectedComponents(mask, width, height, 1);
+  if (!labeled.components.length) return null;
+
+  const largest = labeled.components.reduce(
+    (best, component) => (!best || component.size > best.size ? component : best),
+    null,
+  );
+  if (!largest) return null;
+
+  const topProfile = new Int32Array(width).fill(height);
+  const bottomProfile = new Int32Array(width).fill(-1);
+  const leftProfile = new Int32Array(height).fill(width);
+  const rightProfile = new Int32Array(height).fill(-1);
+
+  for (let y = largest.bbox.minY; y <= largest.bbox.maxY; y += 1) {
+    for (let x = largest.bbox.minX; x <= largest.bbox.maxX; x += 1) {
+      if (labeled.labels[y * width + x] !== largest.id) continue;
+      if (y < topProfile[x]) topProfile[x] = y;
+      if (y > bottomProfile[x]) bottomProfile[x] = y;
+      if (x < leftProfile[y]) leftProfile[y] = x;
+      if (x > rightProfile[y]) rightProfile[y] = x;
+    }
+  }
+
+  return {
+    topProfile,
+    bottomProfile,
+    leftProfile,
+    rightProfile,
+    componentSize: largest.size,
+  };
+};
+
+const replaceShortSuspiciousRuns = (source, envelope, threshold, maxSpan, inwardDelta, isValid) => {
+  const corrected = new Int32Array(source);
+  let runStart = -1;
+
+  const flushRun = (runEndExclusive) => {
+    if (runStart < 0) return;
+    const runLength = runEndExclusive - runStart;
+    if (runLength <= maxSpan) {
+      for (let i = runStart; i < runEndExclusive; i += 1) {
+        corrected[i] = envelope[i];
+      }
+    }
+    runStart = -1;
+  };
+
+  for (let i = 0; i < source.length; i += 1) {
+    if (!isValid(source[i], envelope[i])) {
+      flushRun(i);
+      continue;
+    }
+    const suspicious = inwardDelta(source[i], envelope[i]) > threshold;
+    if (suspicious) {
+      if (runStart < 0) runStart = i;
+    } else {
+      flushRun(i);
+    }
+  }
+  flushRun(source.length);
+
+  return corrected;
+};
+
+const applyOuterEnvelopeCorrection = (edgeProfiles, envelopeProfiles, width, height, options = {}) => {
+  if (!envelopeProfiles) return edgeProfiles;
+
+  const threshold = options.outerEnvelopeDeviationThreshold
+    ?? Math.max(2, Math.round(Math.min(width, height) * 0.0075));
+  const maxSpan = options.outerEnvelopeShortSpan
+    ?? Math.max(3, Math.round(Math.min(width, height) * 0.03));
+
+  return {
+    topProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.topProfile,
+      envelopeProfiles.topProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => edge - env,
+      (edge, env) => edge < height && env < height,
+    ),
+    bottomProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.bottomProfile,
+      envelopeProfiles.bottomProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => env - edge,
+      (edge, env) => edge >= 0 && env >= 0,
+    ),
+    leftProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.leftProfile,
+      envelopeProfiles.leftProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => edge - env,
+      (edge, env) => edge < width && env < width,
+    ),
+    rightProfile: replaceShortSuspiciousRuns(
+      edgeProfiles.rightProfile,
+      envelopeProfiles.rightProfile,
+      threshold,
+      maxSpan,
+      (edge, env) => env - edge,
+      (edge, env) => edge >= 0 && env >= 0,
+    ),
+  };
+};
+
 /**
  * Measure wall thickness at each exterior wall position by scanning inward
  * through the first dark pixel until the wall ends (transitions to white).
@@ -1005,6 +1115,21 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
   const edgeProfiles = scanEdgeInward(edgeScanMask, w, h);
+  let correctedEdgeProfiles = edgeProfiles;
+  const useOuterEnvelopeCorrection = options.outerEnvelopeCorrection !== false;
+  if (useOuterEnvelopeCorrection) {
+    const candidateMask = dilate(edgeScanMask, w, h, options.outerEnvelopeDilate ?? 2);
+    const envelopeProfiles = getLargestComponentEnvelopeProfiles(candidateMask, w, h);
+    correctedEdgeProfiles = applyOuterEnvelopeCorrection(
+      edgeProfiles,
+      envelopeProfiles,
+      w,
+      h,
+      options,
+    );
+  }
+
+  let footprint = buildEdgeScanFootprintFromProfiles(correctedEdgeProfiles, w, h);
   const rawProfiles = {
     top: profileToArray(edgeProfiles.topProfile),
     bottom: profileToArray(edgeProfiles.bottomProfile),
@@ -1109,6 +1234,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       hasOuter: Boolean(outerPolygon),
       hasInner: Boolean(innerPolygon),
       usedEdgeScan,
+      outerEnvelopeCorrection: useOuterEnvelopeCorrection,
       wallThickness,
       edgeProfiles: {
         raw: rawProfiles,
