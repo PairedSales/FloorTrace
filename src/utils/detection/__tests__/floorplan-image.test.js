@@ -66,10 +66,21 @@ const polygonBBox = (polygon) => {
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
 const EXAMPLE_PATH = path.join(ROOT, 'ExampleFloorplan.png');
 const TRACED_PATH = path.join(ROOT, 'ExampleFloorplan-Traced.png');
+const WINDOW_INTERRUPTION_FIXTURE_PATH = path.join(
+  ROOT,
+  'src',
+  'utils',
+  'detection',
+  '__tests__',
+  '__fixtures__',
+  'WindowInterruptionsFloorplan.png'
+);
 
 let exampleImage;
 let tracedImage;
 let imagesAvailable = false;
+let windowInterruptionImage;
+const windowFixtureAvailable = fs.existsSync(WINDOW_INTERRUPTION_FIXTURE_PATH);
 
 try {
   exampleImage = loadPngAsImageData(EXAMPLE_PATH);
@@ -77,6 +88,10 @@ try {
   imagesAvailable = true;
 } catch {
   // Tests will be skipped if images are missing.
+}
+
+if (windowFixtureAvailable) {
+  windowInterruptionImage = loadPngAsImageData(WINDOW_INTERRUPTION_FIXTURE_PATH);
 }
 
 /* ------------------------------------------------------------------ */
@@ -389,4 +404,29 @@ describe('regression tests', () => {
     expect(boundaryByMode(null)).toBeNull();
     expect(boundaryByMode(null, 'outer')).toBeNull();
   });
+
+  it.skipIf(!windowFixtureAvailable)('real-image case: repeated window interruptions keep right edge stable', () => {
+    // Fixture requirements (if absent in local/dev branches):
+    //  - Place at src/utils/detection/__tests__/__fixtures__/WindowInterruptionsFloorplan.png
+    //  - Should contain a mostly rectangular envelope.
+    //  - One long exterior wall should include repeated narrow window-like interruptions
+    //    and optionally a slightly offset inner framing line.
+    //  - Image should be preprocessed/high-contrast enough for traceFloorplanBoundaryCore.
+    const result = traceFloorplanBoundaryCore(windowInterruptionImage);
+    expect(result).toBeTruthy();
+    expect(result.outer).toBeTruthy();
+
+    const poly = result.outer.polygon;
+    const bbox = polygonBBox(poly);
+    expect(poly.length).toBeGreaterThanOrEqual(4);
+
+    const rightSidePoints = poly.filter(
+      (p) => p.x >= bbox.maxX - 30 && p.y >= bbox.minY + 5 && p.y <= bbox.maxY - 5
+    );
+    expect(rightSidePoints.length).toBeGreaterThan(0);
+
+    const maxInwardDeviation = Math.max(...rightSidePoints.map((p) => bbox.maxX - p.x));
+    expect(maxInwardDeviation).toBeLessThanOrEqual(30);
+    expect(rightSidePoints.length).toBeLessThanOrEqual(32);
+  }, 15000);
 });
