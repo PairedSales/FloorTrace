@@ -262,6 +262,13 @@ const LeftPanel = ({
               checked={saveOnExit}
               onChange={onSaveOnExitChange}
             />
+            {import.meta.env.DEV && (
+              <Toggle
+                label="Detection Debug"
+                checked={debugDetection}
+                onChange={onDebugDetectionChange}
+              />
+            )}
           </section>
           <div className="panel-divider mx-3" />
         </>
