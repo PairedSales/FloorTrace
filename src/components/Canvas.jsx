@@ -1207,17 +1207,6 @@ const Canvas = React.memo(forwardRef(({
         </div>
       )}
 
-      {isProcessing && (
-        <div className="absolute inset-0 flex items-start justify-center pt-3 z-10 pointer-events-none">
-          <div className="bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3.5 shadow-xl">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
-              <span className="text-sm text-slate-200 font-medium">{processingMessage || 'Working…'}</span>
-            </div>
-          </div>
-        </div>
-      )}
-      
       {imageObj && (
         <Stage
           ref={stageRef}

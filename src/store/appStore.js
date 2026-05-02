@@ -85,7 +85,7 @@ const useAppStore = create((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  notification: { show: false, message: '' },
+  notifications: [],
   showPanelOptions: false,
   showHelpModal: false,
 
@@ -121,7 +121,8 @@ const useAppStore = create((set, get) => ({
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
-  setNotification: (v) => set({ notification: v }),
+  addNotification: (v) => set((state) => ({ notifications: [...state.notifications, v] })),
+  removeNotification: (id) => set((state) => ({ notifications: state.notifications.filter(n => n.id !== id) })),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
