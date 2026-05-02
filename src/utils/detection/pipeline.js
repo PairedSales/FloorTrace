@@ -374,32 +374,177 @@ const DARK_PIXEL_THRESHOLD = 200;
  * the position of the first wall (black) pixel encountered in each
  * row/column.  Returns 4 profile arrays.
  *
+ * Supports multi-candidate scoring with tunable options:
+ * - minRunLength: minimum contiguous dark run considered stable.
+ * - neighborSupportRadius: how many prior rows/columns to use for local support.
+ * - consistencyWeight: penalty for diverging from previously regularized position.
+ *
  * For clean, preprocessed inputs this directly identifies the exterior
  * wall positions without any line detection or segment merging.
  */
-const scanEdgeInward = (wallMask, width, height) => {
+const collectDarkRuns1D = (length, getAt, edgeStep) => {
+  const runs = [];
+  let i = edgeStep > 0 ? 0 : length - 1;
+  while (i >= 0 && i < length) {
+    if (!getAt(i)) {
+      i += edgeStep;
+      continue;
+    }
+    const start = i;
+    let end = i;
+    while (end + edgeStep >= 0 && end + edgeStep < length && getAt(end + edgeStep)) {
+      end += edgeStep;
+    }
+    const runLength = Math.abs(end - start) + 1;
+    const edgePos = edgeStep > 0 ? Math.min(start, end) : Math.max(start, end);
+    runs.push({
+      edgePos,
+      length: runLength,
+      start: Math.min(start, end),
+      end: Math.max(start, end),
+    });
+    i = end + edgeStep;
+  }
+  return runs;
+};
+
+const scoreRunCandidate = (run, previousPos, neighborAvg, options) => {
+  const {
+    minRunLength = 2,
+    consistencyWeight = 0.75,
+    neighborSupportWeight = 1.0,
+  } = options;
+  const lengthScore = Math.max(0, run.length - minRunLength + 1);
+  const consistencyPenalty = previousPos == null
+    ? 0
+    : Math.abs(run.edgePos - previousPos) * consistencyWeight;
+  const neighborPenalty = neighborAvg == null
+    ? 0
+    : Math.abs(run.edgePos - neighborAvg) * neighborSupportWeight;
+  return lengthScore - consistencyPenalty - neighborPenalty;
+};
+
+const chooseRunByContinuity = (runs, context, options) => {
+  if (!runs.length) return null;
+  const {
+    minRunLength = 2,
+    stabilityScoreThreshold = 0.25,
+    fallbackToFirstHit = true,
+  } = options;
+
+  const stableRuns = runs.filter((run) => run.length >= minRunLength);
+  const candidates = stableRuns.length ? stableRuns : runs;
+  let bestRun = candidates[0];
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const run of candidates) {
+    const score = scoreRunCandidate(run, context.previousPos, context.neighborAvg, options);
+    if (score > bestScore || (score === bestScore && run.length > bestRun.length)) {
+      bestRun = run;
+      bestScore = score;
+    }
+  }
+
+  if (stableRuns.length && bestScore >= stabilityScoreThreshold) return bestRun;
+  if (!stableRuns.length && fallbackToFirstHit) return runs[0];
+  return bestScore >= stabilityScoreThreshold ? bestRun : (fallbackToFirstHit ? runs[0] : null);
+};
+
+const scanEdgeInward = (wallMask, width, height, options = {}) => {
   const topProfile = new Int32Array(width).fill(height);
   const bottomProfile = new Int32Array(width).fill(-1);
   const leftProfile = new Int32Array(height).fill(width);
   const rightProfile = new Int32Array(height).fill(-1);
+  const {
+    neighborSupportRadius = 2,
+  } = options;
 
   // Top & bottom profiles: scan each column vertically.
   for (let x = 0; x < width; x += 1) {
-    for (let y = 0; y < height; y += 1) {
-      if (wallMask[y * width + x]) { topProfile[x] = y; break; }
+    let topNeighborSum = 0;
+    let topNeighborCount = 0;
+    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
+      if (topProfile[nx] < height) {
+        topNeighborSum += topProfile[nx];
+        topNeighborCount += 1;
+      }
     }
-    for (let y = height - 1; y >= 0; y -= 1) {
-      if (wallMask[y * width + x]) { bottomProfile[x] = y; break; }
+    const topRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], 1);
+    const topChosen = chooseRunByContinuity(
+      topRuns,
+      {
+        previousPos: x > 0 && topProfile[x - 1] < height ? topProfile[x - 1] : null,
+        neighborAvg: topNeighborCount ? topNeighborSum / topNeighborCount : null,
+      },
+      options,
+    );
+    if (topChosen) {
+      topProfile[x] = topChosen.edgePos;
+    }
+
+    let bottomNeighborSum = 0;
+    let bottomNeighborCount = 0;
+    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
+      if (bottomProfile[nx] >= 0) {
+        bottomNeighborSum += bottomProfile[nx];
+        bottomNeighborCount += 1;
+      }
+    }
+    const bottomRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], -1);
+    const bottomChosen = chooseRunByContinuity(
+      bottomRuns,
+      {
+        previousPos: x > 0 && bottomProfile[x - 1] >= 0 ? bottomProfile[x - 1] : null,
+        neighborAvg: bottomNeighborCount ? bottomNeighborSum / bottomNeighborCount : null,
+      },
+      options,
+    );
+    if (bottomChosen) {
+      bottomProfile[x] = bottomChosen.edgePos;
     }
   }
 
   // Left & right profiles: scan each row horizontally.
   for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (wallMask[y * width + x]) { leftProfile[y] = x; break; }
+    let leftNeighborSum = 0;
+    let leftNeighborCount = 0;
+    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
+      if (leftProfile[ny] < width) {
+        leftNeighborSum += leftProfile[ny];
+        leftNeighborCount += 1;
+      }
     }
-    for (let x = width - 1; x >= 0; x -= 1) {
-      if (wallMask[y * width + x]) { rightProfile[y] = x; break; }
+    const leftRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], 1);
+    const leftChosen = chooseRunByContinuity(
+      leftRuns,
+      {
+        previousPos: y > 0 && leftProfile[y - 1] < width ? leftProfile[y - 1] : null,
+        neighborAvg: leftNeighborCount ? leftNeighborSum / leftNeighborCount : null,
+      },
+      options,
+    );
+    if (leftChosen) {
+      leftProfile[y] = leftChosen.edgePos;
+    }
+
+    let rightNeighborSum = 0;
+    let rightNeighborCount = 0;
+    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
+      if (rightProfile[ny] >= 0) {
+        rightNeighborSum += rightProfile[ny];
+        rightNeighborCount += 1;
+      }
+    }
+    const rightRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], -1);
+    const rightChosen = chooseRunByContinuity(
+      rightRuns,
+      {
+        previousPos: y > 0 && rightProfile[y - 1] >= 0 ? rightProfile[y - 1] : null,
+        neighborAvg: rightNeighborCount ? rightNeighborSum / rightNeighborCount : null,
+      },
+      options,
+    );
+    if (rightChosen) {
+      rightProfile[y] = rightChosen.edgePos;
     }
   }
 
@@ -885,6 +1030,14 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   }
 
   let footprint = buildEdgeScanFootprintFromProfiles(correctedEdgeProfiles, w, h);
+  const edgeProfiles = scanEdgeInward(edgeScanMask, w, h, {
+    minRunLength: options.minRunLength,
+    neighborSupportRadius: options.neighborSupportRadius,
+    consistencyWeight: options.consistencyWeight,
+    neighborSupportWeight: options.neighborSupportWeight,
+    stabilityScoreThreshold: options.stabilityScoreThreshold,
+    fallbackToFirstHit: options.fallbackToFirstHit,
+  });
   const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h);
   const smoothingOptions = options.edgeProfileSmoothing;
   const useEdgeProfileSmoothing = smoothingOptions !== false;
