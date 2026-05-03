@@ -23,7 +23,7 @@ const ToolsPanel = ({
     currentCustomShape;
 
   return (
-    <div className="relative z-10 flex shrink-0 flex-col self-start animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none">
+    <div className="flex shrink-0 flex-col animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none">
       <section className="px-3 py-3 pointer-events-auto">
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
