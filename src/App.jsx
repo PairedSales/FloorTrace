@@ -4,6 +4,7 @@ import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
+import FloorTabs from './components/FloorTabs';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import {
@@ -52,6 +53,10 @@ function App() {
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
+
+  // Floor management
+  const floors = useAppStore((s) => s.floors);
+  const addFloor = useAppStore((s) => s.addFloor);
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
@@ -763,6 +768,8 @@ function App() {
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}
+        onAddFloor={addFloor}
+        floorCount={floors.length}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -842,24 +849,28 @@ function App() {
           onDimensionBlur={handleDimensionBlur}
         />
 
-        {image && (
-          <ToolsPanel
-            lineToolActive={lineToolActive}
-            onLineToolToggle={handleLineToolToggle}
-            drawAreaActive={drawAreaActive}
-            onDrawAreaToggle={handleDrawAreaToggle}
-            eraserToolActive={eraserToolActive}
-            onEraserToolToggle={handleEraserToolToggle}
-            cropToolActive={cropToolActive}
-            onCropToolToggle={handleCropToolToggle}
-            measurementLines={measurementLines}
-            customShapes={customShapes}
-            currentMeasurementLine={currentMeasurementLine}
-            currentCustomShape={currentCustomShape}
-            onClearTools={handleClearTools}
-            hasArea={area > 0}
-          />
-        )}
+        {/* Right-side overlay panels — stacked vertically */}
+        <div className="relative z-10 flex shrink-0 flex-col self-start">
+          {image && (
+            <ToolsPanel
+              lineToolActive={lineToolActive}
+              onLineToolToggle={handleLineToolToggle}
+              drawAreaActive={drawAreaActive}
+              onDrawAreaToggle={handleDrawAreaToggle}
+              eraserToolActive={eraserToolActive}
+              onEraserToolToggle={handleEraserToolToggle}
+              cropToolActive={cropToolActive}
+              onCropToolToggle={handleCropToolToggle}
+              measurementLines={measurementLines}
+              customShapes={customShapes}
+              currentMeasurementLine={currentMeasurementLine}
+              currentCustomShape={currentCustomShape}
+              onClearTools={handleClearTools}
+              hasArea={area > 0}
+            />
+          )}
+          <FloorTabs />
+        </div>
 
         {/* Unified Toasts Container - Positioned within the content area, below toolbar */}
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">

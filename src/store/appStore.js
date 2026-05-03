@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createFloorSlice } from './floorManager';
 
 /**
  * Default values for all working state fields (the state that participates in
@@ -92,6 +93,9 @@ const useAppStore = create((set, get) => ({
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
 
+  // ── floor management ───────────────────────────────────────────────────────
+  ...createFloorSlice(set, get),
+
   // ── setters (thin wrappers so call-sites remain terse) ─────────────────────
   setImage: (v) => set({ image: v }),
   setRoomOverlay: (v) => set({ roomOverlay: v }),
@@ -175,8 +179,9 @@ const useAppStore = create((set, get) => ({
     set(defaults);
   },
 
-  /** Full restart: clear image and all working state. */
+  /** Full restart: clear image and all working state, reset to single floor. */
   restart: () => {
+    get().resetFloors();
     set({ ...WORKING_STATE_DEFAULTS });
   },
 

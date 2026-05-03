@@ -7,6 +7,7 @@ import {
   LayoutList,
   ScanText,
   CircleHelp,
+  Layers,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
@@ -25,6 +26,8 @@ const Toolbar = ({
   perimeterOverlay,
   onFindRoomSize,
   onHelpOpen,
+  onAddFloor,
+  floorCount,
 }) => {
   return (
     <header className="flex items-center h-12 px-3 bg-chrome-800 border-b border-chrome-700 select-none shrink-0">
@@ -63,6 +66,17 @@ const Toolbar = ({
           <Download className="w-3.5 h-3.5" />
           <span>Save</span>
         </button>
+
+        {floorCount < 4 && (
+          <button
+            onClick={onAddFloor}
+            className="toolbar-btn"
+            title="Add new floor"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Add Floor</span>
+          </button>
+        )}
       </div>
 
       <div className="w-px h-5 bg-chrome-700 mx-2" />
