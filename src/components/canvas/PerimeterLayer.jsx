@@ -49,11 +49,19 @@ const resamplePolygon = (vertices, n) => {
 
 /**
  * Detect whether a vertex change is a "mode toggle" (many vertices moved at
- * once) rather than a single-vertex drag.
+ * once) rather than a single-vertex drag or single vertex add/remove.
  */
 const detectSignificantChange = (prev, next) => {
   if (!prev || !next || prev.length < 3 || next.length < 3) return false;
-  if (prev.length !== next.length) return true;
+  
+  // If the count differs by more than 1, it's a bulk change (e.g. entirely new polygon).
+  if (Math.abs(prev.length - next.length) > 1) return true;
+  
+  // If the count differs by exactly 1, it's a single vertex add/remove.
+  // We do NOT want to animate this, because animating causes all nodes to unmount
+  // and remount, which produces a noticeable flash.
+  if (Math.abs(prev.length - next.length) === 1) return false;
+
   let movedCount = 0;
   for (let i = 0; i < prev.length; i++) {
     const dx = prev[i].x - next[i].x;
@@ -149,7 +157,7 @@ const useAnimatedVertices = (targetVertices) => {
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
-const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation) => {
+const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation, draggingVertex) => {
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
   const rad = ((canvasRotation || 0) * Math.PI) / 180;
   const cos = Math.abs(Math.cos(rad));
@@ -216,18 +224,23 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
 
     let edgeShift = 0;
-    for (const v of vertices) {
-      const pcx = cx0 + edgeShift * ex;
-      const pcy = cy0 + edgeShift * ey;
-      const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
-      const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
-      const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
-      if (dist2 < vertexClearance * vertexClearance) {
-        const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
-        const required = halfAlong + vertexClearance - Math.abs(projEdge);
-        if (required > 0) {
-          const dir = projEdge > 0 ? -1 : 1;
-          edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
+    
+    // Lightweight mode: skip collision detection if we are actively dragging any vertex.
+    // This keeps the 60fps interaction smooth, and layout snaps to correct position on drag end.
+    if (draggingVertex === null || draggingVertex === undefined) {
+      for (const v of vertices) {
+        const pcx = cx0 + edgeShift * ex;
+        const pcy = cy0 + edgeShift * ey;
+        const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
+        const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
+        const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
+        if (dist2 < vertexClearance * vertexClearance) {
+          const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
+          const required = halfAlong + vertexClearance - Math.abs(projEdge);
+          if (required > 0) {
+            const dir = projEdge > 0 ? -1 : 1;
+            edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
+          }
         }
       }
     }
@@ -255,6 +268,7 @@ const PerimeterLayer = ({
   pixelsPerFoot,
   detectedDimensions,
   unit,
+  draggingVertex,
   onVertexDragStart,
   onVertexDrag,
   onVertexDragEnd,
@@ -276,9 +290,9 @@ const PerimeterLayer = ({
   // Use renderVertices so labels follow the animation in real time.
   const labelLayouts = useMemo(
     () => (showSideLengths && pixelsPerFoot && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation)
+      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation, draggingVertex)
       : [],
-    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit, canvasRotation]
+    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
   if (!perimeterOverlay || !targetVertices) return null;
@@ -296,6 +310,7 @@ const PerimeterLayer = ({
         closed={true}
         fill="rgba(189, 147, 249, 0.15)"
         listening={false}
+        perfectDrawEnabled={false}
       />
 
       {/* Perimeter Vertices – hidden during animation for visual clarity */}
@@ -336,6 +351,7 @@ const PerimeterLayer = ({
             strokeWidth={0}
             cornerRadius={layout.cornerR}
             listening={false}
+            perfectDrawEnabled={false}
           />
           <Text
             x={layout.finalCx}
