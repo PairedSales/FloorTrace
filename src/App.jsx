@@ -53,6 +53,8 @@ function App() {
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const angleToolActive = useAppStore((s) => s.angleToolActive);
+  const angleToolState = useAppStore((s) => s.angleToolState);
 
   // Floor management
   const floors = useAppStore((s) => s.floors);
@@ -78,6 +80,7 @@ function App() {
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
+  const setAngleToolState = useAppStore((s) => s.setAngleToolState);
   const addNotification = useAppStore((s) => s.addNotification);
   const removeNotification = useAppStore((s) => s.removeNotification);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
@@ -110,6 +113,7 @@ function App() {
     handleDrawAreaToggle,
     handleEraserToolToggle,
     handleCropToolToggle,
+    handleAngleToolToggle,
     handleClearTools,
   } = useToolManager();
 
@@ -799,6 +803,10 @@ function App() {
   const handleHelpClose = useCallback(() => setShowHelpModal(false), [setShowHelpModal]);
   const handleSaveUndoPoint = useCallback(() => undoManager.save(), []);
   const handleCancelUndoSave = useCallback(() => undoManager.cancelLastSave(), []);
+  const handleAngleToolStateChange = useCallback((nextState) => {
+    undoManager.save();
+    setAngleToolState(nextState);
+  }, [setAngleToolState]);
 
   // ── Keyboard shortcuts (wired after stable callbacks are defined) ─────────
   useKeyboardShortcuts({
@@ -888,6 +896,10 @@ function App() {
             cropToolActive={cropToolActive}
             onCropToolToggle={handleCropToolToggle}
             onImageUpdate={handleImageUpdate}
+            angleToolActive={angleToolActive}
+            angleToolState={angleToolState}
+            onAngleToolStateChange={handleAngleToolStateChange}
+            onAngleToolToggle={handleAngleToolToggle}
           />
         </div>
 
@@ -928,6 +940,8 @@ function App() {
               onEraserToolToggle={handleEraserToolToggle}
               cropToolActive={cropToolActive}
               onCropToolToggle={handleCropToolToggle}
+              angleToolActive={angleToolActive}
+              onAngleToolToggle={handleAngleToolToggle}
               onRotateCanvas={handleRotateCanvas}
               measurementLines={measurementLines}
               customShapes={customShapes}

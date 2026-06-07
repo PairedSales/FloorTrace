@@ -5,4 +5,5 @@ export { default as ShapeLayer } from './ShapeLayer';
 export { default as DimensionOverlay } from './DimensionOverlay';
 export { default as PerimeterPlacementLayer } from './PerimeterPlacementLayer';
 export { default as DetectionDebugOverlay } from './DetectionDebugOverlay';
+export { default as AngleOverlay } from './AngleOverlay';
 export { getCanvasCoordinates, pointToLineDistance, getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';

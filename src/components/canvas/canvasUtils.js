@@ -6,15 +6,40 @@ export const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 export const SIDE_LEN_FONT_STYLE = '500';
 /** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
 const _measureCtx = document.createElement('canvas').getContext('2d');
+
+const MAX_CACHE_SIZE = 1000;
+const _textWidthCache = new Map();
+const _sideLenCache = new Map();
+
+function safeSetCache(cache, key, value) {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    cache.clear();
+  }
+  cache.set(key, value);
+}
+
 /** Measure the rendered pixel width of a text string using the Canvas 2D API. */
 export function measureTextWidth(text, fontSize) {
+  const key = `${text}_${fontSize}_${OCR_PILL_FONT_STYLE}_${OCR_PILL_FONT_FAMILY}`;
+  if (_textWidthCache.has(key)) {
+    return _textWidthCache.get(key);
+  }
   _measureCtx.font = `${OCR_PILL_FONT_STYLE} ${fontSize}px ${OCR_PILL_FONT_FAMILY}`;
-  return _measureCtx.measureText(text).width;
+  const width = _measureCtx.measureText(text).width;
+  safeSetCache(_textWidthCache, key, width);
+  return width;
 }
+
 /** Measure the pixel width of a side-length pill label using the Canvas 2D API. */
 export function measureSideLenWidth(text, fontSize) {
+  const key = `${text}_${fontSize}_${SIDE_LEN_FONT_STYLE}_${SIDE_LEN_FONT_FAMILY}`;
+  if (_sideLenCache.has(key)) {
+    return _sideLenCache.get(key);
+  }
   _measureCtx.font = `${SIDE_LEN_FONT_STYLE} ${fontSize}px ${SIDE_LEN_FONT_FAMILY}`;
-  return _measureCtx.measureText(text).width;
+  const width = _measureCtx.measureText(text).width;
+  safeSetCache(_sideLenCache, key, width);
+  return width;
 }
 /** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
 export const OCR_DOT_BASE_RADIUS = 3;

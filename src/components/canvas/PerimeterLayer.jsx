@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Rect, Text } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
-import { measureSideLenWidth } from './canvasUtils';
+import { measureSideLenWidth, pointToLineDistance } from './canvasUtils';
 
 const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 const SIDE_LEN_FONT_STYLE = '500';
@@ -163,6 +163,17 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
   const cos = Math.abs(Math.cos(rad));
   const sin = Math.abs(Math.sin(rad));
 
+  // Compute the polygon winding order using Shoelace formula to establish a stable label sideSign.
+  // This replaces array-index parity (i % 2 === 0), preventing label flipping when vertices are added.
+  let sum = 0;
+  for (let idx = 0; idx < vertices.length; idx++) {
+    const v1 = vertices[idx];
+    const v2 = vertices[(idx + 1) % vertices.length];
+    sum += (v2.x - v1.x) * (v2.y + v1.y);
+  }
+  const isCCW = vertices.length >= 3 ? sum > 0 : true;
+  const sideSign = isCCW ? 1 : -1;
+
   return vertices.map((vertex, i) => {
     const nextVertex = vertices[(i + 1) % vertices.length];
 
@@ -176,7 +187,6 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const midY = (vertex.y + nextVertex.y) / 2;
 
     const angle = Math.atan2(dy, dx);
-    const sideSign = i % 2 === 0 ? 1 : -1;
     const shortEdge = lengthInPixels < 48;
     const offsetDistance = sideSign * (shortEdge ? 12 / scale : 9 / scale);
     const offsetX = Math.sin(angle) * offsetDistance;
@@ -228,7 +238,18 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     // Lightweight mode: skip collision detection if we are actively dragging any vertex.
     // This keeps the 60fps interaction smooth, and layout snaps to correct position on drag end.
     if (draggingVertex === null || draggingVertex === undefined) {
-      for (const v of vertices) {
+      // Find candidate vertices to check for collision.
+      // We always check the endpoints, and check other vertices only if they are close.
+      const maxPerpDistance = Math.abs(offsetDistance) + labelHeight / 2 + vertexClearance;
+      const candidateVertices = vertices.filter(v => {
+        const isEndpoint = (v.x === vertex.x && v.y === vertex.y) || 
+                           (v.x === nextVertex.x && v.y === nextVertex.y);
+        if (isEndpoint) return true;
+        const dist = pointToLineDistance(v, vertex, nextVertex);
+        return dist < (maxPerpDistance + 5 / scale);
+      });
+
+      for (const v of candidateVertices) {
         const pcx = cx0 + edgeShift * ex;
         const pcy = cy0 + edgeShift * ey;
         const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));

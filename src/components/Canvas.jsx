@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, us
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
 import useAppStore from '../store/appStore';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
 import { useCanvasZoom } from '../hooks/useCanvasZoom';
 import { useCanvasPan } from '../hooks/useCanvasPan';
 import { useEraserTool } from '../hooks/useEraserTool';
@@ -52,6 +52,10 @@ const Canvas = React.memo(forwardRef(({
   cropToolActive,
   onCropToolToggle,
   onImageUpdate,
+  angleToolActive,
+  angleToolState,
+  onAngleToolStateChange,
+  onAngleToolToggle,
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -74,6 +78,7 @@ const Canvas = React.memo(forwardRef(({
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
+  const [draggingAngle, setDraggingAngle] = useState(false);
   
   // Local drag state to bypass global Zustand store updates at 60fps
   const [localPerimeterVertices, setLocalPerimeterVertices] = useState(null);
@@ -89,8 +94,8 @@ const Canvas = React.memo(forwardRef(({
   const stageY = useAppStore((s) => s.stageY);
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
-  const setZoomScale = useAppStore((s) => s.setZoomScale);
-  const setStagePosition = useAppStore((s) => s.setStagePosition);
+  const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
+  const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
 
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
@@ -117,7 +122,9 @@ const Canvas = React.memo(forwardRef(({
     [] // refs are stable — no deps needed
   );
 
-  const { handleWheel, isZoomingRef } = useCanvasZoom(stageRef, scaleRef, setScale);
+  const viewportSyncTokenRef = useRef(null);
+
+  const { handleWheel, isZoomingRef } = useCanvasZoom(stageRef, scaleRef, setScale, viewportSyncTokenRef);
 
   const { canPanCanvas, handleStageDragStart, handleStageDragEnd } = useCanvasPan({
     stageRef,
@@ -128,11 +135,13 @@ const Canvas = React.memo(forwardRef(({
     draggingRoom,
     draggingRoomCorner,
     draggingVertex,
+    draggingAngle,
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
     roomOverlay,
     perimeterOverlay,
+    viewportSyncTokenRef,
   });
 
   const activePerimeterOverlay = useMemo(() => {
@@ -238,10 +247,11 @@ const Canvas = React.memo(forwardRef(({
       stage.batchDraw();
     }
 
-    // Sync transforms to store
-    setZoomScale(clampedScale);
-    setStagePosition({ x: newX, y: newY });
-  }, [imageObj, canvasRotation, setZoomScale, setStagePosition]);
+    // Sync transforms to store using a token
+    const token = Math.random();
+    viewportSyncTokenRef.current = token;
+    setViewportTransform(clampedScale, { x: newX, y: newY }, token);
+  }, [imageObj, canvasRotation, setViewportTransform]);
 
   // Load image
   useEffect(() => {
@@ -307,9 +317,10 @@ const Canvas = React.memo(forwardRef(({
               stage.batchDraw();
             }
 
-            // Sync transforms to store
-            setZoomScale(clampedScale);
-            setStagePosition({ x: newX, y: newY });
+            // Sync transforms to store using a token
+            const token = Math.random();
+            viewportSyncTokenRef.current = token;
+            setViewportTransform(clampedScale, { x: newX, y: newY }, token);
           }
         }
 
@@ -322,7 +333,37 @@ const Canvas = React.memo(forwardRef(({
       setIsImageReady(false);
     };
     img.src = image;
-  }, [image, zoomScale, stageX, stageY, canvasRotation, setZoomScale, setStagePosition]);
+  }, [image, zoomScale, stageX, stageY, canvasRotation, setViewportTransform]);
+
+  const hasInitializedRef = useRef(false);
+  useEffect(() => {
+    if (angleToolActive && !angleToolState && stageRef.current && contentLayerRef.current) {
+      if (hasInitializedRef.current) return;
+      hasInitializedRef.current = true;
+      const stage = stageRef.current;
+      const contentLayer = contentLayerRef.current;
+      const screenCenter = { x: stage.width() / 2, y: stage.height() / 2 };
+      try {
+        const localCenter = contentLayer.getAbsoluteTransform().invert().point(screenCenter);
+        const initialDist = 100 / scaleRef.current;
+        onAngleToolStateChange?.({
+          center: { x: localCenter.x, y: localCenter.y },
+          angle1: 0,
+          angle2: -Math.PI / 2,
+          radius1: initialDist,
+          radius2: initialDist,
+          visible: true,
+          locked: false,
+          snapEnabled: true
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    if (!angleToolActive) {
+      hasInitializedRef.current = false;
+    }
+  }, [angleToolActive, angleToolState, onAngleToolStateChange]);
 
 
   useEffect(() => {
@@ -510,6 +551,11 @@ const Canvas = React.memo(forwardRef(({
   }, []);
   // Sync stage transform from store when store values change (e.g. on floor switch or project load)
   useEffect(() => {
+    if (viewportSyncToken && viewportSyncToken === viewportSyncTokenRef.current) {
+      viewportSyncTokenRef.current = null; // consume token
+      return;
+    }
+
     const stage = stageRef.current;
     if (!stage || zoomScale === null) return;
 
@@ -529,7 +575,7 @@ const Canvas = React.memo(forwardRef(({
       stage.position({ x: stageX, y: stageY });
       stage.batchDraw();
     }
-  }, [zoomScale, stageX, stageY]);
+  }, [zoomScale, stageX, stageY, viewportSyncToken]);
 
   const rotateCanvas = useCallback((direction = 'clockwise') => {
     const delta = direction === 'counterclockwise' ? -45 : 45;
@@ -1264,6 +1310,8 @@ const Canvas = React.memo(forwardRef(({
         onLineToolToggle();
       } else if (drawAreaActive && onDrawAreaToggle) {
         onDrawAreaToggle();
+      } else if (angleToolActive && onAngleToolToggle) {
+        onAngleToolToggle();
       }
       return;
     }
@@ -1510,6 +1558,26 @@ const Canvas = React.memo(forwardRef(({
             onCustomShapeSelect={handleCustomShapeSelect}
             onCustomShapeDragEnd={handleCustomShapeDragEnd}
           />
+
+          {/* Angle measurement overlay */}
+          <Layer
+            visible={angleToolActive && !!angleToolState}
+            listening={angleToolActive}
+            {...contentTransform}
+          >
+            <AngleOverlay
+              angleToolState={angleToolState}
+              onAngleToolStateChange={onAngleToolStateChange}
+              scale={scale}
+              canvasRotation={canvasRotation}
+              perimeterOverlay={perimeterOverlay}
+              customShapes={customShapes}
+              measurementLines={measurementLines}
+              autoSnapEnabled={autoSnapEnabled}
+              findVertexSnapPoint={findVertexSnapPoint}
+              onDragStateChange={setDraggingAngle}
+            />
+          </Layer>
 
           {/* Eraser cursor and crop selection overlay */}
           <Layer listening={false} {...contentTransform}>

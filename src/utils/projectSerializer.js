@@ -23,7 +23,8 @@ export const PERSISTENT_FLOOR_FIELDS = [
   'detectionDebugData',
   'zoomScale',
   'stageX',
-  'stageY'
+  'stageY',
+  'angleToolState'
 ];
 
 // ── Zod Schema Definition ───────────────────────────────────────────────────
