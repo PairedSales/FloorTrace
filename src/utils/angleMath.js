@@ -146,3 +146,64 @@ export function findAngleSnapPointScreen(
 
   return null;
 }
+
+/**
+ * Finds the neighboring vertices of a snapped point in the active geometries.
+ */
+export function findVertexNeighbors(snappedPoint, perimeterOverlay, customShapes, measurementLines) {
+  if (!snappedPoint) return null;
+  const eps = 1e-4;
+  const isClose = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2) < eps;
+
+  // 1. Check perimeter vertices
+  if (perimeterOverlay?.vertices) {
+    const vertices = perimeterOverlay.vertices;
+    const L = vertices.length;
+    for (let i = 0; i < L; i++) {
+      if (isClose(vertices[i], snappedPoint)) {
+        const n1 = vertices[(i - 1 + L) % L];
+        const n2 = vertices[(i + 1) % L];
+        return [n1, n2];
+      }
+    }
+  }
+
+  // 2. Check custom shapes
+  if (customShapes) {
+    for (const shape of customShapes) {
+      if (shape.vertices) {
+        const vertices = shape.vertices;
+        const L = vertices.length;
+        for (let i = 0; i < L; i++) {
+          if (isClose(vertices[i], snappedPoint)) {
+            if (shape.closed) {
+              const n1 = vertices[(i - 1 + L) % L];
+              const n2 = vertices[(i + 1) % L];
+              return [n1, n2];
+            } else {
+              const neighbors = [];
+              if (i > 0) neighbors.push(vertices[i - 1]);
+              if (i < L - 1) neighbors.push(vertices[i + 1]);
+              return neighbors;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Check measurement lines
+  if (measurementLines) {
+    for (const line of measurementLines) {
+      if (isClose(line.start, snappedPoint)) {
+        return [line.end];
+      }
+      if (isClose(line.end, snappedPoint)) {
+        return [line.start];
+      }
+    }
+  }
+
+  return null;
+}
+
