@@ -407,6 +407,10 @@ function App() {
     }
   };
 
+  const handleRotateCanvas = useCallback((direction) => {
+    canvasRef.current?.rotateCanvas(direction);
+  }, []);
+
   // Handle image update from eraser or crop tool (saves undo point before changing)
   const handleImageUpdate = useCallback((newImageDataUrl) => {
     undoManager.save();
@@ -861,6 +865,7 @@ function App() {
               onEraserToolToggle={handleEraserToolToggle}
               cropToolActive={cropToolActive}
               onCropToolToggle={handleCropToolToggle}
+              onRotateCanvas={handleRotateCanvas}
               measurementLines={measurementLines}
               customShapes={customShapes}
               currentMeasurementLine={currentMeasurementLine}

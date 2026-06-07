@@ -16,7 +16,6 @@ const Canvas = React.memo(forwardRef(({
   onRoomOverlayUpdate,
   onPerimeterUpdate,
   isProcessing,
-  processingMessage,
   detectedDimensions,
   onDimensionSelect,
   showSideLengths,
@@ -49,13 +48,13 @@ const Canvas = React.memo(forwardRef(({
   onCancelUndoSave,
   eraserToolActive,
   eraserBrushSize,
-  onEraserBrushSizeChange,
   cropToolActive,
   onCropToolToggle,
   onImageUpdate,
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
+  const contentLayerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
   const scaleRef = useRef(1); // Track scale imperatively to avoid React reconciliation
@@ -68,6 +67,8 @@ const Canvas = React.memo(forwardRef(({
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
+  const [canvasRotation, setCanvasRotation] = useState(0);
+  const canvasRotationRef = useRef(0);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
 
@@ -86,13 +87,17 @@ const Canvas = React.memo(forwardRef(({
 
   const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
 
+  useEffect(() => {
+    canvasRotationRef.current = canvasRotation;
+  }, [canvasRotation]);
+
   // ── Composable hooks ───────────────────────────────────────────────────────
 
   // Helper: convert screen coordinates to canvas coordinates (image-space)
   // Defined early so hooks that need it can reference it via closure.
   const getCanvasCoords = useCallback(
-    (stage) => getCanvasCoordinates(stage, scaleRef),
-    [] // scaleRef is a ref — stable reference, no deps needed
+    (stage) => getCanvasCoordinates(stage, scaleRef, contentLayerRef),
+    [] // refs are stable — no deps needed
   );
 
   const { handleWheel, isZoomingRef } = useCanvasZoom(stageRef, scaleRef, setScale);
@@ -159,8 +164,12 @@ const Canvas = React.memo(forwardRef(({
     const imgWidth = imageObj.width;
     const imgHeight = imageObj.height;
 
-    const scaleX = containerWidth / imgWidth;
-    const scaleY = containerHeight / imgHeight;
+    const angle = (canvasRotationRef.current * Math.PI) / 180;
+    const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
+    const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
+
+    const scaleX = containerWidth / rotatedWidth;
+    const scaleY = containerHeight / rotatedHeight;
     const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
 
     // Ensure scale is reasonable
@@ -206,8 +215,12 @@ const Canvas = React.memo(forwardRef(({
             const imgWidth = img.width;
             const imgHeight = img.height;
 
-            const scaleX = containerWidth / imgWidth;
-            const scaleY = containerHeight / imgHeight;
+            const angle = (canvasRotationRef.current * Math.PI) / 180;
+            const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
+            const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
+
+            const scaleX = containerWidth / rotatedWidth;
+            const scaleY = containerHeight / rotatedHeight;
             const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
 
             // Ensure scale is reasonable
@@ -423,10 +436,16 @@ const Canvas = React.memo(forwardRef(({
       window.removeEventListener('resize', debouncedMeasure);
     };
   }, []);
-  // Expose fitToWindow method
+  const rotateCanvas = useCallback((direction = 'clockwise') => {
+    const delta = direction === 'counterclockwise' ? -45 : 45;
+    setCanvasRotation((current) => (current + delta + 360) % 360);
+  }, []);
+
+  // Expose canvas viewport controls
   useImperativeHandle(ref, () => ({
-    fitToWindow: () => fitToWindow()
-  }));
+    fitToWindow: () => fitToWindow(),
+    rotateCanvas,
+  }), [fitToWindow, rotateCanvas]);
 
   // getCanvasCoords is defined above near the hook declarations.
 
@@ -1183,6 +1202,17 @@ const Canvas = React.memo(forwardRef(({
 
   // canPanCanvas comes from useCanvasPan above.
 
+  const imageCenter = imageObj
+    ? { x: imageObj.width / 2, y: imageObj.height / 2 }
+    : { x: 0, y: 0 };
+  const contentTransform = {
+    x: imageCenter.x,
+    y: imageCenter.y,
+    offsetX: imageCenter.x,
+    offsetY: imageCenter.y,
+    rotation: canvasRotation,
+  };
+
   return (
     <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
       {!image && !isProcessing && (
@@ -1226,7 +1256,7 @@ const Canvas = React.memo(forwardRef(({
           onDblTap={handleStageDoubleClick}
           style={{ cursor: eraserToolActive ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
         >
-          <Layer>
+          <Layer ref={contentLayerRef} {...contentTransform}>
             {/* Main Image - only show when ready */}
             {isImageReady && (
               <KonvaImage
@@ -1315,6 +1345,7 @@ const Canvas = React.memo(forwardRef(({
 
           {/* Measurement Lines & Preview */}
           <MeasurementLayer
+            layerProps={contentTransform}
             measurementLines={measurementLines}
             currentMeasurementLine={currentMeasurementLine}
             lineToolActive={lineToolActive}
@@ -1330,6 +1361,7 @@ const Canvas = React.memo(forwardRef(({
 
           {/* Custom Shapes & Preview */}
           <ShapeLayer
+            layerProps={contentTransform}
             customShapes={customShapes}
             currentCustomShape={currentCustomShape}
             currentMousePos={currentMousePos}
@@ -1344,7 +1376,7 @@ const Canvas = React.memo(forwardRef(({
           />
 
           {/* Eraser cursor and crop selection overlay */}
-          <Layer listening={false}>
+          <Layer listening={false} {...contentTransform}>
             {/* Eraser brush cursor */}
             {eraserToolActive && currentMousePos && (
               <Rect

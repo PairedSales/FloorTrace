@@ -19,12 +19,13 @@ const ShapeLayer = ({
   selectedCustomShapeIndex,
   onCustomShapeSelect,
   onCustomShapeDragEnd,
+  layerProps = {},
 }) => {
   return (
     <>
       {/* Completed Custom Areas */}
       {customShapes && customShapes.length > 0 && (
-        <Layer>
+        <Layer {...layerProps}>
           {customShapes.map((shape, shapeIndex) => {
             const colors = LINE_COLORS[shapeIndex % LINE_COLORS.length];
             const strokeColor = selectedCustomShapeIndex === shapeIndex ? colors.selected : colors.normal;
@@ -103,7 +104,7 @@ const ShapeLayer = ({
       
       {/* Custom Shape (Draw Area Tool) Preview */}
       {drawAreaActive && currentCustomShape && currentMousePos && (
-        <Layer>
+        <Layer {...layerProps}>
           <Line
             points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
             closed={false}
