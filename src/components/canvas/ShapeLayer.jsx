@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layer, Group, Line, Circle, Text } from 'react-konva';
+import { Group, Line, Circle, Text } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { sqFeetToSqMeters } from '../../utils/unitConverter';
 import { calculateArea, getCentroid } from '../../utils/areaCalculator';
@@ -20,7 +20,6 @@ const ShapeLayer = ({
   selectedCustomShapeIndex,
   onCustomShapeSelect,
   onCustomShapeDragEnd,
-  layerProps = {},
 }) => {
   const canvasRotation = useAppStore((s) => s.canvasRotation);
 
@@ -28,7 +27,7 @@ const ShapeLayer = ({
     <>
       {/* Completed Custom Areas */}
       {customShapes && customShapes.length > 0 && (
-        <Layer {...layerProps}>
+        <Group>
           {customShapes.map((shape, shapeIndex) => {
             const colors = LINE_COLORS[shapeIndex % LINE_COLORS.length];
             const strokeColor = selectedCustomShapeIndex === shapeIndex ? colors.selected : colors.normal;
@@ -104,12 +103,12 @@ const ShapeLayer = ({
             </Group>
             );
           })}
-        </Layer>
+        </Group>
       )}
       
       {/* Custom Shape (Draw Area Tool) Preview */}
       {drawAreaActive && currentCustomShape && currentMousePos && (
-        <Layer {...layerProps}>
+        <Group>
           <Line
             points={currentCustomShape.vertices.flatMap(v => [v.x, v.y]).concat(currentCustomShape.vertices.length > 0 ? [currentMousePos.x, currentMousePos.y] : [])}
             closed={false}
@@ -129,7 +128,7 @@ const ShapeLayer = ({
               strokeWidth={1 / scale}
             />
           ))}
-        </Layer>
+        </Group>
       )}
     </>
   );

@@ -40,7 +40,108 @@ const globalSettingsSchema = z.object({
   canvasRotation: z.number().default(0),
 });
 
-const floorStateSchema = z.record(z.any());
+const vertexSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+});
+
+const calibrationSchema = z.object({
+  calibrated: z.boolean(),
+  feetPerPixel: z.number(),
+  source: z.string().nullable().optional(),
+  calibratedRoomId: z.string().nullable().optional(),
+  createdAt: z.number().nullable().optional(),
+}).optional();
+
+const roomDimensionsSchema = z.object({
+  width: z.string(),
+  height: z.string(),
+}).optional();
+
+const roomOverlaySchema = z.object({
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+  polygon: z.array(vertexSchema).nullable().optional(),
+  confidence: z.number().nullable().optional(),
+}).nullable().optional();
+
+const perimeterTraceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  vertices: z.array(vertexSchema),
+  closed: z.boolean(),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  color: z.string(),
+});
+
+const measurementLineSchema = z.object({
+  start: vertexSchema,
+  end: vertexSchema,
+});
+
+const customShapeSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  vertices: z.array(vertexSchema),
+  closed: z.boolean(),
+  color: z.string().optional(),
+});
+
+const angleToolStateSchema = z.object({
+  center: vertexSchema,
+  angle1: z.number(),
+  angle2: z.number(),
+  radius1: z.number(),
+  radius2: z.number(),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  snapEnabled: z.boolean().optional(),
+}).nullable().optional();
+
+const bboxSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+const detectedDimensionSchema = z.object({
+  width: z.number(),
+  height: z.number(),
+  text: z.string(),
+  bbox: bboxSchema,
+  format: z.string(),
+  confidence: z.number().optional(),
+});
+
+const floorStateSchema = z.object({
+  imageRef: z.string().nullable().optional(),
+  roomOverlay: roomOverlaySchema,
+  perimeterTraces: z.array(perimeterTraceSchema).optional(),
+  activeTraceId: z.string().nullable().optional(),
+  roomDimensions: roomDimensionsSchema,
+  calibration: calibrationSchema,
+  mode: z.string().optional(),
+  detectedDimensions: z.array(detectedDimensionSchema).optional(),
+  showSideLengths: z.boolean().optional(),
+  useInteriorWalls: z.boolean().optional(),
+  autoSnapEnabled: z.boolean().optional(),
+  manualEntryMode: z.boolean().optional(),
+  ocrFailed: z.boolean().optional(),
+  unit: z.string().optional(),
+  measurementLines: z.array(measurementLineSchema).optional(),
+  customShapes: z.array(customShapeSchema).optional(),
+  tracedBoundaries: z.any().optional(),
+  debugDetection: z.boolean().optional(),
+  detectionDebugData: z.any().optional(),
+  zoomScale: z.number().nullable().optional(),
+  stageX: z.number().optional(),
+  stageY: z.number().optional(),
+  angleToolState: angleToolStateSchema,
+}).catchall(z.any());
 
 const floorSchema = z.object({
   id: z.string(),
@@ -48,9 +149,14 @@ const floorSchema = z.object({
   state: floorStateSchema,
 });
 
+const historyStateSchema = floorStateSchema.extend({
+  __imageRef: z.string().nullable().optional(),
+  image: z.string().nullable().optional(),
+});
+
 const historySchema = z.object({
-  undoStack: z.array(z.record(z.any())).default([]),
-  redoStack: z.array(z.record(z.any())).default([]),
+  undoStack: z.array(historyStateSchema).default([]),
+  redoStack: z.array(historyStateSchema).default([]),
 });
 
 const projectSchema = z.object({
@@ -106,38 +212,14 @@ export function sanitizeData(val) {
   return val;
 }
 
-// ── Migrations Registry ─────────────────────────────────────────────────────
+// ── Version Validation ─────────────────────────────────────────────────────
 
-const MIGRATIONS = {
-  1: (data) => {
-    // V1 schema initialization
-    return data;
-  },
-};
-
-export function migrateProjectSchema(project) {
-  const targetVersion = 1;
-  let currentVersion = project.version;
-  let migrated = { ...project };
-
-  if (currentVersion > targetVersion) {
+export function validateProjectVersion(project) {
+  if (project.version > 1) {
     throw new Error(
-      `Incompatible project version: The project was saved in a newer version of FloorTrace (v${currentVersion}). Please update FloorTrace to open this project.`
+      `Incompatible project version: The project was saved in a newer version of FloorTrace (v${project.version}). Please update FloorTrace to open this project.`
     );
   }
-
-  while (currentVersion < targetVersion) {
-    const nextVer = currentVersion + 1;
-    const migration = MIGRATIONS[nextVer];
-    if (!migration) {
-      throw new Error(`No migration found from v${currentVersion} to v${nextVer}`);
-    }
-    migrated = migration(migrated);
-    migrated.version = nextVer;
-    currentVersion = nextVer;
-  }
-
-  return migrated;
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -228,65 +310,17 @@ export function serializeSketch(storeState, historyState = null) {
  */
 export function deserializeSketch(project) {
   const images = project.images || {};
+  const floor = project.floors[0];
+  const state = { ...floor.state };
 
-  // Restore background images in floor states
-  const restoredFloors = project.floors.map((floor) => {
-    const state = { ...floor.state };
-    if (state.imageRef && images[state.imageRef]) {
-      state.image = images[state.imageRef];
-    } else {
-      state.image = null;
-    }
-    delete state.imageRef;
-    return {
-      ...floor,
-      state,
-    };
-  });
-
-  const activeFloor = restoredFloors.find((f) => f.id === project.activeFloorId) || restoredFloors[0];
-
-  // Find canonical floor: first floor with an image and calibration
-  const canonicalFloor = restoredFloors.find(f => f.state?.image && f.state?.calibration) || activeFloor || restoredFloors[0];
-  const canonicalState = canonicalFloor ? { ...canonicalFloor.state } : {};
-
-  // ── Legacy Multi-Floor to Multi-Perimeter Migration ──────────────────────
-  // Convert legacy multi-tab floor perimeters into traces on the canonical canvas.
-  //
-  // WARNING/ASSUMPTION:
-  // This migration assumes that all legacy floor vertices are already image-space
-  // compatible with the canonical canvas. If different tabs supported different images,
-  // dimensions, offsets, or transforms, the imported traces may be misaligned.
-  const TRACE_COLORS = [
-    '#BD93F9', // Purple
-    '#8BE9FD', // Cyan
-    '#50FA7B', // Green
-    '#FF79C6', // Pink
-    '#FFB86C', // Orange
-    '#F1FA8C', // Yellow
-    '#FF5555', // Red
-  ];
-
-  let perimeterTraces = canonicalState.perimeterTraces || [];
-  if (perimeterTraces.length === 0) {
-    restoredFloors.forEach((f, index) => {
-      const fState = f.state || {};
-      const overlay = fState.perimeterOverlay;
-      if (overlay && overlay.vertices && overlay.vertices.length > 0) {
-        perimeterTraces.push({
-          id: `trace-migrated-${f.id}-${index}`,
-          name: f.name || `Floor ${index + 1}`,
-          vertices: overlay.vertices,
-          closed: true,
-          visible: true,
-          locked: false,
-          color: TRACE_COLORS[index % TRACE_COLORS.length],
-        });
-      }
-    });
+  if (state.imageRef && images[state.imageRef]) {
+    state.image = images[state.imageRef];
+  } else {
+    state.image = null;
   }
+  delete state.imageRef;
 
-  // Fallback: If still no traces exist, default to one empty trace
+  let perimeterTraces = state.perimeterTraces || [];
   if (perimeterTraces.length === 0) {
     perimeterTraces = [
       {
@@ -301,22 +335,7 @@ export function deserializeSketch(project) {
     ];
   }
 
-  let activeTraceId = canonicalState.activeTraceId;
-  if (!activeTraceId && perimeterTraces.length > 0) {
-    // Try to select the trace corresponding to the activeFloor in the legacy project
-    const activeFloorIndex = restoredFloors.findIndex(f => f.id === project.activeFloorId);
-    const matchingMigratedTrace = perimeterTraces.find(t => t.id === `trace-migrated-${project.activeFloorId}-${activeFloorIndex}`);
-    if (matchingMigratedTrace) {
-      activeTraceId = matchingMigratedTrace.id;
-    } else {
-      activeTraceId = perimeterTraces[0].id;
-    }
-  }
-  if (!activeTraceId && perimeterTraces.length > 0) {
-    activeTraceId = perimeterTraces[0].id;
-  }
-
-  // Force single floor structure for multi-perimeter architecture
+  const activeTraceId = state.activeTraceId || perimeterTraces[0].id;
   const activeFloorId = 'floor-1';
   const floors = [
     {
@@ -326,13 +345,12 @@ export function deserializeSketch(project) {
     }
   ];
 
-  // Hydrate Zustand store patch
   const statePatch = {
-    ...canonicalState,
+    ...state,
     perimeterTraces,
     activeTraceId,
     traceInteractionMode: 'idle',
-    perimeterVertices: null, // ensure no in-progress drawing on load
+    perimeterVertices: null,
     floors,
     activeFloorId,
     canvasRotation: project.globalSettings?.canvasRotation ?? 0,
@@ -340,7 +358,6 @@ export function deserializeSketch(project) {
     isDirty: false,
   };
 
-  // Re-hydrate undo/redo history pool
   let historyPatch = null;
   if (project.history) {
     const historyPool = [];
@@ -403,11 +420,16 @@ export async function exportProject(storeState, historyState, isSaveAs = false) 
 }
 
 export function importProject(projectJsonText) {
-  const rawProject = JSON.parse(projectJsonText);
+  let rawProject;
+  try {
+    rawProject = JSON.parse(projectJsonText);
+  } catch (err) {
+    throw new Error('Failed to parse project file. The file is not valid JSON.');
+  }
   
+  validateProjectVersion(rawProject);
   validateProjectSchema(rawProject);
-  const migrated = migrateProjectSchema(rawProject);
-  const sanitized = sanitizeData(migrated);
+  const sanitized = sanitizeData(rawProject);
   
   return deserializeSketch(sanitized);
 }

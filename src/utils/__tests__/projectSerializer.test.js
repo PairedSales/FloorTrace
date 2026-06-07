@@ -3,8 +3,9 @@ import {
   serializeSketch,
   deserializeSketch,
   validateProjectSchema,
-  migrateProjectSchema,
+  validateProjectVersion,
   sanitizeData,
+  importProject,
 } from '../projectSerializer';
 
 // Mock storeState
@@ -203,24 +204,50 @@ describe('projectSerializer', () => {
       project.fileType = 'wrong_filetype';
       expect(() => validateProjectSchema(project)).toThrow();
     });
+
+    it('throws on invalid coordinate type in perimeterTraces', () => {
+      const storeState = createMockStoreState();
+      const project = serializeSketch(storeState);
+      // Change vertex x to a string (invalid)
+      project.floors[0].state.perimeterTraces[0].vertices[0].x = 'invalid-string';
+      expect(() => validateProjectSchema(project)).toThrow();
+    });
+
+    it('throws on missing required fields inside customShapes', () => {
+      const storeState = createMockStoreState();
+      const project = serializeSketch(storeState);
+      project.floors[0].state.customShapes = [{
+        closed: true,
+        // missing vertices
+      }];
+      expect(() => validateProjectSchema(project)).toThrow();
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Schema Migration
+  // importProject
   // ──────────────────────────────────────────────────────────────────────────
-  describe('migrateProjectSchema', () => {
-    it('returns project unchanged if version matches current', () => {
+  describe('importProject', () => {
+    it('throws on invalid JSON string', () => {
+      expect(() => importProject('not-a-json-string')).toThrow('Failed to parse project file. The file is not valid JSON.');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Version Validation
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('validateProjectVersion', () => {
+    it('passes if version matches target version', () => {
       const storeState = createMockStoreState();
       const project = serializeSketch(storeState);
-      const migrated = migrateProjectSchema(project);
-      expect(migrated.version).toBe(1);
+      expect(() => validateProjectVersion(project)).not.toThrow();
     });
 
     it('throws if project version is newer than supported', () => {
       const storeState = createMockStoreState();
       const project = serializeSketch(storeState);
       project.version = 99; // Far in the future
-      expect(() => migrateProjectSchema(project)).toThrow(/Incompatible project version/);
+      expect(() => validateProjectVersion(project)).toThrow(/Incompatible project version/);
     });
   });
 });
