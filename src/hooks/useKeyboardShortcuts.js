@@ -16,11 +16,12 @@ import * as undoManager from '../store/undoManager';
  * @param {object} config
  * @param {() => void} config.onPaste        - triggered by Ctrl+V
  * @param {() => void} config.onFileOpen     - triggered by Ctrl+O
+ * @param {(isSaveAs: boolean) => void} config.onSaveProject - triggered by Ctrl+S / Ctrl+Shift+S
  * @param {boolean}    config.eraserToolActive
  * @param {number}     config.eraserBrushSize
  * @param {(size: number) => void} config.setEraserBrushSize
  */
-export function useKeyboardShortcuts({ onPaste, onFileOpen, eraserToolActive, eraserBrushSize, setEraserBrushSize }) {
+export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, eraserToolActive, eraserBrushSize, setEraserBrushSize, onRotateCanvas }) {
   // ── keydown ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -52,12 +53,23 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, eraserToolActive, er
             return;
           }
         }
+        if (e.key.toLowerCase() === 'r') {
+          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+            onRotateCanvas?.('clockwise');
+            return;
+          }
+        }
       }
 
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
 
         switch (key) {
+          case 'r':
+            e.preventDefault();
+            onRotateCanvas?.('counterclockwise');
+            break;
           case 'v':
             e.preventDefault();
             onPaste();
@@ -65,6 +77,10 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, eraserToolActive, er
           case 'o':
             e.preventDefault();
             onFileOpen();
+            break;
+          case 's':
+            e.preventDefault();
+            onSaveProject(e.shiftKey); // Shift key held down -> Save As
             break;
           case 'z':
             e.preventDefault();
@@ -84,7 +100,7 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, eraserToolActive, er
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onPaste, onFileOpen, eraserToolActive, eraserBrushSize, setEraserBrushSize]);
+  }, [onPaste, onFileOpen, onSaveProject, eraserToolActive, eraserBrushSize, setEraserBrushSize, onRotateCanvas]);
 
   // ── mousedown: side buttons for undo/redo ─────────────────────────────────
   useEffect(() => {

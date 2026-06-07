@@ -1,5 +1,6 @@
 import React from 'react';
 import { Line, Circle, Text } from 'react-konva';
+import useAppStore from '../../store/appStore';
 
 /**
  * PerimeterPlacementLayer renders temporary vertices, preview lines,
@@ -15,6 +16,8 @@ const PerimeterPlacementLayer = ({
   manualEntryMode,
   scale,
 }) => {
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   if (!roomOverlay || perimeterOverlay || !perimeterVertices || perimeterVertices.length >= 3 || lineToolActive || drawAreaActive || manualEntryMode) {
     return null;
   }
@@ -29,6 +32,7 @@ const PerimeterPlacementLayer = ({
         fontSize={16 / scale}
         fill="#F1FA8C"
         fontStyle="bold"
+        rotation={-canvasRotation}
       />
       
       {/* Temporary vertices */}

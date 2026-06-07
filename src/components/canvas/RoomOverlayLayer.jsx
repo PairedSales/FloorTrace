@@ -1,5 +1,6 @@
 import React from 'react';
 import { Rect, Line, Circle, Text } from 'react-konva';
+import useAppStore from '../../store/appStore';
 
 /**
  * RoomOverlayLayer renders the room detection rectangle, its corner drag handles,
@@ -12,6 +13,8 @@ const RoomOverlayLayer = ({
   onRoomMouseDown,
   onRoomCornerMouseDown,
 }) => {
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   if (!roomOverlay) return null;
 
   return (
@@ -63,6 +66,7 @@ const RoomOverlayLayer = ({
           fontSize={11 / scale}
           fill="#50FA7B"
           fontStyle="bold"
+          rotation={-canvasRotation}
           listening={false}
         />
       )}

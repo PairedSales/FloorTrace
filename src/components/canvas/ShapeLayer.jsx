@@ -1,5 +1,6 @@
 import React from 'react';
 import { Layer, Group, Line, Circle, Text } from 'react-konva';
+import useAppStore from '../../store/appStore';
 import { sqFeetToSqMeters } from '../../utils/unitConverter';
 import { calculateArea, getCentroid } from '../../utils/areaCalculator';
 import { SQ_M_TO_SQ_CM, MIN_SQ_M_DISPLAY, LINE_COLORS } from './canvasUtils';
@@ -21,6 +22,8 @@ const ShapeLayer = ({
   onCustomShapeDragEnd,
   layerProps = {},
 }) => {
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   return (
     <>
       {/* Completed Custom Areas */}
@@ -87,6 +90,7 @@ const ShapeLayer = ({
                     offsetX={0}
                     offsetY={0}
                     align="center"
+                    rotation={-canvasRotation}
                     ref={(node) => {
                       if (node) {
                         node.offsetX(node.width() / 2);

@@ -15,7 +15,8 @@ const Toolbar = ({
   image,
   isProcessing,
   onFileOpen,
-  onSaveImage,
+  onSaveProject,
+  onSaveProjectAs,
   onTracePerimeter,
   onFitToWindow,
   onRestart,
@@ -51,20 +52,30 @@ const Toolbar = ({
           onClick={onFileOpen}
           disabled={isProcessing}
           className="toolbar-btn"
-          title="Open image (Ctrl+O)"
+          title="Open project or image (Ctrl+O)"
         >
           <FolderOpen className="w-3.5 h-3.5" />
           <span>Open</span>
         </button>
 
         <button
-          onClick={onSaveImage}
+          onClick={onSaveProject}
           disabled={!image}
           className="toolbar-btn"
-          title="Save screenshot"
+          title="Save project (Ctrl+S)"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Save</span>
+        </button>
+
+        <button
+          onClick={onSaveProjectAs}
+          disabled={!image}
+          className="toolbar-btn"
+          title="Save project as (Ctrl+Shift+S)"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>Save As</span>
         </button>
 
         {floorCount < 4 && (
