@@ -18,12 +18,13 @@ const MeasurementLayer = ({
   onMeasurementLineSelect,
   onMeasurementLineDragEnd,
   onMeasurementLinesChange,
+  layerProps = {},
 }) => {
   return (
     <>
       {/* Completed Measurement Lines */}
       {measurementLines && measurementLines.length > 0 && (
-        <Layer>
+        <Layer {...layerProps}>
           {measurementLines.map((line, index) => {
             const layout = getMeasurementLineLayout(line, scale, pixelsPerFoot, unit, { unitStyle });
             const colors = LINE_COLORS[index % LINE_COLORS.length];
@@ -90,7 +91,7 @@ const MeasurementLayer = ({
           ? getMeasurementLineLayout(currentMeasurementLine, scale, pixelsPerFoot, unit, { forceAbove: true, unitStyle })
           : null;
         return (
-          <Layer>
+          <Layer {...layerProps}>
             <Line
               points={[
                 currentMeasurementLine.start.x,
