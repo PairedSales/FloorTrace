@@ -55,6 +55,7 @@ const Canvas = React.memo(forwardRef(({
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
+  const backgroundImageLayerRef = useRef(null);
   const contentLayerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
@@ -68,6 +69,13 @@ const Canvas = React.memo(forwardRef(({
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
+  
+  // Local drag state to bypass global Zustand store updates at 60fps
+  const [localPerimeterVertices, setLocalPerimeterVertices] = useState(null);
+  const [localRoomOverlay, setLocalRoomOverlay] = useState(null);
+  const [localMeasurementLine, setLocalMeasurementLine] = useState(null);
+  const [localCustomShape, setLocalCustomShape] = useState(null);
+
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
 
@@ -122,19 +130,43 @@ const Canvas = React.memo(forwardRef(({
     perimeterOverlay,
   });
 
+  const activePerimeterOverlay = useMemo(() => {
+    return localPerimeterVertices 
+      ? { ...perimeterOverlay, vertices: localPerimeterVertices }
+      : perimeterOverlay;
+  }, [perimeterOverlay, localPerimeterVertices]);
+
+  const activeRoomOverlay = localRoomOverlay || roomOverlay;
+  const activeMeasurementLine = localMeasurementLine || currentMeasurementLine;
+  const activeCustomShape = localCustomShape || currentCustomShape;
+
+  const activePixelsPerFoot = useMemo(() => {
+    if (draggingRoomCorner && localRoomOverlay && roomDimensions?.width && roomDimensions?.height) {
+      const dimWidth = parseFloat(roomDimensions.width);
+      const dimHeight = parseFloat(roomDimensions.height);
+      const overlayWidth = Math.abs(localRoomOverlay.x2 - localRoomOverlay.x1);
+      const overlayHeight = Math.abs(localRoomOverlay.y2 - localRoomOverlay.y1);
+      if (overlayWidth > 0 && overlayHeight > 0) {
+        return Math.min(dimWidth, dimHeight) / Math.min(overlayWidth, overlayHeight);
+      }
+    }
+    return pixelsPerFoot;
+  }, [draggingRoomCorner, localRoomOverlay, roomDimensions, pixelsPerFoot]);
+
+  const handleEraserPerimeterUpdate = useCallback((nextVertices, isFinal) => {
+    if (isFinal) {
+      onPerimeterUpdate(nextVertices, true);
+      setLocalPerimeterVertices(null);
+    } else {
+      setLocalPerimeterVertices(nextVertices);
+    }
+  }, [onPerimeterUpdate]);
+
   const eraser = useEraserTool({
-    perimeterOverlay,
+    perimeterOverlay: activePerimeterOverlay,
     eraserToolActive,
     eraserBrushSize,
-    onPerimeterUpdate,
-    getCanvasCoords,
-  });
-
-  const crop = useCropTool({
-    imageObj,
-    cropToolActive,
-    onImageUpdate,
-    onCropToolToggle,
+    onPerimeterUpdate: handleEraserPerimeterUpdate,
     getCanvasCoords,
   });
 
@@ -501,7 +533,7 @@ const Canvas = React.memo(forwardRef(({
   // getCanvasCoords is defined above near the hook declarations.
 
   // Handle room overlay dragging (move entire overlay)
-  const handleRoomMouseDown = (e) => {
+  const handleRoomMouseDown = useCallback((e) => {
     if (!roomOverlay) return;
     
     // ONLY allow LEFT mouse button (button 0) for dragging
@@ -526,14 +558,15 @@ const Canvas = React.memo(forwardRef(({
       ensureImageSnapAnalyzer();
     }
     
+    setLocalRoomOverlay(roomOverlay);
     setDraggingRoom(true);
     if (canvasPos) {
       setRoomStart(canvasPos);
     }
-  };
+  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
 
   // Handle room corner dragging (with snapping)
-  const handleRoomCornerMouseDown = (corner, e) => {
+  const handleRoomCornerMouseDown = useCallback((corner, e) => {
     if (!roomOverlay) return;
     
     // ONLY allow LEFT mouse button (button 0) for dragging
@@ -558,11 +591,12 @@ const Canvas = React.memo(forwardRef(({
       ensureImageSnapAnalyzer();
     }
     
+    setLocalRoomOverlay(roomOverlay);
     setDraggingRoomCorner(corner);
-  };
+  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
 
   // Handle perimeter vertex dragging (no snapping)
-  const handleVertexDragStart = (index) => {
+  const handleVertexDragStart = useCallback((index) => {
     if (!perimeterOverlay) return;
     
     // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
@@ -575,31 +609,28 @@ const Canvas = React.memo(forwardRef(({
       ensureImageSnapAnalyzer();
     }
     
+    setLocalPerimeterVertices(perimeterOverlay.vertices);
     setDraggingVertex(index);
-  };
+  }, [perimeterOverlay, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
 
   // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseMove
-  const handleVertexDrag = (index, e) => {
-    if (!perimeterOverlay || draggingVertex !== index) return;
+  const handleVertexDrag = useCallback((index, e) => {
+    if (!localPerimeterVertices || draggingVertex !== index) return;
     const canvasPos = getCanvasCoords(e.target.getStage());
     if (!canvasPos) return;
     
-    // No snapping during drag — snapping is applied on vertex release (handleVertexDragEnd)
-    // Update only the visual elements, not the actual data
-    // In .NET this updates Canvas.SetLeft/SetTop and polygon.Points
-    // In React-Konva, we update the state which re-renders, but mark saveAction=false
-    let newVertices = [...perimeterOverlay.vertices];
+    let newVertices = [...localPerimeterVertices];
     newVertices[index] = { x: canvasPos.x, y: canvasPos.y };
     
-    onPerimeterUpdate(newVertices, false); // Don't save action during drag
-  };
+    setLocalPerimeterVertices(newVertices);
+  }, [localPerimeterVertices, draggingVertex, getCanvasCoords]);
 
   // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseUp
-  const handleVertexDragEnd = (index, e) => {
-    if (!perimeterOverlay || draggingVertex !== index) return;
+  const handleVertexDragEnd = useCallback((index, e) => {
+    if (!localPerimeterVertices || draggingVertex !== index) return;
     
     // Get current position from visual snap or current vertex position
-    const currentVertex = perimeterOverlay.vertices[index];
+    const currentVertex = localPerimeterVertices[index];
     
     // Apply snapping to intersection points (disabled when Shift is held)
     const shiftHeld = e?.evt?.shiftKey ?? false;
@@ -614,34 +645,36 @@ const Canvas = React.memo(forwardRef(({
     const origVertex = lastDragStartPosRef.current;
     if (origVertex && finalPoint.x === origVertex.x && finalPoint.y === origVertex.y) {
       onCancelUndoSave?.();
+      setLocalPerimeterVertices(null);
       setDraggingVertex(null);
       return;
     }
     
     // Now update the actual data point
-    let newVertices = [...perimeterOverlay.vertices];
+    let newVertices = [...localPerimeterVertices];
     newVertices[index] = finalPoint;
 
     // Undo point was already saved at drag start; just commit the final position
     onPerimeterUpdate(newVertices, false);
     
     // Clean up
+    setLocalPerimeterVertices(null);
     setDraggingVertex(null);
-  };
+  }, [localPerimeterVertices, draggingVertex, autoSnapEnabled, findVertexSnapPoint, onPerimeterUpdate, onCancelUndoSave]);
 
-  const handleMeasurementLineSelect = (index, e) => {
+  const handleMeasurementLineSelect = useCallback((index, e) => {
     e.cancelBubble = true;
     setSelectedMeasurementLineIndex(index);
     setSelectedCustomShapeIndex(null);
-  };
+  }, []);
 
-  const handleCustomShapeSelect = (index, e) => {
+  const handleCustomShapeSelect = useCallback((index, e) => {
     e.cancelBubble = true;
     setSelectedCustomShapeIndex(index);
     setSelectedMeasurementLineIndex(null);
-  };
+  }, []);
 
-  const handleMeasurementLineDragEnd = (index, e) => {
+  const handleMeasurementLineDragEnd = useCallback((index, e) => {
     if (!onMeasurementLinesChange) return;
     e.cancelBubble = true;
     const deltaX = e.target.x();
@@ -660,9 +693,9 @@ const Canvas = React.memo(forwardRef(({
 
     e.target.position({ x: 0, y: 0 });
     onMeasurementLinesChange(nextLines);
-  };
+  }, [measurementLines, onMeasurementLinesChange]);
 
-  const handleCustomShapeDragEnd = (index, e) => {
+  const handleCustomShapeDragEnd = useCallback((index, e) => {
     if (!onCustomShapesChange) return;
     e.cancelBubble = true;
     const deltaX = e.target.x();
@@ -683,7 +716,7 @@ const Canvas = React.memo(forwardRef(({
 
     e.target.position({ x: 0, y: 0 });
     onCustomShapesChange(nextShapes);
-  };
+  }, [customShapes, onCustomShapesChange]);
 
   // Eraser and crop tool logic live in useEraserTool / useCropTool (see hook calls above).
 
@@ -763,14 +796,18 @@ const Canvas = React.memo(forwardRef(({
 
 
   // Handle global mouse move for dragging
-  const handleStageMouseMove = (e) => {
+  const handleStageMouseMove = useCallback((e) => {
     const stage = e.target.getStage();
     if (!stage) return;
     
     const mousePoint = getCanvasCoords(stage);
     if (!mousePoint) return;
     
-    setCurrentMousePos(mousePoint);
+    // Only update global crosshair position if we are NOT dragging.
+    // This prevents a full Canvas re-render just from moving the mouse during vertex drag.
+    if (!draggingVertex && !draggingRoom && !draggingRoomCorner) {
+      setCurrentMousePos(mousePoint);
+    }
 
     // Eraser tool: continuous erase during drag
     if (eraserToolActive && eraser.isErasingRef.current) {
@@ -798,69 +835,69 @@ const Canvas = React.memo(forwardRef(({
     
     // Handle room overlay dragging with live edge scans.
     // Holding Shift disables auto-snapping for precise placement.
-    if (draggingRoom && roomStart) {
+    if (draggingRoom && roomStart && activeRoomOverlay) {
       const deltaX = mousePoint.x - roomStart.x;
       const deltaY = mousePoint.y - roomStart.y;
       
       const movedOverlay = {
-        x1: roomOverlay.x1 + deltaX,
-        y1: roomOverlay.y1 + deltaY,
-        x2: roomOverlay.x2 + deltaX,
-        y2: roomOverlay.y2 + deltaY,
+        x1: activeRoomOverlay.x1 + deltaX,
+        y1: activeRoomOverlay.y1 + deltaY,
+        x2: activeRoomOverlay.x2 + deltaX,
+        y2: activeRoomOverlay.y2 + deltaY,
         // Translate polygon along with the bounding rect so the outline stays in sync
-        ...(Array.isArray(roomOverlay.polygon)
-          ? { polygon: roomOverlay.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
+        ...(Array.isArray(activeRoomOverlay.polygon)
+          ? { polygon: activeRoomOverlay.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
           : {}),
-        ...(roomOverlay.confidence !== undefined ? { confidence: roomOverlay.confidence } : {}),
+        ...(activeRoomOverlay.confidence !== undefined ? { confidence: activeRoomOverlay.confidence } : {}),
       };
       
       const shiftHeld = e.evt.shiftKey;
       const newOverlay = (autoSnapEnabled && !shiftHeld) ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
-      onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
+      setLocalRoomOverlay(newOverlay);
       setRoomStart(mousePoint);
       return;
     }
     
     // Handle room corner dragging with local edge scans while resizing.
     // Holding Shift disables auto-snapping for precise placement.
-    if (draggingRoomCorner && roomOverlay) {
+    if (draggingRoomCorner && activeRoomOverlay) {
       // Only copy coordinates (and confidence metadata) — resizing invalidates
       // the detected polygon boundary so it is intentionally not preserved.
-      const newOverlay = { x1: roomOverlay.x1, y1: roomOverlay.y1, x2: roomOverlay.x2, y2: roomOverlay.y2 };
-      if (roomOverlay.confidence !== undefined) {
-        newOverlay.confidence = roomOverlay.confidence;
+      const newOverlay = { x1: activeRoomOverlay.x1, y1: activeRoomOverlay.y1, x2: activeRoomOverlay.x2, y2: activeRoomOverlay.y2 };
+      if (activeRoomOverlay.confidence !== undefined) {
+        newOverlay.confidence = activeRoomOverlay.confidence;
       }
       const shiftHeld = e.evt.shiftKey;
       
       if (draggingRoomCorner === 'tl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2) : null;
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x) : null;
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, roomOverlay.x2) : null;
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
         newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, roomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, roomOverlay.x1, mousePoint.x) : null;
+        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
+        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
         newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
         newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
       }
       
-      onRoomOverlayUpdate(newOverlay, false); // Don't save action during drag
+      setLocalRoomOverlay(newOverlay);
       return;
     }
     
     // Line tool preview
-    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start && onMeasurementLineUpdate) {
-      onMeasurementLineUpdate({
+    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start) {
+      setLocalMeasurementLine({
         start: currentMeasurementLine.start,
         end: mousePoint
       });
@@ -1307,19 +1344,21 @@ const Canvas = React.memo(forwardRef(({
           onDblTap={handleStageDoubleClick}
           style={{ cursor: eraserToolActive ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
         >
-          <Layer ref={contentLayerRef} {...contentTransform}>
-            {/* Main Image - only show when ready */}
-            {isImageReady && (
+          {/* Background Image Layer - completely non-interactive for performance */}
+          {isImageReady && (
+            <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
               <KonvaImage
                 image={imageObj}
                 x={0}
                 y={0}
               />
-            )}
+            </Layer>
+          )}
 
+          <Layer ref={contentLayerRef} {...contentTransform}>
             {/* Room Overlay - Rendered below the exterior wall (perimeter) overlay */}
             <RoomOverlayLayer
-              roomOverlay={roomOverlay}
+              roomOverlay={activeRoomOverlay}
               scale={scale}
               debugDetection={debugDetection}
               onRoomMouseDown={handleRoomMouseDown}
@@ -1328,12 +1367,13 @@ const Canvas = React.memo(forwardRef(({
 
             {/* Perimeter Overlay - Outline and vertices with side-length labels (on top of room overlay) */}
             <PerimeterLayer
-              perimeterOverlay={perimeterOverlay}
+              perimeterOverlay={activePerimeterOverlay}
               scale={scale}
               showSideLengths={showSideLengths}
-              pixelsPerFoot={pixelsPerFoot}
+              pixelsPerFoot={activePixelsPerFoot}
               detectedDimensions={detectedDimensions}
               unit={unit}
+              draggingVertex={draggingVertex}
               onVertexDragStart={handleVertexDragStart}
               onVertexDrag={handleVertexDrag}
               onVertexDragEnd={handleVertexDragEnd}
@@ -1384,8 +1424,8 @@ const Canvas = React.memo(forwardRef(({
             
             {/* Perimeter Vertex Placement Mode */}
             <PerimeterPlacementLayer
-              roomOverlay={roomOverlay}
-              perimeterOverlay={perimeterOverlay}
+              roomOverlay={activeRoomOverlay}
+              perimeterOverlay={activePerimeterOverlay}
               perimeterVertices={perimeterVertices}
               currentMousePos={currentMousePos}
               lineToolActive={lineToolActive}
@@ -1400,10 +1440,10 @@ const Canvas = React.memo(forwardRef(({
           <MeasurementLayer
             layerProps={contentTransform}
             measurementLines={measurementLines}
-            currentMeasurementLine={currentMeasurementLine}
+            currentMeasurementLine={activeMeasurementLine}
             lineToolActive={lineToolActive}
             scale={scale}
-            pixelsPerFoot={pixelsPerFoot}
+            pixelsPerFoot={activePixelsPerFoot}
             unit={unit}
             unitStyle={unitStyle}
             selectedMeasurementLineIndex={selectedMeasurementLineIndex}
@@ -1416,11 +1456,11 @@ const Canvas = React.memo(forwardRef(({
           <ShapeLayer
             layerProps={contentTransform}
             customShapes={customShapes}
-            currentCustomShape={currentCustomShape}
+            currentCustomShape={activeCustomShape}
             currentMousePos={currentMousePos}
             drawAreaActive={drawAreaActive}
             scale={scale}
-            pixelsPerFoot={pixelsPerFoot}
+            pixelsPerFoot={activePixelsPerFoot}
             unit={unit}
             unitStyle={unitStyle}
             selectedCustomShapeIndex={selectedCustomShapeIndex}
