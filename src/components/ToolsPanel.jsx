@@ -41,6 +41,34 @@ const ToolsPanel = ({
           )}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
+          {hasArea && (
+            <>
+              <button
+                onClick={onLineToolToggle}
+                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+                  lineToolActive
+                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                }`}
+                title="Measure Line"
+              >
+                <Ruler className="w-4 h-4" />
+                Line
+              </button>
+              <button
+                onClick={onDrawAreaToggle}
+                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+                  drawAreaActive
+                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+                }`}
+                title="Draw Area"
+              >
+                <Pentagon className="w-4 h-4" />
+                Area
+              </button>
+            </>
+          )}
           <button
             onClick={onEraserToolToggle}
             className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
@@ -78,34 +106,6 @@ const ToolsPanel = ({
             <RotateCw className="w-4 h-4" />
             Rotate
           </button>
-          {hasArea && (
-            <>
-              <button
-                onClick={onLineToolToggle}
-                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
-                  lineToolActive
-                    ? 'bg-accent/15 text-accent border border-accent/30'
-                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-                }`}
-                title="Measure Line"
-              >
-                <Ruler className="w-4 h-4" />
-                Line
-              </button>
-              <button
-                onClick={onDrawAreaToggle}
-                className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
-                  drawAreaActive
-                    ? 'bg-accent/15 text-accent border border-accent/30'
-                    : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-                }`}
-                title="Draw Area"
-              >
-                <Pentagon className="w-4 h-4" />
-                Area
-              </button>
-            </>
-          )}
         </div>
       </section>
     </div>

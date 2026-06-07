@@ -556,16 +556,16 @@ function App() {
   }, [setScale, setArea]);
 
   // Update room overlay position
-  const updateRoomOverlay = (overlay, saveAction = true) => {
+  const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
     if (saveAction) undoManager.save();
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
       updateScale(roomDimensions, overlay);
     }
-  };
+  }, [setRoomOverlay, roomDimensions, updateScale]);
 
   // Update perimeter vertices
-  const updatePerimeterVertices = (vertices, saveAction = true) => {
+  const updatePerimeterVertices = useCallback((vertices, saveAction = true) => {
     if (saveAction) undoManager.save();
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
     if (roomOverlay) {
@@ -574,10 +574,10 @@ function App() {
     } else {
       setArea(0);
     }
-  };
+  }, [setPerimeterOverlay, perimeterOverlay, roomOverlay, scale, setArea]);
 
   // Handle adding perimeter vertex in manual mode
-  const handleAddPerimeterVertex = (vertex) => {
+  const handleAddPerimeterVertex = useCallback((vertex) => {
     undoManager.save();
     const newVertices = [...perimeterVertices, vertex];
     setPerimeterVertices(newVertices);
@@ -586,11 +586,10 @@ function App() {
     if (newVertices.length > 0) {
       setPerimeterOverlay({ vertices: newVertices });
     }
-
-  };
+  }, [perimeterVertices, setPerimeterVertices, setPerimeterOverlay]);
 
   // Handle closing the perimeter
-  const handleClosePerimeter = () => {
+  const handleClosePerimeter = useCallback(() => {
     if (perimeterVertices && perimeterVertices.length > 2) {
       undoManager.save();
       setPerimeterOverlay({ vertices: perimeterVertices });
@@ -602,25 +601,25 @@ function App() {
       }
       setPerimeterVertices(null); // Exit vertex placement mode
     }
-  };
+  }, [perimeterVertices, setPerimeterOverlay, roomOverlay, scale, setArea, setPerimeterVertices]);
 
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
-  const handleRemovePerimeterVertex = () => {
+  const handleRemovePerimeterVertex = useCallback(() => {
     if (perimeterVertices && perimeterVertices.length > 0) {
       undoManager.save();
       const newVertices = perimeterVertices.slice(0, -1);
       setPerimeterVertices(newVertices);
     }
-  };
+  }, [perimeterVertices, setPerimeterVertices]);
 
   // Delete a specific perimeter vertex by index (right-click on vertex)
-  const handleDeletePerimeterVertex = (index) => {
+  const handleDeletePerimeterVertex = useCallback((index) => {
     if (!perimeterOverlay?.vertices || perimeterOverlay.vertices.length <= 3) return;
     updatePerimeterVertices(
       perimeterOverlay.vertices.filter((_, i) => i !== index),
       true
     );
-  };
+  }, [perimeterOverlay, updatePerimeterVertices]);
 
   // Switch to manual outline drawing: clear the auto-detected perimeter and let the user draw fresh
   const handleManualOutlineMode = () => {
@@ -631,7 +630,7 @@ function App() {
   };
 
   // Auto-trace exterior boundary after room overlay is placed.
-  const autoTraceExterior = async (overlayForScale, dims) => {
+  const autoTraceExterior = useCallback(async (overlayForScale, dims) => {
     setIsProcessing(true, 'Detecting exterior boundary…');
     try {
       const traced = await traceFloorplanBoundary(image, {
@@ -663,10 +662,10 @@ function App() {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [image, useInteriorWalls, setTracedBoundaries, setDetectionDebugData, setPerimeterVertices, setPerimeterOverlay, setArea, setIsProcessing, notify]);
 
   // Handle dimension selection in manual mode
-  const handleDimensionSelect = async (dimension) => {
+  const handleDimensionSelect = useCallback(async (dimension) => {
     undoManager.save();
     const dims = {
       width: dimension.width.toString(),
@@ -712,10 +711,10 @@ function App() {
     // Automatically detect exterior boundary after room overlay is placed.
     // autoTraceExterior manages its own isProcessing state.
     autoTraceExterior(nextOverlay, dims);
-  };
+  }, [setRoomDimensions, setIsProcessing, image, setDetectionDebugData, setRoomOverlay, updateScale, setPerimeterVertices, setMode, setDetectedDimensions, setManualEntryMode, autoTraceExterior]);
 
   // Handle canvas click for manual overlay placement
-  const handleCanvasClick = (clickPoint) => {
+  const handleCanvasClick = useCallback((clickPoint) => {
     if (!manualEntryMode || !roomDimensions.width || !roomDimensions.height) return;
     
     // Validate dimensions
@@ -766,7 +765,7 @@ function App() {
     };
 
     placeOverlay();
-  };
+  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setDetectionDebugData, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
   const handleFileOpen = useCallback(() => fileInputRef.current?.click(), []);

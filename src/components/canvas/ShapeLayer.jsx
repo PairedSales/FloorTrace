@@ -51,6 +51,7 @@ const ShapeLayer = ({
                 fill={shape.closed ? `${colors.normal}26` : 'transparent'}
                 stroke={strokeColor}
                 strokeWidth={(selectedCustomShapeIndex === shapeIndex ? 3 : 2) / scale}
+                perfectDrawEnabled={false}
               />
               {shape.closed && shape.vertices.map((vertex, vertexIndex) => (
                 <Circle
@@ -115,6 +116,7 @@ const ShapeLayer = ({
             stroke={LINE_COLORS[customShapes ? customShapes.length % LINE_COLORS.length : 0].normal}
             strokeWidth={2 / scale}
             dash={[6 / scale, 3 / scale]}
+            perfectDrawEnabled={false}
           />
           {currentCustomShape.vertices.map((vertex, index) => (
             <Circle

@@ -27,6 +27,7 @@ const RoomOverlayLayer = ({
           strokeWidth={1.5 / scale}
           fill="rgba(80, 250, 123, 0.1)"
           listening={false}
+          perfectDrawEnabled={false}
         />
       )}
       <Rect
@@ -38,6 +39,7 @@ const RoomOverlayLayer = ({
         strokeWidth={2 / scale}
         fill="rgba(80, 250, 123, 0.15)"
         onMouseDown={onRoomMouseDown}
+        perfectDrawEnabled={false}
       />
       
       {/* Room Corner Handles */}
