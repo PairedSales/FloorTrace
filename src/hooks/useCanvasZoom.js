@@ -71,7 +71,7 @@ export function useCanvasZoom(stageRef, scaleRef, setScale, viewportSyncTokenRef
     };
 
     const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const scaleBy = 1.05; // 1.05 for smoother zoom
+    const scaleBy = 1.0625; // 1.0625 for smoother zoom (increased by 25% from 1.05)
     const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
     const clampedScale = Math.max(0.1, Math.min(20, newScale));
 

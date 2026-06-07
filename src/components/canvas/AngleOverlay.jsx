@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Group, Line, Circle, Arc, Rect, Text } from 'react-konva';
-import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen } from '../../utils/angleMath';
+import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen, findVertexNeighbors } from '../../utils/angleMath';
 import { measureSideLenWidth } from './canvasUtils';
 
 /**
@@ -144,27 +144,79 @@ const AngleOverlay = ({
     // 1. Get raw dragged local position
     const rawCenter = { x: e.target.x(), y: e.target.y() };
 
-    // 2. Snapping
-    const snappedPoint = findAngleSnapPointScreen(
-      rawCenter,
-      stage,
-      layer,
-      perimeterOverlay,
-      customShapes,
-      measurementLines,
-      autoSnapEnabled,
-      findVertexSnapPoint
-    );
+    // 2. Snapping (holding shift key bypasses snap)
+    const shiftHeld = e.evt && e.evt.shiftKey;
+    const snappedPoint = (!shiftHeld && autoSnapEnabled)
+      ? findAngleSnapPointScreen(
+          rawCenter,
+          stage,
+          layer,
+          perimeterOverlay,
+          customShapes,
+          measurementLines,
+          autoSnapEnabled,
+          findVertexSnapPoint
+        )
+      : null;
 
     const finalCenter = snappedPoint || rawCenter;
 
     // Apply back to node position
     e.target.position({ x: finalCenter.x, y: finalCenter.y });
 
-    coordsRef.current = {
-      ...dragStartCoordsRef.current,
-      center: finalCenter,
-    };
+    if (snappedPoint) {
+      const neighbors = findVertexNeighbors(
+        snappedPoint,
+        perimeterOverlay,
+        customShapes,
+        measurementLines
+      );
+      if (neighbors && neighbors.length >= 2) {
+        const n1 = neighbors[0];
+        const n2 = neighbors[1];
+
+        const dx1 = n1.x - snappedPoint.x;
+        const dy1 = n1.y - snappedPoint.y;
+        const angle1 = Math.atan2(dy1, dx1);
+        const radius1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+
+        const dx2 = n2.x - snappedPoint.x;
+        const dy2 = n2.y - snappedPoint.y;
+        const angle2 = Math.atan2(dy2, dx2);
+        const radius2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+        coordsRef.current = {
+          center: snappedPoint,
+          angle1,
+          angle2,
+          radius1,
+          radius2,
+        };
+      } else if (neighbors && neighbors.length === 1) {
+        const n1 = neighbors[0];
+        const dx1 = n1.x - snappedPoint.x;
+        const dy1 = n1.y - snappedPoint.y;
+        const angle1 = Math.atan2(dy1, dx1);
+        const radius1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+
+        coordsRef.current = {
+          ...dragStartCoordsRef.current,
+          center: snappedPoint,
+          angle1,
+          radius1,
+        };
+      } else {
+        coordsRef.current = {
+          ...dragStartCoordsRef.current,
+          center: snappedPoint,
+        };
+      }
+    } else {
+      coordsRef.current = {
+        ...dragStartCoordsRef.current,
+        center: finalCenter,
+      };
+    }
 
     updateVisuals();
     layer.batchDraw();
@@ -192,17 +244,20 @@ const AngleOverlay = ({
     // Get raw dragged local position
     const rawP1 = { x: e.target.x(), y: e.target.y() };
 
-    // Snap target point
-    const snappedPoint = findAngleSnapPointScreen(
-      rawP1,
-      stage,
-      layer,
-      perimeterOverlay,
-      customShapes,
-      measurementLines,
-      autoSnapEnabled,
-      findVertexSnapPoint
-    );
+    // Snap target point (holding shift key bypasses snap)
+    const shiftHeld = e.evt && e.evt.shiftKey;
+    const snappedPoint = (!shiftHeld && autoSnapEnabled)
+      ? findAngleSnapPointScreen(
+          rawP1,
+          stage,
+          layer,
+          perimeterOverlay,
+          customShapes,
+          measurementLines,
+          autoSnapEnabled,
+          findVertexSnapPoint
+        )
+      : null;
 
     const targetP1 = snappedPoint || rawP1;
 
@@ -254,17 +309,20 @@ const AngleOverlay = ({
     // Get raw dragged local position
     const rawP2 = { x: e.target.x(), y: e.target.y() };
 
-    // Snap target point
-    const snappedPoint = findAngleSnapPointScreen(
-      rawP2,
-      stage,
-      layer,
-      perimeterOverlay,
-      customShapes,
-      measurementLines,
-      autoSnapEnabled,
-      findVertexSnapPoint
-    );
+    // Snap target point (holding shift key bypasses snap)
+    const shiftHeld = e.evt && e.evt.shiftKey;
+    const snappedPoint = (!shiftHeld && autoSnapEnabled)
+      ? findAngleSnapPointScreen(
+          rawP2,
+          stage,
+          layer,
+          perimeterOverlay,
+          customShapes,
+          measurementLines,
+          autoSnapEnabled,
+          findVertexSnapPoint
+        )
+      : null;
 
     const targetP2 = snappedPoint || rawP2;
 
