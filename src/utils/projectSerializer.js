@@ -7,7 +7,7 @@ export const PERSISTENT_FLOOR_FIELDS = [
   'perimeterTraces',
   'activeTraceId',
   'roomDimensions',
-  'scale',
+  'calibration',
   'mode',
   'detectedDimensions',
   'showSideLengths',
@@ -246,8 +246,8 @@ export function deserializeSketch(project) {
 
   const activeFloor = restoredFloors.find((f) => f.id === project.activeFloorId) || restoredFloors[0];
 
-  // Find canonical floor: first floor with an image and scale
-  const canonicalFloor = restoredFloors.find(f => f.state?.image && f.state?.scale) || activeFloor || restoredFloors[0];
+  // Find canonical floor: first floor with an image and calibration
+  const canonicalFloor = restoredFloors.find(f => f.state?.image && f.state?.calibration) || activeFloor || restoredFloors[0];
   const canonicalState = canonicalFloor ? { ...canonicalFloor.state } : {};
 
   // ── Legacy Multi-Floor to Multi-Perimeter Migration ──────────────────────
@@ -286,6 +286,21 @@ export function deserializeSketch(project) {
     });
   }
 
+  // Fallback: If still no traces exist, default to one empty trace
+  if (perimeterTraces.length === 0) {
+    perimeterTraces = [
+      {
+        id: 'trace-default',
+        name: '1st Floor',
+        vertices: [],
+        closed: false,
+        visible: true,
+        locked: false,
+        color: '#BD93F9',
+      }
+    ];
+  }
+
   let activeTraceId = canonicalState.activeTraceId;
   if (!activeTraceId && perimeterTraces.length > 0) {
     // Try to select the trace corresponding to the activeFloor in the legacy project
@@ -296,6 +311,9 @@ export function deserializeSketch(project) {
     } else {
       activeTraceId = perimeterTraces[0].id;
     }
+  }
+  if (!activeTraceId && perimeterTraces.length > 0) {
+    activeTraceId = perimeterTraces[0].id;
   }
 
   // Force single floor structure for multi-perimeter architecture

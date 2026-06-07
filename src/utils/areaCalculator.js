@@ -1,5 +1,6 @@
 // Calculate area of a polygon using the shoelace formula
-export const calculateArea = (vertices, scale) => {
+// feetPerPixel: real-world feet represented by one image pixel
+export const calculateArea = (vertices, feetPerPixel) => {
   if (!vertices || vertices.length < 3) {
     return 0;
   }
@@ -16,14 +17,15 @@ export const calculateArea = (vertices, scale) => {
   
   area = Math.abs(area) / 2;
   
-  // Convert from pixels to square feet using scale
-  const areaInSquareFeet = area * scale * scale;
+  // Convert from pixels to square feet using feetPerPixel
+  const areaInSquareFeet = area * feetPerPixel * feetPerPixel;
   
   return areaInSquareFeet;
 };
 
 // Calculate perimeter length
-export const calculatePerimeter = (vertices, scale) => {
+// feetPerPixel: real-world feet represented by one image pixel
+export const calculatePerimeter = (vertices, feetPerPixel) => {
   if (!vertices || vertices.length < 2) {
     return 0;
   }
@@ -38,8 +40,8 @@ export const calculatePerimeter = (vertices, scale) => {
     perimeter += Math.sqrt(dx * dx + dy * dy);
   }
   
-  // Convert from pixels to feet using scale
-  return perimeter * scale;
+  // Convert from pixels to feet using feetPerPixel
+  return perimeter * feetPerPixel;
 };
 
 // Calculate bounding box of vertices

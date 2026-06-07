@@ -15,7 +15,7 @@ const ShapeLayer = ({
   currentMousePos,
   drawAreaActive,
   scale,
-  pixelsPerFoot,
+  feetPerPixel,
   unit,
   selectedCustomShapeIndex,
   onCustomShapeSelect,
@@ -67,7 +67,7 @@ const ShapeLayer = ({
               ))}
               {shape.closed && shape.vertices.length >= 3 && (() => {
                 const centroid = getCentroid(shape.vertices);
-                const areaValue = calculateArea(shape.vertices, pixelsPerFoot);
+                const areaValue = calculateArea(shape.vertices, feetPerPixel);
                 let areaText;
                 if (unit === 'metric') {
                   const sqMeters = sqFeetToSqMeters(areaValue);

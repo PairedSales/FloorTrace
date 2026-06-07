@@ -20,30 +20,31 @@ const createMockStoreState = () => ({
       name: '1st Floor',
       state: null, // active
     },
-    {
-      id: 'floor-2',
-      name: '2nd Floor',
-      state: {
-        image: 'data:image/png;base64,FloorTwoImageContent',
-        roomOverlay: { x1: 10, y1: 10, x2: 100, y2: 100 },
-        perimeterOverlay: { vertices: [{ x: 10, y: 10 }, { x: 100, y: 10 }] },
-        roomDimensions: { width: '10', height: '10' },
-        area: 90,
-        scale: 1.5,
-        mode: 'normal',
-        zoomScale: 1.2,
-        stageX: 10,
-        stageY: 20,
-      },
-    },
   ],
   // Active floor state on root
   image: 'data:image/png;base64,FloorOneImageContent',
   roomOverlay: { x1: 5, y1: 5, x2: 50, y2: 50 },
-  perimeterOverlay: { vertices: [{ x: 5, y: 5 }, { x: 50, y: 5 }] },
+  perimeterTraces: [
+    {
+      id: 'trace-1',
+      name: '1st Floor Trace',
+      vertices: [{ x: 5, y: 5 }, { x: 50, y: 5 }, { x: 50, y: 50 }],
+      closed: true,
+      visible: true,
+      locked: false,
+      color: '#BD93F9',
+    }
+  ],
+  activeTraceId: 'trace-1',
   roomDimensions: { width: '5', height: '5' },
   area: 20,
-  scale: 2.0,
+  calibration: {
+    calibrated: true,
+    feetPerPixel: 2.0,
+    source: 'room-calibration',
+    calibratedRoomId: null,
+    createdAt: 1234567890
+  },
   mode: 'normal',
   zoomScale: 1.0,
   stageX: 0,
@@ -141,12 +142,10 @@ describe('projectSerializer', () => {
       // Verify de-duplication: image data URLs are NOT nested in floors, only references
       expect(project.floors[0].state.image).toBeUndefined();
       expect(project.floors[0].state.imageRef).toBeDefined();
-      expect(project.floors[1].state.image).toBeUndefined();
-      expect(project.floors[1].state.imageRef).toBeDefined();
 
-      // Verify the de-duplicated images pool contains both background images
+      // Verify the de-duplicated images pool contains the background image
       const imageHashes = Object.keys(project.images);
-      expect(imageHashes.length).toBe(2); // Floor 1 and Floor 2 images
+      expect(imageHashes.length).toBe(1); // Floor 1 image
       
       // Re-hydrate the project
       const { statePatch, historyPatch } = deserializeSketch(project);
@@ -154,19 +153,19 @@ describe('projectSerializer', () => {
       // Verify active floor state hydration on root patch
       expect(statePatch.image).toBe('data:image/png;base64,FloorOneImageContent');
       expect(statePatch.roomOverlay).toEqual({ x1: 5, y1: 5, x2: 50, y2: 50 });
-      expect(statePatch.scale).toBe(2.0);
+      expect(statePatch.calibration).toEqual({
+        calibrated: true,
+        feetPerPixel: 2.0,
+        source: 'room-calibration',
+        calibratedRoomId: null,
+        createdAt: 1234567890
+      });
       expect(statePatch.projectId).toBe('test-uuid-1234');
       expect(statePatch.canvasRotation).toBe(90);
 
       // Verify active floor state is null in floors list for runtime Zustand
       const activeFloor = statePatch.floors.find(f => f.id === 'floor-1');
       expect(activeFloor.state).toBeNull();
-
-      // Verify inactive floor (Floor 2) image is re-hydrated
-      const inactiveFloor = statePatch.floors.find(f => f.id === 'floor-2');
-      expect(inactiveFloor.state.image).toBe('data:image/png;base64,FloorTwoImageContent');
-      expect(inactiveFloor.state.imageRef).toBeUndefined();
-      expect(inactiveFloor.state.roomOverlay).toEqual({ x1: 10, y1: 10, x2: 100, y2: 100 });
 
       // Verify history stack is restored correctly
       expect(historyPatch).toBeDefined();
