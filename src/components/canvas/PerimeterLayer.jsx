@@ -270,7 +270,6 @@ const PerimeterLayer = ({
   unit,
   draggingVertex,
   onVertexDragStart,
-  onVertexDrag,
   onVertexDragEnd,
   onDeletePerimeterVertex,
 }) => {
@@ -278,12 +277,82 @@ const PerimeterLayer = ({
 
   const canvasRotation = useAppStore((s) => s.canvasRotation);
 
+  // Dev-only Render metrics
+  const renderCountRef = useRef(0);
+  if (import.meta.env?.DEV) {
+    renderCountRef.current += 1;
+    console.log(`[PerimeterLayer] Render count: ${renderCountRef.current}`);
+  }
+
+  // Ref tracking drag coordinates, current drag index, and animation frame ID
+  const draggingVertexIndexRef = useRef(null);
+  const dragCoordsRef = useRef(null);
+  const dragRafRef = useRef(null);
+
+  // Local state for dragging vertices
+  const [localVertices, setLocalVertices] = useState(targetVertices);
+  const [prevTargetVertices, setPrevTargetVertices] = useState(targetVertices);
+
+  // Derived state from props synchronization, strictly guarded against active drags
+  if (targetVertices !== prevTargetVertices) {
+    setPrevTargetVertices(targetVertices);
+    if (draggingVertexIndexRef.current === null) {
+      setLocalVertices(targetVertices);
+    }
+  }
+
+  // Cancel any pending RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+      }
+    };
+  }, []);
+
+  const handleDragStart = (index) => {
+    draggingVertexIndexRef.current = index;
+    onVertexDragStart?.(index);
+  };
+
+  const handleDragMove = (index, e) => {
+    const newX = e.target.x();
+    const newY = e.target.y();
+
+    dragCoordsRef.current = { index, x: newX, y: newY };
+
+    if (dragRafRef.current === null) {
+      dragRafRef.current = requestAnimationFrame(() => {
+        dragRafRef.current = null;
+        if (dragCoordsRef.current) {
+          const { index: idx, x, y } = dragCoordsRef.current;
+          setLocalVertices((prev) => {
+            if (!prev) return prev;
+            const next = [...prev];
+            next[idx] = { x, y };
+            return next;
+          });
+        }
+      });
+    }
+  };
+
+  const handleDragEnd = (index, e) => {
+    if (dragRafRef.current !== null) {
+      cancelAnimationFrame(dragRafRef.current);
+      dragRafRef.current = null;
+    }
+    draggingVertexIndexRef.current = null;
+    dragCoordsRef.current = null;
+    onVertexDragEnd?.(index, e);
+  };
+
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
   // Hooks must be called before any early return (rules of hooks).
   const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
 
-  // During animation, render the interpolated path; otherwise the target.
-  const renderVertices = displayVertices || targetVertices;
+  // During animation, render the interpolated path; otherwise the local/drag state.
+  const renderVertices = displayVertices || localVertices;
 
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
@@ -304,7 +373,7 @@ const PerimeterLayer = ({
           that the room overlay Rect below it remains interactable. Double-click
           for vertex insertion is handled at the Stage level via onDblClick. */}
       <Line
-        points={renderVertices.flatMap(v => [v.x, v.y])}
+        points={renderVertices ? renderVertices.flatMap(v => [v.x, v.y]) : []}
         stroke="#BD93F9"
         strokeWidth={2 / scale}
         closed={true}
@@ -314,7 +383,7 @@ const PerimeterLayer = ({
       />
 
       {/* Perimeter Vertices – hidden during animation for visual clarity */}
-      {!isAnimating && targetVertices.map((vertex, i) => (
+      {!isAnimating && localVertices && localVertices.map((vertex, i) => (
         <React.Fragment key={i}>
           <Circle
             x={vertex.x}
@@ -324,9 +393,9 @@ const PerimeterLayer = ({
             stroke="#fff"
             strokeWidth={1.5 / scale}
             draggable
-            onDragStart={() => onVertexDragStart(i)}
-            onDragMove={(e) => onVertexDrag(i, e)}
-            onDragEnd={(e) => onVertexDragEnd(i, e)}
+            onDragStart={() => handleDragStart(i)}
+            onDragMove={(e) => handleDragMove(i, e)}
+            onDragEnd={(e) => handleDragEnd(i, e)}
             onContextMenu={(e) => {
               e.evt.preventDefault();
               e.cancelBubble = true;

@@ -57,6 +57,7 @@ const MeasurementLayer = ({
                 stroke={strokeColor}
                 strokeWidth={strokeW}
                 hitStrokeWidth={16 / scale}
+                perfectDrawEnabled={false}
               />
               <Line
                 name="measurement-line"
@@ -64,6 +65,7 @@ const MeasurementLayer = ({
                 stroke={strokeColor}
                 strokeWidth={strokeW}
                 hitStrokeWidth={16 / scale}
+                perfectDrawEnabled={false}
               />
               <Text
                 name="measurement-line"
@@ -107,6 +109,7 @@ const MeasurementLayer = ({
               strokeWidth={2 / scale}
               dash={[6 / scale, 3 / scale]}
               opacity={0.7}
+              perfectDrawEnabled={false}
             />
             {previewLayout && (
               <Text
