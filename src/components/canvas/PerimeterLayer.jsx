@@ -158,7 +158,7 @@ const useAnimatedVertices = (targetVertices) => {
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
-const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation, draggingVertex) => {
+const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex) => {
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
   const rad = ((canvasRotation || 0) * Math.PI) / 180;
   const cos = Math.abs(Math.cos(rad));
@@ -181,7 +181,7 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const dx = nextVertex.x - vertex.x;
     const dy = nextVertex.y - vertex.y;
     const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-    const lengthInFeet = lengthInPixels * pixelsPerFoot;
+    const lengthInFeet = lengthInPixels * feetPerPixel;
     const formattedLength = formatLength(lengthInFeet, unit, unitStyle);
 
     const midX = (vertex.x + nextVertex.x) / 2;
@@ -298,7 +298,7 @@ const PerimeterLayer = ({
   localPerimeterVertices,
   scale,
   showSideLengths,
-  pixelsPerFoot,
+  feetPerPixel,
   detectedDimensions,
   unit,
   draggingVertex,
@@ -390,10 +390,10 @@ const PerimeterLayer = ({
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
   const labelLayouts = useMemo(
-    () => (showSideLengths && pixelsPerFoot && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation, draggingVertex)
+    () => (showSideLengths && feetPerPixel && renderVertices)
+      ? computeLabelLayouts(renderVertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex)
       : [],
-    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
+    [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
   return (
@@ -493,7 +493,7 @@ const PerimeterLayer = ({
       ))}
 
       {/* 5. Render Centroid Area Badges for all visible closed traces */}
-      {pixelsPerFoot && (perimeterTraces || []).map((trace) => {
+      {feetPerPixel && (perimeterTraces || []).map((trace) => {
         if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
 
         // Use renderVertices for active trace to move badge in real time during drag/animation
@@ -501,7 +501,7 @@ const PerimeterLayer = ({
         if (!vertices || vertices.length < 3) return null;
 
         const centroid = getCentroid(vertices);
-        const traceArea = calculateArea(vertices, pixelsPerFoot);
+        const traceArea = calculateArea(vertices, feetPerPixel);
         const { value: areaText, suffix: areaSuffix } = formatArea(traceArea, unit);
 
         const labelText = `${trace.name}: ${areaText} ${areaSuffix}`;

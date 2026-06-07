@@ -21,7 +21,7 @@ const TRACE_COLORS = [
   '#FF5555', // Dracula Red
 ];
 
-let nextTraceNumber = 1;
+let nextTraceNumber = 2;
 
 /**
  * Generate a sequential floor/trace name.
@@ -38,7 +38,7 @@ const FLOOR_STATE_FIELDS = [
   'image',
   'roomOverlay',
   'roomDimensions',
-  'scale',
+  'calibration',
   'mode',
   'detectedDimensions',
   'showSideLengths',
@@ -192,19 +192,31 @@ export function createFloorSlice(set, get) {
     getFloorArea: (traceId) => {
       const state = get();
       const trace = (state.perimeterTraces || []).find((t) => t.id === traceId);
-      return trace ? calculateArea(trace.vertices, state.scale) : 0;
+      const feetPerPixel = state.calibration?.feetPerPixel || 1.0;
+      return trace ? calculateArea(trace.vertices, feetPerPixel) : 0;
     },
 
     /**
      * Reset floor manager to initial state.
      */
     resetFloors: () => {
-      nextTraceNumber = 1;
+      nextTraceNumber = 2;
+      const defaultTraceId = `trace-${Date.now()}`;
       set({
         floors: [{ id: 'floor-1', name: '1st Floor', state: null }],
         activeFloorId: 'floor-1',
-        perimeterTraces: [],
-        activeTraceId: null,
+        perimeterTraces: [
+          {
+            id: defaultTraceId,
+            name: '1st Floor',
+            vertices: [],
+            closed: false,
+            visible: true,
+            locked: false,
+            color: '#BD93F9',
+          }
+        ],
+        activeTraceId: defaultTraceId,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
       });

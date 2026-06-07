@@ -29,7 +29,7 @@ function App() {
   const roomDimensions = useAppStore((s) => s.roomDimensions);
   const area = useAppStore(selectCombinedArea);
   const mode = useAppStore((s) => s.mode);
-  const scale = useAppStore((s) => s.scale);
+  const calibration = useAppStore((s) => s.calibration);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
   const detectedDimensions = useAppStore((s) => s.detectedDimensions);
@@ -69,7 +69,7 @@ function App() {
   const setRoomDimensions = useAppStore((s) => s.setRoomDimensions);
   const setArea = useAppStore((s) => s.setArea);
   const setMode = useAppStore((s) => s.setMode);
-  const setScale = useAppStore((s) => s.setScale);
+  const applyRoomCalibration = useAppStore((s) => s.applyRoomCalibration);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
   const setDetectedDimensions = useAppStore((s) => s.setDetectedDimensions);
   const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
@@ -423,11 +423,8 @@ function App() {
     }));
     setPerimeterVertices(null);
     setPerimeterOverlay({ vertices });
-    if (roomOverlay) {
-      setArea(calculateArea(vertices, scale));
-    }
     return true;
-  }, [roomOverlay, scale]);
+  }, []);
 
   // Handle trace perimeter using the detection worker.
   const handleTracePerimeter = async () => {
@@ -546,20 +543,20 @@ function App() {
     const overlayWidth = Math.abs(overlay.x2 - overlay.x1);
     const overlayHeight = Math.abs(overlay.y2 - overlay.y1);
     
+    if (overlayWidth === 0 || overlayHeight === 0) return;
+    
     // Match smallest dimension to smallest measurement
     const minDim = Math.min(dimWidth, dimHeight);
     const minOverlay = Math.min(overlayWidth, overlayHeight);
     
     const newScale = minDim / minOverlay; // feet per pixel
-    setScale(newScale);
     
-    // If perimeter already exists, recalculate area with new scale (only if room overlay exists)
-    const currentPerimeter = useAppStore.getState().perimeterOverlay;
-    if (currentPerimeter && currentPerimeter.vertices && overlay) {
-      const calculatedArea = calculateArea(currentPerimeter.vertices, newScale);
-      setArea(calculatedArea);
+    // Only apply if the scale has actually changed
+    const currentCalibration = useAppStore.getState().calibration;
+    if (!currentCalibration.calibrated || Math.abs(currentCalibration.feetPerPixel - newScale) > 1e-9) {
+      applyRoomCalibration(newScale, null, 'room-calibration');
     }
-  }, [setScale, setArea]);
+  }, [applyRoomCalibration]);
 
   // Update room overlay position
   const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
@@ -574,13 +571,7 @@ function App() {
   const updatePerimeterVertices = useCallback((vertices, saveAction = true) => {
     if (saveAction) undoManager.save();
     setPerimeterOverlay({ ...perimeterOverlay, vertices });
-    if (roomOverlay) {
-      const calculatedArea = calculateArea(vertices, scale);
-      setArea(calculatedArea);
-    } else {
-      setArea(0);
-    }
-  }, [setPerimeterOverlay, perimeterOverlay, roomOverlay, scale, setArea]);
+  }, [setPerimeterOverlay, perimeterOverlay]);
 
   // Handle adding perimeter vertex in manual mode
   const handleAddPerimeterVertex = useCallback((vertex) => {
@@ -599,15 +590,9 @@ function App() {
     if (perimeterVertices && perimeterVertices.length > 2) {
       undoManager.save();
       setPerimeterOverlay({ vertices: perimeterVertices });
-      if (roomOverlay) {
-        const calculatedArea = calculateArea(perimeterVertices, scale);
-        setArea(calculatedArea);
-      } else {
-        setArea(0);
-      }
       setPerimeterVertices(null); // Exit vertex placement mode
     }
-  }, [perimeterVertices, setPerimeterOverlay, roomOverlay, scale, setArea, setPerimeterVertices]);
+  }, [perimeterVertices, setPerimeterOverlay, setPerimeterVertices]);
 
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = useCallback(() => {
@@ -653,14 +638,6 @@ function App() {
       setPerimeterVertices(null);
       setPerimeterOverlay({ vertices });
 
-      // Calculate area now that we have both room overlay and perimeter
-      const dimW = parseFloat(dims.width);
-      const dimH = parseFloat(dims.height);
-      const oW = Math.abs(overlayForScale.x2 - overlayForScale.x1);
-      const oH = Math.abs(overlayForScale.y2 - overlayForScale.y1);
-      const autoScale = Math.min(dimW, dimH) / Math.min(oW, oH);
-      setArea(calculateArea(vertices, autoScale));
-
       notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2500);
     } catch (error) {
       console.error('Auto exterior tracing failed:', error);
@@ -668,7 +645,7 @@ function App() {
     } finally {
       setIsProcessing(false);
     }
-  }, [image, useInteriorWalls, setTracedBoundaries, setDetectionDebugData, setPerimeterVertices, setPerimeterOverlay, setArea, setIsProcessing, notify]);
+  }, [image, useInteriorWalls, setTracedBoundaries, setDetectionDebugData, setPerimeterVertices, setPerimeterOverlay, setIsProcessing, notify]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback(async (dimension) => {
@@ -867,7 +844,7 @@ function App() {
             detectedDimensions={detectedDimensions}
             onDimensionSelect={handleDimensionSelect}
             showSideLengths={showSideLengths}
-            pixelsPerFoot={scale}
+            feetPerPixel={calibration.feetPerPixel}
             manualEntryMode={manualEntryMode}
             onCanvasClick={handleCanvasClick}
             unit={unit}

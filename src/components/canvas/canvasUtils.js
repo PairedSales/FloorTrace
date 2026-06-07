@@ -65,12 +65,12 @@ export const LINE_COLORS = [
  *  @param {object} options
  *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). 
  *  @param {string|null} [options.unitStyle=null] Specific format style inferred from OCR. */
-export const getMeasurementLineLayout = (line, scale, pixelsPerFoot, unit, { forceAbove = false, unitStyle = null } = {}) => {
+export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forceAbove = false, unitStyle = null } = {}) => {
   const { formatLength } = getMeasurementLineLayout._deps;
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const lenPx = Math.sqrt(dx * dx + dy * dy);
-  const lengthFeet = lenPx * pixelsPerFoot;
+  const lengthFeet = lenPx * feetPerPixel;
   const textStr = `${formatLength(lengthFeet, unit, unitStyle)}`;
   const fontSize = 12 / scale;
   const ux = lenPx > 1e-6 ? dx / lenPx : 1;

@@ -23,7 +23,7 @@ const Canvas = React.memo(forwardRef(({
   detectedDimensions,
   onDimensionSelect,
   showSideLengths,
-  pixelsPerFoot,
+  feetPerPixel,
   manualEntryMode,
   onCanvasClick,
   unit,
@@ -157,7 +157,7 @@ const Canvas = React.memo(forwardRef(({
   const activeMeasurementLine = localMeasurementLine || currentMeasurementLine;
   const activeCustomShape = currentCustomShape;
 
-  const activePixelsPerFoot = useMemo(() => {
+  const activeFeetPerPixel = useMemo(() => {
     if (draggingRoomCorner && localRoomOverlay && roomDimensions?.width && roomDimensions?.height) {
       const dimWidth = parseFloat(roomDimensions.width);
       const dimHeight = parseFloat(roomDimensions.height);
@@ -167,8 +167,8 @@ const Canvas = React.memo(forwardRef(({
         return Math.min(dimWidth, dimHeight) / Math.min(overlayWidth, overlayHeight);
       }
     }
-    return pixelsPerFoot;
-  }, [draggingRoomCorner, localRoomOverlay, roomDimensions, pixelsPerFoot]);
+    return feetPerPixel;
+  }, [draggingRoomCorner, localRoomOverlay, roomDimensions, feetPerPixel]);
 
   const handleEraserPerimeterUpdate = useCallback((nextVertices, isFinal) => {
     if (isFinal) {
@@ -1479,7 +1479,7 @@ const Canvas = React.memo(forwardRef(({
               localPerimeterVertices={localPerimeterVertices}
               scale={scale}
               showSideLengths={showSideLengths}
-              pixelsPerFoot={activePixelsPerFoot}
+              feetPerPixel={activeFeetPerPixel}
               detectedDimensions={detectedDimensions}
               unit={unit}
               draggingVertex={draggingVertex}
@@ -1551,7 +1551,7 @@ const Canvas = React.memo(forwardRef(({
             currentMeasurementLine={activeMeasurementLine}
             lineToolActive={lineToolActive}
             scale={scale}
-            pixelsPerFoot={activePixelsPerFoot}
+            feetPerPixel={activeFeetPerPixel}
             unit={unit}
             unitStyle={unitStyle}
             selectedMeasurementLineIndex={selectedMeasurementLineIndex}
@@ -1568,7 +1568,7 @@ const Canvas = React.memo(forwardRef(({
             currentMousePos={currentMousePos}
             drawAreaActive={drawAreaActive}
             scale={scale}
-            pixelsPerFoot={activePixelsPerFoot}
+            feetPerPixel={activeFeetPerPixel}
             unit={unit}
             unitStyle={unitStyle}
             selectedCustomShapeIndex={selectedCustomShapeIndex}

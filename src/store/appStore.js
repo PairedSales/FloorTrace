@@ -7,14 +7,31 @@ import { calculateArea } from '../utils/areaCalculator';
  * undo/redo and autosave). Defining them in one place avoids the duplication
  * that previously existed across applySnapshot, resetOverlays, and autosave.
  */
+const DEFAULT_TRACE_ID = 'trace-default';
 const WORKING_STATE_DEFAULTS = {
   image: null,
   roomOverlay: null,
-  perimeterTraces: [],
+  perimeterTraces: [
+    {
+      id: DEFAULT_TRACE_ID,
+      name: '1st Floor',
+      vertices: [],
+      closed: false,
+      visible: true,
+      locked: false,
+      color: '#BD93F9',
+    }
+  ],
   traceInteractionMode: 'idle',
-  activeTraceId: null,
+  activeTraceId: DEFAULT_TRACE_ID,
   roomDimensions: { width: '', height: '' },
-  scale: 1,
+  calibration: {
+    calibrated: false,
+    feetPerPixel: 1.0, // feet per pixel
+    source: null,
+    calibratedRoomId: null,
+    createdAt: null,
+  },
   mode: 'normal',
   isProcessing: false,
   processingMessage: '',
@@ -175,7 +192,26 @@ const useAppStore = create((set, get) => ({
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setArea: (v) => {}, // Deprecated canonical setter, no-op since area is derived
   setMode: (v) => set({ mode: v }),
-  setScale: (v) => set({ scale: v, isDirty: true }),
+  applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration') => {
+    if (mutationSource !== 'room-calibration') {
+      throw new Error(
+        "Only explicit room calibration may modify calibration scale"
+      );
+    }
+    if (typeof feetPerPixel !== 'number' || isNaN(feetPerPixel) || !isFinite(feetPerPixel) || feetPerPixel <= 0) {
+      throw new Error("Invalid calibration scale");
+    }
+    set({
+      calibration: {
+        calibrated: true,
+        feetPerPixel,
+        source: 'room-calibration',
+        calibratedRoomId: roomId,
+        createdAt: Date.now(),
+      },
+      isDirty: true,
+    });
+  },
   setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
   setDetectedDimensions: (v) => set({ detectedDimensions: v }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
@@ -192,7 +228,15 @@ const useAppStore = create((set, get) => ({
   setDrawAreaActive: (v) => set({ drawAreaActive: v }),
   setCustomShapes: (v) => set({ customShapes: v }),
   setCurrentCustomShape: (v) => set({ currentCustomShape: v }),
-  setPerimeterVertices: (v) => set({ perimeterVertices: v }),
+  setPerimeterVertices: (v) => set((state) => {
+    const patch = { perimeterVertices: v };
+    if (v !== null) {
+      patch.traceInteractionMode = 'drawing';
+    } else if (state.traceInteractionMode === 'drawing') {
+      patch.traceInteractionMode = 'idle';
+    }
+    return patch;
+  }),
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
   setDebugDetection: (v) => set({ debugDetection: v }),
   setDetectionDebugData: (v) => set({ detectionDebugData: v }),
@@ -314,17 +358,17 @@ export const selectPerimeterOverlay = (state) => {
   return lastOverlayResult;
 };
 
-let lastScale = null;
+let lastFeetPerPixel = null;
 let lastTraces = [];
 let lastCombinedArea = 0;
 
 /** Selector to get the combined total area of all visible traces */
 export const selectCombinedArea = (state) => {
   const traces = state.perimeterTraces || [];
-  const scale = state.scale || 1;
+  const feetPerPixel = state.calibration?.feetPerPixel || 1.0;
 
-  // Quick check for changes in scale or trace object reference
-  let changed = scale !== lastScale || traces.length !== lastTraces.length;
+  // Quick check for changes in feetPerPixel or trace object reference
+  let changed = feetPerPixel !== lastFeetPerPixel || traces.length !== lastTraces.length;
   if (!changed) {
     for (let i = 0; i < traces.length; i++) {
       if (traces[i] !== lastTraces[i]) {
@@ -340,9 +384,9 @@ export const selectCombinedArea = (state) => {
 
   const areaValue = traces
     .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
-    .reduce((sum, t) => sum + calculateArea(t.vertices, scale), 0);
+    .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel), 0);
 
-  lastScale = scale;
+  lastFeetPerPixel = feetPerPixel;
   lastTraces = traces;
   lastCombinedArea = areaValue;
   return areaValue;
