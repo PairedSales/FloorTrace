@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Text, Rect, Group } from 'react-konva';
 import useAppStore from '../store/appStore';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
@@ -1541,100 +1541,97 @@ const Canvas = React.memo(forwardRef(({
               manualEntryMode={manualEntryMode}
               scale={scale}
             />
-            
-          </Layer>
 
-          {/* Measurement Lines & Preview */}
-          <MeasurementLayer
-            layerProps={contentTransform}
-            measurementLines={measurementLines}
-            currentMeasurementLine={activeMeasurementLine}
-            lineToolActive={lineToolActive}
-            scale={scale}
-            feetPerPixel={activeFeetPerPixel}
-            unit={unit}
-            unitStyle={unitStyle}
-            selectedMeasurementLineIndex={selectedMeasurementLineIndex}
-            onMeasurementLineSelect={handleMeasurementLineSelect}
-            onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
-            onMeasurementLinesChange={onMeasurementLinesChange}
-          />
-
-          {/* Custom Shapes & Preview */}
-          <ShapeLayer
-            layerProps={contentTransform}
-            customShapes={customShapes}
-            currentCustomShape={activeCustomShape}
-            currentMousePos={currentMousePos}
-            drawAreaActive={drawAreaActive}
-            scale={scale}
-            feetPerPixel={activeFeetPerPixel}
-            unit={unit}
-            unitStyle={unitStyle}
-            selectedCustomShapeIndex={selectedCustomShapeIndex}
-            onCustomShapeSelect={handleCustomShapeSelect}
-            onCustomShapeDragEnd={handleCustomShapeDragEnd}
-          />
-
-          {/* Angle measurement overlay */}
-          <Layer
-            visible={angleToolActive && !!angleToolState}
-            listening={angleToolActive}
-            {...contentTransform}
-          >
-            <AngleOverlay
-              angleToolState={angleToolState}
-              onAngleToolStateChange={onAngleToolStateChange}
-              scale={scale}
-              canvasRotation={canvasRotation}
-              perimeterTraces={perimeterTraces}
-              customShapes={customShapes}
+            {/* Measurement Lines & Preview */}
+            <MeasurementLayer
               measurementLines={measurementLines}
-              autoSnapEnabled={autoSnapEnabled}
-              findVertexSnapPoint={findVertexSnapPoint}
-              onDragStateChange={setDraggingAngle}
+              currentMeasurementLine={activeMeasurementLine}
+              lineToolActive={lineToolActive}
+              scale={scale}
+              feetPerPixel={activeFeetPerPixel}
+              unit={unit}
+              unitStyle={unitStyle}
+              selectedMeasurementLineIndex={selectedMeasurementLineIndex}
+              onMeasurementLineSelect={handleMeasurementLineSelect}
+              onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
+              onMeasurementLinesChange={onMeasurementLinesChange}
             />
-          </Layer>
 
-          {/* Eraser cursor and crop selection overlay */}
-          <Layer listening={false} {...contentTransform}>
-            {/* Eraser brush cursor */}
-            {eraserToolActive && currentMousePos && (
-              <Rect
-                x={currentMousePos.x - eraserBrushSize / 2}
-                y={currentMousePos.y - eraserBrushSize / 2}
-                width={eraserBrushSize}
-                height={eraserBrushSize}
-                stroke="#8BE9FD"
-                strokeWidth={1.5 / scale}
-                dash={[4 / scale, 4 / scale]}
-                listening={false}
+            {/* Custom Shapes & Preview */}
+            <ShapeLayer
+              customShapes={customShapes}
+              currentCustomShape={activeCustomShape}
+              currentMousePos={currentMousePos}
+              drawAreaActive={drawAreaActive}
+              scale={scale}
+              feetPerPixel={activeFeetPerPixel}
+              unit={unit}
+              unitStyle={unitStyle}
+              selectedCustomShapeIndex={selectedCustomShapeIndex}
+              onCustomShapeSelect={handleCustomShapeSelect}
+              onCustomShapeDragEnd={handleCustomShapeDragEnd}
+            />
+
+            {/* Angle measurement overlay */}
+            <Group
+              visible={angleToolActive && !!angleToolState}
+              listening={angleToolActive}
+            >
+              <AngleOverlay
+                angleToolState={angleToolState}
+                onAngleToolStateChange={onAngleToolStateChange}
+                scale={scale}
+                canvasRotation={canvasRotation}
+                perimeterTraces={perimeterTraces}
+                customShapes={customShapes}
+                measurementLines={measurementLines}
+                autoSnapEnabled={autoSnapEnabled}
+                findVertexSnapPoint={findVertexSnapPoint}
+                onDragStateChange={setDraggingAngle}
               />
-            )}
+            </Group>
 
-            {/* Crop selection overlay */}
-            {cropToolActive && crop.cropSelection && (() => {
-              const sel = crop.cropSelection;
-              const sx = Math.min(sel.x1, sel.x2);
-              const sy = Math.min(sel.y1, sel.y2);
-              const sw = Math.abs(sel.x2 - sel.x1);
-              const sh = Math.abs(sel.y2 - sel.y1);
-              return (
-                <>
-                  {/* Selection border */}
-                  <Rect
-                    x={sx}
-                    y={sy}
-                    width={sw}
-                    height={sh}
-                    stroke="#8BE9FD"
-                    strokeWidth={2 / scale}
-                    dash={[6 / scale, 4 / scale]}
-                    listening={false}
-                  />
-                </>
-              );
-            })()}
+            {/* Eraser cursor and crop selection overlay */}
+            <Group listening={false}>
+              {/* Eraser brush cursor */}
+              {eraserToolActive && currentMousePos && (
+                <Rect
+                  x={currentMousePos.x - eraserBrushSize / 2}
+                  y={currentMousePos.y - eraserBrushSize / 2}
+                  width={eraserBrushSize}
+                  height={eraserBrushSize}
+                  stroke="#8BE9FD"
+                  strokeWidth={1.5 / scale}
+                  dash={[4 / scale, 4 / scale]}
+                  listening={false}
+                />
+              )}
+
+              {/* Crop selection overlay */}
+              {cropToolActive && crop.cropSelection && (() => {
+                const sel = crop.cropSelection;
+                const sx = Math.min(sel.x1, sel.x2);
+                const sy = Math.min(sel.y1, sel.y2);
+                const sw = Math.abs(sel.x2 - sel.x1);
+                const sh = Math.abs(sel.y2 - sel.y1);
+                return (
+                  <>
+                    {/* Selection border */}
+                    <Rect
+                      x={sx}
+                      y={sy}
+                      width={sw}
+                      height={sh}
+                      stroke="#8BE9FD"
+                      strokeWidth={2 / scale}
+                      dash={[6 / scale, 4 / scale]}
+                      listening={false}
+                    />
+                  </>
+                );
+              })()}
+            </Group>
+            
           </Layer>
         </Stage>
       )}

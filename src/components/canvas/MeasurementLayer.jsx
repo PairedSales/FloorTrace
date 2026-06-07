@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layer, Group, Line, Text } from 'react-konva';
+import { Group, Line, Text } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';
 
@@ -19,7 +19,6 @@ const MeasurementLayer = ({
   onMeasurementLineSelect,
   onMeasurementLineDragEnd,
   onMeasurementLinesChange,
-  layerProps = {},
 }) => {
   const canvasRotation = useAppStore((s) => s.canvasRotation);
 
@@ -27,7 +26,7 @@ const MeasurementLayer = ({
     <>
       {/* Completed Measurement Lines */}
       {measurementLines && measurementLines.length > 0 && (
-        <Layer {...layerProps}>
+        <Group>
           {measurementLines.map((line, index) => {
             const layout = getMeasurementLineLayout(line, scale, feetPerPixel, unit, { unitStyle });
             const colors = LINE_COLORS[index % LINE_COLORS.length];
@@ -82,7 +81,7 @@ const MeasurementLayer = ({
             </Group>
             );
           })}
-        </Layer>
+        </Group>
       )}
 
       {/* Measurement Line Preview */}
@@ -97,7 +96,7 @@ const MeasurementLayer = ({
           ? getMeasurementLineLayout(currentMeasurementLine, scale, feetPerPixel, unit, { forceAbove: true, unitStyle })
           : null;
         return (
-          <Layer {...layerProps}>
+          <Group>
             <Line
               points={[
                 currentMeasurementLine.start.x,
@@ -125,7 +124,7 @@ const MeasurementLayer = ({
                 rotation={-canvasRotation}
               />
             )}
-          </Layer>
+          </Group>
         );
       })()}
     </>

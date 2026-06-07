@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice } from './floorManager';
 import { calculateArea } from '../utils/areaCalculator';
 
@@ -130,7 +131,7 @@ const pickFields = (state, fields) => {
 
 // ──── store ──────────────────────────────────────────────────────────────────
 
-const useAppStore = create((set, get) => ({
+const useAppStore = create(subscribeWithSelector((set, get) => ({
   // ── working state ──────────────────────────────────────────────────────────
   ...WORKING_STATE_DEFAULTS,
 
@@ -331,7 +332,7 @@ const useAppStore = create((set, get) => ({
     patch.processingMessage = '';
     set(patch);
   },
-}));
+})));
 
 // ── Memoized selectors ────────────────────────────────────────────────────────
 

@@ -82,14 +82,23 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
   }
 
   const image = await loadImageElement(imageSrc);
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
+  const naturalW = image.naturalWidth || image.width;
+  const naturalH = image.naturalHeight || image.height;
+
+  const MAX_DIM = 1500;
+  let factor = 1.0;
+  if (Math.max(naturalW, naturalH) > MAX_DIM) {
+    factor = MAX_DIM / Math.max(naturalW, naturalH);
+  }
+
+  const width = Math.round(naturalW * factor);
+  const height = Math.round(naturalH * factor);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0);
+  ctx.drawImage(image, 0, 0, width, height);
   const { data } = ctx.getImageData(0, 0, width, height);
 
   const grayscale = new Uint8Array(width * height);
@@ -115,8 +124,9 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
   const findCornerSnap = (point) => {
     if (!point || width < 1 || height < 1) return null;
 
-    const cx = Math.round(point.x);
-    const cy = Math.round(point.y);
+    const scaledPoint = { x: point.x * factor, y: point.y * factor };
+    const cx = Math.round(scaledPoint.x);
+    const cy = Math.round(scaledPoint.y);
     const x0 = clamp(cx - CORNER_BOX_HALF, 0, width - 1);
     const y0 = clamp(cy - CORNER_BOX_HALF, 0, height - 1);
     const x1 = clamp(cx + CORNER_BOX_HALF - 1, 0, width - 1);
@@ -143,8 +153,8 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
         const score = cornerScoreFromQuadrants(fracs);
         if (score < MIN_CORNER_SCORE) continue;
 
-        const dx = px - point.x;
-        const dy = py - point.y;
+        const dx = px - scaledPoint.x;
+        const dy = py - scaledPoint.y;
         const distSq = dx * dx + dy * dy;
 
         if (
@@ -158,18 +168,25 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
       }
     }
 
-    return best;
+    if (best) {
+      return { x: best.x / factor, y: best.y / factor };
+    }
+    return null;
   };
 
   const findVerticalWall = (targetX, y1, y2, options = {}) => {
+    const scaledTargetX = targetX * factor;
+    const scaledY1 = y1 * factor;
+    const scaledY2 = y2 * factor;
+
     const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
     const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
 
-    const yLo = clamp(Math.round(Math.min(y1, y2)), 0, height - 1);
-    const yHi = clamp(Math.round(Math.max(y1, y2)), 0, height - 1);
+    const yLo = clamp(Math.round(Math.min(scaledY1, scaledY2)), 0, height - 1);
+    const yHi = clamp(Math.round(Math.max(scaledY1, scaledY2)), 0, height - 1);
     const span = Math.max(1, yHi - yLo + 1);
 
-    const xCenter = Math.round(targetX);
+    const xCenter = Math.round(scaledTargetX);
     let bestX = null;
     let bestDist = Number.POSITIVE_INFINITY;
     let bestDensity = -1;
@@ -185,7 +202,7 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
       const density = dark / span;
       if (density < minRatio) continue;
 
-      const dist = Math.abs(x - targetX);
+      const dist = Math.abs(x - scaledTargetX);
       if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
         bestDist = dist;
         bestDensity = density;
@@ -193,18 +210,25 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
       }
     }
 
-    return bestX;
+    if (bestX !== null) {
+      return bestX / factor;
+    }
+    return null;
   };
 
   const findHorizontalWall = (targetY, x1, x2, options = {}) => {
+    const scaledTargetY = targetY * factor;
+    const scaledX1 = x1 * factor;
+    const scaledX2 = x2 * factor;
+
     const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
     const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
 
-    const xLo = clamp(Math.round(Math.min(x1, x2)), 0, width - 1);
-    const xHi = clamp(Math.round(Math.max(x1, x2)), 0, width - 1);
+    const xLo = clamp(Math.round(Math.min(scaledX1, scaledX2)), 0, width - 1);
+    const xHi = clamp(Math.round(Math.max(scaledX1, scaledX2)), 0, width - 1);
     const span = Math.max(1, xHi - xLo + 1);
 
-    const yCenter = Math.round(targetY);
+    const yCenter = Math.round(scaledTargetY);
     let bestY = null;
     let bestDist = Number.POSITIVE_INFINITY;
     let bestDensity = -1;
@@ -221,7 +245,7 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
       const density = dark / span;
       if (density < minRatio) continue;
 
-      const dist = Math.abs(y - targetY);
+      const dist = Math.abs(y - scaledTargetY);
       if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
         bestDist = dist;
         bestDensity = density;
@@ -229,7 +253,10 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
       }
     }
 
-    return bestY;
+    if (bestY !== null) {
+      return bestY / factor;
+    }
+    return null;
   };
 
   return {

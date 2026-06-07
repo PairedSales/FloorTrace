@@ -12,6 +12,7 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
+import { terminateOcrWorker } from './utils/DimensionsOCR';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
@@ -123,7 +124,10 @@ function App() {
   // shortcut hook can close over the stable callback references.
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
-  useEffect(() => () => terminateDetectionWorker(), []);
+  useEffect(() => () => {
+    terminateDetectionWorker();
+    terminateOcrWorker();
+  }, []);
 
 
   // Reset entire application
@@ -244,6 +248,7 @@ function App() {
         img.src = imgSrc;
       } finally {
         setIsProcessing(false);
+        terminateOcrWorker();
       }
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit, notify]);
@@ -432,13 +437,17 @@ function App() {
 
     undoManager.save();
     setIsProcessing(true, 'Tracing exterior walls…');
+    const startImage = image;
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
       });
 
+      if (useAppStore.getState().image !== startImage) return;
+
       if (!traced) {
         notify('Unable to trace perimeter from this image.', 2500);
+        setIsProcessing(false);
         return;
       }
 
@@ -448,15 +457,18 @@ function App() {
 
       if (!applied) {
         notify('No valid perimeter detected.', 2500);
+        setIsProcessing(false);
         return;
       }
 
       notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2200);
-    } catch (error) {
-      console.error('Perimeter detection failed:', error);
-      notify('Perimeter detection failed. Try another image region.');
-    } finally {
       setIsProcessing(false);
+    } catch (error) {
+      if (useAppStore.getState().image === startImage) {
+        console.error('Perimeter detection failed:', error);
+        notify('Perimeter detection failed. Try another image region.');
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -623,10 +635,12 @@ function App() {
   // Auto-trace exterior boundary after room overlay is placed.
   const autoTraceExterior = useCallback(async (overlayForScale, dims) => {
     setIsProcessing(true, 'Detecting exterior boundary…');
+    const startImage = image;
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
       });
+      if (useAppStore.getState().image !== startImage) return;
       if (!traced) return;
       setTracedBoundaries(traced);
       setDetectionDebugData({ ...(useAppStore.getState().detectionDebugData ?? {}), ...(traced.debug ?? {}) });
@@ -640,10 +654,14 @@ function App() {
 
       notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2500);
     } catch (error) {
-      console.error('Auto exterior tracing failed:', error);
+      if (useAppStore.getState().image === startImage) {
+        console.error('Auto exterior tracing failed:', error);
+      }
       // Non-fatal — user can still trace manually
     } finally {
-      setIsProcessing(false);
+      if (useAppStore.getState().image === startImage) {
+        setIsProcessing(false);
+      }
     }
   }, [image, useInteriorWalls, setTracedBoundaries, setDetectionDebugData, setPerimeterVertices, setPerimeterOverlay, setIsProcessing, notify]);
 
@@ -666,10 +684,13 @@ function App() {
     };
 
     setIsProcessing(true, 'Finding room…');
+    const startImage = image;
     try {
       const roomResult = await detectRoomFromClick(image, { x: centerX, y: centerY }, {
         preprocess: { maxDimension: 1300 },
       });
+
+      if (useAppStore.getState().image !== startImage) return;
 
       if (roomResult?.overlay) {
         nextOverlay = {
@@ -680,8 +701,12 @@ function App() {
         setDetectionDebugData(roomResult.debug ?? null);
       }
     } catch (error) {
-      console.error('Room enclosure detection failed:', error);
+      if (useAppStore.getState().image === startImage) {
+        console.error('Room enclosure detection failed:', error);
+      }
     }
+
+    if (useAppStore.getState().image !== startImage) return;
 
     setRoomOverlay(nextOverlay);
     updateScale(dims, nextOverlay);
@@ -717,6 +742,7 @@ function App() {
       y2: clickPoint.y + 100
     };
 
+    const startImage = image;
     const placeOverlay = async () => {
       let nextOverlay = fallbackOverlay;
       setIsProcessing(true, 'Finding room…');
@@ -724,6 +750,9 @@ function App() {
         const roomResult = await detectRoomFromClick(image, clickPoint, {
           preprocess: { maxDimension: 1300 },
         });
+
+        if (useAppStore.getState().image !== startImage) return;
+
         if (roomResult?.overlay) {
           nextOverlay = {
             ...roomResult.overlay,
@@ -733,8 +762,12 @@ function App() {
           setDetectionDebugData(roomResult.debug ?? null);
         }
       } catch (error) {
-        console.error('Manual room detection fallback failed:', error);
+        if (useAppStore.getState().image === startImage) {
+          console.error('Manual room detection fallback failed:', error);
+        }
       }
+
+      if (useAppStore.getState().image !== startImage) return;
 
       setRoomOverlay(nextOverlay);
       updateScale(roomDimensions, nextOverlay);
