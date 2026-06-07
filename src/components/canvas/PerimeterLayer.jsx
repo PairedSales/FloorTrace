@@ -492,8 +492,8 @@ const PerimeterLayer = ({
         </React.Fragment>
       ))}
 
-      {/* 5. Render Centroid Area Badges for all visible closed traces */}
-      {feetPerPixel && (perimeterTraces || []).map((trace) => {
+      {/* 5. Render Centroid Area Badges for all visible closed traces (only if multiple are active/visible) */}
+      {feetPerPixel && (perimeterTraces || []).filter(t => t.visible && t.closed && t.vertices && t.vertices.length >= 3).length > 1 && (perimeterTraces || []).map((trace) => {
         if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
 
         // Use renderVertices for active trace to move badge in real time during drag/animation
