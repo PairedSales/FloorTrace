@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { shallow } from 'zustand/shallow';
 import useAppStore from '../store/appStore';
 import { AUTOSAVE_FIELDS } from '../store/appStore';
+import * as undoManager from '../store/undoManager';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
@@ -40,7 +41,11 @@ export function useAutosave(notify) {
 
   const saveAutosavedDraft = useCallback((snapshot) => {
     try {
-      localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+      const payload = {
+        state: snapshot,
+        history: undoManager.getHistoryState(),
+      };
+      localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
       if (notify) notify('Autosave unavailable (storage full or blocked).');
@@ -61,13 +66,24 @@ export function useAutosave(notify) {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
-        const savedStateRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
-        if (savedStateRaw) {
-          const savedState = JSON.parse(savedStateRaw);
+        const savedDataRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
+        if (savedDataRaw) {
+          const parsed = JSON.parse(savedDataRaw);
+          // Support both new wrapped format: { state: ..., history: ... }
+          // and legacy flat format: { image: ..., roomOverlay: ... }
+          const hasWrappedState = parsed && 'state' in parsed;
+          const savedState = hasWrappedState ? parsed.state : parsed;
+          const savedHistory = hasWrappedState ? parsed.history : null;
+
           if (savedState?.image) {
             useAppStore.getState().restoreFromSaved(savedState);
             if (typeof savedState.useInteriorWalls === 'boolean') {
               localStorage.setItem(WALL_MODE_KEY, String(savedState.useInteriorWalls));
+            }
+            if (savedHistory) {
+              undoManager.setHistoryState(savedHistory);
+            } else {
+              undoManager.clear();
             }
             setHasRestoredState(true);
             return;
@@ -176,3 +192,4 @@ export function useAutosave(notify) {
 
   return { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft };
 }
+

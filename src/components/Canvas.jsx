@@ -774,21 +774,23 @@ const Canvas = React.memo(forwardRef(({
     if (e.evt && e.evt.button !== 0) return;
 
     // Line tool: a double click finishes the line
-    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start) {
+    const storeCurrentLine = useAppStore.getState().currentMeasurementLine;
+    if (lineToolActive && storeCurrentLine && storeCurrentLine.start) {
       const stage = e.target.getStage();
       if (!stage) return;
       const finalPoint = getCanvasCoords(stage);
       if (!finalPoint) return;
 
-      const newLine = { start: currentMeasurementLine.start, end: finalPoint };
+      const newLine = { start: storeCurrentLine.start, end: finalPoint };
       onAddMeasurementLine(newLine);
       onMeasurementLineUpdate(null); // Reset for next line
       return;
     }
 
     // Draw area tool - close the shape
-    if (drawAreaActive && currentCustomShape && !currentCustomShape.closed && currentCustomShape.vertices.length >= 3) {
-      const finalShape = { ...currentCustomShape, closed: true };
+    const storeCustomShape = useAppStore.getState().currentCustomShape;
+    if (drawAreaActive && storeCustomShape && !storeCustomShape.closed && storeCustomShape.vertices.length >= 3) {
+      const finalShape = { ...storeCustomShape, closed: true };
       onAddCustomShape(finalShape);
       onCustomShapeUpdate(null); // Reset for next shape
       return;
@@ -1193,12 +1195,14 @@ const Canvas = React.memo(forwardRef(({
         const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
 
-        if (!currentMeasurementLine) {
+        const storeCurrentLine = useAppStore.getState().currentMeasurementLine;
+
+        if (!storeCurrentLine) {
           // Start a new line
           onMeasurementLineUpdate({ start: clickPoint, end: clickPoint });
         } else {
           // Finish the current line
-          const newLine = { start: currentMeasurementLine.start, end: clickPoint };
+          const newLine = { start: storeCurrentLine.start, end: clickPoint };
           onAddMeasurementLine(newLine);
           onMeasurementLineUpdate(null); // Reset for the next line
         }
@@ -1212,23 +1216,25 @@ const Canvas = React.memo(forwardRef(({
         const clickPoint = getCanvasCoords(stage);
         if (!clickPoint) return;
 
-        if (!currentCustomShape) {
+        const storeCustomShape = useAppStore.getState().currentCustomShape;
+
+        if (!storeCustomShape) {
           // Start a new shape
           onCustomShapeUpdate({ vertices: [clickPoint], closed: false });
         } else {
           // Check if closing the shape by clicking the first vertex
-          const firstVertex = currentCustomShape.vertices[0];
+          const firstVertex = storeCustomShape.vertices[0];
           const distance = Math.sqrt(Math.pow(clickPoint.x - firstVertex.x, 2) + Math.pow(clickPoint.y - firstVertex.y, 2));
 
-          if (currentCustomShape.vertices.length > 2 && distance < 10 / scaleRef.current) {
+          if (storeCustomShape.vertices.length > 2 && distance < 10 / scaleRef.current) {
             // Close the shape
-            const finalShape = { ...currentCustomShape, closed: true };
+            const finalShape = { ...storeCustomShape, closed: true };
             onAddCustomShape(finalShape);
             onCustomShapeUpdate(null); // Reset for next shape
           } else {
             // Add a new vertex
-            const newVertices = [...currentCustomShape.vertices, clickPoint];
-            onCustomShapeUpdate({ ...currentCustomShape, vertices: newVertices });
+            const newVertices = [...storeCustomShape.vertices, clickPoint];
+            onCustomShapeUpdate({ ...storeCustomShape, vertices: newVertices });
           }
         }
         return;
