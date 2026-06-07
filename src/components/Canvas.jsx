@@ -270,15 +270,21 @@ const Canvas = React.memo(forwardRef(({
       requestAnimationFrame(() => {
         // Double check that container is available and has dimensions
         if (containerRef.current && img) {
+          // Read current store transforms on-demand (not reactively)
+          const store = useAppStore.getState();
+          const currentZoomScale = store.zoomScale;
+          const currentStageX = store.stageX;
+          const currentStageY = store.stageY;
+
           // If we already have zoomScale from the store (loaded project or floor switch), restore it
-          if (zoomScale !== null) {
-            scaleRef.current = zoomScale;
-            setScale(zoomScale);
+          if (currentZoomScale !== null) {
+            scaleRef.current = currentZoomScale;
+            setScale(currentZoomScale);
 
             if (stageRef.current) {
               const stage = stageRef.current;
-              stage.scale({ x: zoomScale, y: zoomScale });
-              stage.position({ x: stageX, y: stageY });
+              stage.scale({ x: currentZoomScale, y: currentZoomScale });
+              stage.position({ x: currentStageX, y: currentStageY });
               stage.batchDraw();
             }
             setIsImageReady(true);
@@ -333,7 +339,7 @@ const Canvas = React.memo(forwardRef(({
       setIsImageReady(false);
     };
     img.src = image;
-  }, [image, zoomScale, stageX, stageY, canvasRotation, setViewportTransform]);
+  }, [image, canvasRotation, setViewportTransform]);
 
   const hasInitializedRef = useRef(false);
   useEffect(() => {
