@@ -69,20 +69,6 @@ function captureFloorState() {
 }
 
 /**
- * Restore a floor snapshot into the appStore.
- */
-function restoreFloorState(snapshot) {
-  const patch = {};
-  for (const key of FLOOR_STATE_FIELDS) {
-    patch[key] = snapshot[key];
-  }
-  // Clear transient processing state when switching floors
-  patch.isProcessing = false;
-  patch.processingMessage = '';
-  useAppStore.setState(patch);
-}
-
-/**
  * Create an empty floor state snapshot (new blank session).
  */
 function createEmptyFloorState() {

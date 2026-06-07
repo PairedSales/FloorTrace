@@ -94,7 +94,13 @@ import { formatLength } from '../../utils/unitConverter';
 getMeasurementLineLayout._deps = { formatLength };
 
 /** Helper function to convert screen coordinates to canvas coordinates */
-export const getCanvasCoordinates = (stage, scaleRef) => {
+export const getCanvasCoordinates = (stage, scaleRef, contentNodeRef = null) => {
+  const transformedNode = contentNodeRef?.current;
+  if (transformedNode?.getRelativePointerPosition) {
+    const relativePos = transformedNode.getRelativePointerPosition();
+    if (relativePos) return relativePos;
+  }
+
   const pos = stage.getPointerPosition();
   if (!pos) return null;
   

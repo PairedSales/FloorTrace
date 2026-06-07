@@ -186,7 +186,7 @@ const parseDimensionLine = (line) => {
   const norm = normalizeOcrText(line);
 
   // Split on separators: x, hyphen
-  for (const match of norm.matchAll(/\s*[xX\-]\s*/g)) {
+  for (const match of norm.matchAll(/\s*[xX-]\s*/g)) {
     const left = norm.slice(0, match.index).trim();
     const right = norm.slice(match.index + match[0].length).trim();
     if (!left || !right) continue;

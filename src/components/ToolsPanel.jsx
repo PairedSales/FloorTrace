@@ -1,4 +1,4 @@
-import { Ruler, Pentagon, Eraser, Crop } from 'lucide-react';
+import { Ruler, Pentagon, Eraser, Crop, RotateCw } from 'lucide-react';
 
 const ToolsPanel = ({
   lineToolActive,
@@ -9,6 +9,7 @@ const ToolsPanel = ({
   onEraserToolToggle,
   cropToolActive,
   onCropToolToggle,
+  onRotateCanvas,
   measurementLines,
   customShapes,
   currentMeasurementLine,
@@ -39,7 +40,7 @@ const ToolsPanel = ({
             </button>
           )}
         </div>
-        <div className="flex gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5">
           <button
             onClick={onEraserToolToggle}
             className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
@@ -63,6 +64,19 @@ const ToolsPanel = ({
           >
             <Crop className="w-4 h-4" />
             Crop
+          </button>
+
+          <button
+            onClick={() => onRotateCanvas?.('clockwise')}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onRotateCanvas?.('counterclockwise');
+            }}
+            className="flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
+            title="Rotate canvas 45° clockwise (right-click for counterclockwise)"
+          >
+            <RotateCw className="w-4 h-4" />
+            Rotate
           </button>
           {hasArea && (
             <>
