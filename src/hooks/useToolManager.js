@@ -24,6 +24,7 @@ export function useToolManager() {
   const drawAreaActive   = useAppStore((s) => s.drawAreaActive);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const cropToolActive   = useAppStore((s) => s.cropToolActive);
+  const angleToolActive   = useAppStore((s) => s.angleToolActive);
 
   const setLineToolActive         = useAppStore((s) => s.setLineToolActive);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -31,6 +32,7 @@ export function useToolManager() {
   const setCurrentCustomShape     = useAppStore((s) => s.setCurrentCustomShape);
   const setEraserToolActive       = useAppStore((s) => s.setEraserToolActive);
   const setCropToolActive         = useAppStore((s) => s.setCropToolActive);
+  const setAngleToolActive         = useAppStore((s) => s.setAngleToolActive);
   const setMeasurementLines       = useAppStore((s) => s.setMeasurementLines);
   const setCustomShapes           = useAppStore((s) => s.setCustomShapes);
 
@@ -46,7 +48,9 @@ export function useToolManager() {
     setCurrentCustomShape(null);
     setEraserToolActive(false);
     setCropToolActive(false);
+    setAngleToolActive(false);
   }, [
+    setAngleToolActive,
     setCropToolActive,
     setCurrentCustomShape,
     setCurrentMeasurementLine,
@@ -99,6 +103,16 @@ export function useToolManager() {
     setCropToolActive(true);
   }, [cropToolActive, deactivateAll, setCropToolActive]);
 
+  const handleAngleToolToggle = useCallback(() => {
+    if (angleToolActive) {
+      undoManager.save();
+      setAngleToolActive(false);
+      return;
+    }
+    deactivateAll();
+    setAngleToolActive(true);
+  }, [angleToolActive, deactivateAll, setAngleToolActive]);
+
   // ── clear all measurement lines and custom shapes ─────────────────────────
 
   const handleClearTools = useCallback(() => {
@@ -114,6 +128,7 @@ export function useToolManager() {
     handleDrawAreaToggle,
     handleEraserToolToggle,
     handleCropToolToggle,
+    handleAngleToolToggle,
     handleClearTools,
   };
 }

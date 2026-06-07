@@ -24,6 +24,8 @@ const WORKING_STATE_DEFAULTS = {
   ocrFailed: false,
   unit: 'decimal',
   lineToolActive: false,
+  angleToolActive: false,
+  angleToolState: null,
   measurementLines: [],
   currentMeasurementLine: null,
   drawAreaActive: false,
@@ -41,6 +43,7 @@ const WORKING_STATE_DEFAULTS = {
   stageX: 0,
   stageY: 0,
   canvasRotation: 0,    // global rotation alignment
+  viewportSyncToken: null,
   // Project tracking states
   isDirty: false,
   projectId: null,
@@ -58,6 +61,7 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'stageX',
   'stageY',
   'canvasRotation',
+  'viewportSyncToken',
   'isDirty',
   'projectId',
 ];
@@ -136,6 +140,8 @@ const useAppStore = create((set, get) => ({
   setOcrFailed: (v) => set({ ocrFailed: v }),
   setUnit: (v) => set({ unit: v }),
   setLineToolActive: (v) => set({ lineToolActive: v }),
+  setAngleToolActive: (v) => set({ angleToolActive: v }),
+  setAngleToolState: (v) => set({ angleToolState: v }),
   setMeasurementLines: (v) => set({ measurementLines: v }),
   setCurrentMeasurementLine: (v) => set({ currentMeasurementLine: v }),
   setDrawAreaActive: (v) => set({ drawAreaActive: v }),
@@ -150,6 +156,7 @@ const useAppStore = create((set, get) => ({
   setCropToolActive: (v) => set({ cropToolActive: v }),
   setZoomScale: (v) => set({ zoomScale: v }),
   setStagePosition: (pos) => set({ stageX: pos.x, stageY: pos.y }),
+  setViewportTransform: (scale, pos, token) => set({ zoomScale: scale, stageX: pos.x, stageY: pos.y, viewportSyncToken: token }),
   setCanvasRotation: (v) => set({ canvasRotation: v }),
   setIsDirty: (v) => set({ isDirty: v }),
   setProjectId: (v) => set({ projectId: v }),

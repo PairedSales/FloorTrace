@@ -21,6 +21,7 @@ import useAppStore from '../store/appStore';
  * @param {boolean}         opts.cropToolActive
  * @param {object|null}     opts.roomOverlay
  * @param {object|null}     opts.perimeterOverlay
+ * @param {React.RefObject} opts.viewportSyncTokenRef
  * @returns {{ canPanCanvas, handleStageDragStart, handleStageDragEnd }}
  */
 export function useCanvasPan({
@@ -32,11 +33,13 @@ export function useCanvasPan({
   draggingRoom,
   draggingRoomCorner,
   draggingVertex,
+  draggingAngle,
   manualEntryMode,
   eraserToolActive,
   cropToolActive,
   roomOverlay,
   perimeterOverlay,
+  viewportSyncTokenRef,
 }) {
   /** Record the canvas-space point under the pointer at the start of a stage drag. */
   const handleStageDragStart = () => {
@@ -59,13 +62,18 @@ export function useCanvasPan({
     if (dragStartPosRef.current) {
       isDraggingRef.current = true;
 
-      // Update store with new position
+      // Update store with new position using viewportSyncToken
       const stage = stageRef.current;
       if (stage) {
-        useAppStore.getState().setStagePosition({
-          x: stage.x(),
-          y: stage.y()
-        });
+        const token = Math.random();
+        if (viewportSyncTokenRef) {
+          viewportSyncTokenRef.current = token;
+        }
+        useAppStore.getState().setViewportTransform(
+          scaleRef.current,
+          { x: stage.x(), y: stage.y() },
+          token
+        );
       }
 
       setTimeout(() => {
@@ -81,7 +89,7 @@ export function useCanvasPan({
    * clean pointer events, and while the zoom animation is in flight.
    */
   const canPanCanvas = useMemo(() => {
-    if (draggingRoom || draggingRoomCorner || draggingVertex !== null) return false;
+    if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
     if (manualEntryMode || eraserToolActive || cropToolActive) return false;
     if (roomOverlay && !perimeterOverlay) return false; // vertex placement mode
     return !isZoomingRef.current;
@@ -89,6 +97,7 @@ export function useCanvasPan({
     draggingRoom,
     draggingRoomCorner,
     draggingVertex,
+    draggingAngle,
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
