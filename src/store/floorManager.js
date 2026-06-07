@@ -14,6 +14,9 @@ import * as undoManager from './undoManager';
 
 // Fields that are saved/restored per floor session.
 // Excludes transient UI state (isProcessing, processingMessage, notifications, etc.)
+// Fields that are saved/restored per floor session.
+// Excludes transient UI state (isProcessing, processingMessage, notifications, etc.)
+// and global settings like canvasRotation.
 const FLOOR_STATE_FIELDS = [
   'image',
   'roomOverlay',
@@ -42,6 +45,10 @@ const FLOOR_STATE_FIELDS = [
   'eraserToolActive',
   'eraserBrushSize',
   'cropToolActive',
+  // Per-floor viewport state (rotation is global)
+  'zoomScale',
+  'stageX',
+  'stageY',
 ];
 
 const MAX_FLOORS = 4;
@@ -100,6 +107,9 @@ function createEmptyFloorState() {
     eraserToolActive: false,
     eraserBrushSize: 20,
     cropToolActive: false,
+    zoomScale: null,
+    stageX: 0,
+    stageY: 0,
   };
 }
 
@@ -151,6 +161,7 @@ export function createFloorSlice(set, get) {
       patch.processingMessage = '';
       patch.floors = [...updatedFloors, newFloor];
       patch.activeFloorId = newId;
+      patch.isDirty = true;
 
       set(patch);
     },
@@ -230,11 +241,12 @@ export function createFloorSlice(set, get) {
         patch.processingMessage = '';
         patch.floors = updatedFloors;
         patch.activeFloorId = nextFloor.id;
+        patch.isDirty = true;
 
         set(patch);
       } else {
         // Closing an inactive tab — just remove it
-        set({ floors: remainingFloors });
+        set({ floors: remainingFloors, isDirty: true });
       }
     },
 
@@ -246,7 +258,7 @@ export function createFloorSlice(set, get) {
       const updatedFloors = state.floors.map((f) =>
         f.id === floorId ? { ...f, name: newName } : f
       );
-      set({ floors: updatedFloors });
+      set({ floors: updatedFloors, isDirty: true });
     },
 
     /**

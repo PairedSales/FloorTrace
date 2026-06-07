@@ -1,5 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect } from 'react-konva';
+import useAppStore from '../store/appStore';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
 import { useCanvasZoom } from '../hooks/useCanvasZoom';
@@ -67,10 +68,17 @@ const Canvas = React.memo(forwardRef(({
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
   const [currentMousePos, setCurrentMousePos] = useState(null);
-  const [canvasRotation, setCanvasRotation] = useState(0);
-  const canvasRotationRef = useRef(0);
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
+
+  // Zustand visual transform selectors
+  const zoomScale = useAppStore((s) => s.zoomScale);
+  const stageX = useAppStore((s) => s.stageX);
+  const stageY = useAppStore((s) => s.stageY);
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+  const setZoomScale = useAppStore((s) => s.setZoomScale);
+  const setStagePosition = useAppStore((s) => s.setStagePosition);
+  const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
 
   const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
   const lastDragStartPosRef = useRef(null); // Track starting position before drag
@@ -86,10 +94,6 @@ const Canvas = React.memo(forwardRef(({
   const prevImageDimsRef = useRef(null);
 
   const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
-
-  useEffect(() => {
-    canvasRotationRef.current = canvasRotation;
-  }, [canvasRotation]);
 
   // ── Composable hooks ───────────────────────────────────────────────────────
 
@@ -164,7 +168,7 @@ const Canvas = React.memo(forwardRef(({
     const imgWidth = imageObj.width;
     const imgHeight = imageObj.height;
 
-    const angle = (canvasRotationRef.current * Math.PI) / 180;
+    const angle = (canvasRotation * Math.PI) / 180;
     const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
     const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
 
@@ -175,6 +179,9 @@ const Canvas = React.memo(forwardRef(({
     // Ensure scale is reasonable
     const clampedScale = Math.max(0.1, Math.min(5, newScale));
 
+    const newX = (containerWidth - imgWidth * clampedScale) / 2;
+    const newY = (containerHeight - imgHeight * clampedScale) / 2;
+
     scaleRef.current = clampedScale;
     setScale(clampedScale);
 
@@ -182,13 +189,14 @@ const Canvas = React.memo(forwardRef(({
     if (stageRef.current) {
       const stage = stageRef.current;
       stage.scale({ x: clampedScale, y: clampedScale });
-      stage.position({
-        x: (containerWidth - imgWidth * clampedScale) / 2,
-        y: (containerHeight - imgHeight * clampedScale) / 2
-      });
+      stage.position({ x: newX, y: newY });
       stage.batchDraw();
     }
-  }, [imageObj]);
+
+    // Sync transforms to store
+    setZoomScale(clampedScale);
+    setStagePosition({ x: newX, y: newY });
+  }, [imageObj, canvasRotation, setZoomScale, setStagePosition]);
 
   // Load image
   useEffect(() => {
@@ -207,6 +215,21 @@ const Canvas = React.memo(forwardRef(({
       requestAnimationFrame(() => {
         // Double check that container is available and has dimensions
         if (containerRef.current && img) {
+          // If we already have zoomScale from the store (loaded project or floor switch), restore it
+          if (zoomScale !== null) {
+            scaleRef.current = zoomScale;
+            setScale(zoomScale);
+
+            if (stageRef.current) {
+              const stage = stageRef.current;
+              stage.scale({ x: zoomScale, y: zoomScale });
+              stage.position({ x: stageX, y: stageY });
+              stage.batchDraw();
+            }
+            setIsImageReady(true);
+            return;
+          }
+
           const containerWidth = containerRef.current.offsetWidth;
           const containerHeight = containerRef.current.offsetHeight;
 
@@ -215,7 +238,7 @@ const Canvas = React.memo(forwardRef(({
             const imgWidth = img.width;
             const imgHeight = img.height;
 
-            const angle = (canvasRotationRef.current * Math.PI) / 180;
+            const angle = (canvasRotation * Math.PI) / 180;
             const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
             const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
 
@@ -226,18 +249,22 @@ const Canvas = React.memo(forwardRef(({
             // Ensure scale is reasonable
             const clampedScale = Math.max(0.1, Math.min(5, newScale));
 
+            const newX = (containerWidth - imgWidth * clampedScale) / 2;
+            const newY = (containerHeight - imgHeight * clampedScale) / 2;
+
             scaleRef.current = clampedScale;
             setScale(clampedScale);
 
             if (stageRef.current) {
               const stage = stageRef.current;
               stage.scale({ x: clampedScale, y: clampedScale });
-              stage.position({
-                x: (containerWidth - imgWidth * clampedScale) / 2,
-                y: (containerHeight - imgHeight * clampedScale) / 2
-              });
+              stage.position({ x: newX, y: newY });
               stage.batchDraw();
             }
+
+            // Sync transforms to store
+            setZoomScale(clampedScale);
+            setStagePosition({ x: newX, y: newY });
           }
         }
 
@@ -250,7 +277,7 @@ const Canvas = React.memo(forwardRef(({
       setIsImageReady(false);
     };
     img.src = image;
-  }, [image]);
+  }, [image, zoomScale, stageX, stageY, canvasRotation, setZoomScale, setStagePosition]);
 
 
   useEffect(() => {
@@ -436,10 +463,34 @@ const Canvas = React.memo(forwardRef(({
       window.removeEventListener('resize', debouncedMeasure);
     };
   }, []);
+  // Sync stage transform from store when store values change (e.g. on floor switch or project load)
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || zoomScale === null) return;
+
+    const currentScale = stage.scaleX();
+    const currentX = stage.x();
+    const currentY = stage.y();
+
+    const scaleDiff = Math.abs(currentScale - zoomScale);
+    const xDiff = Math.abs(currentX - stageX);
+    const yDiff = Math.abs(currentY - stageY);
+
+    // If they differ significantly, sync them imperatively
+    if (scaleDiff > 0.001 || xDiff > 0.1 || yDiff > 0.1) {
+      scaleRef.current = zoomScale;
+      setScale(zoomScale);
+      stage.scale({ x: zoomScale, y: zoomScale });
+      stage.position({ x: stageX, y: stageY });
+      stage.batchDraw();
+    }
+  }, [zoomScale, stageX, stageY]);
+
   const rotateCanvas = useCallback((direction = 'clockwise') => {
     const delta = direction === 'counterclockwise' ? -45 : 45;
-    setCanvasRotation((current) => (current + delta + 360) % 360);
-  }, []);
+    const nextRotation = (canvasRotation + delta + 360) % 360;
+    setCanvasRotation(nextRotation);
+  }, [canvasRotation, setCanvasRotation]);
 
   // Expose canvas viewport controls
   useImperativeHandle(ref, () => ({
@@ -1303,6 +1354,7 @@ const Canvas = React.memo(forwardRef(({
                 text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
                 fontSize={12 / scale}
                 fill="#8BE9FD"
+                rotation={-canvasRotation}
                 listening={false}
               />
             )}
@@ -1326,6 +1378,7 @@ const Canvas = React.memo(forwardRef(({
                 fontSize={16 / scale}
                 fill="#8BE9FD"
                 fontStyle="bold"
+                rotation={-canvasRotation}
               />
             )}
             

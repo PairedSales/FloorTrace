@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Rect, Text } from 'react-konva';
+import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
 import { measureSideLenWidth } from './canvasUtils';
 
@@ -148,8 +149,11 @@ const useAnimatedVertices = (targetVertices) => {
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
-const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit) => {
+const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation) => {
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
+  const rad = ((canvasRotation || 0) * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
 
   return vertices.map((vertex, i) => {
     const nextVertex = vertices[(i + 1) % vertices.length];
@@ -195,13 +199,19 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     const labelHeight = Math.max(fontSize * 1.5, 16 / scale);
     const cornerR = labelHeight / 2;
 
+    // Calculate the effective bounding box in layer-space for collision detection.
+    // Since the label is kept upright (unrotated) in viewport-space, its projection
+    // onto the layer-space axes depends on the layer rotation.
+    const effectiveWidth = labelWidth * cos + labelHeight * sin;
+    const effectiveHeight = labelWidth * sin + labelHeight * cos;
+
     const cx0 = midX + offsetX;
     const cy0 = midY + offsetY;
 
     const len = lengthInPixels;
     const ex = len > 0 ? dx / len : 1;
     const ey = len > 0 ? dy / len : 0;
-    const halfAlong = (labelWidth * Math.abs(ex) + labelHeight * Math.abs(ey)) / 2;
+    const halfAlong = (effectiveWidth * Math.abs(ex) + effectiveHeight * Math.abs(ey)) / 2;
     const vertexClearance = 8 / scale;
     const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
 
@@ -209,8 +219,8 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
     for (const v of vertices) {
       const pcx = cx0 + edgeShift * ex;
       const pcy = cy0 + edgeShift * ey;
-      const nearX = Math.max(pcx - labelWidth / 2, Math.min(v.x, pcx + labelWidth / 2));
-      const nearY = Math.max(pcy - labelHeight / 2, Math.min(v.y, pcy + labelHeight / 2));
+      const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
+      const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
       const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
       if (dist2 < vertexClearance * vertexClearance) {
         const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
@@ -252,6 +262,8 @@ const PerimeterLayer = ({
 }) => {
   const targetVertices = perimeterOverlay?.vertices;
 
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
   // Hooks must be called before any early return (rules of hooks).
   const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
@@ -264,9 +276,9 @@ const PerimeterLayer = ({
   // Use renderVertices so labels follow the animation in real time.
   const labelLayouts = useMemo(
     () => (showSideLengths && pixelsPerFoot && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit)
+      ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation)
       : [],
-    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit]
+    [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit, canvasRotation]
   );
 
   if (!perimeterOverlay || !targetVertices) return null;
@@ -313,20 +325,26 @@ const PerimeterLayer = ({
       {labelLayouts.map((layout, i) => (
         <React.Fragment key={`label-${i}`}>
           <Rect
-            x={layout.finalCx - layout.labelWidth / 2}
-            y={layout.finalCy - layout.labelHeight / 2}
+            x={layout.finalCx}
+            y={layout.finalCy}
             width={layout.labelWidth}
             height={layout.labelHeight}
+            offsetX={layout.labelWidth / 2}
+            offsetY={layout.labelHeight / 2}
+            rotation={-canvasRotation}
             fill="rgba(40, 42, 54, 0.92)"
             strokeWidth={0}
             cornerRadius={layout.cornerR}
             listening={false}
           />
           <Text
-            x={layout.finalCx - layout.labelWidth / 2}
-            y={layout.finalCy - layout.labelHeight / 2}
+            x={layout.finalCx}
+            y={layout.finalCy}
             width={layout.labelWidth}
             height={layout.labelHeight}
+            offsetX={layout.labelWidth / 2}
+            offsetY={layout.labelHeight / 2}
+            rotation={-canvasRotation}
             text={layout.formattedLength}
             fontSize={layout.fontSize}
             fill="#ffffff"

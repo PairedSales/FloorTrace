@@ -1,4 +1,5 @@
 import { useRef, useCallback } from 'react';
+import useAppStore from '../store/appStore';
 
 /**
  * useCanvasZoom
@@ -69,6 +70,11 @@ export function useCanvasZoom(stageRef, scaleRef, setScale) {
       // Keep React state in sync so stroke widths, labels, and hit targets match
       setScale(clampedScale);
       stage.batchDraw();
+
+      // Dispatch visual transforms to Zustand store
+      const store = useAppStore.getState();
+      store.setZoomScale(clampedScale);
+      store.setStagePosition({ x: newPos.x, y: newPos.y });
     });
   }, [stageRef, scaleRef, setScale]);
 

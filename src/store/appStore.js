@@ -36,15 +36,33 @@ const WORKING_STATE_DEFAULTS = {
   eraserToolActive: false,
   eraserBrushSize: 20,
   cropToolActive: false,
+  // Viewport transforms (stage scale/zoom, position, rotation)
+  zoomScale: null,      // null means needs fitToWindow
+  stageX: 0,
+  stageY: 0,
+  canvasRotation: 0,    // global rotation alignment
+  // Project tracking states
+  isDirty: false,
+  projectId: null,
 };
 
 /**
  * The subset of field names that are persisted in undo/redo snapshots.
- * `isProcessing` and `processingMessage` are excluded as transient UI state.
- * `image` is included so that crop and erase tool changes can be undone/redone.
+ * Transient UI state, project metadata, and camera transforms are excluded
+ * to prevent undo stack bloat.
  */
+const EXCLUDED_SNAPSHOT_FIELDS = [
+  'isProcessing',
+  'processingMessage',
+  'zoomScale',
+  'stageX',
+  'stageY',
+  'canvasRotation',
+  'isDirty',
+  'projectId',
+];
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)
 );
 
 /**
@@ -56,10 +74,15 @@ const SNAPSHOT_FIELDS_NO_IMAGE = SNAPSHOT_FIELDS.filter((k) => k !== 'image');
 
 /**
  * The subset of field names written to localStorage on autosave.
- * Same as SNAPSHOT_FIELDS but also includes `image`.
+ * Excludes transient UI state and changes tracking status.
  */
+const EXCLUDED_AUTOSAVE_FIELDS = [
+  'isProcessing',
+  'processingMessage',
+  'isDirty',
+];
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
-  (k) => k !== 'isProcessing' && k !== 'processingMessage'
+  (k) => !EXCLUDED_AUTOSAVE_FIELDS.includes(k)
 );
 
 // ──── helpers ────────────────────────────────────────────────────────────────
@@ -125,6 +148,17 @@ const useAppStore = create((set, get) => ({
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
+  setZoomScale: (v) => set({ zoomScale: v }),
+  setStagePosition: (pos) => set({ stageX: pos.x, stageY: pos.y }),
+  setCanvasRotation: (v) => set({ canvasRotation: v }),
+  setIsDirty: (v) => set({ isDirty: v }),
+  setProjectId: (v) => set({ projectId: v }),
+  loadProject: (projectState) => set({
+    ...WORKING_STATE_DEFAULTS,
+    ...projectState,
+    isProcessing: false,
+    processingMessage: '',
+  }),
   addNotification: (v) => set((state) => ({ notifications: [...state.notifications, v] })),
   removeNotification: (id) => set((state) => ({ notifications: state.notifications.filter(n => n.id !== id) })),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),

@@ -274,34 +274,72 @@ function App() {
     handleManualMode,
   ]);
 
+  const checkUnsavedChanges = useCallback(() => {
+    const state = useAppStore.getState();
+    if (state.isDirty || state.image) {
+      return window.confirm(
+        'You have unsaved changes in your current project. Opening a new project or image will discard these changes. Are you sure you want to proceed?'
+      );
+    }
+    return true;
+  }, []);
+
   // Handle file upload
   const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
     if (file) {
-      try {
-        // Clear existing image before loading new one to ensure state change
-        setImage(null);
-        // Clear overlays as well
-        resetOverlays();
-        undoManager.clear();
+      if (!checkUnsavedChanges()) {
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
 
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        handleManualMode(loadedImage, true); // Automatically enter manual mode
+      try {
+        if (file.name.endsWith('.floorplan')) {
+          setIsProcessing(true, 'Loading project…');
+          const text = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (err) => reject(err);
+            reader.readAsText(file);
+          });
+
+          const { importProject } = await import('./utils/projectSerializer');
+          const { statePatch, historyPatch } = importProject(text);
+
+          useAppStore.getState().loadProject(statePatch);
+          undoManager.setHistoryState(historyPatch);
+
+          notify('Project loaded successfully');
+        } else {
+          // Clear existing image before loading new one to ensure state change
+          setImage(null);
+          // Clear overlays as well
+          resetOverlays();
+          undoManager.clear();
+
+          const loadedImage = await loadImageFromFile(file);
+          setImage(loadedImage);
+          handleManualMode(loadedImage, true); // Automatically enter manual mode
+        }
       } catch (error) {
-        console.error('Error loading image:', error);
-        alert('Failed to load image. Please try again.');
+        console.error('Error loading file:', error);
+        alert(`Failed to load file: ${error.message}`);
       } finally {
+        setIsProcessing(false);
         // Reset file input so the same file can be selected again
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
       }
     }
-  }, [resetOverlays, handleManualMode]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage]);
 
   // Handle clipboard paste
   const handlePasteImage = useCallback(async () => {
+    if (!checkUnsavedChanges()) return;
+
     try {
       // Clear existing image before loading new one to ensure state change
       setImage(null);
@@ -318,7 +356,7 @@ function App() {
       console.error('Error pasting image:', error);
       alert('Failed to paste image. Make sure an image is copied to your clipboard.');
     }
-  }, [resetOverlays, handleManualMode]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -327,18 +365,45 @@ function App() {
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (!file || !file.type.startsWith('image/')) return;
+    if (!file) return;
+
+    const isFloorplan = file.name.endsWith('.floorplan');
+    const isImage = file.type.startsWith('image/');
+    if (!isFloorplan && !isImage) return;
+
+    if (!checkUnsavedChanges()) return;
+
     try {
-      resetOverlays();
-      undoManager.clear();
-      const loadedImage = await loadImageFromFile(file);
-      setImage(loadedImage);
-      handleManualMode(loadedImage, true);
+      if (isFloorplan) {
+        setIsProcessing(true, 'Loading project…');
+        const text = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onerror = (err) => reject(err);
+          reader.readAsText(file);
+        });
+
+        const { importProject } = await import('./utils/projectSerializer');
+        const { statePatch, historyPatch } = importProject(text);
+
+        useAppStore.getState().loadProject(statePatch);
+        undoManager.setHistoryState(historyPatch);
+
+        notify('Project loaded successfully');
+      } else {
+        resetOverlays();
+        undoManager.clear();
+        const loadedImage = await loadImageFromFile(file);
+        setImage(loadedImage);
+        handleManualMode(loadedImage, true);
+      }
     } catch (error) {
-      console.error('Error loading dropped image:', error);
-      alert('Failed to load image. Please try again.');
+      console.error('Error loading dropped file:', error);
+      alert(`Failed to load file: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [resetOverlays, handleManualMode]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage]);
 
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
     const activeBoundary = getBoundaryForMode(boundaryResult, interiorMode);
@@ -440,34 +505,30 @@ function App() {
     setCustomShapes(nextShapes);
   }, [setCustomShapes]);
 
-  // Handle save image (one-click screenshot of the entire app)
-  const handleSaveImage = async () => {
+  // Handle project export/save
+  const handleSaveProject = useCallback(async (isSaveAs = false) => {
+    setIsProcessing(true, isSaveAs ? 'Saving project as…' : 'Saving project…');
     try {
-      const { toPng } = await import('html-to-image');
-      const appElement = document.getElementById('app-container');
-      if (!appElement) {
-        alert('Could not capture screenshot');
-        return;
+      const storeState = useAppStore.getState();
+      const historyState = undoManager.getHistoryState();
+
+      const { exportProject } = await import('./utils/projectSerializer');
+      const success = await exportProject(storeState, historyState, isSaveAs);
+
+      if (success) {
+        useAppStore.getState().setIsDirty(false);
+        notify(isSaveAs ? 'Project saved successfully' : 'Project exported');
       }
-
-      const dataUrl = await toPng(appElement, { pixelRatio: 2, skipFonts: true });
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const base64 = dataUrl.split(',')[1];
-      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: 'image/png' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.download = `floortrace-${timestamp}.png`;
-      link.href = url;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error saving screenshot:', error);
-      alert('Error saving screenshot. Please try again.');
+      console.error('Error exporting project:', error);
+      alert(`Failed to save project: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
     }
-  };
+  }, [setIsProcessing, notify]);
+
+  const handleSaveProjectNormal = useCallback(() => handleSaveProject(false), [handleSaveProject]);
+  const handleSaveProjectAs = useCallback(() => handleSaveProject(true), [handleSaveProject]);
 
 
   // Update scale based on room dimensions and overlay
@@ -744,9 +805,11 @@ function App() {
   useKeyboardShortcuts({
     onPaste: handlePasteImage,
     onFileOpen: handleFileOpen,
+    onSaveProject: handleSaveProject,
     eraserToolActive,
     eraserBrushSize,
     setEraserBrushSize,
+    onRotateCanvas: handleRotateCanvas,
   });
 
   // Desktop UI
@@ -761,7 +824,8 @@ function App() {
         image={image}
         isProcessing={isProcessing}
         onFileOpen={handleFileOpen}
-        onSaveImage={handleSaveImage}
+        onSaveProject={handleSaveProjectNormal}
+        onSaveProjectAs={handleSaveProjectAs}
         onTracePerimeter={handleTracePerimeter}
         onFitToWindow={handleFitToWindow}
         onRestart={handleRestart}
@@ -904,7 +968,7 @@ function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.floorplan"
         onChange={handleFileUpload}
         className="hidden"
       />

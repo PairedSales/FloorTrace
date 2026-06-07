@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import useAppStore from '../store/appStore';
 
 /**
  * useCanvasPan
@@ -57,6 +58,15 @@ export function useCanvasPan({
   const handleStageDragEnd = () => {
     if (dragStartPosRef.current) {
       isDraggingRef.current = true;
+
+      // Update store with new position
+      const stage = stageRef.current;
+      if (stage) {
+        useAppStore.getState().setStagePosition({
+          x: stage.x(),
+          y: stage.y()
+        });
+      }
 
       setTimeout(() => {
         isDraggingRef.current = false;

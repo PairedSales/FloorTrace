@@ -1,5 +1,6 @@
 import React from 'react';
 import { Layer, Group, Line, Text } from 'react-konva';
+import useAppStore from '../../store/appStore';
 import { getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';
 
 /**
@@ -20,6 +21,8 @@ const MeasurementLayer = ({
   onMeasurementLinesChange,
   layerProps = {},
 }) => {
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   return (
     <>
       {/* Completed Measurement Lines */}
@@ -72,6 +75,7 @@ const MeasurementLayer = ({
                 fontStyle="bold"
                 offsetX={layout.approxTextWidth / 2}
                 offsetY={layout.approxTextHeight / 2}
+                rotation={-canvasRotation}
               />
             </Group>
             );
@@ -115,6 +119,7 @@ const MeasurementLayer = ({
                 offsetX={previewLayout.approxTextWidth / 2}
                 offsetY={previewLayout.approxTextHeight / 2}
                 opacity={0.9}
+                rotation={-canvasRotation}
               />
             )}
           </Layer>

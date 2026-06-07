@@ -113,6 +113,9 @@ export function save() {
   savedRedoStackForCancel = redoStack;
   undoStack.push(internSnapshot(state.createSnapshot(lastSnapshotImage())));
   redoStack = [];
+  
+  // Set project state as dirty
+  state.setIsDirty(true);
 }
 
 /**
@@ -137,6 +140,7 @@ export function undo() {
   redoStack.push(internSnapshot(useAppStore.getState().createSnapshot(lastSnapshotImage())));
   useAppStore.getState().applySnapshot(resolveSnapshot(undoStack.pop()));
   pruneImagePool();
+  useAppStore.getState().setIsDirty(true);
   return true;
 }
 
@@ -153,6 +157,7 @@ export function redo() {
   undoStack.push(internSnapshot(useAppStore.getState().createSnapshot(lastSnapshotImage())));
   useAppStore.getState().applySnapshot(resolveSnapshot(redoStack.pop()));
   pruneImagePool();
+  useAppStore.getState().setIsDirty(true);
   return true;
 }
 
@@ -165,4 +170,34 @@ export function clear() {
   redoStack = [];
   savedRedoStackForCancel = null;
   imagePool.clear();
+}
+
+/**
+ * Gather the current undo history state for serialization.
+ */
+export function getHistoryState() {
+  return {
+    undoStack: [...undoStack],
+    redoStack: [...redoStack],
+    imagePool: Array.from(imagePool.entries()),
+  };
+}
+
+/**
+ * Restore the undo history state from deserialization.
+ */
+export function setHistoryState(history) {
+  savedRedoStackForCancel = null;
+  if (!history) {
+    clear();
+    return;
+  }
+  undoStack = history.undoStack || [];
+  redoStack = history.redoStack || [];
+  imagePool.clear();
+  if (history.imagePool) {
+    for (const [k, v] of history.imagePool) {
+      imagePool.set(k, v);
+    }
+  }
 }

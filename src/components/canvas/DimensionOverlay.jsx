@@ -1,5 +1,6 @@
 import React from 'react';
 import { Line, Circle, Text, Rect } from 'react-konva';
+import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
 import { measureTextWidth, OCR_PILL_FONT_FAMILY, OCR_PILL_FONT_STYLE, OCR_DOT_BASE_RADIUS, OCR_DOT_MIN_RADIUS } from './canvasUtils';
 
@@ -15,6 +16,8 @@ const DimensionOverlay = ({
   stageRef,
   onDimensionSelect,
 }) => {
+  const canvasRotation = useAppStore((s) => s.canvasRotation);
+
   if (mode !== 'manual' || !detectedDimensions || detectedDimensions.length === 0) return null;
 
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
@@ -37,6 +40,8 @@ const DimensionOverlay = ({
         const tailH = 5 / scale;
         const labelY = Math.max(0, dim.bbox.y - labelH - tailH - gap);
         const labelX = cx - labelW / 2;
+        const labelCx = labelX + labelW / 2;
+        const labelCy = labelY + labelH / 2;
         const dotR = Math.max(OCR_DOT_MIN_RADIUS, OCR_DOT_BASE_RADIUS / scale);
         const handleClick = () => onDimensionSelect && onDimensionSelect(dim);
         const handlePointerEnter = () => { if (stageRef.current) stageRef.current.container().style.cursor = 'pointer'; };
@@ -62,10 +67,13 @@ const DimensionOverlay = ({
               listening={false}
             />
             <Rect
-              x={labelX}
-              y={labelY}
+              x={labelCx}
+              y={labelCy}
               width={labelW}
               height={labelH}
+              offsetX={labelW / 2}
+              offsetY={labelH / 2}
+              rotation={-canvasRotation}
               fill="#FFB86C"
               cornerRadius={cornerR}
               onClick={handleClick}
@@ -74,13 +82,20 @@ const DimensionOverlay = ({
               onMouseLeave={handlePointerLeave}
             />
             <Text
-              x={labelX + padX}
-              y={labelY + padY}
+              x={labelCx}
+              y={labelCy}
+              width={labelW}
+              height={labelH}
+              offsetX={labelW / 2}
+              offsetY={labelH / 2}
+              rotation={-canvasRotation}
               text={labelText}
               fontSize={fs}
               fill="#ffffff"
               fontFamily={OCR_PILL_FONT_FAMILY}
               fontStyle={OCR_PILL_FONT_STYLE}
+              align="center"
+              verticalAlign="middle"
               listening={false}
             />
           </React.Fragment>
