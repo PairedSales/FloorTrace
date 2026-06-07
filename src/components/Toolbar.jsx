@@ -78,11 +78,11 @@ const Toolbar = ({
           <span>Save As</span>
         </button>
 
-        {floorCount < 4 && (
+        {floorCount < 7 && (
           <button
             onClick={onAddFloor}
             className="toolbar-btn"
-            title="Add new floor"
+            title="Add new perimeter trace"
           >
             <Layers className="w-3.5 h-3.5" />
             <span>Add Floor</span>

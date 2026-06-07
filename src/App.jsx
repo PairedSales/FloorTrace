@@ -4,7 +4,6 @@ import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
-import FloorTabs from './components/FloorTabs';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { calculateArea } from './utils/areaCalculator';
 import {
@@ -13,7 +12,7 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
-import useAppStore from './store/appStore';
+import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -23,9 +22,12 @@ function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
   const image = useAppStore((s) => s.image);
   const roomOverlay = useAppStore((s) => s.roomOverlay);
-  const perimeterOverlay = useAppStore((s) => s.perimeterOverlay);
+  const perimeterOverlay = useAppStore(selectPerimeterOverlay);
+  const perimeterTraces = useAppStore((s) => s.perimeterTraces);
+  const activeTraceId = useAppStore((s) => s.activeTraceId);
+  const traceInteractionMode = useAppStore((s) => s.traceInteractionMode);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
-  const area = useAppStore((s) => s.area);
+  const area = useAppStore(selectCombinedArea);
   const mode = useAppStore((s) => s.mode);
   const scale = useAppStore((s) => s.scale);
   const isProcessing = useAppStore((s) => s.isProcessing);
@@ -844,7 +846,7 @@ function App() {
         onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}
         onAddFloor={addFloor}
-        floorCount={floors.length}
+        floorCount={perimeterTraces.length}
       />
 
       <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
@@ -854,6 +856,9 @@ function App() {
             image={image}
             roomOverlay={roomOverlay}
             perimeterOverlay={perimeterOverlay}
+            perimeterTraces={perimeterTraces}
+            activeTraceId={activeTraceId}
+            traceInteractionMode={traceInteractionMode}
             mode={mode}
             onRoomOverlayUpdate={updateRoomOverlay}
             onPerimeterUpdate={updatePerimeterVertices}
@@ -951,7 +956,6 @@ function App() {
               hasArea={area > 0}
             />
           )}
-          <FloorTabs />
         </div>
 
         {/* Unified Toasts Container - Positioned within the content area, below toolbar */}

@@ -8,7 +8,7 @@ import useAppStore from '../../store/appStore';
  */
 const PerimeterPlacementLayer = ({
   roomOverlay,
-  perimeterOverlay,
+  traceInteractionMode,
   perimeterVertices,
   currentMousePos,
   lineToolActive,
@@ -18,7 +18,7 @@ const PerimeterPlacementLayer = ({
 }) => {
   const canvasRotation = useAppStore((s) => s.canvasRotation);
 
-  if (!roomOverlay || perimeterOverlay || !perimeterVertices || perimeterVertices.length >= 3 || lineToolActive || drawAreaActive || manualEntryMode) {
+  if (!roomOverlay || traceInteractionMode !== 'drawing' || !perimeterVertices || perimeterVertices.length >= 3 || lineToolActive || drawAreaActive || manualEntryMode) {
     return null;
   }
 

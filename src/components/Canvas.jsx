@@ -13,6 +13,9 @@ const Canvas = React.memo(forwardRef(({
   image,
   roomOverlay,
   perimeterOverlay,
+  perimeterTraces,
+  activeTraceId,
+  traceInteractionMode,
   mode,
   onRoomOverlayUpdate,
   onPerimeterUpdate,
@@ -140,7 +143,7 @@ const Canvas = React.memo(forwardRef(({
     eraserToolActive,
     cropToolActive,
     roomOverlay,
-    perimeterOverlay,
+    traceInteractionMode,
     viewportSyncTokenRef,
   });
 
@@ -857,7 +860,7 @@ const Canvas = React.memo(forwardRef(({
     // This prevents a full Canvas re-render just from moving the mouse during normal operation.
     const needsMousePos = eraserToolActive || 
       (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) || 
-      (roomOverlay && !perimeterOverlay && perimeterVertices && perimeterVertices.length > 0);
+      (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0);
 
     if (needsMousePos && !draggingVertex && !draggingRoom && !draggingRoomCorner) {
       setCurrentMousePos(mousePoint);
@@ -1097,7 +1100,7 @@ const Canvas = React.memo(forwardRef(({
     // Check if we're in a mode that needs single-click handling
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
-      (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) ||
+      (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) ||
       (lineToolActive && onMeasurementLineUpdate) ||
       (drawAreaActive && onCustomShapeUpdate);
     
@@ -1147,7 +1150,7 @@ const Canvas = React.memo(forwardRef(({
       
       // Perimeter vertex placement mode (only active after manual mode or trace perimeter)
       // perimeterVertices !== null means user has explicitly entered vertex placement mode
-      if (roomOverlay && !perimeterOverlay && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) {
+      if (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) {
         // Don't place vertex if clicking on room overlay (allow dragging though)
         const targetType = e.target.getType();
         if (targetType === 'Rect' || targetType === 'Circle') {
@@ -1471,7 +1474,9 @@ const Canvas = React.memo(forwardRef(({
 
             {/* Perimeter Overlay - Outline and vertices with side-length labels (on top of room overlay) */}
             <PerimeterLayer
-              perimeterOverlay={activePerimeterOverlay}
+              perimeterTraces={perimeterTraces}
+              activeTraceId={activeTraceId}
+              localPerimeterVertices={localPerimeterVertices}
               scale={scale}
               showSideLengths={showSideLengths}
               pixelsPerFoot={activePixelsPerFoot}
@@ -1528,7 +1533,7 @@ const Canvas = React.memo(forwardRef(({
             {/* Perimeter Vertex Placement Mode */}
             <PerimeterPlacementLayer
               roomOverlay={activeRoomOverlay}
-              perimeterOverlay={activePerimeterOverlay}
+              traceInteractionMode={traceInteractionMode}
               perimeterVertices={perimeterVertices}
               currentMousePos={currentMousePos}
               lineToolActive={lineToolActive}
@@ -1582,7 +1587,7 @@ const Canvas = React.memo(forwardRef(({
               onAngleToolStateChange={onAngleToolStateChange}
               scale={scale}
               canvasRotation={canvasRotation}
-              perimeterOverlay={perimeterOverlay}
+              perimeterTraces={perimeterTraces}
               customShapes={customShapes}
               measurementLines={measurementLines}
               autoSnapEnabled={autoSnapEnabled}

@@ -4,9 +4,9 @@ import { z } from 'zod';
 export const PERSISTENT_FLOOR_FIELDS = [
   'image',
   'roomOverlay',
-  'perimeterOverlay',
+  'perimeterTraces',
+  'activeTraceId',
   'roomDimensions',
-  'area',
   'scale',
   'mode',
   'detectedDimensions',
@@ -245,20 +245,76 @@ export function deserializeSketch(project) {
   });
 
   const activeFloor = restoredFloors.find((f) => f.id === project.activeFloorId) || restoredFloors[0];
-  const activeFloorId = activeFloor.id;
-  const activeFloorState = activeFloor.state;
 
-  // Set the active floor state to null inside floors list (Zustand representation)
-  const floors = restoredFloors.map((f) => {
-    if (f.id === activeFloorId) {
-      return { ...f, state: null };
+  // Find canonical floor: first floor with an image and scale
+  const canonicalFloor = restoredFloors.find(f => f.state?.image && f.state?.scale) || activeFloor || restoredFloors[0];
+  const canonicalState = canonicalFloor ? { ...canonicalFloor.state } : {};
+
+  // ── Legacy Multi-Floor to Multi-Perimeter Migration ──────────────────────
+  // Convert legacy multi-tab floor perimeters into traces on the canonical canvas.
+  //
+  // WARNING/ASSUMPTION:
+  // This migration assumes that all legacy floor vertices are already image-space
+  // compatible with the canonical canvas. If different tabs supported different images,
+  // dimensions, offsets, or transforms, the imported traces may be misaligned.
+  const TRACE_COLORS = [
+    '#BD93F9', // Purple
+    '#8BE9FD', // Cyan
+    '#50FA7B', // Green
+    '#FF79C6', // Pink
+    '#FFB86C', // Orange
+    '#F1FA8C', // Yellow
+    '#FF5555', // Red
+  ];
+
+  let perimeterTraces = canonicalState.perimeterTraces || [];
+  if (perimeterTraces.length === 0) {
+    restoredFloors.forEach((f, index) => {
+      const fState = f.state || {};
+      const overlay = fState.perimeterOverlay;
+      if (overlay && overlay.vertices && overlay.vertices.length > 0) {
+        perimeterTraces.push({
+          id: `trace-migrated-${f.id}-${index}`,
+          name: f.name || `Floor ${index + 1}`,
+          vertices: overlay.vertices,
+          closed: true,
+          visible: true,
+          locked: false,
+          color: TRACE_COLORS[index % TRACE_COLORS.length],
+        });
+      }
+    });
+  }
+
+  let activeTraceId = canonicalState.activeTraceId;
+  if (!activeTraceId && perimeterTraces.length > 0) {
+    // Try to select the trace corresponding to the activeFloor in the legacy project
+    const activeFloorIndex = restoredFloors.findIndex(f => f.id === project.activeFloorId);
+    const matchingMigratedTrace = perimeterTraces.find(t => t.id === `trace-migrated-${project.activeFloorId}-${activeFloorIndex}`);
+    if (matchingMigratedTrace) {
+      activeTraceId = matchingMigratedTrace.id;
+    } else {
+      activeTraceId = perimeterTraces[0].id;
     }
-    return f;
-  });
+  }
+
+  // Force single floor structure for multi-perimeter architecture
+  const activeFloorId = 'floor-1';
+  const floors = [
+    {
+      id: 'floor-1',
+      name: '1st Floor',
+      state: null,
+    }
+  ];
 
   // Hydrate Zustand store patch
   const statePatch = {
-    ...activeFloorState,
+    ...canonicalState,
+    perimeterTraces,
+    activeTraceId,
+    traceInteractionMode: 'idle',
+    perimeterVertices: null, // ensure no in-progress drawing on load
     floors,
     activeFloorId,
     canvasRotation: project.globalSettings?.canvasRotation ?? 0,
