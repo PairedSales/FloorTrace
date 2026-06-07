@@ -14,6 +14,7 @@ import useAppStore from '../store/appStore';
 export function useCanvasZoom(stageRef, scaleRef, setScale) {
   const isZoomingRef = useRef(false);
   const zoomTimeoutRef = useRef(null);
+  const syncTimeoutRef = useRef(null);
 
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault();
@@ -27,6 +28,9 @@ export function useCanvasZoom(stageRef, scaleRef, setScale) {
 
     if (zoomTimeoutRef.current) {
       clearTimeout(zoomTimeoutRef.current);
+    }
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
     }
 
     // Reset zooming flag after a short delay
@@ -67,14 +71,20 @@ export function useCanvasZoom(stageRef, scaleRef, setScale) {
         x: newPos.x,
         y: newPos.y,
       });
-      // Keep React state in sync so stroke widths, labels, and hit targets match
-      setScale(clampedScale);
       stage.batchDraw();
 
-      // Dispatch visual transforms to Zustand store
-      const store = useAppStore.getState();
-      store.setZoomScale(clampedScale);
-      store.setStagePosition({ x: newPos.x, y: newPos.y });
+      // Debounce the React state updates to prevent flickering (tearing between
+      // Konva imperative updates and React render cycles). Labels and stroke widths
+      // will scale visually with the canvas during the zoom, and snap to their
+      // constant pixel size when the user stops scrolling.
+      syncTimeoutRef.current = setTimeout(() => {
+        setScale(clampedScale);
+        
+        // Dispatch visual transforms to Zustand store
+        const store = useAppStore.getState();
+        store.setZoomScale(clampedScale);
+        store.setStagePosition({ x: newPos.x, y: newPos.y });
+      }, 50);
     });
   }, [stageRef, scaleRef, setScale]);
 
