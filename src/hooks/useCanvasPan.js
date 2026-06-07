@@ -20,7 +20,7 @@ import useAppStore from '../store/appStore';
  * @param {boolean}         opts.eraserToolActive
  * @param {boolean}         opts.cropToolActive
  * @param {object|null}     opts.roomOverlay
- * @param {object|null}     opts.perimeterOverlay
+ * @param {string}          opts.traceInteractionMode
  * @param {React.RefObject} opts.viewportSyncTokenRef
  * @returns {{ canPanCanvas, handleStageDragStart, handleStageDragEnd }}
  */
@@ -38,7 +38,7 @@ export function useCanvasPan({
   eraserToolActive,
   cropToolActive,
   roomOverlay,
-  perimeterOverlay,
+  traceInteractionMode,
   viewportSyncTokenRef,
 }) {
   /** Record the canvas-space point under the pointer at the start of a stage drag. */
@@ -91,7 +91,7 @@ export function useCanvasPan({
   const canPanCanvas = useMemo(() => {
     if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
     if (manualEntryMode || eraserToolActive || cropToolActive) return false;
-    if (roomOverlay && !perimeterOverlay) return false; // vertex placement mode
+    if (traceInteractionMode === 'drawing') return false; // vertex placement mode
     return !isZoomingRef.current;
   }, [
     draggingRoom,
@@ -101,8 +101,7 @@ export function useCanvasPan({
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
-    roomOverlay,
-    perimeterOverlay,
+    traceInteractionMode,
     isZoomingRef,
   ]);
 

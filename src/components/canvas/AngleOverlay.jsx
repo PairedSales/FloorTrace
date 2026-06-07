@@ -13,7 +13,7 @@ const AngleOverlay = ({
   onAngleToolStateChange,
   scale,
   canvasRotation,
-  perimeterOverlay,
+  perimeterTraces,
   customShapes,
   measurementLines,
   autoSnapEnabled,
@@ -151,7 +151,7 @@ const AngleOverlay = ({
           rawCenter,
           stage,
           layer,
-          perimeterOverlay,
+          perimeterTraces,
           customShapes,
           measurementLines,
           autoSnapEnabled,
@@ -167,7 +167,7 @@ const AngleOverlay = ({
     if (snappedPoint) {
       const neighbors = findVertexNeighbors(
         snappedPoint,
-        perimeterOverlay,
+        perimeterTraces,
         customShapes,
         measurementLines
       );
@@ -251,7 +251,7 @@ const AngleOverlay = ({
           rawP1,
           stage,
           layer,
-          perimeterOverlay,
+          perimeterTraces,
           customShapes,
           measurementLines,
           autoSnapEnabled,
@@ -316,7 +316,7 @@ const AngleOverlay = ({
           rawP2,
           stage,
           layer,
-          perimeterOverlay,
+          perimeterTraces,
           customShapes,
           measurementLines,
           autoSnapEnabled,

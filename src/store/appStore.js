@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createFloorSlice } from './floorManager';
+import { calculateArea } from '../utils/areaCalculator';
 
 /**
  * Default values for all working state fields (the state that participates in
@@ -9,9 +10,10 @@ import { createFloorSlice } from './floorManager';
 const WORKING_STATE_DEFAULTS = {
   image: null,
   roomOverlay: null,
-  perimeterOverlay: null,
+  perimeterTraces: [],
+  traceInteractionMode: 'idle',
+  activeTraceId: null,
   roomDimensions: { width: '', height: '' },
-  area: 0,
   scale: 1,
   mode: 'normal',
   isProcessing: false,
@@ -64,6 +66,8 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'viewportSyncToken',
   'isDirty',
   'projectId',
+  'traceInteractionMode',
+  'activeTraceId',
 ];
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)
@@ -84,6 +88,7 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
   'isProcessing',
   'processingMessage',
   'isDirty',
+  'traceInteractionMode',
 ];
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_AUTOSAVE_FIELDS.includes(k)
@@ -126,11 +131,51 @@ const useAppStore = create((set, get) => ({
   // ── setters (thin wrappers so call-sites remain terse) ─────────────────────
   setImage: (v) => set({ image: v }),
   setRoomOverlay: (v) => set({ roomOverlay: v }),
-  setPerimeterOverlay: (v) => set({ perimeterOverlay: v }),
+  setPerimeterOverlay: (v) => {
+    const state = get();
+    const activeId = state.activeTraceId;
+    const currentTraces = state.perimeterTraces || [];
+
+    if (!activeId) {
+      // Create a default first trace if none exists
+      const newId = `trace-${Date.now()}`;
+      const newTrace = {
+        id: newId,
+        name: '1st Floor',
+        vertices: v?.vertices || [],
+        closed: true,
+        visible: true,
+        locked: false,
+        color: '#BD93F9',
+      };
+      set({
+        perimeterTraces: [newTrace],
+        activeTraceId: newId,
+        isDirty: true,
+      });
+      return;
+    }
+
+    const updatedTraces = currentTraces.map((t) => {
+      if (t.id === activeId) {
+        return {
+          ...t,
+          vertices: v?.vertices || [],
+          closed: true,
+        };
+      }
+      return t;
+    });
+
+    set({
+      perimeterTraces: updatedTraces,
+      isDirty: true,
+    });
+  },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
-  setArea: (v) => set({ area: v }),
+  setArea: (v) => {}, // Deprecated canonical setter, no-op since area is derived
   setMode: (v) => set({ mode: v }),
-  setScale: (v) => set({ scale: v }),
+  setScale: (v) => set({ scale: v, isDirty: true }),
   setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
   setDetectedDimensions: (v) => set({ detectedDimensions: v }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
@@ -163,6 +208,8 @@ const useAppStore = create((set, get) => ({
   loadProject: (projectState) => set({
     ...WORKING_STATE_DEFAULTS,
     ...projectState,
+    traceInteractionMode: 'idle',
+    perimeterVertices: null,
     isProcessing: false,
     processingMessage: '',
   }),
@@ -241,6 +288,65 @@ const useAppStore = create((set, get) => ({
     set(patch);
   },
 }));
+
+// ── Memoized selectors ────────────────────────────────────────────────────────
+
+let lastActiveTraceId = null;
+let lastVertices = null;
+let lastOverlayResult = null;
+
+/** Selector to get the active perimeter overlay (compatibility adapter) */
+export const selectPerimeterOverlay = (state) => {
+  const traces = state.perimeterTraces || [];
+  const active = traces.find(t => t.id === state.activeTraceId);
+  if (!active) {
+    lastActiveTraceId = null;
+    lastVertices = null;
+    lastOverlayResult = null;
+    return null;
+  }
+  if (state.activeTraceId === lastActiveTraceId && active.vertices === lastVertices) {
+    return lastOverlayResult;
+  }
+  lastActiveTraceId = state.activeTraceId;
+  lastVertices = active.vertices;
+  lastOverlayResult = { vertices: active.vertices };
+  return lastOverlayResult;
+};
+
+let lastScale = null;
+let lastTraces = [];
+let lastCombinedArea = 0;
+
+/** Selector to get the combined total area of all visible traces */
+export const selectCombinedArea = (state) => {
+  const traces = state.perimeterTraces || [];
+  const scale = state.scale || 1;
+
+  // Quick check for changes in scale or trace object reference
+  let changed = scale !== lastScale || traces.length !== lastTraces.length;
+  if (!changed) {
+    for (let i = 0; i < traces.length; i++) {
+      if (traces[i] !== lastTraces[i]) {
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (!changed) {
+    return lastCombinedArea;
+  }
+
+  const areaValue = traces
+    .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
+    .reduce((sum, t) => sum + calculateArea(t.vertices, scale), 0);
+
+  lastScale = scale;
+  lastTraces = traces;
+  lastCombinedArea = areaValue;
+  return areaValue;
+};
 
 export { AUTOSAVE_FIELDS };
 export default useAppStore;

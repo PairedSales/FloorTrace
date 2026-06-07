@@ -1,28 +1,43 @@
 import useAppStore from './appStore';
 import * as undoManager from './undoManager';
+import { calculateArea } from '../utils/areaCalculator';
 
 /**
- * Floor Manager — manages multiple floor sessions.
+ * Floor Manager Slice — refactored to manage multiple perimeter traces
+ * on a single, globally calibrated canvas.
  *
- * Each floor is a self-contained session with its own geometry, overlays,
- * dimensions, area, measurement lines, custom shapes, etc.
- *
- * The active floor's state lives in the main Zustand store (appStore).
- * When the user switches floors, the current floor's state is serialized
- * into this manager and the target floor's state is restored into appStore.
+ * Each perimeter trace represents an independent polygon on the canvas.
+ * Legacy methods are preserved for toolbar and app state compatibility,
+ * but mapped to perimeter trace actions.
  */
 
-// Fields that are saved/restored per floor session.
-// Excludes transient UI state (isProcessing, processingMessage, notifications, etc.)
-// Fields that are saved/restored per floor session.
-// Excludes transient UI state (isProcessing, processingMessage, notifications, etc.)
-// and global settings like canvasRotation.
+const TRACE_COLORS = [
+  '#BD93F9', // Dracula Purple
+  '#8BE9FD', // Dracula Cyan
+  '#50FA7B', // Dracula Green
+  '#FF79C6', // Dracula Pink
+  '#FFB86C', // Dracula Orange
+  '#F1FA8C', // Dracula Yellow
+  '#FF5555', // Dracula Red
+];
+
+let nextTraceNumber = 1;
+
+/**
+ * Generate a sequential floor/trace name.
+ */
+function generateTraceName() {
+  const num = nextTraceNumber++;
+  const suffix = num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
+  return `${num}${suffix} Floor`;
+}
+
+// Fields persisted inside project files per trace session:
+// Kept for structure, but serialization uses a single canonical canvas.
 const FLOOR_STATE_FIELDS = [
   'image',
   'roomOverlay',
-  'perimeterOverlay',
   'roomDimensions',
-  'area',
   'scale',
   'mode',
   'detectedDimensions',
@@ -38,248 +53,160 @@ const FLOOR_STATE_FIELDS = [
   'drawAreaActive',
   'customShapes',
   'currentCustomShape',
-  'perimeterVertices',
+  'perimeterTraces',
+  'activeTraceId',
   'tracedBoundaries',
   'debugDetection',
   'detectionDebugData',
   'eraserToolActive',
   'eraserBrushSize',
   'cropToolActive',
-  // Per-floor viewport state (rotation is global)
   'zoomScale',
   'stageX',
   'stageY',
 ];
 
-const MAX_FLOORS = 4;
-let nextFloorNumber = 2; // "1st Floor" is floor 1
-
-/**
- * Generate the next sequential floor name using ordinal abbreviations.
- */
-function generateFloorName() {
-  const num = nextFloorNumber++;
-  const suffix = num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
-  return `${num}${suffix} Floor`;
-}
-
-/**
- * Capture the current appStore working state for a floor snapshot.
- */
-function captureFloorState() {
-  const state = useAppStore.getState();
-  const snapshot = {};
-  for (const key of FLOOR_STATE_FIELDS) {
-    snapshot[key] = state[key];
-  }
-  return snapshot;
-}
-
-/**
- * Create an empty floor state snapshot (new blank session).
- */
-function createEmptyFloorState() {
-  return {
-    image: null,
-    roomOverlay: null,
-    perimeterOverlay: null,
-    roomDimensions: { width: '', height: '' },
-    area: 0,
-    scale: 1,
-    mode: 'normal',
-    detectedDimensions: [],
-    showSideLengths: true,
-    useInteriorWalls: false,
-    autoSnapEnabled: true,
-    manualEntryMode: false,
-    ocrFailed: false,
-    unit: 'decimal',
-    lineToolActive: false,
-    measurementLines: [],
-    currentMeasurementLine: null,
-    drawAreaActive: false,
-    customShapes: [],
-    currentCustomShape: null,
-    perimeterVertices: null,
-    tracedBoundaries: null,
-    debugDetection: false,
-    detectionDebugData: null,
-    eraserToolActive: false,
-    eraserBrushSize: 20,
-    cropToolActive: false,
-    zoomScale: null,
-    stageX: 0,
-    stageY: 0,
-  };
-}
-
-// ── Floor Zustand slice (added to appStore) ──────────────────────────────────
-
-/**
- * Create the floor management slice for appStore.
- * This is merged into the main store via a separate `set/get` scope.
- */
 export function createFloorSlice(set, get) {
   return {
-    // Array of floor objects: { id, name, state }
-    // `state` is null for the active floor (its state lives in appStore directly)
+    // We maintain a dummy floors structure for project serialization schema compatibility.
+    // There is always exactly one floor session recorded in the project file,
+    // which holds all the traces.
     floors: [
       {
         id: 'floor-1',
         name: '1st Floor',
-        state: null, // active — state is the current appStore state
+        state: null, // active
       },
     ],
     activeFloorId: 'floor-1',
 
     /**
-     * Add a new empty floor and switch to it.
+     * Add a new empty perimeter trace and select it.
      */
     addFloor: () => {
+      undoManager.save();
       const state = get();
-      if (state.floors.length >= MAX_FLOORS) return; // enforce max
-      const currentFloorId = state.activeFloorId;
 
-      // Save current floor's state
-      const currentSnapshot = captureFloorState();
-      const updatedFloors = state.floors.map((f) =>
-        f.id === currentFloorId ? { ...f, state: currentSnapshot } : f
-      );
+      const newId = `trace-${Date.now()}`;
+      const newName = generateTraceName();
+      const colorIndex = state.perimeterTraces.length % TRACE_COLORS.length;
+      const newColor = TRACE_COLORS[colorIndex];
 
-      // Create new floor
-      const newId = `floor-${Date.now()}`;
-      const newName = generateFloorName();
-      const newFloor = { id: newId, name: newName, state: null };
+      const newTrace = {
+        id: newId,
+        name: newName,
+        vertices: [],
+        closed: false,
+        visible: true,
+        locked: false,
+        color: newColor,
+      };
 
-      // Clear undo history for the new floor
-      undoManager.clear();
-
-      // Restore empty state into appStore
-      const emptyState = createEmptyFloorState();
-      const patch = { ...emptyState };
-      patch.isProcessing = false;
-      patch.processingMessage = '';
-      patch.floors = [...updatedFloors, newFloor];
-      patch.activeFloorId = newId;
-      patch.isDirty = true;
-
-      set(patch);
-    },
-
-    /**
-     * Switch to a different floor tab.
-     */
-    switchFloor: (targetFloorId) => {
-      const state = get();
-      if (targetFloorId === state.activeFloorId) return;
-
-      const targetFloor = state.floors.find((f) => f.id === targetFloorId);
-      if (!targetFloor) return;
-
-      // Save current floor's state
-      const currentSnapshot = captureFloorState();
-      const updatedFloors = state.floors.map((f) => {
-        if (f.id === state.activeFloorId) return { ...f, state: currentSnapshot };
-        if (f.id === targetFloorId) return { ...f, state: null }; // will become active
-        return f;
+      set({
+        perimeterTraces: [...state.perimeterTraces, newTrace],
+        activeTraceId: newId,
+        traceInteractionMode: 'drawing',
+        perimeterVertices: [], // start drawing immediately
+        isDirty: true,
       });
-
-      // Clear undo history (each floor has independent undo — for simplicity, we clear on switch)
-      undoManager.clear();
-
-      // Restore target floor's state
-      const targetState = targetFloor.state || createEmptyFloorState();
-      const patch = { ...targetState };
-      patch.isProcessing = false;
-      patch.processingMessage = '';
-      patch.floors = updatedFloors;
-      patch.activeFloorId = targetFloorId;
-
-      set(patch);
     },
 
     /**
-     * Close a floor tab. Cannot close the last remaining tab.
+     * Switch / select a perimeter trace.
+     * Selection change does not save an undo snapshot.
      */
-    closeFloor: (floorId) => {
+    switchFloor: (targetTraceId) => {
       const state = get();
-      if (state.floors.length <= 1) return; // can't close last tab
+      if (targetTraceId === state.activeTraceId) return;
 
-      const floorToClose = state.floors.find((f) => f.id === floorId);
-      if (!floorToClose) return;
-
-      // Check if closing has unsaved work (image loaded = work exists)
-      const hasWork = floorId === state.activeFloorId
-        ? !!state.image
-        : !!floorToClose.state?.image;
-
-      if (hasWork) {
-        const confirmed = window.confirm(
-          `Close "${floorToClose.name}"? Any unsaved work will be lost.`
-        );
-        if (!confirmed) return;
-      }
-
-      const remainingFloors = state.floors.filter((f) => f.id !== floorId);
-
-      if (floorId === state.activeFloorId) {
-        // Closing the active tab — switch to the nearest neighbor
-        const closedIndex = state.floors.findIndex((f) => f.id === floorId);
-        const nextIndex = Math.min(closedIndex, remainingFloors.length - 1);
-        const nextFloor = remainingFloors[nextIndex];
-
-        // Mark the new active floor
-        const updatedFloors = remainingFloors.map((f) =>
-          f.id === nextFloor.id ? { ...f, state: null } : f
-        );
-
-        undoManager.clear();
-
-        const nextState = nextFloor.state || createEmptyFloorState();
-        const patch = { ...nextState };
-        patch.isProcessing = false;
-        patch.processingMessage = '';
-        patch.floors = updatedFloors;
-        patch.activeFloorId = nextFloor.id;
-        patch.isDirty = true;
-
-        set(patch);
-      } else {
-        // Closing an inactive tab — just remove it
-        set({ floors: remainingFloors, isDirty: true });
-      }
+      set({
+        activeTraceId: targetTraceId,
+        traceInteractionMode: 'idle',
+        perimeterVertices: null, // cancel drawing mode on switch
+      });
     },
 
     /**
-     * Rename a floor tab.
+     * Delete a perimeter trace.
+     * Deterministically shifts selection to neighboring trace if active trace is deleted.
      */
-    renameFloor: (floorId, newName) => {
+    closeFloor: (traceId) => {
+      undoManager.save();
       const state = get();
-      const updatedFloors = state.floors.map((f) =>
-        f.id === floorId ? { ...f, name: newName } : f
+
+      const currentTraces = state.perimeterTraces || [];
+      const traceIndex = currentTraces.findIndex((t) => t.id === traceId);
+      if (traceIndex === -1) return;
+
+      const remainingTraces = currentTraces.filter((t) => t.id !== traceId);
+      let nextActiveId = state.activeTraceId;
+
+      if (state.activeTraceId === traceId) {
+        if (remainingTraces.length > 0) {
+          const newIndex = Math.max(0, traceIndex - 1);
+          nextActiveId = remainingTraces[newIndex].id;
+        } else {
+          nextActiveId = null;
+        }
+      }
+
+      set({
+        perimeterTraces: remainingTraces,
+        activeTraceId: nextActiveId,
+        traceInteractionMode: nextActiveId ? 'idle' : 'idle',
+        perimeterVertices: null,
+        isDirty: true,
+      });
+    },
+
+    /**
+     * Rename a perimeter trace.
+     */
+    renameFloor: (traceId, newName) => {
+      const state = get();
+      const updated = (state.perimeterTraces || []).map((t) =>
+        t.id === traceId ? { ...t, name: newName } : t
       );
-      set({ floors: updatedFloors, isDirty: true });
+      set({ perimeterTraces: updated, isDirty: true });
     },
 
     /**
-     * Get area for a specific floor (for showing in tab badge).
+     * Toggle visibility of a perimeter trace.
+     * Visibility is treated as document state (saves undo snapshot).
      */
-    getFloorArea: (floorId) => {
+    togglePerimeterTraceVisibility: (traceId) => {
+      undoManager.save();
       const state = get();
-      if (floorId === state.activeFloorId) return state.area;
-      const floor = state.floors.find((f) => f.id === floorId);
-      return floor?.state?.area || 0;
+      const updated = (state.perimeterTraces || []).map((t) =>
+        t.id === traceId ? { ...t, visible: !t.visible } : t
+      );
+      set({
+        perimeterTraces: updated,
+        isDirty: true,
+      });
     },
 
     /**
-     * Reset floor manager to initial state (single "First Floor" tab).
+     * Get area for a specific trace.
+     */
+    getFloorArea: (traceId) => {
+      const state = get();
+      const trace = (state.perimeterTraces || []).find((t) => t.id === traceId);
+      return trace ? calculateArea(trace.vertices, state.scale) : 0;
+    },
+
+    /**
+     * Reset floor manager to initial state.
      */
     resetFloors: () => {
-      nextFloorNumber = 2;
-      undoManager.clear();
+      nextTraceNumber = 1;
       set({
         floors: [{ id: 'floor-1', name: '1st Floor', state: null }],
         activeFloorId: 'floor-1',
+        perimeterTraces: [],
+        activeTraceId: null,
+        traceInteractionMode: 'idle',
+        perimeterVertices: null,
       });
     },
   };

@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Line, Circle, Rect, Text } from 'react-konva';
+import { Line, Circle, Rect, Text, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
-import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
+import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
 import { measureSideLenWidth, pointToLineDistance } from './canvasUtils';
+import { calculateArea, getCentroid } from '../../utils/areaCalculator';
 
 const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 const SIDE_LEN_FONT_STYLE = '500';
@@ -278,12 +279,23 @@ const computeLabelLayouts = (vertices, scale, pixelsPerFoot, detectedDimensions,
   });
 };
 
+const hexToRgba = (hex, opacity) => {
+  if (!hex) return `rgba(189, 147, 249, ${opacity})`;
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+};
+
 /**
- * PerimeterLayer renders the perimeter polygon outline, draggable vertices,
- * and optional side-length pill labels.
+ * PerimeterLayer renders all visible perimeter traces, draggable vertices for
+ * the active trace, and centroid name/area badges.
  */
 const PerimeterLayer = ({
-  perimeterOverlay,
+  perimeterTraces,
+  activeTraceId,
+  localPerimeterVertices,
   scale,
   showSideLengths,
   pixelsPerFoot,
@@ -294,7 +306,8 @@ const PerimeterLayer = ({
   onVertexDragEnd,
   onDeletePerimeterVertex,
 }) => {
-  const targetVertices = perimeterOverlay?.vertices;
+  const activeTrace = (perimeterTraces || []).find((t) => t.id === activeTraceId);
+  const targetVertices = activeTrace?.vertices;
 
   const canvasRotation = useAppStore((s) => s.canvasRotation);
 
@@ -310,7 +323,7 @@ const PerimeterLayer = ({
   const dragCoordsRef = useRef(null);
   const dragRafRef = useRef(null);
 
-  // Local state for dragging vertices
+  // Local state for dragging vertices of the active trace
   const [localVertices, setLocalVertices] = useState(targetVertices);
   const [prevTargetVertices, setPrevTargetVertices] = useState(targetVertices);
 
@@ -369,7 +382,6 @@ const PerimeterLayer = ({
   };
 
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
-  // Hooks must be called before any early return (rules of hooks).
   const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
 
   // During animation, render the interpolated path; otherwise the local/drag state.
@@ -377,7 +389,6 @@ const PerimeterLayer = ({
 
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
-  // Use renderVertices so labels follow the animation in real time.
   const labelLayouts = useMemo(
     () => (showSideLengths && pixelsPerFoot && renderVertices)
       ? computeLabelLayouts(renderVertices, scale, pixelsPerFoot, detectedDimensions, unit, canvasRotation, draggingVertex)
@@ -385,50 +396,68 @@ const PerimeterLayer = ({
     [renderVertices, scale, pixelsPerFoot, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
-  if (!perimeterOverlay || !targetVertices) return null;
-
   return (
     <>
-      {/* Perimeter Outline */}
-      {/* listening={false}: the filled polygon must not intercept mouse events so
-          that the room overlay Rect below it remains interactable. Double-click
-          for vertex insertion is handled at the Stage level via onDblClick. */}
-      <Line
-        points={renderVertices ? renderVertices.flatMap(v => [v.x, v.y]) : []}
-        stroke="#BD93F9"
-        strokeWidth={2 / scale}
-        closed={true}
-        fill="rgba(189, 147, 249, 0.15)"
-        listening={false}
-        perfectDrawEnabled={false}
-      />
+      {/* 1. Render all visible inactive traces first */}
+      {(perimeterTraces || []).map((trace) => {
+        if (!trace.visible || trace.id === activeTraceId) return null;
+        const color = trace.color || '#BD93F9';
+        const fillRgba = hexToRgba(color, 0.05);
+        const strokeRgba = hexToRgba(color, 0.4);
 
-      {/* Perimeter Vertices – hidden during animation for visual clarity */}
-      {!isAnimating && localVertices && localVertices.map((vertex, i) => (
-        <React.Fragment key={i}>
-          <Circle
-            x={vertex.x}
-            y={vertex.y}
-            radius={5 / scale}
-            fill="#BD93F9"
-            stroke="#fff"
+        return (
+          <Line
+            key={`inactive-outline-${trace.id}`}
+            points={trace.vertices ? trace.vertices.flatMap(v => [v.x, v.y]) : []}
+            stroke={strokeRgba}
             strokeWidth={1.5 / scale}
-            draggable
-            onDragStart={() => handleDragStart(i)}
-            onDragMove={(e) => handleDragMove(i, e)}
-            onDragEnd={(e) => handleDragEnd(i, e)}
-            onContextMenu={(e) => {
-              e.evt.preventDefault();
-              e.cancelBubble = true;
-              if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
-            }}
+            closed={true}
+            fill={fillRgba}
+            listening={false}
+            perfectDrawEnabled={false}
           />
-        </React.Fragment>
+        );
+      })}
+
+      {/* 2. Render active trace outline */}
+      {activeTrace && activeTrace.visible && (
+        <Line
+          key={`active-outline-${activeTrace.id}`}
+          points={renderVertices ? renderVertices.flatMap(v => [v.x, v.y]) : []}
+          stroke={activeTrace.color || '#BD93F9'}
+          strokeWidth={2 / scale}
+          closed={true}
+          fill={hexToRgba(activeTrace.color || '#BD93F9', 0.12)}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      )}
+
+      {/* 3. Render active trace draggable vertex handles */}
+      {activeTrace && activeTrace.visible && !isAnimating && localVertices && localVertices.map((vertex, i) => (
+        <Circle
+          key={`active-vertex-${activeTrace.id}-${i}`}
+          x={vertex.x}
+          y={vertex.y}
+          radius={5 / scale}
+          fill={activeTrace.color || '#BD93F9'}
+          stroke="#fff"
+          strokeWidth={1.5 / scale}
+          draggable
+          onDragStart={() => handleDragStart(i)}
+          onDragMove={(e) => handleDragMove(i, e)}
+          onDragEnd={(e) => handleDragEnd(i, e)}
+          onContextMenu={(e) => {
+            e.evt.preventDefault();
+            e.cancelBubble = true;
+            if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
+          }}
+        />
       ))}
 
-      {/* Side Length Labels (memoized layout) */}
-      {labelLayouts.map((layout, i) => (
-        <React.Fragment key={`label-${i}`}>
+      {/* 4. Render active trace side length labels */}
+      {activeTrace && activeTrace.visible && labelLayouts.map((layout, i) => (
+        <React.Fragment key={`active-label-${activeTrace.id}-${i}`}>
           <Rect
             x={layout.finalCx}
             y={layout.finalCy}
@@ -462,6 +491,60 @@ const PerimeterLayer = ({
           />
         </React.Fragment>
       ))}
+
+      {/* 5. Render Centroid Area Badges for all visible closed traces */}
+      {pixelsPerFoot && (perimeterTraces || []).map((trace) => {
+        if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
+
+        // Use renderVertices for active trace to move badge in real time during drag/animation
+        const vertices = trace.id === activeTraceId ? renderVertices : trace.vertices;
+        if (!vertices || vertices.length < 3) return null;
+
+        const centroid = getCentroid(vertices);
+        const traceArea = calculateArea(vertices, pixelsPerFoot);
+        const { value: areaText, suffix: areaSuffix } = formatArea(traceArea, unit);
+
+        const labelText = `${trace.name}: ${areaText} ${areaSuffix}`;
+        const fontSize = 11 / scale;
+        const labelWidth = measureSideLenWidth(labelText, fontSize) + 12 / scale;
+        const labelHeight = fontSize * 1.5 + 4 / scale;
+
+        return (
+          <Group
+            key={`centroid-badge-${trace.id}`}
+            x={centroid.x}
+            y={centroid.y}
+            listening={false}
+          >
+            <Rect
+              width={labelWidth}
+              height={labelHeight}
+              offsetX={labelWidth / 2}
+              offsetY={labelHeight / 2}
+              rotation={-canvasRotation}
+              fill="rgba(40, 42, 54, 0.92)"
+              stroke={trace.color || '#BD93F9'}
+              strokeWidth={1 / scale}
+              cornerRadius={labelHeight / 2}
+              perfectDrawEnabled={false}
+            />
+            <Text
+              width={labelWidth}
+              height={labelHeight}
+              offsetX={labelWidth / 2}
+              offsetY={labelHeight / 2}
+              rotation={-canvasRotation}
+              text={labelText}
+              fontSize={fontSize}
+              fill="#ffffff"
+              fontFamily={SIDE_LEN_FONT_FAMILY}
+              fontStyle="600"
+              align="center"
+              verticalAlign="middle"
+            />
+          </Group>
+        );
+      })}
     </>
   );
 };

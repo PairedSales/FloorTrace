@@ -71,7 +71,7 @@ export function findAngleSnapPointScreen(
   localCursorPoint,
   stage,
   contentLayer,
-  perimeterOverlay,
+  perimeterTraces,
   customShapes,
   measurementLines,
   autoSnapEnabled,
@@ -103,9 +103,13 @@ export function findAngleSnapPointScreen(
     }
   };
 
-  // 1. Check perimeter vertices
-  if (perimeterOverlay?.vertices) {
-    perimeterOverlay.vertices.forEach(checkLocalPoint);
+  // 1. Check perimeter vertices of visible traces
+  if (perimeterTraces) {
+    perimeterTraces.forEach((trace) => {
+      if (trace.visible && trace.vertices) {
+        trace.vertices.forEach(checkLocalPoint);
+      }
+    });
   }
 
   // 2. Check custom shapes vertices
@@ -150,20 +154,24 @@ export function findAngleSnapPointScreen(
 /**
  * Finds the neighboring vertices of a snapped point in the active geometries.
  */
-export function findVertexNeighbors(snappedPoint, perimeterOverlay, customShapes, measurementLines) {
+export function findVertexNeighbors(snappedPoint, perimeterTraces, customShapes, measurementLines) {
   if (!snappedPoint) return null;
   const eps = 1e-4;
   const isClose = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2) < eps;
 
-  // 1. Check perimeter vertices
-  if (perimeterOverlay?.vertices) {
-    const vertices = perimeterOverlay.vertices;
-    const L = vertices.length;
-    for (let i = 0; i < L; i++) {
-      if (isClose(vertices[i], snappedPoint)) {
-        const n1 = vertices[(i - 1 + L) % L];
-        const n2 = vertices[(i + 1) % L];
-        return [n1, n2];
+  // 1. Check perimeter vertices of visible traces
+  if (perimeterTraces) {
+    for (const trace of perimeterTraces) {
+      if (trace.visible && trace.vertices) {
+        const vertices = trace.vertices;
+        const L = vertices.length;
+        for (let i = 0; i < L; i++) {
+          if (isClose(vertices[i], snappedPoint)) {
+            const n1 = vertices[(i - 1 + L) % L];
+            const n2 = vertices[(i + 1) % L];
+            return [n1, n2];
+          }
+        }
       }
     }
   }
