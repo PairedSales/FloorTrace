@@ -239,119 +239,123 @@ const LeftPanel = ({
         </div>
       </section>
 
-      <div className="panel-divider mx-3" />
+      {perimeterTraces.length > 1 && (
+        <>
+          <div className="panel-divider mx-3" />
 
-      {/* Traces List */}
-      <section className="px-3 py-3 pointer-events-auto flex flex-col min-h-0">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-            Perimeters
-          </h3>
-          {perimeterTraces.length < 7 && (
-            <button
-              onClick={addFloor}
-              className="flex items-center gap-1 text-[10px] font-semibold text-accent hover:text-accent/80 transition-colors cursor-pointer"
-              title="Add new perimeter trace"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-0.5">
-          {perimeterTraces.length === 0 ? (
-            <p className="text-[11px] text-slate-500 italic py-2 text-center">
-              No perimeters defined.
-            </p>
-          ) : (
-            perimeterTraces.map((trace) => {
-              const isActive = trace.id === activeTraceId;
-              const traceArea = trace.vertices && trace.vertices.length >= 3 
-                ? calculateArea(trace.vertices, scale) 
-                : 0;
-              const { value: tAreaText, suffix: tAreaSuffix } = formatArea(traceArea, unit);
-
-              return (
-                <div
-                  key={trace.id}
-                  onClick={() => switchFloor(trace.id)}
-                  className={`group flex flex-col gap-1 px-2 py-1.5 rounded-md transition-all border cursor-pointer ${
-                    isActive
-                      ? 'bg-chrome-950/70 border-accent/40 shadow-sm'
-                      : 'bg-chrome-900/35 border-transparent hover:bg-chrome-900/50 hover:border-chrome-700/50'
-                  }`}
+          {/* Traces List */}
+          <section className="px-3 py-3 pointer-events-auto flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                Perimeters
+              </h3>
+              {perimeterTraces.length < 7 && (
+                <button
+                  onClick={addFloor}
+                  className="flex items-center gap-1 text-[10px] font-semibold text-accent hover:text-accent/80 transition-colors cursor-pointer"
+                  title="Add new perimeter trace"
                 >
-                  <div className="flex items-center gap-1.5">
-                    {/* Color Dot */}
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0 shadow-sm transition-transform group-hover:scale-110"
-                      style={{ backgroundColor: trace.color }}
-                    />
+                  <Plus className="w-3.5 h-3.5" />
+                  Add
+                </button>
+              )}
+            </div>
 
-                    {/* Rename Input */}
-                    <input
-                      type="text"
-                      value={trace.name}
-                      onChange={(e) => renameFloor(trace.id, e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      onFocus={() => {
-                        if (!isActive) switchFloor(trace.id);
-                      }}
-                      className={`flex-1 bg-transparent border-0 p-0 text-[11px] font-medium focus:ring-0 focus:outline-none focus:border-b focus:border-accent/50 min-w-0 ${
-                        isActive ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-300'
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-0.5">
+              {perimeterTraces.length === 0 ? (
+                <p className="text-[11px] text-slate-500 italic py-2 text-center">
+                  No perimeters defined.
+                </p>
+              ) : (
+                perimeterTraces.map((trace) => {
+                  const isActive = trace.id === activeTraceId;
+                  const traceArea = trace.vertices && trace.vertices.length >= 3 
+                    ? calculateArea(trace.vertices, scale) 
+                    : 0;
+                  const { value: tAreaText, suffix: tAreaSuffix } = formatArea(traceArea, unit);
+
+                  return (
+                    <div
+                      key={trace.id}
+                      onClick={() => switchFloor(trace.id)}
+                      className={`group flex flex-col gap-1 px-2 py-1.5 rounded-md transition-all border cursor-pointer ${
+                        isActive
+                          ? 'bg-chrome-950/70 border-accent/40 shadow-sm'
+                          : 'bg-chrome-900/35 border-transparent hover:bg-chrome-900/50 hover:border-chrome-700/50'
                       }`}
-                    />
-
-                    {/* Visibility Toggle */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleVisibility(trace.id);
-                      }}
-                      className={`p-0.5 rounded hover:bg-chrome-800 transition-colors shrink-0 ${
-                        trace.visible ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-400'
-                      }`}
-                      title={trace.visible ? 'Hide perimeter' : 'Show perimeter'}
                     >
-                      {trace.visible ? (
-                        <Eye className="w-3.5 h-3.5" />
-                      ) : (
-                        <EyeOff className="w-3.5 h-3.5" />
-                      )}
-                    </button>
+                      <div className="flex items-center gap-1.5">
+                        {/* Color Dot */}
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0 shadow-sm transition-transform group-hover:scale-110"
+                          style={{ backgroundColor: trace.color }}
+                        />
 
-                    {/* Delete button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeFloor(trace.id);
-                      }}
-                      className="p-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-chrome-800 transition-colors shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      title="Delete perimeter"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                        {/* Rename Input */}
+                        <input
+                          type="text"
+                          value={trace.name}
+                          onChange={(e) => renameFloor(trace.id, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onFocus={() => {
+                            if (!isActive) switchFloor(trace.id);
+                          }}
+                          className={`flex-1 bg-transparent border-0 p-0 text-[11px] font-medium focus:ring-0 focus:outline-none focus:border-b focus:border-accent/50 min-w-0 ${
+                            isActive ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-300'
+                          }`}
+                        />
 
-                  {/* Derived Area & Status */}
-                  <div className="flex items-center justify-between pl-3.5 text-[9px] text-slate-500 font-mono">
-                    <span>
-                      {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
-                      {trace.closed ? ' (Closed)' : ' (Drawing)'}
-                    </span>
-                    <span>
-                      {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </section>
+                        {/* Visibility Toggle */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleVisibility(trace.id);
+                          }}
+                          className={`p-0.5 rounded hover:bg-chrome-800 transition-colors shrink-0 ${
+                            trace.visible ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-400'
+                          }`}
+                          title={trace.visible ? 'Hide perimeter' : 'Show perimeter'}
+                        >
+                          {trace.visible ? (
+                            <Eye className="w-3.5 h-3.5" />
+                          ) : (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        {/* Delete button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeFloor(trace.id);
+                          }}
+                          className="p-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-chrome-800 transition-colors shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          title="Delete perimeter"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Derived Area & Status */}
+                      <div className="flex items-center justify-between pl-3.5 text-[9px] text-slate-500 font-mono">
+                        <span>
+                          {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
+                          {trace.closed ? ' (Closed)' : ' (Drawing)'}
+                        </span>
+                        <span>
+                          {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        </>
+      )}
 
       <div className="panel-divider mx-3" />
 
