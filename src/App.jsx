@@ -1136,7 +1136,7 @@ function App() {
         style={{ top: '56px' }}
         toastOptions={{
           classNames: {
-            toast: 'group !bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] rounded-lg shadow-xl font-medium text-xs font-sans select-none flex items-center gap-2 p-3 !w-fit !min-w-[220px] !max-w-md',
+            toast: 'group !bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] rounded-lg shadow-xl font-medium text-xs font-sans select-none flex items-center gap-2 p-3 !w-fit !max-w-md',
             title: '!text-[#F8F8F2]',
             description: '!text-[#6272A4]',
             success: '!text-[#50FA7B] !border-[#50FA7B]/30',
