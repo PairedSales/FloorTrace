@@ -130,6 +130,101 @@ function App() {
     terminateOcrWorker();
   }, []);
 
+  // Manage instructions toasts
+  useEffect(() => {
+    // 1. Perimeter vertex placement mode
+    if (perimeterVertices !== null && perimeterVertices.length < 3) {
+      toast.info(`Click to add perimeter vertices (${perimeterVertices.length}/3). Esc/Enter to finish.`, {
+        id: 'perimeter-vertices-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('perimeter-vertices-toast');
+    }
+
+    // 2. Manual overlay placement mode (Click on canvas to place overlays)
+    if (manualEntryMode) {
+      toast.info('Click on the canvas to place room overlay.', {
+        id: 'manual-entry-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('manual-entry-toast');
+    }
+
+    // 3. Line Tool
+    if (lineToolActive) {
+      toast.info('Click to place line endpoints. Esc to cancel.', {
+        id: 'line-tool-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('line-tool-toast');
+    }
+
+    // 4. Draw Area Tool (Custom Shapes)
+    if (drawAreaActive) {
+      const vertexCount = currentCustomShape?.vertices?.length || 0;
+      toast.info(`Click to draw custom shape vertices${vertexCount > 0 ? ` (${vertexCount})` : ''}. Enter/double-click first point to close. Esc to cancel.`, {
+        id: 'draw-area-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('draw-area-toast');
+    }
+
+    // 5. Eraser Tool
+    if (eraserToolActive) {
+      toast.info('Click and drag to erase parts of the image. Esc to cancel.', {
+        id: 'eraser-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('eraser-toast');
+    }
+
+    // 6. Crop Tool
+    if (cropToolActive) {
+      toast.info('Click and drag to select crop area. Esc to cancel.', {
+        id: 'crop-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('crop-toast');
+    }
+
+    // 7. Angle Tool
+    if (angleToolActive) {
+      toast.info('Drag the angle arms or vertices to measure angles. Esc to cancel.', {
+        id: 'angle-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('angle-toast');
+    }
+
+    // Cleanup all toasts on unmount
+    return () => {
+      toast.dismiss('perimeter-vertices-toast');
+      toast.dismiss('manual-entry-toast');
+      toast.dismiss('line-tool-toast');
+      toast.dismiss('draw-area-toast');
+      toast.dismiss('eraser-toast');
+      toast.dismiss('crop-toast');
+      toast.dismiss('angle-toast');
+    };
+  }, [
+    perimeterVertices,
+    perimeterVertices?.length,
+    manualEntryMode,
+    lineToolActive,
+    drawAreaActive,
+    currentCustomShape?.vertices?.length,
+    eraserToolActive,
+    cropToolActive,
+    angleToolActive
+  ]);
+
 
   // Reset entire application
   const handleRestart = () => {
@@ -140,6 +235,7 @@ function App() {
     clearAutosavedDraft();
     undoManager.clear();
     useAppStore.getState().restart();
+    notify('Project reset successfully');
   };
 
   // Handle manual mode
@@ -169,7 +265,7 @@ function App() {
       }
       
       if (!imgSrc) {
-        alert('Please load an image first');
+        notify('Error: Please load an image first');
         return;
       }
       
@@ -341,7 +437,7 @@ function App() {
         }
       } catch (error) {
         console.error('Error loading file:', error);
-        alert(`Failed to load file: ${error.message}`);
+        notify(`Failed to load file: ${error.message}`);
       } finally {
         setIsProcessing(false);
         // Reset file input so the same file can be selected again
@@ -370,7 +466,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error pasting image:', error);
-      alert('Failed to paste image. Make sure an image is copied to your clipboard.');
+      notify('Failed to paste image. Make sure an image is copied to your clipboard.');
     }
   }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage]);
 
@@ -415,7 +511,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);
-      alert(`Failed to load file: ${error.message}`);
+      notify(`Failed to load file: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -494,7 +590,8 @@ function App() {
 
   const handleRotateCanvas = useCallback((direction) => {
     canvasRef.current?.rotateCanvas(direction);
-  }, []);
+    notify(`Canvas rotated ${direction === 'clockwise' ? 'clockwise' : 'counterclockwise'}`);
+  }, [notify]);
 
   // Handle image update from eraser or crop tool (saves undo point before changing)
   const handleImageUpdate = useCallback((newImageDataUrl) => {
@@ -541,7 +638,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error exporting project:', error);
-      alert(`Failed to save project: ${error.message}`);
+      notify(`Failed to save project: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -738,7 +835,7 @@ function App() {
     const width = parseFloat(roomDimensions.width);
     const height = parseFloat(roomDimensions.height);
     if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      alert('Please enter valid room dimensions first');
+      notify('Error: Please enter valid room dimensions first');
       return;
     }
 
@@ -811,7 +908,33 @@ function App() {
   const handleUnitChange = useCallback((u) => {
     undoManager.save();
     setUnit(u);
-  }, [setUnit]);
+    const unitNames = {
+      decimal: 'Decimal Feet',
+      inches: 'Feet & Inches',
+      metric: 'Meters'
+    };
+    notify(`Unit format changed to ${unitNames[u] || u}`);
+  }, [setUnit, notify]);
+
+  const handleShowSideLengthsChange = useCallback((value) => {
+    setShowSideLengths(value);
+    notify(value ? 'Side lengths enabled' : 'Side lengths disabled');
+  }, [setShowSideLengths, notify]);
+
+  const handleAutoSnapChange = useCallback((value) => {
+    setAutoSnapEnabled(value);
+    notify(value ? 'Auto-snap enabled' : 'Auto-snap disabled');
+  }, [setAutoSnapEnabled, notify]);
+
+  const handleSaveOnExitChangeWithToast = useCallback((value) => {
+    handleSaveOnExitChange(value);
+    notify(value ? 'Autosave on exit enabled' : 'Autosave on exit disabled');
+  }, [handleSaveOnExitChange, notify]);
+
+  const handleDebugDetectionChange = useCallback((value) => {
+    setDebugDetection(value);
+    notify(value ? 'Detection debug overlay enabled' : 'Detection debug overlay disabled');
+  }, [setDebugDetection, notify]);
   const handleDimensionFocus = useCallback(() => {
     if (!dimensionEditActiveRef.current) {
       dimensionEditActiveRef.current = true;
@@ -946,14 +1069,14 @@ function App() {
         {showPanelOptions && (
           <OptionsOverlay
             showSideLengths={showSideLengths}
-            onShowSideLengthsChange={setShowSideLengths}
+            onShowSideLengthsChange={handleShowSideLengthsChange}
             autoSnapEnabled={autoSnapEnabled}
-            onAutoSnapChange={setAutoSnapEnabled}
+            onAutoSnapChange={handleAutoSnapChange}
             perimeterOverlay={perimeterOverlay}
             saveOnExit={saveOnExit}
-            onSaveOnExitChange={handleSaveOnExitChange}
+            onSaveOnExitChange={handleSaveOnExitChangeWithToast}
             debugDetection={debugDetection}
-            onDebugDetectionChange={setDebugDetection}
+            onDebugDetectionChange={handleDebugDetectionChange}
           />
         )}
 

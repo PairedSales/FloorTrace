@@ -1405,6 +1405,8 @@ const Canvas = React.memo(forwardRef(({
         onDrawAreaToggle();
       } else if (angleToolActive && onAngleToolToggle) {
         onAngleToolToggle();
+      } else if (perimeterVertices !== null) {
+        useAppStore.getState().setPerimeterVertices(null);
       }
       return;
     }
@@ -1599,17 +1601,6 @@ const Canvas = React.memo(forwardRef(({
             />
             
             {/* Manual Entry Mode - Click to place overlays */}
-            {manualEntryMode && (
-              <Text
-                x={10}
-                y={10}
-                text="Click on the canvas to place overlays"
-                fontSize={16 / scale}
-                fill="#8BE9FD"
-                fontStyle="bold"
-                rotation={-canvasRotation}
-              />
-            )}
             
             {/* Perimeter Vertex Placement Mode */}
             <PerimeterPlacementLayer

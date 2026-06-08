@@ -329,7 +329,9 @@ const LeftPanel = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            const traceName = trace.name;
                             closeFloor(trace.id);
+                            toast.success(`Removed perimeter: ${traceName}`);
                           }}
                           className="p-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-chrome-800 transition-colors shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Delete perimeter"
