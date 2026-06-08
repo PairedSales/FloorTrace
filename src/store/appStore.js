@@ -56,7 +56,7 @@ const WORKING_STATE_DEFAULTS = {
   debugDetection: false,
   detectionDebugData: null,
   eraserToolActive: false,
-  eraserBrushSize: 20,
+  eraserBrushSize: 60,
   cropToolActive: false,
   // Viewport transforms (stage scale/zoom, position, rotation)
   zoomScale: null,      // null means needs fitToWindow

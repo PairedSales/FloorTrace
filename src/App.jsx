@@ -587,47 +587,51 @@ function App() {
   // Update perimeter vertices
   const updatePerimeterVertices = useCallback((vertices, saveAction = true) => {
     if (saveAction) undoManager.save();
-    setPerimeterOverlay({ ...perimeterOverlay, vertices });
-  }, [setPerimeterOverlay, perimeterOverlay]);
+    setPerimeterOverlay({ vertices });
+  }, [setPerimeterOverlay]);
 
   // Handle adding perimeter vertex in manual mode
   const handleAddPerimeterVertex = useCallback((vertex) => {
     undoManager.save();
-    const newVertices = [...perimeterVertices, vertex];
+    const currentVertices = useAppStore.getState().perimeterVertices || [];
+    const newVertices = [...currentVertices, vertex];
     setPerimeterVertices(newVertices);
 
     // Update the perimeter overlay in real-time
     if (newVertices.length > 0) {
       setPerimeterOverlay({ vertices: newVertices });
     }
-  }, [perimeterVertices, setPerimeterVertices, setPerimeterOverlay]);
+  }, [setPerimeterVertices, setPerimeterOverlay]);
 
   // Handle closing the perimeter
   const handleClosePerimeter = useCallback(() => {
-    if (perimeterVertices && perimeterVertices.length > 2) {
+    const currentVertices = useAppStore.getState().perimeterVertices;
+    if (currentVertices && currentVertices.length > 2) {
       undoManager.save();
-      setPerimeterOverlay({ vertices: perimeterVertices });
+      setPerimeterOverlay({ vertices: currentVertices });
       setPerimeterVertices(null); // Exit vertex placement mode
     }
-  }, [perimeterVertices, setPerimeterOverlay, setPerimeterVertices]);
+  }, [setPerimeterOverlay, setPerimeterVertices]);
 
   // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
   const handleRemovePerimeterVertex = useCallback(() => {
-    if (perimeterVertices && perimeterVertices.length > 0) {
+    const currentVertices = useAppStore.getState().perimeterVertices;
+    if (currentVertices && currentVertices.length > 0) {
       undoManager.save();
-      const newVertices = perimeterVertices.slice(0, -1);
+      const newVertices = currentVertices.slice(0, -1);
       setPerimeterVertices(newVertices);
     }
-  }, [perimeterVertices, setPerimeterVertices]);
+  }, [setPerimeterVertices]);
 
   // Delete a specific perimeter vertex by index (right-click on vertex)
   const handleDeletePerimeterVertex = useCallback((index) => {
-    if (!perimeterOverlay?.vertices || perimeterOverlay.vertices.length <= 3) return;
+    const overlay = selectPerimeterOverlay(useAppStore.getState());
+    if (!overlay?.vertices || overlay.vertices.length <= 3) return;
     updatePerimeterVertices(
-      perimeterOverlay.vertices.filter((_, i) => i !== index),
+      overlay.vertices.filter((_, i) => i !== index),
       true
     );
-  }, [perimeterOverlay, updatePerimeterVertices]);
+  }, [updatePerimeterVertices]);
 
   // Switch to manual outline drawing: clear the auto-detected perimeter and let the user draw fresh
   const handleManualOutlineMode = () => {
