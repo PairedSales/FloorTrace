@@ -18,7 +18,6 @@ const ToolsPanel = ({
   currentCustomShape,
   onClearTools,
   hasArea,
-  compactHeight,
 }) => {
   const hasToolData =
     measurementLines?.length > 0 ||
@@ -27,10 +26,7 @@ const ToolsPanel = ({
     currentCustomShape;
 
   return (
-    <div 
-      style={{ height: (hasArea && compactHeight) ? `${compactHeight}px` : 'auto' }}
-      className="flex shrink-0 flex-col animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none"
-    >
+    <div className="flex shrink-0 flex-col animate-slide-in-left border-r border-b border-chrome-700 bg-chrome-800 rounded-br-xl pointer-events-none select-none">
       <section className="px-3 py-3 pointer-events-auto">
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">

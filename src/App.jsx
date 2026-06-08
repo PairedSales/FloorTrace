@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { Toaster, toast } from 'sonner';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
@@ -95,7 +95,6 @@ function App() {
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
-  const [leftPanelCompactHeight, setLeftPanelCompactHeight] = useState(null);
 
   const notify = useCallback((message, durationMs = 3000) => {
     const msg = message.toLowerCase();
@@ -942,7 +941,6 @@ function App() {
           onSaveOnExitChange={handleSaveOnExitChange}
           onDimensionFocus={handleDimensionFocus}
           onDimensionBlur={handleDimensionBlur}
-          onCompactHeightChange={setLeftPanelCompactHeight}
         />
 
         {/* Right-side overlay panels — stacked vertically */}
@@ -966,7 +964,6 @@ function App() {
               currentCustomShape={currentCustomShape}
               onClearTools={handleClearTools}
               hasArea={area > 0}
-              compactHeight={leftPanelCompactHeight}
             />
           )}
         </div>
