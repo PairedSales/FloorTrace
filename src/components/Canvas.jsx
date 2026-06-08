@@ -110,6 +110,10 @@ const Canvas = React.memo(forwardRef(({
   const imageSnapAnalyzerSourceRef = useRef(null);
   const imageSnapAnalyzerLoadingRef = useRef(null);
 
+  const isRightClickDraggingRef = useRef(false);
+  const lastRightClickPointerPosRef = useRef({ x: 0, y: 0 });
+  const rightClickPannedRef = useRef(false);
+
   // Track the previous imageObj dimensions so fitToWindow is only triggered
   // when the image actually changes size (not after same-size eraser/crop edits).
   const prevImageDimsRef = useRef(null);
@@ -850,6 +854,28 @@ const Canvas = React.memo(forwardRef(({
 
   // Handle global mouse move for dragging
   const handleStageMouseMove = useCallback((e) => {
+    if (isRightClickDraggingRef.current) {
+      const dx = e.evt.clientX - lastRightClickPointerPosRef.current.x;
+      const dy = e.evt.clientY - lastRightClickPointerPosRef.current.y;
+      
+      if (Math.sqrt(dx * dx + dy * dy) > 3) {
+        rightClickPannedRef.current = true;
+      }
+      
+      if (rightClickPannedRef.current) {
+        const stage = stageRef.current;
+        if (stage) {
+          const newX = stage.x() + dx;
+          const newY = stage.y() + dy;
+          stage.position({ x: newX, y: newY });
+          stage.batchDraw();
+        }
+      }
+      
+      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+      return;
+    }
+
     const stage = e.target.getStage();
     if (!stage) return;
     
@@ -989,6 +1015,28 @@ const Canvas = React.memo(forwardRef(({
   
   // Handle global mouse up
   const handleStageMouseUp = () => {
+    if (isRightClickDraggingRef.current) {
+      isRightClickDraggingRef.current = false;
+      if (rightClickPannedRef.current) {
+        const stage = stageRef.current;
+        if (stage) {
+          const token = Math.random();
+          if (viewportSyncTokenRef) {
+            viewportSyncTokenRef.current = token;
+          }
+          useAppStore.getState().setViewportTransform(
+            scaleRef.current,
+            { x: stage.x(), y: stage.y() },
+            token
+          );
+        }
+        setTimeout(() => {
+          rightClickPannedRef.current = false;
+        }, 100);
+      }
+      return;
+    }
+
     // Eraser tool: commit the erased image
     if (eraser.isErasingRef.current) {
       eraser.handleEraserMouseUp();
@@ -1051,6 +1099,13 @@ const Canvas = React.memo(forwardRef(({
 
   // Handle Stage mousedown for eraser/crop tool
   const handleStageMouseDown = useCallback((e) => {
+    if (e.evt && e.evt.button === 2) {
+      isRightClickDraggingRef.current = true;
+      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+      rightClickPannedRef.current = false;
+      return;
+    }
+
     // Only handle left mouse button
     if (e.evt && e.evt.button !== 0) return;
 
@@ -1250,6 +1305,9 @@ const Canvas = React.memo(forwardRef(({
   // If the crop tool is active and a selection is in progress, right-click cancels it.
   const handleStageContextMenu = (e) => {
     e.evt.preventDefault();
+    if (rightClickPannedRef.current) {
+      return;
+    }
 
     if (cropToolActive && crop.isCroppingRef.current) {
       crop.resetCropState();
@@ -1274,7 +1332,27 @@ const Canvas = React.memo(forwardRef(({
 
   // Handle mouseup outside the canvas to commit eraser/crop operations
   useEffect(() => {
-    const handleWindowMouseUp = () => {
+    const handleWindowMouseUp = (e) => {
+      if (isRightClickDraggingRef.current) {
+        isRightClickDraggingRef.current = false;
+        if (rightClickPannedRef.current) {
+          const stage = stageRef.current;
+          if (stage) {
+            const token = Math.random();
+            if (viewportSyncTokenRef) {
+              viewportSyncTokenRef.current = token;
+            }
+            useAppStore.getState().setViewportTransform(
+              scaleRef.current,
+              { x: stage.x(), y: stage.y() },
+              token
+            );
+          }
+          setTimeout(() => {
+            rightClickPannedRef.current = false;
+          }, 100);
+        }
+      }
       if (eraser.isErasingRef.current) {
         eraser.handleEraserMouseUp();
       }
@@ -1485,7 +1563,10 @@ const Canvas = React.memo(forwardRef(({
               draggingVertex={draggingVertex}
               onVertexDragStart={handleVertexDragStart}
               onVertexDragEnd={handleVertexDragEnd}
-              onDeletePerimeterVertex={onDeletePerimeterVertex}
+              onDeletePerimeterVertex={(index) => {
+                if (rightClickPannedRef.current) return;
+                onDeletePerimeterVertex?.(index);
+              }}
             />
 
             {debugDetection && (
@@ -1554,7 +1635,10 @@ const Canvas = React.memo(forwardRef(({
               selectedMeasurementLineIndex={selectedMeasurementLineIndex}
               onMeasurementLineSelect={handleMeasurementLineSelect}
               onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
-              onMeasurementLinesChange={onMeasurementLinesChange}
+              onMeasurementLinesChange={(nextLines) => {
+                if (rightClickPannedRef.current) return;
+                onMeasurementLinesChange?.(nextLines);
+              }}
             />
 
             {/* Custom Shapes & Preview */}
