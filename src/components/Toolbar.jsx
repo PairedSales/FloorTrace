@@ -77,17 +77,6 @@ const Toolbar = ({
           <Download className="w-3.5 h-3.5" />
           <span>Save As</span>
         </button>
-
-        {floorCount < 7 && (
-          <button
-            onClick={onAddFloor}
-            className="toolbar-btn"
-            title="Add new perimeter trace"
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Add Floor</span>
-          </button>
-        )}
       </div>
 
       <div className="w-px h-5 bg-chrome-700 mx-2" />
@@ -113,6 +102,18 @@ const Toolbar = ({
           <ScanSearch className="w-3.5 h-3.5" />
           <span>Find Perimeter</span>
         </button>
+
+        {floorCount < 7 && (
+          <button
+            onClick={onAddFloor}
+            disabled={!perimeterOverlay?.vertices || perimeterOverlay.vertices.length === 0}
+            className="toolbar-btn"
+            title="Add new perimeter trace"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Add Floor</span>
+          </button>
+        )}
 
         {perimeterOverlay && hasAutoDetection && (
           <button

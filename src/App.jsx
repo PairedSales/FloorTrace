@@ -132,6 +132,10 @@ function App() {
 
   // Reset entire application
   const handleRestart = () => {
+    if (image) {
+      const confirmed = window.confirm('Are you sure you want to restart and clear the current project?');
+      if (!confirmed) return;
+    }
     clearAutosavedDraft();
     undoManager.clear();
     useAppStore.getState().restart();

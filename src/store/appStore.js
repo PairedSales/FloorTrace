@@ -86,6 +86,8 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'projectId',
   'traceInteractionMode',
   'activeTraceId',
+  'angleToolActive',
+  'angleToolState',
 ];
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)

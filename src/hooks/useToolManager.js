@@ -41,7 +41,9 @@ export function useToolManager() {
    * Saves an undo point first so tool activations are undoable.
    */
   const deactivateAll = useCallback(() => {
-    undoManager.save();
+    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive) {
+      undoManager.save();
+    }
     setLineToolActive(false);
     setCurrentMeasurementLine(null);
     setDrawAreaActive(false);
@@ -50,6 +52,10 @@ export function useToolManager() {
     setCropToolActive(false);
     setAngleToolActive(false);
   }, [
+    lineToolActive,
+    drawAreaActive,
+    eraserToolActive,
+    cropToolActive,
     setAngleToolActive,
     setCropToolActive,
     setCurrentCustomShape,
@@ -105,7 +111,6 @@ export function useToolManager() {
 
   const handleAngleToolToggle = useCallback(() => {
     if (angleToolActive) {
-      undoManager.save();
       setAngleToolActive(false);
       return;
     }
