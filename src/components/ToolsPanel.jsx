@@ -28,7 +28,7 @@ const ToolsPanel = ({
 
   return (
     <div 
-      style={{ height: compactHeight ? `${compactHeight}px` : 'auto' }}
+      style={{ height: (hasArea && compactHeight) ? `${compactHeight}px` : 'auto' }}
       className="flex shrink-0 flex-col animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none"
     >
       <section className="px-3 py-3 pointer-events-auto">
