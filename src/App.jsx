@@ -996,6 +996,7 @@ function App() {
         position="top-center" 
         theme="dark"
         closeButton
+        style={{ top: '56px' }}
         toastOptions={{
           classNames: {
             toast: 'group !bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] rounded-lg shadow-xl font-medium text-xs font-sans select-none flex items-center gap-2 p-3 min-w-[300px]',

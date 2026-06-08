@@ -3,6 +3,7 @@ import { shallow } from 'zustand/shallow';
 import useAppStore from '../store/appStore';
 import { AUTOSAVE_FIELDS } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
+import { getDraft, setDraft, removeDraft } from '../utils/draftStorage';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
@@ -34,18 +35,18 @@ export function useAutosave(notify) {
     return stored === null ? true : stored === 'true';
   });
 
-  // ── localStorage helpers ──────────────────────────────────────────────────
+  // ── storage helpers ───────────────────────────────────────────────────────
   const clearAutosavedDraft = useCallback(() => {
-    localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+    removeDraft(LOCAL_DRAFT_STORAGE_KEY);
   }, []);
 
-  const saveAutosavedDraft = useCallback((snapshot) => {
+  const saveAutosavedDraft = useCallback(async (snapshot) => {
     try {
       const payload = {
         state: snapshot,
         history: undoManager.getHistoryState(),
       };
-      localStorage.setItem(LOCAL_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+      await setDraft(LOCAL_DRAFT_STORAGE_KEY, payload);
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
       if (notify) notify('Autosave unavailable (storage full or blocked).');
@@ -56,7 +57,7 @@ export function useAutosave(notify) {
     setSaveOnExit(enabled);
     localStorage.setItem(SAVE_ON_EXIT_KEY, String(enabled));
     if (!enabled) {
-      localStorage.removeItem(LOCAL_DRAFT_STORAGE_KEY);
+      removeDraft(LOCAL_DRAFT_STORAGE_KEY);
     }
   }, []);
 
@@ -66,9 +67,9 @@ export function useAutosave(notify) {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
-        const savedDataRaw = saveOnExitEnabled ? localStorage.getItem(LOCAL_DRAFT_STORAGE_KEY) : null;
-        if (savedDataRaw) {
-          const parsed = JSON.parse(savedDataRaw);
+        const savedData = saveOnExitEnabled ? await getDraft(LOCAL_DRAFT_STORAGE_KEY) : null;
+        if (savedData) {
+          const parsed = savedData;
           // Support both new wrapped format: { state: ..., history: ... }
           // and legacy flat format: { image: ..., roomOverlay: ... }
           const hasWrappedState = parsed && 'state' in parsed;
