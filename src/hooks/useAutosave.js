@@ -87,6 +87,7 @@ export function useAutosave(notify) {
               undoManager.clear();
             }
             setHasRestoredState(true);
+            if (notify) notify('Autosaved project restored.');
             return;
           }
         }
