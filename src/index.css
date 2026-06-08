@@ -58,7 +58,7 @@
            bg-chrome-900/80 border border-chrome-700 text-slate-100
            placeholder-slate-500
            focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent
-           transition-colors duration-150;
+           transition-colors duration-150 select-text;
   }
 
   /* Toggle pill buttons */

@@ -136,7 +136,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  notifications: [],
   showPanelOptions: false,
   showHelpModal: false,
 
@@ -258,8 +257,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     isProcessing: false,
     processingMessage: '',
   }),
-  addNotification: (v) => set((state) => ({ notifications: [...state.notifications, v] })),
-  removeNotification: (id) => set((state) => ({ notifications: state.notifications.filter(n => n.id !== id) })),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),

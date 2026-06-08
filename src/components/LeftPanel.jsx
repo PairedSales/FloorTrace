@@ -5,6 +5,7 @@ import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitCon
 import { calculateArea } from '../utils/areaCalculator';
 import InchesInput from './InchesInput';
 import Toggle from './Toggle';
+import { toast } from 'sonner';
 
 const LeftPanel = ({
   roomDimensions,
@@ -112,8 +113,13 @@ const LeftPanel = ({
 
   const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
 
+  const handleCopyArea = () => {
+    navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
+    toast.success(`Area copied to clipboard: ${areaText} ${areaSuffix}`);
+  };
+
   return (
-    <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none">
+    <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none">
 
       {/* Room Dimensions */}
       <section className="px-3 py-3 pointer-events-auto">
@@ -159,7 +165,7 @@ const LeftPanel = ({
                 onChange={(e) => handleDimensionChange('width', e.target.value)}
                 onFocus={() => handleFocus('width')}
                 onBlur={() => handleBlur('width')}
-                className="panel-input"
+                className="panel-input select-text"
                 placeholder={unit === 'metric' ? '0.00 m' : '0.0 ft'}
               />
             )}
@@ -182,7 +188,7 @@ const LeftPanel = ({
                 onChange={(e) => handleDimensionChange('height', e.target.value)}
                 onFocus={() => handleFocus('height')}
                 onBlur={() => handleBlur('height')}
-                className="panel-input"
+                className="panel-input select-text"
                 placeholder={unit === 'metric' ? '0.00 m' : '0.0 ft'}
               />
             )}
@@ -229,8 +235,12 @@ const LeftPanel = ({
             </div>
           )}
         </div>
-        <div className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2">
-        <div className="font-mono font-bold text-accent leading-none text-center" style={{
+        <div 
+          onDoubleClick={handleCopyArea}
+          title="Double-click to copy to clipboard"
+          className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2 cursor-pointer hover:bg-chrome-950/80 hover:border-accent/40 active:scale-[0.98] transition-all duration-200 pointer-events-auto"
+        >
+          <div className="font-mono font-bold text-accent leading-none text-center" style={{
             fontSize: areaText.length <= 7 ? '1.75rem' : areaText.length <= 9 ? '1.375rem' : '1.125rem',
           }}>
             {areaText}
@@ -300,7 +310,7 @@ const LeftPanel = ({
                           onFocus={() => {
                             if (!isActive) switchFloor(trace.id);
                           }}
-                          className={`flex-1 bg-transparent border-0 p-0 text-[11px] font-medium focus:ring-0 focus:outline-none focus:border-b focus:border-accent/50 min-w-0 ${
+                          className={`flex-1 bg-transparent border-0 p-0 text-[11px] font-medium focus:ring-0 focus:outline-none focus:border-b focus:border-accent/50 min-w-0 select-none focus:select-text ${
                             isActive ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-300'
                           }`}
                         />

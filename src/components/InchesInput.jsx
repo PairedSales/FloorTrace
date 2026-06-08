@@ -78,7 +78,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   return (
     <div
       className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
-                 focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto"
+                 focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           const rect = e.currentTarget.getBoundingClientRect();
@@ -99,7 +99,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={handleFieldFocus('feet')}
           onBlur={handleFieldBlur('feet')}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
-          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600 select-text"
           style={{ width: `${Math.max((feet || '0').length, 1)}ch` }}
           placeholder="0"
         />
@@ -112,7 +112,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={handleFieldFocus('inches')}
           onBlur={handleFieldBlur('inches')}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
-          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600"
+          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600 select-text"
           style={{ width: `${Math.max((inches || '0').length, 1)}ch` }}
           placeholder="0"
         />
