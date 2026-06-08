@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
@@ -30,7 +30,6 @@ const LeftPanel = ({
   onSaveOnExitChange,
   onDimensionFocus,
   onDimensionBlur,
-  onCompactHeightChange,
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
@@ -45,22 +44,6 @@ const LeftPanel = ({
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
   const [editingField, setEditingField] = useState(null);
   const [originalValues, setOriginalValues] = useState({ width: '', height: '' });
-
-  const compactWrapperRef = useRef(null);
-
-  useEffect(() => {
-    if (!compactWrapperRef.current || !onCompactHeightChange) return;
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-        onCompactHeightChange(height);
-      }
-    });
-
-    observer.observe(compactWrapperRef.current);
-    return () => observer.disconnect();
-  }, [onCompactHeightChange]);
 
   useEffect(() => {
     setLocalDimensions(roomDimensions);
@@ -136,10 +119,9 @@ const LeftPanel = ({
   };
 
   return (
-    <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none">
+    <div className="relative z-10 flex w-[228px] shrink-0 flex-col self-start max-h-full animate-slide-in-left overflow-y-auto border-r border-b border-chrome-700 rounded-br-xl bg-chrome-800 pointer-events-none select-none">
 
-      <div ref={compactWrapperRef} className="flex flex-col">
-        {/* Room Dimensions */}
+      {/* Room Dimensions */}
         <section className="px-3 py-3 pointer-events-auto">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
             Room Size
@@ -264,9 +246,8 @@ const LeftPanel = ({
               {areaText}
               <span className="text-accent/60 text-sm font-medium ml-1">{areaSuffix}</span>
             </div>
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       {perimeterTraces.length > 1 && (
         <>
