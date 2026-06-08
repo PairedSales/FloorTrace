@@ -18,6 +18,7 @@ const ToolsPanel = ({
   currentCustomShape,
   onClearTools,
   hasArea,
+  compactHeight,
 }) => {
   const hasToolData =
     measurementLines?.length > 0 ||
@@ -26,7 +27,10 @@ const ToolsPanel = ({
     currentCustomShape;
 
   return (
-    <div className="flex shrink-0 flex-col animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none">
+    <div 
+      style={{ height: compactHeight ? `${compactHeight}px` : 'auto' }}
+      className="flex shrink-0 flex-col animate-slide-in-left border-r border-chrome-700 bg-chrome-800 pointer-events-none select-none"
+    >
       <section className="px-3 py-3 pointer-events-auto">
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
@@ -83,18 +87,20 @@ const ToolsPanel = ({
               </button>
             </>
           )}
+
           <button
-            onClick={onEraserToolToggle}
-            className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
-              eraserToolActive
-                ? 'bg-accent/15 text-accent border border-accent/30'
-                : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
-            }`}
-            title="Eraser"
+            onClick={() => onRotateCanvas?.('clockwise')}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onRotateCanvas?.('counterclockwise');
+            }}
+            className="flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
+            title="Rotate canvas 45° clockwise (right-click for counterclockwise)"
           >
-            <Eraser className="w-4 h-4" />
-            Eraser
+            <RotateCw className="w-4 h-4" />
+            Rotate
           </button>
+
           <button
             onClick={onCropToolToggle}
             className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
@@ -109,16 +115,16 @@ const ToolsPanel = ({
           </button>
 
           <button
-            onClick={() => onRotateCanvas?.('clockwise')}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onRotateCanvas?.('counterclockwise');
-            }}
-            className="flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600"
-            title="Rotate canvas 45° clockwise (right-click for counterclockwise)"
+            onClick={onEraserToolToggle}
+            className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+              eraserToolActive
+                ? 'bg-accent/15 text-accent border border-accent/30'
+                : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+            }`}
+            title="Eraser"
           >
-            <RotateCw className="w-4 h-4" />
-            Rotate
+            <Eraser className="w-4 h-4" />
+            Eraser
           </button>
         </div>
       </section>
