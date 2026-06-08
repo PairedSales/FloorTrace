@@ -5,6 +5,7 @@ import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
+import OptionsOverlay from './components/OptionsOverlay';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import {
   detectRoomFromClick,
@@ -931,21 +932,26 @@ function App() {
           onUnitChange={handleUnitChange}
           isProcessing={isProcessing}
           ocrFailed={ocrFailed}
-          showSideLengths={showSideLengths}
-          onShowSideLengthsChange={setShowSideLengths}
           useInteriorWalls={useInteriorWalls}
           onInteriorWallToggle={handleInteriorWallToggle}
-          autoSnapEnabled={autoSnapEnabled}
-          onAutoSnapChange={setAutoSnapEnabled}
           perimeterOverlay={perimeterOverlay}
-          debugDetection={debugDetection}
-          onDebugDetectionChange={setDebugDetection}
-          showOptions={showPanelOptions}
-          saveOnExit={saveOnExit}
-          onSaveOnExitChange={handleSaveOnExitChange}
           onDimensionFocus={handleDimensionFocus}
           onDimensionBlur={handleDimensionBlur}
         />
+
+        {showPanelOptions && (
+          <OptionsOverlay
+            showSideLengths={showSideLengths}
+            onShowSideLengthsChange={setShowSideLengths}
+            autoSnapEnabled={autoSnapEnabled}
+            onAutoSnapChange={setAutoSnapEnabled}
+            perimeterOverlay={perimeterOverlay}
+            saveOnExit={saveOnExit}
+            onSaveOnExitChange={handleSaveOnExitChange}
+            debugDetection={debugDetection}
+            onDebugDetectionChange={setDebugDetection}
+          />
+        )}
 
         {/* Right-side overlay panels — stacked vertically */}
         <div className="relative z-10 flex shrink-0 flex-col self-start">

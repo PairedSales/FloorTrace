@@ -4,7 +4,6 @@ import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea } from '../utils/areaCalculator';
 import InchesInput from './InchesInput';
-import Toggle from './Toggle';
 import { toast } from 'sonner';
 
 const LeftPanel = ({
@@ -16,18 +15,9 @@ const LeftPanel = ({
   onUnitChange,
   isProcessing,
   ocrFailed,
-  showSideLengths,
-  onShowSideLengthsChange,
   useInteriorWalls,
   onInteriorWallToggle,
-  autoSnapEnabled,
-  onAutoSnapChange,
   perimeterOverlay,
-  debugDetection,
-  onDebugDetectionChange,
-  showOptions,
-  saveOnExit,
-  onSaveOnExitChange,
   onDimensionFocus,
   onDimensionBlur,
 }) => {
@@ -368,54 +358,7 @@ const LeftPanel = ({
       )}
 
       {/* Options/Settings Divider */}
-      {(perimeterTraces.length > 1 || showOptions) && (
-        <div className="panel-divider mx-3" />
-      )}
-
-      {showOptions && (
-        <>
-          {/* Options */}
-          {perimeterOverlay && (
-            <>
-              <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
-                <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
-                  Options
-                </h3>
-                <Toggle
-                  label="Show Lengths"
-                  checked={showSideLengths}
-                  onChange={onShowSideLengthsChange}
-                />
-                <Toggle
-                  label="Auto Snap"
-                  checked={autoSnapEnabled}
-                  onChange={onAutoSnapChange}
-                />
-              </section>
-              <div className="panel-divider mx-3" />
-            </>
-          )}
-
-          <section className="px-3 py-3 flex flex-col gap-2.5 pointer-events-auto">
-            <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-0.5">
-              Settings
-            </h3>
-            <Toggle
-              label="Save on Exit"
-              checked={saveOnExit}
-              onChange={onSaveOnExitChange}
-            />
-            {import.meta.env.DEV && (
-              <Toggle
-                label="Detection Debug"
-                checked={debugDetection}
-                onChange={onDebugDetectionChange}
-              />
-            )}
-          </section>
-          <div className="panel-divider mx-3" />
-        </>
-      )}
+      {/* (LeftPanel ends after the Perimeters list) */}
     </div>
   );
 };
