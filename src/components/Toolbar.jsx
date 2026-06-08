@@ -38,7 +38,7 @@ const Toolbar = ({
         onClick={onRestart}
         title="Restart FloorTrace"
       >
-        <img src={FloorTraceLogo} alt="" className="w-6 h-6" />
+        <img src={FloorTraceLogo} alt="" className="w-6 h-6" draggable="false" />
         <span className="text-sm font-semibold text-slate-100 tracking-tight">
           FloorTrace
         </span>

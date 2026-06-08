@@ -1,11 +1,11 @@
 import { useRef, useEffect, useCallback } from 'react';
+import { Toaster, toast } from 'sonner';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
-import { calculateArea } from './utils/areaCalculator';
 import {
   detectRoomFromClick,
   getBoundaryForMode,
@@ -50,7 +50,6 @@ function App() {
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const debugDetection = useAppStore((s) => s.debugDetection);
   const detectionDebugData = useAppStore((s) => s.detectionDebugData);
-  const notifications = useAppStore((s) => s.notifications);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -84,8 +83,6 @@ function App() {
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
   const setAngleToolState = useAppStore((s) => s.setAngleToolState);
-  const addNotification = useAppStore((s) => s.addNotification);
-  const removeNotification = useAppStore((s) => s.removeNotification);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
@@ -100,12 +97,15 @@ function App() {
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
 
   const notify = useCallback((message, durationMs = 3000) => {
-    const id = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-    addNotification({ id, message });
-    setTimeout(() => {
-      removeNotification(id);
-    }, durationMs);
-  }, [addNotification, removeNotification]);
+    const msg = message.toLowerCase();
+    if (msg.includes('error') || msg.includes('fail') || msg.includes('unable')) {
+      toast.error(message, { duration: durationMs });
+    } else if (msg.includes('success') || msg.includes('detected') || msg.includes('loaded')) {
+      toast.success(message, { duration: durationMs });
+    } else {
+      toast(message, { duration: durationMs });
+    }
+  }, []);
 
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
@@ -972,18 +972,11 @@ function App() {
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
           {/* Processing Message */}
           {isProcessing && (
-            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3 shadow-xl flex items-center gap-3 animate-toast-in">
+            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3 shadow-xl flex items-center gap-3 animate-toast-in select-none">
               <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
               <span className="text-sm text-slate-200 font-medium">{processingMessage || 'Working…'}</span>
             </div>
           )}
-          
-          {/* Notifications Stack */}
-          {notifications.map(toast => (
-            <div key={toast.id} className="pointer-events-auto bg-chrome-800 border border-chrome-700 text-slate-100 text-xs font-medium px-4 py-2 rounded-lg shadow-xl animate-toast-in shadow-black/50">
-              {toast.message}
-            </div>
-          ))}
         </div>
 
         {showHelpModal && (
@@ -998,6 +991,23 @@ function App() {
         accept="image/*,.floorplan"
         onChange={handleFileUpload}
         className="hidden"
+      />
+      <Toaster 
+        position="top-center" 
+        theme="dark"
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: 'group !bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] rounded-lg shadow-xl font-medium text-xs font-sans select-none flex items-center gap-2 p-3 min-w-[300px]',
+            title: '!text-[#F8F8F2]',
+            description: '!text-[#6272A4]',
+            success: '!text-[#50FA7B] !border-[#50FA7B]/30',
+            error: '!text-[#FF5555] !border-[#FF5555]/30',
+            info: '!text-[#8BE9FD] !border-[#8BE9FD]/30',
+            warning: '!text-[#FFB86C] !border-[#FFB86C]/30',
+            closeButton: '!bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] hover:!bg-[#44475A]',
+          }
+        }}
       />
     </div>
   );
