@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Stage, Layer, Image as KonvaImage, Text, Rect, Group } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Circle } from 'react-konva';
 import useAppStore from '../store/appStore';
 import { createImageSnapAnalyzer } from '../utils/imageSnapper';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
@@ -1595,13 +1595,13 @@ const Canvas = React.memo(forwardRef(({
             <Group listening={false}>
               {/* Eraser brush cursor */}
               {eraserToolActive && currentMousePos && (
-                <Rect
-                  x={currentMousePos.x - eraserBrushSize / 2}
-                  y={currentMousePos.y - eraserBrushSize / 2}
-                  width={eraserBrushSize}
-                  height={eraserBrushSize}
-                  stroke="#8BE9FD"
-                  strokeWidth={1.5 / scale}
+                <Circle
+                  x={currentMousePos.x}
+                  y={currentMousePos.y}
+                  radius={eraserBrushSize / 2}
+                  stroke="#FF5555"
+                  strokeWidth={2 / scale}
+                  fill="rgba(255, 85, 85, 0.15)"
                   dash={[4 / scale, 4 / scale]}
                   listening={false}
                 />

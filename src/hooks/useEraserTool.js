@@ -28,41 +28,10 @@ export function useEraserTool({
   const eraserStartPosRef = useRef(null);
   const eraserLastPosRef = useRef(null);
   const eraserAxisRef = useRef(null);
+  const eraserPathRef = useRef([]);
 
   const initialVerticesRef = useRef(null);
   const activeVerticesRef = useRef(null);
-  const hasChangesRef = useRef(false);
-
-  const eraseVerticesNearStroke = useCallback((from, to) => {
-    const vertices = activeVerticesRef.current;
-    if (!vertices || vertices.length <= 3) return;
-
-    const radius = eraserBrushSize / 2;
-    const candidates = [];
-
-    for (let i = 0; i < vertices.length; i++) {
-      const distance = distancePointToSegment(vertices[i], from, to);
-      if (distance <= radius) {
-        candidates.push({ index: i, distance });
-      }
-    }
-
-    if (candidates.length === 0) return;
-
-    const maxRemovals = vertices.length - 3;
-    if (maxRemovals <= 0) return;
-
-    candidates.sort((a, b) => a.distance - b.distance);
-    const removeSet = new Set(candidates.slice(0, maxRemovals).map((c) => c.index));
-    if (removeSet.size === 0) return;
-
-    const nextVertices = vertices.filter((_, index) => !removeSet.has(index));
-    if (nextVertices.length === vertices.length) return;
-
-    activeVerticesRef.current = nextVertices;
-    hasChangesRef.current = true;
-    onPerimeterUpdate?.(nextVertices, false);
-  }, [eraserBrushSize, onPerimeterUpdate]);
 
   const handleEraserMouseDown = useCallback((stage) => {
     if (!eraserToolActive || !perimeterOverlay?.vertices?.length) return false;
@@ -74,14 +43,13 @@ export function useEraserTool({
     eraserStartPosRef.current = pos;
     eraserLastPosRef.current = pos;
     eraserAxisRef.current = null;
+    eraserPathRef.current = [pos];
 
     initialVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
     activeVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
-    hasChangesRef.current = false;
 
-    eraseVerticesNearStroke(pos, pos);
     return true;
-  }, [eraserToolActive, perimeterOverlay, getCanvasCoords, eraseVerticesNearStroke]);
+  }, [eraserToolActive, perimeterOverlay, getCanvasCoords]);
 
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
     if (!isErasingRef.current || !activeVerticesRef.current) return false;
@@ -107,14 +75,12 @@ export function useEraserTool({
       eraserAxisRef.current = null;
     }
 
-    const prev = eraserLastPosRef.current ?? { x: drawX, y: drawY };
     const next = { x: drawX, y: drawY };
-
-    eraseVerticesNearStroke(prev, next);
+    eraserPathRef.current.push(next);
     eraserLastPosRef.current = next;
 
     return true;
-  }, [getCanvasCoords, eraseVerticesNearStroke]);
+  }, [getCanvasCoords]);
 
   const handleEraserMouseUp = useCallback(() => {
     if (!isErasingRef.current) return false;
@@ -124,16 +90,53 @@ export function useEraserTool({
     eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
 
-    if (hasChangesRef.current && activeVerticesRef.current) {
-      onPerimeterUpdate?.(activeVerticesRef.current, true);
+    const vertices = initialVerticesRef.current;
+    const path = eraserPathRef.current;
+
+    if (vertices && vertices.length > 3 && path && path.length > 0) {
+      const radius = eraserBrushSize / 2;
+      const candidates = [];
+
+      for (let i = 0; i < vertices.length; i++) {
+        let minDistance = Infinity;
+        if (path.length === 1) {
+          minDistance = Math.hypot(vertices[i].x - path[0].x, vertices[i].y - path[0].y);
+        } else {
+          for (let j = 0; j < path.length - 1; j++) {
+            const dist = distancePointToSegment(vertices[i], path[j], path[j + 1]);
+            if (dist < minDistance) {
+              minDistance = dist;
+            }
+          }
+        }
+
+        if (minDistance <= radius) {
+          candidates.push({ index: i, distance: minDistance });
+        }
+      }
+
+      if (candidates.length > 0) {
+        const maxRemovals = vertices.length - 3;
+        if (maxRemovals > 0) {
+          candidates.sort((a, b) => a.distance - b.distance);
+          const removeSet = new Set(candidates.slice(0, maxRemovals).map((c) => c.index));
+
+          if (removeSet.size > 0) {
+            const nextVertices = vertices.filter((_, index) => !removeSet.has(index));
+            if (nextVertices.length < vertices.length) {
+              onPerimeterUpdate?.(nextVertices, true);
+            }
+          }
+        }
+      }
     }
 
     initialVerticesRef.current = null;
     activeVerticesRef.current = null;
-    hasChangesRef.current = false;
+    eraserPathRef.current = [];
 
     return true;
-  }, [onPerimeterUpdate]);
+  }, [eraserBrushSize, onPerimeterUpdate]);
 
   const cancelErase = useCallback(() => {
     if (!isErasingRef.current) return;
@@ -142,15 +145,11 @@ export function useEraserTool({
     eraserStartPosRef.current = null;
     eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
-
-    if (initialVerticesRef.current) {
-      onPerimeterUpdate?.(initialVerticesRef.current, false);
-    }
+    eraserPathRef.current = [];
 
     initialVerticesRef.current = null;
     activeVerticesRef.current = null;
-    hasChangesRef.current = false;
-  }, [onPerimeterUpdate]);
+  }, []);
 
   return {
     isErasingRef,
