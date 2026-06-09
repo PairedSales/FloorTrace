@@ -658,17 +658,24 @@ function App() {
     const overlayHeight = Math.abs(overlay.y2 - overlay.y1);
     
     if (overlayWidth === 0 || overlayHeight === 0) return;
+    if (isNaN(dimWidth) || isNaN(dimHeight) || dimWidth <= 0 || dimHeight <= 0) return;
     
-    // Match smallest dimension to smallest measurement
-    const minDim = Math.min(dimWidth, dimHeight);
-    const minOverlay = Math.min(overlayWidth, overlayHeight);
-    
-    const newScale = minDim / minOverlay; // feet per pixel
+    // Scale X is based on horizontal width:
+    const scaleX = dimWidth / overlayWidth;
+    // Scale Y is based on vertical height:
+    const scaleY = dimHeight / overlayHeight;
     
     // Only apply if the scale has actually changed
     const currentCalibration = useAppStore.getState().calibration;
-    if (!currentCalibration.calibrated || Math.abs(currentCalibration.feetPerPixel - newScale) > 1e-9) {
-      applyRoomCalibration(newScale, null, 'room-calibration');
+    const currentScale = currentCalibration.feetPerPixel;
+    
+    const hasChanged = !currentCalibration.calibrated ||
+      typeof currentScale !== 'object' ||
+      Math.abs((currentScale?.x ?? 0) - scaleX) > 1e-9 ||
+      Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9;
+      
+    if (hasChanged) {
+      applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration');
     }
   }, [applyRoomCalibration]);
 

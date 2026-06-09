@@ -181,7 +181,9 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
     const dx = nextVertex.x - vertex.x;
     const dy = nextVertex.y - vertex.y;
     const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-    const lengthInFeet = lengthInPixels * feetPerPixel;
+    const dxFeet = dx * feetPerPixel.x;
+    const dyFeet = dy * feetPerPixel.y;
+    const lengthInFeet = Math.sqrt(dxFeet * dxFeet + dyFeet * dyFeet);
     const formattedLength = formatLength(lengthInFeet, unit, unitStyle);
 
     const midX = (vertex.x + nextVertex.x) / 2;

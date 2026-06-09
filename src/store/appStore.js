@@ -28,7 +28,7 @@ const WORKING_STATE_DEFAULTS = {
   roomDimensions: { width: '', height: '' },
   calibration: {
     calibrated: false,
-    feetPerPixel: 1.0, // feet per pixel
+    feetPerPixel: { x: 1.0, y: 1.0 }, // feet per pixel for X and Y directions
     source: null,
     calibratedRoomId: null,
     createdAt: null,
@@ -200,13 +200,26 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         "Only explicit room calibration may modify calibration scale"
       );
     }
-    if (typeof feetPerPixel !== 'number' || isNaN(feetPerPixel) || !isFinite(feetPerPixel) || feetPerPixel <= 0) {
+    let targetScale;
+    if (typeof feetPerPixel === 'number') {
+      targetScale = { x: feetPerPixel, y: feetPerPixel };
+    } else if (feetPerPixel && typeof feetPerPixel.x === 'number' && typeof feetPerPixel.y === 'number') {
+      targetScale = feetPerPixel;
+    } else {
       throw new Error("Invalid calibration scale");
     }
+
+    if (
+      isNaN(targetScale.x) || !isFinite(targetScale.x) || targetScale.x <= 0 ||
+      isNaN(targetScale.y) || !isFinite(targetScale.y) || targetScale.y <= 0
+    ) {
+      throw new Error("Invalid calibration scale");
+    }
+
     set({
       calibration: {
         calibrated: true,
-        feetPerPixel,
+        feetPerPixel: targetScale,
         source: 'room-calibration',
         calibratedRoomId: roomId,
         createdAt: Date.now(),
@@ -365,10 +378,13 @@ let lastCombinedArea = 0;
 /** Selector to get the combined total area of all visible traces */
 export const selectCombinedArea = (state) => {
   const traces = state.perimeterTraces || [];
-  const feetPerPixel = state.calibration?.feetPerPixel || 1.0;
+  const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
 
-  // Quick check for changes in feetPerPixel or trace object reference
-  let changed = feetPerPixel !== lastFeetPerPixel || traces.length !== lastTraces.length;
+  // Quick check for changes in feetPerPixel properties or trace object reference
+  let changed = !lastFeetPerPixel ||
+                feetPerPixel.x !== lastFeetPerPixel.x ||
+                feetPerPixel.y !== lastFeetPerPixel.y ||
+                traces.length !== lastTraces.length;
   if (!changed) {
     for (let i = 0; i < traces.length; i++) {
       if (traces[i] !== lastTraces[i]) {
@@ -386,7 +402,7 @@ export const selectCombinedArea = (state) => {
     .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
     .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel), 0);
 
-  lastFeetPerPixel = feetPerPixel;
+  lastFeetPerPixel = { ...feetPerPixel };
   lastTraces = traces;
   lastCombinedArea = areaValue;
   return areaValue;
