@@ -307,11 +307,14 @@ const PerimeterLayer = ({
   onVertexDragStart,
   onVertexDragEnd,
   onDeletePerimeterVertex,
+  isSelfIntersecting = false,
 }) => {
   const activeTrace = (perimeterTraces || []).find((t) => t.id === activeTraceId);
   const targetVertices = activeTrace?.vertices;
 
   const canvasRotation = useAppStore((s) => s.canvasRotation);
+  const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
+  const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
 
   // Dev-only Render metrics
   const renderCountRef = useRef(0);
@@ -426,10 +429,10 @@ const PerimeterLayer = ({
         <Line
           key={`active-outline-${activeTrace.id}`}
           points={renderVertices ? renderVertices.flatMap(v => [v.x, v.y]) : []}
-          stroke={activeTrace.color || '#BD93F9'}
+          stroke={strokeColor}
           strokeWidth={2 / scale}
           closed={true}
-          fill={hexToRgba(activeTrace.color || '#BD93F9', 0.12)}
+          fill={fillColor}
           listening={false}
           perfectDrawEnabled={false}
         />

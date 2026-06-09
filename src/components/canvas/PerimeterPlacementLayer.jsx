@@ -14,6 +14,7 @@ const PerimeterPlacementLayer = ({
   drawAreaActive,
   manualEntryMode,
   scale,
+  isPreviewInvalid = false,
 }) => {
 
   if (!roomOverlay || traceInteractionMode !== 'drawing' || !perimeterVertices || perimeterVertices.length >= 3 || lineToolActive || drawAreaActive || manualEntryMode) {
@@ -60,10 +61,10 @@ const PerimeterPlacementLayer = ({
             currentMousePos.x,
             currentMousePos.y
           ]}
-          stroke="#F1FA8C"
+          stroke={isPreviewInvalid ? '#FF5555' : '#F1FA8C'}
           strokeWidth={2 / scale}
           dash={[10 / scale, 5 / scale]}
-          opacity={0.5}
+          opacity={isPreviewInvalid ? 0.8 : 0.5}
         />
       )}
     </>
