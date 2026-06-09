@@ -724,8 +724,9 @@ function App() {
       undoManager.save();
       const newVertices = currentVertices.slice(0, -1);
       setPerimeterVertices(newVertices);
+      setPerimeterOverlay({ vertices: newVertices });
     }
-  }, [setPerimeterVertices]);
+  }, [setPerimeterVertices, setPerimeterOverlay]);
 
   // Delete a specific perimeter vertex by index (right-click on vertex)
   const handleDeletePerimeterVertex = useCallback((index) => {
