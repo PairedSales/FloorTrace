@@ -8,6 +8,8 @@ import { useCanvasPan } from '../hooks/useCanvasPan';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
+import { toast } from 'sonner';
+import { hasSelfIntersection, validateVertexMove } from '../utils/geometryValidation';
 
 const Canvas = React.memo(forwardRef(({
   image,
@@ -75,6 +77,7 @@ const Canvas = React.memo(forwardRef(({
   const [imageObj, setImageObj] = useState(null);
   const [isImageReady, setIsImageReady] = useState(false);
   const [draggingVertex, setDraggingVertex] = useState(null);
+  const [draggedVertexCoords, setDraggedVertexCoords] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
   const [roomStart, setRoomStart] = useState(null);
   const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
@@ -513,6 +516,27 @@ const Canvas = React.memo(forwardRef(({
 
     return result;
   }, [findHorizontalSnap, findVerticalSnap]);
+
+  const isSelfIntersecting = useMemo(() => {
+    if (draggingVertex !== null && draggedVertexCoords && perimeterOverlay?.vertices) {
+      return !validateVertexMove(perimeterOverlay.vertices, draggingVertex, draggedVertexCoords, true);
+    }
+    return false;
+  }, [draggingVertex, draggedVertexCoords, perimeterOverlay]);
+
+  const isPreviewInvalid = useMemo(() => {
+    if (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0 && currentMousePos) {
+      const snappedPoint = autoSnapEnabled ? findVertexSnapPoint(currentMousePos) : null;
+      const finalHoverPoint = snappedPoint || currentMousePos;
+      const candidate = [...perimeterVertices, finalHoverPoint];
+      return hasSelfIntersection(candidate, false);
+    }
+    return false;
+  }, [traceInteractionMode, perimeterVertices, currentMousePos, autoSnapEnabled, findVertexSnapPoint]);
+
+  const handleVertexDragMove = useCallback((index, coords) => {
+    setDraggedVertexCoords(coords);
+  }, []);
   useEffect(() => {
     if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
       const prev = prevImageDimsRef.current;
@@ -682,6 +706,7 @@ const Canvas = React.memo(forwardRef(({
     
     lastDraggedVertexRef.current = index;
     lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
+    setDraggedVertexCoords(null);
 
     if (autoSnapEnabled) {
       ensureImageSnapAnalyzer();
@@ -716,11 +741,18 @@ const Canvas = React.memo(forwardRef(({
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = finalPoint;
 
-    // Undo point was already saved at drag start; just commit the final position
-    onPerimeterUpdate(newVertices, false);
+    // Check if the resulting polygon would self-intersect
+    if (hasSelfIntersection(newVertices, true)) {
+      toast.error('Invalid edit: perimeter cannot self-intersect. Changes reverted.');
+      onCancelUndoSave?.();
+    } else {
+      // Undo point was already saved at drag start; just commit the final position
+      onPerimeterUpdate(newVertices, false);
+    }
     
     // Clean up
     setDraggingVertex(null);
+    setDraggedVertexCoords(null);
   }, [perimeterOverlay, autoSnapEnabled, findVertexSnapPoint, onPerimeterUpdate, onCancelUndoSave]);
 
   const handleMeasurementLineSelect = useCallback((index, e) => {
@@ -851,6 +883,12 @@ const Canvas = React.memo(forwardRef(({
     // Insert the new vertex after the closest edge start
     const newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
+
+    // Validate simple polygon before committing
+    if (hasSelfIntersection(newVertices, true)) {
+      toast.error('Cannot add vertex: would cause perimeter to self-intersect.');
+      return;
+    }
 
     onPerimeterUpdate(newVertices, true); // Save action for undo
   };
@@ -1240,10 +1278,24 @@ const Canvas = React.memo(forwardRef(({
           const distance = Math.sqrt(dx * dx + dy * dy);
 
           if (distance < 10 / scaleRef.current) {
+            // Validate the closed shape before closing
+            if (hasSelfIntersection(perimeterVertices, true)) {
+              toast.error('Cannot close perimeter: would cause self-intersection.');
+              return;
+            }
             // Close the shape
             if (onClosePerimeter) {
               onClosePerimeter();
             }
+            return;
+          }
+        }
+
+        // Validate the open path before adding the vertex
+        if (perimeterVertices && perimeterVertices.length > 0) {
+          const candidate = [...perimeterVertices, finalPoint];
+          if (hasSelfIntersection(candidate, false)) {
+            toast.error('Cannot add vertex: segment would intersect existing lines.');
             return;
           }
         }
@@ -1420,6 +1472,10 @@ const Canvas = React.memo(forwardRef(({
     if (e.key === 'Enter') {
       // Close perimeter on Enter key
       if (perimeterVertices && perimeterVertices.length > 2 && onClosePerimeter) {
+        if (hasSelfIntersection(perimeterVertices, true)) {
+          toast.error('Cannot close perimeter: would cause self-intersection.');
+          return;
+        }
         onClosePerimeter();
       }
       // Close custom shape on Enter key
@@ -1570,11 +1626,13 @@ const Canvas = React.memo(forwardRef(({
               unit={unit}
               draggingVertex={draggingVertex}
               onVertexDragStart={handleVertexDragStart}
+              onVertexDragMove={handleVertexDragMove}
               onVertexDragEnd={handleVertexDragEnd}
               onDeletePerimeterVertex={(index) => {
                 if (rightClickPannedRef.current) return;
                 onDeletePerimeterVertex?.(index);
               }}
+              isSelfIntersecting={isSelfIntersecting}
             />
 
             {debugDetection && (
@@ -1618,6 +1676,7 @@ const Canvas = React.memo(forwardRef(({
               drawAreaActive={drawAreaActive}
               manualEntryMode={manualEntryMode}
               scale={scale}
+              isPreviewInvalid={isPreviewInvalid}
             />
 
             {/* Measurement Lines & Preview */}
