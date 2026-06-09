@@ -186,10 +186,16 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       return t;
     });
 
-    set({
+    const patch = {
       perimeterTraces: updatedTraces,
       isDirty: true,
-    });
+    };
+
+    if (state.perimeterVertices !== null) {
+      patch.perimeterVertices = v ? (v.vertices || []) : null;
+    }
+
+    set(patch);
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setArea: (v) => {}, // Deprecated canonical setter, no-op since area is derived
