@@ -1,5 +1,5 @@
 // Calculate area of a polygon using the shoelace formula
-// feetPerPixel: real-world feet represented by one image pixel
+// feetPerPixel: real-world feet represented by one image pixel { x, y }
 export const calculateArea = (vertices, feetPerPixel) => {
   if (!vertices || vertices.length < 3) {
     return 0;
@@ -17,31 +17,35 @@ export const calculateArea = (vertices, feetPerPixel) => {
   
   area = Math.abs(area) / 2;
   
-  // Convert from pixels to square feet using feetPerPixel
-  const areaInSquareFeet = area * feetPerPixel * feetPerPixel;
+  // Convert from pixels to square feet using non-uniform X and Y scale factors
+  const scaleX = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.x ?? 1.0);
+  const scaleY = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.y ?? 1.0);
+  const areaInSquareFeet = area * scaleX * scaleY;
   
   return areaInSquareFeet;
 };
 
 // Calculate perimeter length
-// feetPerPixel: real-world feet represented by one image pixel
+// feetPerPixel: real-world feet represented by one image pixel { x, y }
 export const calculatePerimeter = (vertices, feetPerPixel) => {
   if (!vertices || vertices.length < 2) {
     return 0;
   }
+  
+  const scaleX = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.x ?? 1.0);
+  const scaleY = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.y ?? 1.0);
   
   let perimeter = 0;
   const n = vertices.length;
   
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    const dx = vertices[j].x - vertices[i].x;
-    const dy = vertices[j].y - vertices[i].y;
+    const dx = (vertices[j].x - vertices[i].x) * scaleX;
+    const dy = (vertices[j].y - vertices[i].y) * scaleY;
     perimeter += Math.sqrt(dx * dx + dy * dy);
   }
   
-  // Convert from pixels to feet using feetPerPixel
-  return perimeter * feetPerPixel;
+  return perimeter;
 };
 
 // Calculate bounding box of vertices

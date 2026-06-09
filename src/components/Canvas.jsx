@@ -167,9 +167,15 @@ const Canvas = React.memo(forwardRef(({
       const dimHeight = parseFloat(roomDimensions.height);
       const overlayWidth = Math.abs(localRoomOverlay.x2 - localRoomOverlay.x1);
       const overlayHeight = Math.abs(localRoomOverlay.y2 - localRoomOverlay.y1);
-      if (overlayWidth > 0 && overlayHeight > 0) {
-        return Math.min(dimWidth, dimHeight) / Math.min(overlayWidth, overlayHeight);
+      if (overlayWidth > 0 && overlayHeight > 0 && !isNaN(dimWidth) && !isNaN(dimHeight)) {
+        return {
+          x: dimWidth / overlayWidth,
+          y: dimHeight / overlayHeight
+        };
       }
+    }
+    if (typeof feetPerPixel === 'number') {
+      return { x: feetPerPixel, y: feetPerPixel };
     }
     return feetPerPixel;
   }, [draggingRoomCorner, localRoomOverlay, roomDimensions, feetPerPixel]);

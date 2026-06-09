@@ -41,7 +41,7 @@ const createMockStoreState = () => ({
   area: 20,
   calibration: {
     calibrated: true,
-    feetPerPixel: 2.0,
+    feetPerPixel: { x: 2.0, y: 2.0 },
     source: 'room-calibration',
     calibratedRoomId: null,
     createdAt: 1234567890
@@ -156,7 +156,7 @@ describe('projectSerializer', () => {
       expect(statePatch.roomOverlay).toEqual({ x1: 5, y1: 5, x2: 50, y2: 50 });
       expect(statePatch.calibration).toEqual({
         calibrated: true,
-        feetPerPixel: 2.0,
+        feetPerPixel: { x: 2.0, y: 2.0 },
         source: 'room-calibration',
         calibratedRoomId: null,
         createdAt: 1234567890
@@ -175,6 +175,20 @@ describe('projectSerializer', () => {
       
       // Image pool map entries restored
       expect(historyPatch.imagePool.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should migrate legacy numeric feetPerPixel to {x, y} format on deserialization', () => {
+      const storeState = createMockStoreState();
+      // Force legacy scalar format in the store state before serialize
+      storeState.calibration.feetPerPixel = 3.5;
+      const project = serializeSketch(storeState);
+
+      // Verify that Zod accepts the serialized version
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      // De-serialize and verify migration to {x: 3.5, y: 3.5}
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.calibration.feetPerPixel).toEqual({ x: 3.5, y: 3.5 });
     });
   });
 

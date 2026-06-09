@@ -47,7 +47,10 @@ const vertexSchema = z.object({
 
 const calibrationSchema = z.object({
   calibrated: z.boolean(),
-  feetPerPixel: z.number(),
+  feetPerPixel: z.union([
+    z.number(),
+    z.object({ x: z.number(), y: z.number() })
+  ]),
   source: z.string().nullable().optional(),
   calibratedRoomId: z.string().nullable().optional(),
   createdAt: z.number().nullable().optional(),
@@ -319,6 +322,17 @@ export function deserializeSketch(project) {
     state.image = null;
   }
   delete state.imageRef;
+
+  // Migrate legacy numeric scale to X/Y scale object format at deserialization boundary
+  if (state.calibration) {
+    const fpp = state.calibration.feetPerPixel;
+    if (typeof fpp === 'number') {
+      state.calibration = {
+        ...state.calibration,
+        feetPerPixel: { x: fpp, y: fpp },
+      };
+    }
+  }
 
   let perimeterTraces = state.perimeterTraces || [];
   if (perimeterTraces.length === 0) {
