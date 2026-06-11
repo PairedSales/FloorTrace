@@ -198,7 +198,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     set(patch);
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
-  setArea: (v) => {}, // Deprecated canonical setter, no-op since area is derived
   setMode: (v) => set({ mode: v }),
   applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration') => {
     if (mutationSource !== 'room-calibration') {
@@ -332,7 +331,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   /** Full restart: clear image and all working state, reset to single floor. */
   restart: () => {
-    get().resetFloors();
+    get().resetPerimeterTraces();
     set({ ...WORKING_STATE_DEFAULTS });
   },
 

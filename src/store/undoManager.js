@@ -1,4 +1,5 @@
 import useAppStore from './appStore';
+import { hashDataUrl } from '../utils/hash';
 
 /**
  * Maximum number of undo steps kept across both stacks combined.
@@ -20,21 +21,6 @@ const MAX_UNDO = 50;
 
 /** @type {Map<string, string>} hash → full data URL */
 const imagePool = new Map();
-
-/**
- * Fast, non-cryptographic hash of a string (FNV-1a, 32-bit).
- * We sample the first 8 KB + the total length so very large images that
- * differ only in later bytes are still distinguishable in practice.
- */
-function hashDataUrl(dataUrl) {
-  const sample = dataUrl.slice(0, 8192) + '|' + dataUrl.length;
-  let h = 0x811c9dc5;
-  for (let i = 0; i < sample.length; i++) {
-    h ^= sample.charCodeAt(i);
-    h = (Math.imul(h, 0x01000193) >>> 0);
-  }
-  return h.toString(16);
-}
 
 /**
  * Intern a data URL into the pool and return its hash key.

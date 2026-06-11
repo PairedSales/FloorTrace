@@ -1,15 +1,18 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Circle } from 'react-konva';
 import useAppStore from '../store/appStore';
-import { createImageSnapAnalyzer } from '../utils/imageSnapper';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates, pointToLineDistance } from './canvas/index.js';
-import { useCanvasZoom } from '../hooks/useCanvasZoom';
-import { useCanvasPan } from '../hooks/useCanvasPan';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
-import { toast } from 'sonner';
-import { hasSelfIntersection, validateVertexMove } from '../utils/geometryValidation';
+
+// Sub-system Hooks
+import { useCameraController } from './canvas/hooks/useCameraController';
+import { useSnappingSystem } from './canvas/hooks/useSnappingSystem';
+import { usePerimeterEditor } from './canvas/hooks/usePerimeterEditor';
+import { useShapeEditor } from './canvas/hooks/useShapeEditor';
+import { useMeasurementSystem } from './canvas/hooks/useMeasurementSystem';
+import { useToolRouter } from './canvas/hooks/useToolRouter';
 
 const Canvas = React.memo(forwardRef(({
   image,
@@ -44,7 +47,7 @@ const Canvas = React.memo(forwardRef(({
   onCustomShapesChange,
   perimeterVertices,
   onAddPerimeterVertex,
-  onClosePerimeter, // New prop to handle closing the shape
+  onClosePerimeter,
   onDeletePerimeterVertex,
   onLineToolToggle,
   autoSnapEnabled,
@@ -71,28 +74,7 @@ const Canvas = React.memo(forwardRef(({
   }
   const backgroundImageLayerRef = useRef(null);
   const contentLayerRef = useRef(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [scale, setScale] = useState(1);
-  const scaleRef = useRef(1); // Track scale imperatively to avoid React reconciliation
-  const [imageObj, setImageObj] = useState(null);
-  const [isImageReady, setIsImageReady] = useState(false);
-  const [draggingVertex, setDraggingVertex] = useState(null);
-  const [draggedVertexCoords, setDraggedVertexCoords] = useState(null);
-  const [draggingRoom, setDraggingRoom] = useState(false);
-  const [roomStart, setRoomStart] = useState(null);
-  const [draggingRoomCorner, setDraggingRoomCorner] = useState(null);
-  const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
-  const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
-  const [currentMousePos, setCurrentMousePos] = useState(null);
-  const [draggingAngle, setDraggingAngle] = useState(false);
-  
-  // Local drag state to bypass global Zustand store updates at 60fps
-  const [localPerimeterVertices, setLocalPerimeterVertices] = useState(null);
-  const [localRoomOverlay, setLocalRoomOverlay] = useState(null);
-  const [localMeasurementLine, setLocalMeasurementLine] = useState(null);
-
-  const clickTimeoutRef = useRef(null);
-  const clickCountRef = useRef(0);
+  const prevImageDimsRef = useRef(null);
 
   // Zustand visual transform selectors
   const zoomScale = useAppStore((s) => s.zoomScale);
@@ -104,259 +86,214 @@ const Canvas = React.memo(forwardRef(({
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
 
-  const lastDraggedVertexRef = useRef(null); // Track last dragged vertex index
-  const lastDragStartPosRef = useRef(null); // Track starting position before drag
-  const lastRoomDragStartRef = useRef(null); // Track room overlay before move/resize
-  const isDraggingRef = useRef(false); // Track if any drag operation is in progress
-  const dragStartPosRef = useRef(null); // Track initial mouse position to detect drag vs click
-  const imageSnapAnalyzerRef = useRef(null);
-  const imageSnapAnalyzerSourceRef = useRef(null);
-  const imageSnapAnalyzerLoadingRef = useRef(null);
+  // Shared refs to break mutual dependencies between hooks
+  const cameraRef = useRef(null);
+  const measurementRef = useRef(null);
+  const shapeRef = useRef(null);
+  const perimeterRef = useRef(null);
+  const routerRef = useRef(null);
 
-  const isRightClickDraggingRef = useRef(false);
-  const lastRightClickPointerPosRef = useRef({ x: 0, y: 0 });
-  const rightClickPannedRef = useRef(false);
-
-  // Track the previous imageObj dimensions so fitToWindow is only triggered
-  // when the image actually changes size (not after same-size eraser/crop edits).
-  const prevImageDimsRef = useRef(null);
-
-  const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
-
-  // ── Composable hooks ───────────────────────────────────────────────────────
-
-  // Helper: convert screen coordinates to canvas coordinates (image-space)
-  // Defined early so hooks that need it can reference it via closure.
+  // Helper to convert screen coordinates to canvas (image) coordinates
   const getCanvasCoords = useCallback(
-    (stage) => getCanvasCoordinates(stage, scaleRef, contentLayerRef),
-    [] // refs are stable — no deps needed
+    (stage) => getCanvasCoordinates(stage, cameraRef.current ? cameraRef.current.scaleRef : { current: 1 }, contentLayerRef),
+    []
   );
 
-  const viewportSyncTokenRef = useRef(null);
+  // ── 1. Snapping System ─────────────────────────────────────────────────────
+  const snapper = useSnappingSystem({
+    autoSnapEnabled,
+    image,
+  });
 
-  const { handleWheel, isZoomingRef } = useCanvasZoom(stageRef, scaleRef, setScale, viewportSyncTokenRef);
-
-  const { canPanCanvas, handleStageDragStart, handleStageDragEnd } = useCanvasPan({
+  // ── 2. Camera Controller ───────────────────────────────────────────────────
+  const camera = useCameraController({
+    image,
     stageRef,
-    scaleRef,
-    isDraggingRef,
-    dragStartPosRef,
-    isZoomingRef,
-    draggingRoom,
-    draggingRoomCorner,
-    draggingVertex,
-    draggingAngle,
+    containerRef,
+    canvasRotation,
+    setViewportTransform,
+    setCanvasRotation,
+    zoomScale,
+    stageX,
+    stageY,
+    viewportSyncToken,
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
     roomOverlay,
     traceInteractionMode,
-    viewportSyncTokenRef,
+    draggingRoom: routerRef.current?.draggingRoom ?? false,
+    draggingRoomCorner: routerRef.current?.draggingRoomCorner ?? null,
+    draggingVertex: perimeterRef.current?.draggingVertex ?? null,
+    draggingAngle: routerRef.current?.draggingAngle ?? false,
+    isDraggingRef: routerRef.current?.isDraggingRef ?? { current: false },
+    dragStartPosRef: routerRef.current?.dragStartPosRef ?? { current: null },
   });
 
+  // ── 3. Eraser Tool ─────────────────────────────────────────────────────────
   const activePerimeterOverlay = useMemo(() => {
-    return localPerimeterVertices 
-      ? { ...perimeterOverlay, vertices: localPerimeterVertices }
+    return perimeterRef.current?.localPerimeterVertices 
+      ? { ...perimeterOverlay, vertices: perimeterRef.current.localPerimeterVertices }
       : perimeterOverlay;
-  }, [perimeterOverlay, localPerimeterVertices]);
-
-  const activeRoomOverlay = localRoomOverlay || roomOverlay;
-  const activeMeasurementLine = localMeasurementLine || currentMeasurementLine;
-  const activeCustomShape = currentCustomShape;
-
-  const activeFeetPerPixel = useMemo(() => {
-    if (draggingRoomCorner && localRoomOverlay && roomDimensions?.width && roomDimensions?.height) {
-      const dimWidth = parseFloat(roomDimensions.width);
-      const dimHeight = parseFloat(roomDimensions.height);
-      const overlayWidth = Math.abs(localRoomOverlay.x2 - localRoomOverlay.x1);
-      const overlayHeight = Math.abs(localRoomOverlay.y2 - localRoomOverlay.y1);
-      if (overlayWidth > 0 && overlayHeight > 0 && !isNaN(dimWidth) && !isNaN(dimHeight)) {
-        return {
-          x: dimWidth / overlayWidth,
-          y: dimHeight / overlayHeight
-        };
-      }
-    }
-    if (typeof feetPerPixel === 'number') {
-      return { x: feetPerPixel, y: feetPerPixel };
-    }
-    return feetPerPixel;
-  }, [draggingRoomCorner, localRoomOverlay, roomDimensions, feetPerPixel]);
-
-  const handleEraserPerimeterUpdate = useCallback((nextVertices, isFinal) => {
-    if (isFinal) {
-      onPerimeterUpdate(nextVertices, true);
-      setLocalPerimeterVertices(null);
-    } else {
-      setLocalPerimeterVertices(nextVertices);
-    }
-  }, [onPerimeterUpdate]);
+  }, [perimeterOverlay]);
 
   const eraser = useEraserTool({
     perimeterOverlay: activePerimeterOverlay,
     eraserToolActive,
     eraserBrushSize,
-    onPerimeterUpdate: handleEraserPerimeterUpdate,
+    onPerimeterUpdate: useCallback((nextVertices, isFinal) => {
+      if (isFinal) {
+        onPerimeterUpdate(nextVertices, true);
+        perimeterRef.current?.setLocalPerimeterVertices(null);
+      } else {
+        perimeterRef.current?.setLocalPerimeterVertices(nextVertices);
+      }
+    }, [onPerimeterUpdate]),
     getCanvasCoords,
   });
 
+  // ── 4. Crop Tool ───────────────────────────────────────────────────────────
   const crop = useCropTool({
-    imageObj,
+    imageObj: camera.imageObj,
     cropToolActive,
     onImageUpdate,
     onCropToolToggle,
     getCanvasCoords,
   });
 
+  // ── 5. Measurement System ──────────────────────────────────────────────────
+  const measurement = useMeasurementSystem({
+    measurementLines,
+    currentMeasurementLine,
+    onMeasurementLinesChange,
+    setSelectedCustomShapeIndex: useCallback((val) => shapeRef.current?.setSelectedCustomShapeIndex(val), []),
+  });
+
+  // ── 6. Shape Editor ────────────────────────────────────────────────────────
+  const shape = useShapeEditor({
+    customShapes,
+    currentCustomShape,
+    onAddCustomShape,
+    onCustomShapeUpdate,
+    onCustomShapesChange,
+    setSelectedMeasurementLineIndex: useCallback((val) => measurementRef.current?.setSelectedMeasurementLineIndex(val), []),
+  });
+
+  // ── 7. Perimeter Editor ────────────────────────────────────────────────────
+  const perimeter = usePerimeterEditor({
+    perimeterOverlay,
+    perimeterVertices,
+    currentMousePos: routerRef.current?.currentMousePos ?? null,
+    autoSnapEnabled,
+    findVertexSnapPoint: snapper.findVertexSnapPoint,
+    scaleRef: camera.scaleRef,
+    traceInteractionMode,
+    onPerimeterUpdate,
+    onSaveUndoPoint,
+    onCancelUndoSave,
+    setPerimeterVertices: useCallback((v) => useAppStore.getState().setPerimeterVertices(v), []),
+    onClosePerimeter,
+    onDeletePerimeterVertex,
+  });
+
+  // ── 8. Tool Router ─────────────────────────────────────────────────────────
+  const router = useToolRouter({
+    stageRef,
+    contentLayerRef,
+    scaleRef: camera.scaleRef,
+    image,
+    imageObj: camera.imageObj,
+    eraserToolActive,
+    cropToolActive,
+    lineToolActive,
+    drawAreaActive,
+    angleToolActive,
+    manualEntryMode,
+    traceInteractionMode,
+    autoSnapEnabled,
+    viewportSyncTokenRef: camera.viewportSyncTokenRef,
+    
+    // Snapping
+    findVertexSnapPoint: snapper.findVertexSnapPoint,
+    findVerticalSnap: snapper.findVerticalSnap,
+    findHorizontalSnap: snapper.findHorizontalSnap,
+    snapRoomOverlayPosition: snapper.snapRoomOverlayPosition,
+    ensureImageSnapAnalyzer: snapper.ensureImageSnapAnalyzer,
+
+    // Perimeter
+    perimeterOverlay,
+    perimeterVertices,
+    draggingVertex: perimeter.draggingVertex,
+    handleClosePerimeter: perimeter.handleClosePerimeter,
+    handleAddPerimeterVertex: perimeter.handleAddPerimeterVertex,
+    handleInsertPerimeterVertex: perimeter.handleInsertPerimeterVertex,
+
+    // Shape
+    customShapes,
+    currentCustomShape,
+    selectedCustomShapeIndex: shape.selectedCustomShapeIndex,
+    setSelectedCustomShapeIndex: shape.setSelectedCustomShapeIndex,
+    onAddCustomShape,
+    onCustomShapeUpdate,
+
+    // Measurement
+    measurementLines,
+    currentMeasurementLine,
+    selectedMeasurementLineIndex: measurement.selectedMeasurementLineIndex,
+    setSelectedMeasurementLineIndex: measurement.setSelectedMeasurementLineIndex,
+    onAddMeasurementLine,
+    onMeasurementLineUpdate,
+
+    // Eraser & Crop
+    eraser,
+    crop,
+
+    // Callbacks
+    onRoomOverlayUpdate,
+    onSaveUndoPoint,
+    onCancelUndoSave,
+    onMeasurementLinesChange,
+    onCustomShapesChange,
+    onLineToolToggle,
+    onDrawAreaToggle,
+    onAngleToolToggle,
+    roomDimensions,
+    roomOverlay,
+    onCanvasClick,
+  });
+
+  // ── 9. Keep refs in sync after every render ────────────────────────────────
   useEffect(() => {
-    if (selectedMeasurementLineIndex !== null && selectedMeasurementLineIndex >= measurementLines.length) {
-      setSelectedMeasurementLineIndex(null);
-    }
-  }, [measurementLines, selectedMeasurementLineIndex]);
+    cameraRef.current = camera;
+    measurementRef.current = measurement;
+    shapeRef.current = shape;
+    perimeterRef.current = perimeter;
+    routerRef.current = router;
+  });
 
+  // Center stage when a new image is loaded
   useEffect(() => {
-    if (selectedCustomShapeIndex !== null && selectedCustomShapeIndex >= customShapes.length) {
-      setSelectedCustomShapeIndex(null);
+    if (camera.imageObj && camera.dimensions.width > 0 && camera.dimensions.height > 0) {
+      const prev = prevImageDimsRef.current;
+      const sameSize = prev && prev.width === camera.imageObj.width && prev.height === camera.imageObj.height;
+
+      if (!sameSize) {
+        prevImageDimsRef.current = { width: camera.imageObj.width, height: camera.imageObj.height };
+        const timeoutId = setTimeout(() => {
+          camera.fitToWindow();
+        }, 100);
+        return () => clearTimeout(timeoutId);
+      }
     }
-  }, [customShapes, selectedCustomShapeIndex]);
+  }, [camera.dimensions, camera.imageObj, camera.fitToWindow]);
 
+  // Expose canvas viewport controls
+  useImperativeHandle(ref, () => ({
+    fitToWindow: () => camera.fitToWindow(),
+    rotateCanvas: (direction) => camera.rotateCanvas(direction),
+  }), [camera]);
 
-
-  // Fit to window function
-  const fitToWindow = useCallback(() => {
-    if (!imageObj || !containerRef.current) return;
-
-    const containerWidth = containerRef.current.offsetWidth;
-    const containerHeight = containerRef.current.offsetHeight;
-
-    // Ensure we have valid container dimensions
-    if (containerWidth <= 0 || containerHeight <= 0) {
-      console.warn('Invalid container dimensions for fit to window');
-      return;
-    }
-
-    const imgWidth = imageObj.width;
-    const imgHeight = imageObj.height;
-
-    const angle = (canvasRotation * Math.PI) / 180;
-    const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
-    const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
-
-    const scaleX = containerWidth / rotatedWidth;
-    const scaleY = containerHeight / rotatedHeight;
-    const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
-
-    // Ensure scale is reasonable
-    const clampedScale = Math.max(0.1, Math.min(5, newScale));
-
-    const newX = (containerWidth - imgWidth * clampedScale) / 2;
-    const newY = (containerHeight - imgHeight * clampedScale) / 2;
-
-    scaleRef.current = clampedScale;
-    setScale(clampedScale);
-
-    // Center the stage
-    if (stageRef.current) {
-      const stage = stageRef.current;
-      stage.scale({ x: clampedScale, y: clampedScale });
-      stage.position({ x: newX, y: newY });
-      stage.batchDraw();
-    }
-
-    // Sync transforms to store using a token
-    const token = Math.random();
-    viewportSyncTokenRef.current = token;
-    setViewportTransform(clampedScale, { x: newX, y: newY }, token);
-  }, [imageObj, canvasRotation, setViewportTransform]);
-
-  // Load image
-  useEffect(() => {
-    if (!image) {
-      setImageObj(null);
-      setIsImageReady(false);
-      return;
-    }
-
-    setIsImageReady(false); // Hide image while loading
-    const img = new window.Image();
-    img.onload = () => {
-      setImageObj(img);
-
-      // Use requestAnimationFrame to ensure DOM is ready
-      requestAnimationFrame(() => {
-        // Double check that container is available and has dimensions
-        if (containerRef.current && img) {
-          // Read current store transforms on-demand (not reactively)
-          const store = useAppStore.getState();
-          const currentZoomScale = store.zoomScale;
-          const currentStageX = store.stageX;
-          const currentStageY = store.stageY;
-
-          // If we already have zoomScale from the store (loaded project or floor switch), restore it
-          if (currentZoomScale !== null) {
-            scaleRef.current = currentZoomScale;
-            setScale(currentZoomScale);
-
-            if (stageRef.current) {
-              const stage = stageRef.current;
-              stage.scale({ x: currentZoomScale, y: currentZoomScale });
-              stage.position({ x: currentStageX, y: currentStageY });
-              stage.batchDraw();
-            }
-            setIsImageReady(true);
-            return;
-          }
-
-          const containerWidth = containerRef.current.offsetWidth;
-          const containerHeight = containerRef.current.offsetHeight;
-
-          // Ensure we have valid container dimensions
-          if (containerWidth > 0 && containerHeight > 0) {
-            const imgWidth = img.width;
-            const imgHeight = img.height;
-
-            const angle = (canvasRotation * Math.PI) / 180;
-            const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
-            const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
-
-            const scaleX = containerWidth / rotatedWidth;
-            const scaleY = containerHeight / rotatedHeight;
-            const newScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some padding
-
-            // Ensure scale is reasonable
-            const clampedScale = Math.max(0.1, Math.min(5, newScale));
-
-            const newX = (containerWidth - imgWidth * clampedScale) / 2;
-            const newY = (containerHeight - imgHeight * clampedScale) / 2;
-
-            scaleRef.current = clampedScale;
-            setScale(clampedScale);
-
-            if (stageRef.current) {
-              const stage = stageRef.current;
-              stage.scale({ x: clampedScale, y: clampedScale });
-              stage.position({ x: newX, y: newY });
-              stage.batchDraw();
-            }
-
-            // Sync transforms to store using a token
-            const token = Math.random();
-            viewportSyncTokenRef.current = token;
-            setViewportTransform(clampedScale, { x: newX, y: newY }, token);
-          }
-        }
-
-        // Show the image after processing
-        setIsImageReady(true);
-      });
-    };
-    img.onerror = () => {
-      console.error('Failed to load image');
-      setIsImageReady(false);
-    };
-    img.src = image;
-  }, [image, canvasRotation, setViewportTransform]);
-
+  // Angle tool auto-initialization at screen center
   const hasInitializedRef = useRef(false);
   useEffect(() => {
     if (angleToolActive && !angleToolState && stageRef.current && contentLayerRef.current) {
@@ -367,7 +304,7 @@ const Canvas = React.memo(forwardRef(({
       const screenCenter = { x: stage.width() / 2, y: stage.height() / 2 };
       try {
         const localCenter = contentLayer.getAbsoluteTransform().invert().point(screenCenter);
-        const initialDist = 100 / scaleRef.current;
+        const initialDist = 100 / camera.scaleRef.current;
         onAngleToolStateChange?.({
           center: { x: localCenter.x, y: localCenter.y },
           angle1: 0,
@@ -385,1148 +322,7 @@ const Canvas = React.memo(forwardRef(({
     if (!angleToolActive) {
       hasInitializedRef.current = false;
     }
-  }, [angleToolActive, angleToolState, onAngleToolStateChange]);
-
-
-  useEffect(() => {
-    imageSnapAnalyzerRef.current = null;
-    imageSnapAnalyzerSourceRef.current = null;
-    imageSnapAnalyzerLoadingRef.current = null;
-  }, [image]);
-
-  const ensureImageSnapAnalyzer = useCallback(() => {
-    if (!autoSnapEnabled || !image) {
-      return;
-    }
-
-    const hasCurrentAnalyzer =
-      imageSnapAnalyzerRef.current &&
-      imageSnapAnalyzerSourceRef.current === image;
-    if (hasCurrentAnalyzer) {
-      return;
-    }
-
-    const isCurrentImageLoading =
-      imageSnapAnalyzerLoadingRef.current &&
-      imageSnapAnalyzerSourceRef.current === image;
-    if (isCurrentImageLoading) {
-      return;
-    }
-
-    imageSnapAnalyzerSourceRef.current = image;
-    imageSnapAnalyzerLoadingRef.current = createImageSnapAnalyzer(image)
-      .then((analyzer) => {
-        // Ignore stale resolutions from previous image values.
-        if (imageSnapAnalyzerSourceRef.current !== image) {
-          return;
-        }
-        imageSnapAnalyzerRef.current = analyzer;
-      })
-      .catch((error) => {
-        console.error('Failed to prepare image snap analyzer:', error);
-        if (imageSnapAnalyzerSourceRef.current === image) {
-          imageSnapAnalyzerRef.current = null;
-        }
-      })
-      .finally(() => {
-        if (imageSnapAnalyzerSourceRef.current === image) {
-          imageSnapAnalyzerLoadingRef.current = null;
-        }
-      });
-  }, [autoSnapEnabled, image]);
-
-  const findVertexSnapPoint = useCallback((point) => {
-    if (!autoSnapEnabled || !point) {
-      return null;
-    }
-
-    ensureImageSnapAnalyzer();
-    const analyzer = imageSnapAnalyzerRef.current;
-    if (!analyzer) {
-      return null;
-    }
-
-    return analyzer.findCornerSnap(point);
-  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
-
-  const findVerticalSnap = useCallback((targetX, y1, y2, searchRadius = 15) => {
-    if (!autoSnapEnabled) {
-      return null;
-    }
-
-    ensureImageSnapAnalyzer();
-    const analyzer = imageSnapAnalyzerRef.current;
-    if (!analyzer) {
-      return null;
-    }
-
-    return analyzer.findVerticalWall(targetX, y1, y2, { searchRadius });
-  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
-
-  const findHorizontalSnap = useCallback((targetY, x1, x2, searchRadius = 15) => {
-    if (!autoSnapEnabled) {
-      return null;
-    }
-
-    ensureImageSnapAnalyzer();
-    const analyzer = imageSnapAnalyzerRef.current;
-    if (!analyzer) {
-      return null;
-    }
-
-    return analyzer.findHorizontalWall(targetY, x1, x2, { searchRadius });
-  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
-
-  const snapRoomOverlayPosition = useCallback((overlay) => {
-    const width = overlay.x2 - overlay.x1;
-    const height = overlay.y2 - overlay.y1;
-
-    const leftSnap = findVerticalSnap(overlay.x1, overlay.y1, overlay.y2);
-    const rightSnap = findVerticalSnap(overlay.x2, overlay.y1, overlay.y2);
-    const topSnap = findHorizontalSnap(overlay.y1, overlay.x1, overlay.x2);
-    const bottomSnap = findHorizontalSnap(overlay.y2, overlay.x1, overlay.x2);
-
-    const snapDeltaX = [
-      leftSnap !== null ? leftSnap - overlay.x1 : null,
-      rightSnap !== null ? rightSnap - overlay.x2 : null,
-    ].filter((value) => value !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
-
-    const snapDeltaY = [
-      topSnap !== null ? topSnap - overlay.y1 : null,
-      bottomSnap !== null ? bottomSnap - overlay.y2 : null,
-    ].filter((value) => value !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
-
-    const result = {
-      x1: overlay.x1 + snapDeltaX,
-      y1: overlay.y1 + snapDeltaY,
-      x2: overlay.x1 + snapDeltaX + width,
-      y2: overlay.y1 + snapDeltaY + height,
-    };
-
-    // Preserve and translate the polygon so it stays in sync with the rect
-    if (Array.isArray(overlay.polygon)) {
-      result.polygon = overlay.polygon.map(p => ({
-        x: p.x + snapDeltaX,
-        y: p.y + snapDeltaY,
-      }));
-    }
-    if (overlay.confidence !== undefined) {
-      result.confidence = overlay.confidence;
-    }
-
-    return result;
-  }, [findHorizontalSnap, findVerticalSnap]);
-
-  const isSelfIntersecting = useMemo(() => {
-    if (draggingVertex !== null && draggedVertexCoords && perimeterOverlay?.vertices) {
-      return !validateVertexMove(perimeterOverlay.vertices, draggingVertex, draggedVertexCoords, true);
-    }
-    return false;
-  }, [draggingVertex, draggedVertexCoords, perimeterOverlay]);
-
-  const isPreviewInvalid = useMemo(() => {
-    if (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0 && currentMousePos) {
-      const snappedPoint = autoSnapEnabled ? findVertexSnapPoint(currentMousePos) : null;
-      const finalHoverPoint = snappedPoint || currentMousePos;
-      const candidate = [...perimeterVertices, finalHoverPoint];
-      return hasSelfIntersection(candidate, false);
-    }
-    return false;
-  }, [traceInteractionMode, perimeterVertices, currentMousePos, autoSnapEnabled, findVertexSnapPoint]);
-
-  const handleVertexDragMove = useCallback((index, coords) => {
-    setDraggedVertexCoords(coords);
-  }, []);
-  useEffect(() => {
-    if (imageObj && dimensions.width > 0 && dimensions.height > 0) {
-      const prev = prevImageDimsRef.current;
-      const sameSize =
-        prev &&
-        prev.width === imageObj.width &&
-        prev.height === imageObj.height;
-
-      // Only refit when the image dimensions genuinely changed (new file loaded).
-      // Skip when the same-size image is produced by the eraser or crop tools,
-      // so those tools don't snap the canvas position back to center.
-      if (!sameSize) {
-        prevImageDimsRef.current = { width: imageObj.width, height: imageObj.height };
-        // Small delay to ensure the layout is stable
-        const timeoutId = setTimeout(() => {
-          fitToWindow();
-        }, 100);
-        return () => clearTimeout(timeoutId);
-      }
-    }
-  }, [dimensions, imageObj, fitToWindow]);
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const measure = () => {
-      const w = el.clientWidth;
-      const h = el.clientHeight;
-      if (w && h) setDimensions({ width: w, height: h });
-    };
-
-    // Initial measurement after layout
-    const raf = requestAnimationFrame(measure);
-
-    // Debounced measure to avoid excessive re-renders during resize
-    let resizeTimer = null;
-    const debouncedMeasure = () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(measure, 100);
-    };
-
-    // Observe future size changes (debounced)
-    const ro = new ResizeObserver(debouncedMeasure);
-    ro.observe(el);
-
-    // Fallback on window resize as well
-    window.addEventListener('resize', debouncedMeasure);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      if (resizeTimer) clearTimeout(resizeTimer);
-      ro.disconnect();
-      window.removeEventListener('resize', debouncedMeasure);
-    };
-  }, []);
-  // Sync stage transform from store when store values change (e.g. on floor switch or project load)
-  useEffect(() => {
-    if (viewportSyncToken && viewportSyncToken === viewportSyncTokenRef.current) {
-      viewportSyncTokenRef.current = null; // consume token
-      return;
-    }
-
-    const stage = stageRef.current;
-    if (!stage || zoomScale === null) return;
-
-    const currentScale = stage.scaleX();
-    const currentX = stage.x();
-    const currentY = stage.y();
-
-    const scaleDiff = Math.abs(currentScale - zoomScale);
-    const xDiff = Math.abs(currentX - stageX);
-    const yDiff = Math.abs(currentY - stageY);
-
-    // If they differ significantly, sync them imperatively
-    if (scaleDiff > 0.001 || xDiff > 0.1 || yDiff > 0.1) {
-      scaleRef.current = zoomScale;
-      setScale(zoomScale);
-      stage.scale({ x: zoomScale, y: zoomScale });
-      stage.position({ x: stageX, y: stageY });
-      stage.batchDraw();
-    }
-  }, [zoomScale, stageX, stageY, viewportSyncToken]);
-
-  const rotateCanvas = useCallback((direction = 'clockwise') => {
-    const delta = direction === 'counterclockwise' ? -45 : 45;
-    const nextRotation = (canvasRotation + delta + 360) % 360;
-    setCanvasRotation(nextRotation);
-  }, [canvasRotation, setCanvasRotation]);
-
-  // Expose canvas viewport controls
-  useImperativeHandle(ref, () => ({
-    fitToWindow: () => fitToWindow(),
-    rotateCanvas,
-  }), [fitToWindow, rotateCanvas]);
-
-  // getCanvasCoords is defined above near the hook declarations.
-
-  // Handle room overlay dragging (move entire overlay)
-  const handleRoomMouseDown = useCallback((e) => {
-    if (!roomOverlay) return;
-    
-    // ONLY allow LEFT mouse button (button 0) for dragging
-    if (e.evt && e.evt.button !== 0) return;
-    
-    e.cancelBubble = true;
-    e.evt.preventDefault();
-    
-    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
-    onSaveUndoPoint?.();
-    
-    // Save initial state for change detection at drag end
-    lastRoomDragStartRef.current = { ...roomOverlay };
-    
-    // Track drag start position
-    const canvasPos = getCanvasCoords(e.target.getStage());
-    if (canvasPos) {
-      dragStartPosRef.current = canvasPos;
-    }
-
-    if (autoSnapEnabled) {
-      ensureImageSnapAnalyzer();
-    }
-    
-    setLocalRoomOverlay(roomOverlay);
-    setDraggingRoom(true);
-    if (canvasPos) {
-      setRoomStart(canvasPos);
-    }
-  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
-
-  // Handle room corner dragging (with snapping)
-  const handleRoomCornerMouseDown = useCallback((corner, e) => {
-    if (!roomOverlay) return;
-    
-    // ONLY allow LEFT mouse button (button 0) for dragging
-    if (e.evt && e.evt.button !== 0) return;
-    
-    e.cancelBubble = true;
-    e.evt.preventDefault();
-    
-    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
-    onSaveUndoPoint?.();
-    
-    // Save initial state for change detection at drag end
-    lastRoomDragStartRef.current = { ...roomOverlay };
-    
-    // Track drag start position
-    const canvasPos = getCanvasCoords(e.target.getStage());
-    if (canvasPos) {
-      dragStartPosRef.current = canvasPos;
-    }
-
-    if (autoSnapEnabled) {
-      ensureImageSnapAnalyzer();
-    }
-    
-    setLocalRoomOverlay(roomOverlay);
-    setDraggingRoomCorner(corner);
-  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
-
-  // Handle perimeter vertex dragging (no snapping)
-  const handleVertexDragStart = useCallback((index) => {
-    if (!perimeterOverlay) return;
-    
-    // Save undo point BEFORE any drag changes (state still reflects pre-drag position)
-    onSaveUndoPoint?.();
-    
-    lastDraggedVertexRef.current = index;
-    lastDragStartPosRef.current = { ...perimeterOverlay.vertices[index] };
-    setDraggedVertexCoords(null);
-
-    if (autoSnapEnabled) {
-      ensureImageSnapAnalyzer();
-    }
-    
-    setDraggingVertex(index);
-  }, [perimeterOverlay, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
-
-  // Line-by-line port from PerimeterOverlayControl.xaml.cs:Vertex_MouseUp
-  const handleVertexDragEnd = useCallback((index, e) => {
-    // Get current position from Konva node's actual dragged coordinates in parent space
-    const currentVertex = { x: e.target.x(), y: e.target.y() };
-    
-    // Apply snapping to intersection points (disabled when Shift is held)
-    const shiftHeld = e?.evt?.shiftKey ?? false;
-    const snappedPoint = (autoSnapEnabled && !shiftHeld)
-      ? findVertexSnapPoint(currentVertex)
-      : null;
-    
-    // Use snapped position if available, otherwise use raw position
-    const finalPoint = snappedPoint || currentVertex;
-    
-    // If vertex didn't actually move, cancel the undo point saved at drag start
-    const origVertex = lastDragStartPosRef.current;
-    if (origVertex && finalPoint.x === origVertex.x && finalPoint.y === origVertex.y) {
-      onCancelUndoSave?.();
-      setDraggingVertex(null);
-      return;
-    }
-    
-    // Now update the actual data point
-    let newVertices = [...perimeterOverlay.vertices];
-    newVertices[index] = finalPoint;
-
-    // Check if the resulting polygon would self-intersect
-    if (hasSelfIntersection(newVertices, true)) {
-      toast.error('Invalid edit: perimeter cannot self-intersect. Changes reverted.');
-      onCancelUndoSave?.();
-    } else {
-      // Undo point was already saved at drag start; just commit the final position
-      onPerimeterUpdate(newVertices, false);
-    }
-    
-    // Clean up
-    setDraggingVertex(null);
-    setDraggedVertexCoords(null);
-  }, [perimeterOverlay, autoSnapEnabled, findVertexSnapPoint, onPerimeterUpdate, onCancelUndoSave]);
-
-  const handleMeasurementLineSelect = useCallback((index, e) => {
-    e.cancelBubble = true;
-    setSelectedMeasurementLineIndex(index);
-    setSelectedCustomShapeIndex(null);
-  }, []);
-
-  const handleCustomShapeSelect = useCallback((index, e) => {
-    e.cancelBubble = true;
-    setSelectedCustomShapeIndex(index);
-    setSelectedMeasurementLineIndex(null);
-  }, []);
-
-  const handleMeasurementLineDragEnd = useCallback((index, e) => {
-    if (!onMeasurementLinesChange) return;
-    e.cancelBubble = true;
-    const deltaX = e.target.x();
-    const deltaY = e.target.y();
-    if (!deltaX && !deltaY) return;
-
-    const nextLines = measurementLines.map((line, lineIndex) => (
-      lineIndex === index
-        ? {
-          ...line,
-          start: { x: line.start.x + deltaX, y: line.start.y + deltaY },
-          end: { x: line.end.x + deltaX, y: line.end.y + deltaY }
-        }
-        : line
-    ));
-
-    e.target.position({ x: 0, y: 0 });
-    onMeasurementLinesChange(nextLines);
-  }, [measurementLines, onMeasurementLinesChange]);
-
-  const handleCustomShapeDragEnd = useCallback((index, e) => {
-    if (!onCustomShapesChange) return;
-    e.cancelBubble = true;
-    const deltaX = e.target.x();
-    const deltaY = e.target.y();
-    if (!deltaX && !deltaY) return;
-
-    const nextShapes = customShapes.map((shape, shapeIndex) => (
-      shapeIndex === index
-        ? {
-          ...shape,
-          vertices: shape.vertices.map((vertex) => ({
-            x: vertex.x + deltaX,
-            y: vertex.y + deltaY
-          }))
-        }
-        : shape
-    ));
-
-    e.target.position({ x: 0, y: 0 });
-    onCustomShapesChange(nextShapes);
-  }, [customShapes, onCustomShapesChange]);
-
-  // Eraser and crop tool logic live in useEraserTool / useCropTool (see hook calls above).
-
-  // Handle double-click to close custom shape or add perimeter vertex
-  const handleStageDoubleClick = (e) => {
-    // IMPORTANT: Only respond to LEFT double-click (button 0)
-    if (e.evt && e.evt.button !== 0) return;
-
-    // Line tool: a double click finishes the line
-    const storeCurrentLine = useAppStore.getState().currentMeasurementLine;
-    if (lineToolActive && storeCurrentLine && storeCurrentLine.start) {
-      const stage = e.target.getStage();
-      if (!stage) return;
-      const finalPoint = getCanvasCoords(stage);
-      if (!finalPoint) return;
-
-      const newLine = { start: storeCurrentLine.start, end: finalPoint };
-      onAddMeasurementLine(newLine);
-      onMeasurementLineUpdate(null); // Reset for next line
-      return;
-    }
-
-    // Draw area tool - close the shape
-    const storeCustomShape = useAppStore.getState().currentCustomShape;
-    if (drawAreaActive && storeCustomShape && !storeCustomShape.closed && storeCustomShape.vertices.length >= 3) {
-      const finalShape = { ...storeCustomShape, closed: true };
-      onAddCustomShape(finalShape);
-      onCustomShapeUpdate(null); // Reset for next shape
-      return;
-    }
-
-    // Perimeter tool - add vertex (only when no tools are active)
-    if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive) return;
-    
-    // Don't add vertex if clicking on a perimeter vertex (Circle)
-    const targetType = e.target.getType();
-    if (targetType === 'Circle') return; // Prevent adding vertex when clicking on existing vertices
-    
-    const stage = e.target.getStage();
-    if (!stage) return;
-    
-    const clickPoint = getCanvasCoords(stage);
-    if (!clickPoint) return;
-    
-    // Apply snapping to corner points
-    const snappedPoint = autoSnapEnabled
-      ? findVertexSnapPoint(clickPoint)
-      : null;
-    
-    // Use snapped position if available, otherwise use raw position
-    const finalPoint = snappedPoint || clickPoint;
-    
-    // Find the closest edge to insert the new vertex
-    const vertices = perimeterOverlay.vertices;
-    let closestEdgeIndex = 0;
-    let minDistance = Infinity;
-    
-    for (let i = 0; i < vertices.length; i++) {
-      const v1 = vertices[i];
-      const v2 = vertices[(i + 1) % vertices.length];
-      
-      // Calculate distance from point to line segment
-      const distance = pointToLineDistance(clickPoint, v1, v2);
-      
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestEdgeIndex = i;
-      }
-    }
-    
-    // Insert the new vertex after the closest edge start
-    const newVertices = [...vertices];
-    newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
-
-    // Validate simple polygon before committing
-    if (hasSelfIntersection(newVertices, true)) {
-      toast.error('Cannot add vertex: would cause perimeter to self-intersect.');
-      return;
-    }
-
-    onPerimeterUpdate(newVertices, true); // Save action for undo
-  };
-
-
-
-
-  // Handle global mouse move for dragging
-  const handleStageMouseMove = useCallback((e) => {
-    if (isRightClickDraggingRef.current) {
-      const dx = e.evt.clientX - lastRightClickPointerPosRef.current.x;
-      const dy = e.evt.clientY - lastRightClickPointerPosRef.current.y;
-      
-      if (Math.sqrt(dx * dx + dy * dy) > 3) {
-        rightClickPannedRef.current = true;
-      }
-      
-      if (rightClickPannedRef.current) {
-        const stage = stageRef.current;
-        if (stage) {
-          const newX = stage.x() + dx;
-          const newY = stage.y() + dy;
-          stage.position({ x: newX, y: newY });
-          stage.batchDraw();
-        }
-      }
-      
-      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
-      return;
-    }
-
-    const stage = e.target.getStage();
-    if (!stage) return;
-    
-    const mousePoint = getCanvasCoords(stage);
-    if (!mousePoint) return;
-    
-    // Only update global crosshair position if we are NOT dragging and a tool that needs it is active.
-    // This prevents a full Canvas re-render just from moving the mouse during normal operation.
-    const needsMousePos = eraserToolActive || 
-      (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) || 
-      (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0);
-
-    if (needsMousePos && !draggingVertex && !draggingRoom && !draggingRoomCorner) {
-      setCurrentMousePos(mousePoint);
-    }
-
-    // Eraser tool: continuous erase during drag
-    if (eraserToolActive && eraser.isErasingRef.current) {
-      eraser.handleEraserMouseMove(stage, e.evt.shiftKey);
-      return;
-    }
-
-    // Crop tool: update selection rectangle during drag
-    if (cropToolActive && crop.isCroppingRef.current) {
-      crop.handleCropMouseMove(stage);
-      return;
-    }
-    
-    // Detect if mouse has moved enough to be considered a drag
-    if (dragStartPosRef.current && !isDraggingRef.current) {
-      const dx = mousePoint.x - dragStartPosRef.current.x;
-      const dy = mousePoint.y - dragStartPosRef.current.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      // If moved more than 3 pixels, consider it a drag
-      if (distance > 3) {
-        isDraggingRef.current = true;
-      }
-    }
-    
-    // Handle room overlay dragging with live edge scans.
-    // Holding Shift disables auto-snapping for precise placement.
-    if (draggingRoom && roomStart && activeRoomOverlay) {
-      const deltaX = mousePoint.x - roomStart.x;
-      const deltaY = mousePoint.y - roomStart.y;
-      
-      const movedOverlay = {
-        x1: activeRoomOverlay.x1 + deltaX,
-        y1: activeRoomOverlay.y1 + deltaY,
-        x2: activeRoomOverlay.x2 + deltaX,
-        y2: activeRoomOverlay.y2 + deltaY,
-        // Translate polygon along with the bounding rect so the outline stays in sync
-        ...(Array.isArray(activeRoomOverlay.polygon)
-          ? { polygon: activeRoomOverlay.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
-          : {}),
-        ...(activeRoomOverlay.confidence !== undefined ? { confidence: activeRoomOverlay.confidence } : {}),
-      };
-      
-      const shiftHeld = e.evt.shiftKey;
-      const newOverlay = (autoSnapEnabled && !shiftHeld) ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
-      setLocalRoomOverlay(newOverlay);
-      setRoomStart(mousePoint);
-      return;
-    }
-    
-    // Handle room corner dragging with local edge scans while resizing.
-    // Holding Shift disables auto-snapping for precise placement.
-    if (draggingRoomCorner && activeRoomOverlay) {
-      // Only copy coordinates (and confidence metadata) — resizing invalidates
-      // the detected polygon boundary so it is intentionally not preserved.
-      const newOverlay = { x1: activeRoomOverlay.x1, y1: activeRoomOverlay.y1, x2: activeRoomOverlay.x2, y2: activeRoomOverlay.y2 };
-      if (activeRoomOverlay.confidence !== undefined) {
-        newOverlay.confidence = activeRoomOverlay.confidence;
-      }
-      const shiftHeld = e.evt.shiftKey;
-      
-      if (draggingRoomCorner === 'tl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
-      } else if (draggingRoomCorner === 'tr') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
-      } else if (draggingRoomCorner === 'bl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
-      } else if (draggingRoomCorner === 'br') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
-      }
-      
-      setLocalRoomOverlay(newOverlay);
-      return;
-    }
-    
-    // Line tool preview
-    if (lineToolActive && currentMeasurementLine && currentMeasurementLine.start) {
-      setLocalMeasurementLine({
-        start: currentMeasurementLine.start,
-        end: mousePoint
-      });
-    }
-
-    // Custom shape preview
-    if (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) {
-      setCurrentMousePos(mousePoint);
-    }
-  }, [
-    eraserToolActive,
-    cropToolActive,
-    eraser,
-    crop,
-    draggingRoom,
-    roomStart,
-    activeRoomOverlay,
-    autoSnapEnabled,
-    snapRoomOverlayPosition,
-    draggingRoomCorner,
-    findVerticalSnap,
-    findHorizontalSnap,
-    lineToolActive,
-    currentMeasurementLine,
-    drawAreaActive,
-    currentCustomShape,
-    perimeterOverlay,
-    perimeterVertices,
-    roomOverlay,
-    draggingVertex,
-  ]);
-  
-  // Handle global mouse up
-  const handleStageMouseUp = () => {
-    if (isRightClickDraggingRef.current) {
-      isRightClickDraggingRef.current = false;
-      if (rightClickPannedRef.current) {
-        const stage = stageRef.current;
-        if (stage) {
-          const token = Math.random();
-          if (viewportSyncTokenRef) {
-            viewportSyncTokenRef.current = token;
-          }
-          useAppStore.getState().setViewportTransform(
-            scaleRef.current,
-            { x: stage.x(), y: stage.y() },
-            token
-          );
-        }
-        setTimeout(() => {
-          rightClickPannedRef.current = false;
-        }, 100);
-      }
-      return;
-    }
-
-    // Eraser tool: commit the erased image
-    if (eraser.isErasingRef.current) {
-      eraser.handleEraserMouseUp();
-      return;
-    }
-
-    // Crop tool: apply the crop
-    if (crop.isCroppingRef.current) {
-      crop.handleCropMouseUp(crop.cropSelection);
-      return;
-    }
-
-    if (draggingRoom && localRoomOverlay) {
-      onRoomOverlayUpdate?.(localRoomOverlay, false);
-      if (lastRoomDragStartRef.current && roomOverlay) {
-        const changed = 
-          lastRoomDragStartRef.current.x1 !== localRoomOverlay.x1 ||
-          lastRoomDragStartRef.current.y1 !== localRoomOverlay.y1 ||
-          lastRoomDragStartRef.current.x2 !== localRoomOverlay.x2 ||
-          lastRoomDragStartRef.current.y2 !== localRoomOverlay.y2;
-        
-        if (!changed) {
-          onCancelUndoSave?.();
-        }
-      }
-      setDraggingRoom(false);
-      setLocalRoomOverlay(null);
-      setRoomStart(null);
-      lastRoomDragStartRef.current = null;
-    }
-    if (draggingRoomCorner && localRoomOverlay) {
-      onRoomOverlayUpdate?.(localRoomOverlay, false);
-      if (lastRoomDragStartRef.current && roomOverlay) {
-        const changed = 
-          lastRoomDragStartRef.current.x1 !== localRoomOverlay.x1 ||
-          lastRoomDragStartRef.current.y1 !== localRoomOverlay.y1 ||
-          lastRoomDragStartRef.current.x2 !== localRoomOverlay.x2 ||
-          lastRoomDragStartRef.current.y2 !== localRoomOverlay.y2;
-        
-        if (!changed) {
-          onCancelUndoSave?.();
-        }
-      }
-      setDraggingRoomCorner(null);
-      setLocalRoomOverlay(null);
-      lastRoomDragStartRef.current = null;
-    }
-    
-    // Reset drag tracking after a short delay to prevent click from firing
-    if (isDraggingRef.current) {
-      setTimeout(() => {
-        isDraggingRef.current = false;
-        dragStartPosRef.current = null;
-      }, 100);
-    } else {
-      // No drag occurred, reset immediately
-      dragStartPosRef.current = null;
-    }
-  };
-
-  // Handle Stage mousedown for eraser/crop tool
-  const handleStageMouseDown = useCallback((e) => {
-    if (e.evt && e.evt.button === 2) {
-      isRightClickDraggingRef.current = true;
-      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
-      rightClickPannedRef.current = false;
-      return;
-    }
-
-    // Only handle left mouse button
-    if (e.evt && e.evt.button !== 0) return;
-
-    const stage = e.target.getStage();
-    if (!stage) return;
-
-    if (eraserToolActive) {
-      e.cancelBubble = true;
-      e.evt.preventDefault();
-      eraser.handleEraserMouseDown(stage);
-      return;
-    }
-
-    if (cropToolActive) {
-      e.cancelBubble = true;
-      e.evt.preventDefault();
-      crop.handleCropMouseDown(stage);
-      return;
-    }
-  }, [eraserToolActive, cropToolActive, eraser, crop]);
-  const handleStageClick = (e) => {
-    // Ignore right-clicks (button=2) and side mouse buttons (button=3/4);
-    // right-clicks are handled by handleStageContextMenu, and side buttons are
-    // reserved for undo/redo.
-    if (e.evt.button === 2 || e.evt.button === 3 || e.evt.button === 4) {
-      return;
-    }
-
-    // Ignore clicks that occurred after a drag operation
-    if (isDraggingRef.current) {
-      return;
-    }
-
-    // Eraser and crop tools handle their own mousedown/mouseup; skip click processing
-    if (eraserToolActive || cropToolActive) {
-      return;
-    }
-
-    const target = e.target;
-    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')) {
-      return;
-    }
-
-    setSelectedMeasurementLineIndex(null);
-    setSelectedCustomShapeIndex(null);
-    
-    // Check if we're in a mode that needs single-click handling
-    const needsSingleClickHandling = 
-      (manualEntryMode && onCanvasClick) ||
-      (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) ||
-      (lineToolActive && onMeasurementLineUpdate) ||
-      (drawAreaActive && onCustomShapeUpdate);
-    
-    // If we don't need single-click handling, just return immediately
-    // This allows double-click to work without interference
-    if (!needsSingleClickHandling) {
-      return;
-    }
-    
-    // Increment click count
-    clickCountRef.current += 1;
-    
-    // Clear any existing timeout
-    if (clickTimeoutRef.current) {
-      clearTimeout(clickTimeoutRef.current);
-    }
-    
-    // Set a timeout to reset click count
-    clickTimeoutRef.current = setTimeout(() => {
-      clickCountRef.current = 0;
-    }, 300); // 300ms window for double-click detection
-    
-    // If this is a double-click, let the double-click handler deal with it
-    if (clickCountRef.current >= 2) {
-      // We are handling double click separately in handleStageDoubleClick
-      // so we just reset and return here to avoid single click logic firing.
-      clickCountRef.current = 0;
-      clearTimeout(clickTimeoutRef.current);
-      return;
-    }
-    
-    // Wait a bit to see if a second click comes (to avoid processing single click when double-clicking)
-    setTimeout(() => {
-      if (clickCountRef.current !== 1) return; // A double-click happened, skip single-click processing
-      
-      // Manual entry mode takes priority
-      if (manualEntryMode && onCanvasClick) {
-        const stage = e.target.getStage();
-        if (!stage) return;
-        
-        const clickPoint = getCanvasCoords(stage);
-        if (!clickPoint) return;
-        
-        onCanvasClick(clickPoint);
-        return;
-      }
-      
-      // Perimeter vertex placement mode (only active after manual mode or trace perimeter)
-      // perimeterVertices !== null means user has explicitly entered vertex placement mode
-      if (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && onAddPerimeterVertex && perimeterVertices !== null) {
-        // Don't place vertex if clicking on room overlay (allow dragging though)
-        const targetType = e.target.getType();
-        if (targetType === 'Rect' || targetType === 'Circle') {
-          return; // Clicked on room overlay or its handles
-        }
-        
-        const stage = e.target.getStage();
-        if (!stage) return;
-        
-        const clickPoint = getCanvasCoords(stage);
-        if (!clickPoint) return;
-        
-        // Apply snapping to corner points
-        const snappedPoint = autoSnapEnabled
-          ? findVertexSnapPoint(clickPoint)
-          : null;
-        
-        // Use snapped position if available, otherwise use raw position
-        const finalPoint = snappedPoint || clickPoint;
-        
-        // Check if clicking on the first vertex to close the shape
-        if (perimeterVertices && perimeterVertices.length > 2) {
-          const firstVertex = perimeterVertices[0];
-          const dx = finalPoint.x - firstVertex.x;
-          const dy = finalPoint.y - firstVertex.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance < 10 / scaleRef.current) {
-            // Validate the closed shape before closing
-            if (hasSelfIntersection(perimeterVertices, true)) {
-              toast.error('Cannot close perimeter: would cause self-intersection.');
-              return;
-            }
-            // Close the shape
-            if (onClosePerimeter) {
-              onClosePerimeter();
-            }
-            return;
-          }
-        }
-
-        // Validate the open path before adding the vertex
-        if (perimeterVertices && perimeterVertices.length > 0) {
-          const candidate = [...perimeterVertices, finalPoint];
-          if (hasSelfIntersection(candidate, false)) {
-            toast.error('Cannot add vertex: segment would intersect existing lines.');
-            return;
-          }
-        }
-
-        onAddPerimeterVertex(finalPoint);
-        return;
-      }
-      
-      // Line tool mode
-      if (lineToolActive && onMeasurementLineUpdate) {
-        const stage = e.target.getStage();
-        if (!stage) return;
-        const clickPoint = getCanvasCoords(stage);
-        if (!clickPoint) return;
-
-        const storeCurrentLine = useAppStore.getState().currentMeasurementLine;
-
-        if (!storeCurrentLine) {
-          // Start a new line
-          onMeasurementLineUpdate({ start: clickPoint, end: clickPoint });
-        } else {
-          // Finish the current line
-          const newLine = { start: storeCurrentLine.start, end: clickPoint };
-          onAddMeasurementLine(newLine);
-          onMeasurementLineUpdate(null); // Reset for the next line
-        }
-        return;
-      }
-
-      // Draw area tool mode (functions like perimeter tracing)
-      if (drawAreaActive && onCustomShapeUpdate) {
-        const stage = e.target.getStage();
-        if (!stage) return;
-        const clickPoint = getCanvasCoords(stage);
-        if (!clickPoint) return;
-
-        const storeCustomShape = useAppStore.getState().currentCustomShape;
-
-        if (!storeCustomShape) {
-          // Start a new shape
-          onCustomShapeUpdate({ vertices: [clickPoint], closed: false });
-        } else {
-          // Check if closing the shape by clicking the first vertex
-          const firstVertex = storeCustomShape.vertices[0];
-          const distance = Math.sqrt(Math.pow(clickPoint.x - firstVertex.x, 2) + Math.pow(clickPoint.y - firstVertex.y, 2));
-
-          if (storeCustomShape.vertices.length > 2 && distance < 10 / scaleRef.current) {
-            // Close the shape
-            const finalShape = { ...storeCustomShape, closed: true };
-            onAddCustomShape(finalShape);
-            onCustomShapeUpdate(null); // Reset for next shape
-          } else {
-            // Add a new vertex
-            const newVertices = [...storeCustomShape.vertices, clickPoint];
-            onCustomShapeUpdate({ ...storeCustomShape, vertices: newVertices });
-          }
-        }
-        return;
-      }
-    }, 50); // Wait 50ms to distinguish single from double-click (faster response)
-  };
-  
-  // Handle right click on the stage background.
-  // If the line tool is active and a line is in progress, right-click cancels it.
-  // If the crop tool is active and a selection is in progress, right-click cancels it.
-  const handleStageContextMenu = (e) => {
-    e.evt.preventDefault();
-    if (rightClickPannedRef.current) {
-      return;
-    }
-
-    if (cropToolActive && crop.isCroppingRef.current) {
-      crop.resetCropState();
-      return;
-    }
-
-    if (lineToolActive && currentMeasurementLine && onMeasurementLineUpdate) {
-      onMeasurementLineUpdate(null);
-    }
-  };
-  
-
-  // Clean up click disambiguation timer on unmount
-  // (zoom timer cleanup is handled inside useCanvasZoom)
-  useEffect(() => {
-    return () => {
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Handle mouseup outside the canvas to commit eraser/crop operations
-  useEffect(() => {
-    const handleWindowMouseUp = (e) => {
-      if (isRightClickDraggingRef.current) {
-        isRightClickDraggingRef.current = false;
-        if (rightClickPannedRef.current) {
-          const stage = stageRef.current;
-          if (stage) {
-            const token = Math.random();
-            if (viewportSyncTokenRef) {
-              viewportSyncTokenRef.current = token;
-            }
-            useAppStore.getState().setViewportTransform(
-              scaleRef.current,
-              { x: stage.x(), y: stage.y() },
-              token
-            );
-          }
-          setTimeout(() => {
-            rightClickPannedRef.current = false;
-          }, 100);
-        }
-      }
-      if (eraser.isErasingRef.current) {
-        eraser.handleEraserMouseUp();
-      }
-      if (crop.isCroppingRef.current) {
-        crop.handleCropMouseUp(crop.cropSelection);
-      }
-    };
-    window.addEventListener('mouseup', handleWindowMouseUp);
-    return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [eraser, crop]);
-
-  // handleWheel, handleStageDragStart, handleStageDragEnd come from useCanvasZoom / useCanvasPan above.
-
-  const handleKeyDown = useCallback((e) => {
-    const activeElement = document.activeElement;
-    const isTypingIntoField = activeElement && (
-      activeElement.tagName === 'INPUT' ||
-      activeElement.tagName === 'TEXTAREA' ||
-      activeElement.isContentEditable
-    );
-
-    if (isTypingIntoField) {
-      return;
-    }
-
-    if ((e.key === 'Delete' || e.key === 'Backspace')) {
-      if (selectedMeasurementLineIndex !== null && onMeasurementLinesChange) {
-        onMeasurementLinesChange(measurementLines.filter((_, index) => index !== selectedMeasurementLineIndex));
-        setSelectedMeasurementLineIndex(null);
-        return;
-      }
-
-      if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
-        onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
-        setSelectedCustomShapeIndex(null);
-      }
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      if (eraserToolActive) {
-        // Cancel any in-progress erase and restore the original image on the Konva node
-        eraser.cancelErase();
-      } else if (cropToolActive) {
-        // Cancel any in-progress crop selection
-        crop.resetCropState();
-      } else if (lineToolActive && onLineToolToggle) {
-        onLineToolToggle();
-      } else if (drawAreaActive && onDrawAreaToggle) {
-        onDrawAreaToggle();
-      } else if (angleToolActive && onAngleToolToggle) {
-        onAngleToolToggle();
-      } else if (perimeterVertices !== null) {
-        useAppStore.getState().setPerimeterVertices(null);
-      }
-      return;
-    }
-
-    if (e.key === 'Enter') {
-      // Close perimeter on Enter key
-      if (perimeterVertices && perimeterVertices.length > 2 && onClosePerimeter) {
-        if (hasSelfIntersection(perimeterVertices, true)) {
-          toast.error('Cannot close perimeter: would cause self-intersection.');
-          return;
-        }
-        onClosePerimeter();
-      }
-      // Close custom shape on Enter key
-      else if (drawAreaActive && currentCustomShape && !currentCustomShape.closed && currentCustomShape.vertices.length >= 2) {
-        const finalShape = { ...currentCustomShape, closed: true };
-        onAddCustomShape(finalShape);
-        onCustomShapeUpdate(null); // Reset for next shape
-      }
-    }
-  }, [
-    eraserToolActive,
-    cropToolActive,
-    eraser,
-    crop,
-    lineToolActive,
-    onLineToolToggle,
-    perimeterVertices,
-    onClosePerimeter,
-    drawAreaActive,
-    onDrawAreaToggle,
-    currentCustomShape,
-    onAddCustomShape,
-    onCustomShapeUpdate,
-    selectedMeasurementLineIndex,
-    onMeasurementLinesChange,
-    measurementLines,
-    selectedCustomShapeIndex,
-    onCustomShapesChange,
-    customShapes
-  ]);
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyDown]);
-
-  // canPanCanvas comes from useCanvasPan above.
-
-  const contentTransform = useMemo(() => {
-    const cx = imageObj ? imageObj.width / 2 : 0;
-    const cy = imageObj ? imageObj.height / 2 : 0;
-    return {
-      x: cx,
-      y: cy,
-      offsetX: cx,
-      offsetY: cy,
-      rotation: canvasRotation,
-    };
-  }, [imageObj, canvasRotation]);
+  }, [angleToolActive, angleToolState, onAngleToolStateChange, camera.scaleRef]);
 
   // Dev-only Konva draw-call instrumentation
   useEffect(() => {
@@ -1548,7 +344,41 @@ const Canvas = React.memo(forwardRef(({
         };
       }
     }
-  }, [isImageReady]);
+  }, [camera.isImageReady]);
+
+  // Compute unit labels and active feet-per-pixel ratio
+  const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
+
+  const activeFeetPerPixel = useMemo(() => {
+    if (router.draggingRoomCorner && router.localRoomOverlay && roomDimensions?.width && roomDimensions?.height) {
+      const dimWidth = parseFloat(roomDimensions.width);
+      const dimHeight = parseFloat(roomDimensions.height);
+      const overlayWidth = Math.abs(router.localRoomOverlay.x2 - router.localRoomOverlay.x1);
+      const overlayHeight = Math.abs(router.localRoomOverlay.y2 - router.localRoomOverlay.y1);
+      if (overlayWidth > 0 && overlayHeight > 0 && !isNaN(dimWidth) && !isNaN(dimHeight)) {
+        return {
+          x: dimWidth / overlayWidth,
+          y: dimHeight / overlayHeight
+        };
+      }
+    }
+    if (typeof feetPerPixel === 'number') {
+      return { x: feetPerPixel, y: feetPerPixel };
+    }
+    return feetPerPixel;
+  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel]);
+
+  const contentTransform = useMemo(() => {
+    const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
+    const cy = camera.imageObj ? camera.imageObj.height / 2 : 0;
+    return {
+      x: cx,
+      y: cy,
+      offsetX: cx,
+      offsetY: cy,
+      rotation: canvasRotation,
+    };
+  }, [camera.imageObj, canvasRotation]);
 
   return (
     <div ref={containerRef} className="absolute inset-0 canvas-grid-bg" style={{ cursor: 'default' }}>
@@ -1574,30 +404,29 @@ const Canvas = React.memo(forwardRef(({
         </div>
       )}
 
-      {imageObj && (
+      {camera.imageObj && (
         <Stage
           ref={stageRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          onWheel={handleWheel}
-          draggable={canPanCanvas}
-          onDragStart={handleStageDragStart}
-          onDragEnd={handleStageDragEnd}
-          onMouseDown={handleStageMouseDown}
-          onClick={handleStageClick}
-          onTap={handleStageClick}
-          onContextMenu={handleStageContextMenu}
-          onMouseMove={handleStageMouseMove}
-          onMouseUp={handleStageMouseUp}
-          onDblClick={handleStageDoubleClick}
-          onDblTap={handleStageDoubleClick}
+          width={camera.dimensions.width}
+          height={camera.dimensions.height}
+          onWheel={camera.handleWheel}
+          draggable={camera.canPanCanvas}
+          onDragStart={camera.handleStageDragStart}
+          onDragEnd={camera.handleStageDragEnd}
+          onMouseDown={router.handleStageMouseDown}
+          onClick={router.handleStageClick}
+          onTap={router.handleStageClick}
+          onContextMenu={router.handleStageContextMenu}
+          onMouseMove={router.handleStageMouseMove}
+          onMouseUp={router.handleStageMouseUp}
+          onDblClick={router.handleStageDoubleClick}
+          onDblTap={router.handleStageDoubleClick}
           style={{ cursor: eraserToolActive ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
         >
-          {/* Background Image Layer - completely non-interactive for performance */}
-          {isImageReady && (
+          {camera.isImageReady && (
             <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
               <KonvaImage
-                image={imageObj}
+                image={camera.imageObj}
                 x={0}
                 y={0}
               />
@@ -1605,40 +434,38 @@ const Canvas = React.memo(forwardRef(({
           )}
 
           <Layer ref={contentLayerRef} {...contentTransform}>
-            {/* Room Overlay - Rendered below the exterior wall (perimeter) overlay */}
             <RoomOverlayLayer
-              roomOverlay={activeRoomOverlay}
-              scale={scale}
+              roomOverlay={router.activeRoomOverlay}
+              scale={camera.scale}
               debugDetection={debugDetection}
-              onRoomMouseDown={handleRoomMouseDown}
-              onRoomCornerMouseDown={handleRoomCornerMouseDown}
+              onRoomMouseDown={router.handleRoomMouseDown}
+              onRoomCornerMouseDown={router.handleRoomCornerMouseDown}
             />
 
-            {/* Perimeter Overlay - Outline and vertices with side-length labels (on top of room overlay) */}
             <PerimeterLayer
               perimeterTraces={perimeterTraces}
               activeTraceId={activeTraceId}
-              localPerimeterVertices={localPerimeterVertices}
-              scale={scale}
+              localPerimeterVertices={perimeter.localPerimeterVertices}
+              scale={camera.scale}
               showSideLengths={showSideLengths}
               feetPerPixel={activeFeetPerPixel}
               detectedDimensions={detectedDimensions}
               unit={unit}
-              draggingVertex={draggingVertex}
-              onVertexDragStart={handleVertexDragStart}
-              onVertexDragMove={handleVertexDragMove}
-              onVertexDragEnd={handleVertexDragEnd}
+              draggingVertex={perimeter.draggingVertex}
+              onVertexDragStart={perimeter.handleVertexDragStart}
+              onVertexDragMove={perimeter.handleVertexDragMove}
+              onVertexDragEnd={perimeter.handleVertexDragEnd}
               onDeletePerimeterVertex={(index) => {
-                if (rightClickPannedRef.current) return;
+                if (router.rightClickPannedRef.current) return;
                 onDeletePerimeterVertex?.(index);
               }}
-              isSelfIntersecting={isSelfIntersecting}
+              isSelfIntersecting={perimeter.isSelfIntersecting}
             />
 
             {debugDetection && (
               <DetectionDebugOverlay
                 debugData={detectionDebugData}
-                scale={scale}
+                scale={camera.scale}
               />
             )}
 
@@ -1647,72 +474,65 @@ const Canvas = React.memo(forwardRef(({
                 x={10}
                 y={34}
                 text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
-                fontSize={12 / scale}
+                fontSize={12 / camera.scale}
                 fill="#8BE9FD"
                 rotation={-canvasRotation}
                 listening={false}
               />
             )}
 
-            {/* Manual Mode - Detected Dimensions Highlights */}
             <DimensionOverlay
               mode={mode}
               detectedDimensions={detectedDimensions}
-              scale={scale}
+              scale={camera.scale}
               unit={unit}
               stageRef={stageRef}
               onDimensionSelect={onDimensionSelect}
             />
             
-            {/* Manual Entry Mode - Click to place overlays */}
-            
-            {/* Perimeter Vertex Placement Mode */}
             <PerimeterPlacementLayer
-              roomOverlay={activeRoomOverlay}
+              roomOverlay={router.activeRoomOverlay}
               traceInteractionMode={traceInteractionMode}
               perimeterVertices={perimeterVertices}
-              currentMousePos={currentMousePos}
+              currentMousePos={router.currentMousePos}
               lineToolActive={lineToolActive}
               drawAreaActive={drawAreaActive}
               manualEntryMode={manualEntryMode}
-              scale={scale}
-              isPreviewInvalid={isPreviewInvalid}
+              scale={camera.scale}
+              isPreviewInvalid={perimeter.isPreviewInvalid}
             />
 
-            {/* Measurement Lines & Preview */}
             <MeasurementLayer
               measurementLines={measurementLines}
-              currentMeasurementLine={activeMeasurementLine}
+              currentMeasurementLine={router.activeMeasurementLine}
               lineToolActive={lineToolActive}
-              scale={scale}
+              scale={camera.scale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
               unitStyle={unitStyle}
-              selectedMeasurementLineIndex={selectedMeasurementLineIndex}
-              onMeasurementLineSelect={handleMeasurementLineSelect}
-              onMeasurementLineDragEnd={handleMeasurementLineDragEnd}
+              selectedMeasurementLineIndex={measurement.selectedMeasurementLineIndex}
+              onMeasurementLineSelect={measurement.handleMeasurementLineSelect}
+              onMeasurementLineDragEnd={measurement.handleMeasurementLineDragEnd}
               onMeasurementLinesChange={(nextLines) => {
-                if (rightClickPannedRef.current) return;
+                if (router.rightClickPannedRef.current) return;
                 onMeasurementLinesChange?.(nextLines);
               }}
             />
 
-            {/* Custom Shapes & Preview */}
             <ShapeLayer
               customShapes={customShapes}
-              currentCustomShape={activeCustomShape}
-              currentMousePos={currentMousePos}
+              currentCustomShape={currentCustomShape}
+              currentMousePos={router.currentMousePos}
               drawAreaActive={drawAreaActive}
-              scale={scale}
+              scale={camera.scale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
               unitStyle={unitStyle}
-              selectedCustomShapeIndex={selectedCustomShapeIndex}
-              onCustomShapeSelect={handleCustomShapeSelect}
-              onCustomShapeDragEnd={handleCustomShapeDragEnd}
+              selectedCustomShapeIndex={shape.selectedCustomShapeIndex}
+              onCustomShapeSelect={shape.handleCustomShapeSelect}
+              onCustomShapeDragEnd={shape.handleCustomShapeDragEnd}
             />
 
-            {/* Angle measurement overlay */}
             <Group
               visible={angleToolActive && !!angleToolState}
               listening={angleToolActive}
@@ -1720,34 +540,31 @@ const Canvas = React.memo(forwardRef(({
               <AngleOverlay
                 angleToolState={angleToolState}
                 onAngleToolStateChange={onAngleToolStateChange}
-                scale={scale}
+                scale={camera.scale}
                 canvasRotation={canvasRotation}
                 perimeterTraces={perimeterTraces}
                 customShapes={customShapes}
                 measurementLines={measurementLines}
                 autoSnapEnabled={autoSnapEnabled}
-                findVertexSnapPoint={findVertexSnapPoint}
-                onDragStateChange={setDraggingAngle}
+                findVertexSnapPoint={snapper.findVertexSnapPoint}
+                onDragStateChange={router.setDraggingAngle}
               />
             </Group>
 
-            {/* Eraser cursor and crop selection overlay */}
             <Group listening={false}>
-              {/* Eraser brush cursor */}
-              {eraserToolActive && currentMousePos && (
+              {eraserToolActive && router.currentMousePos && (
                 <Circle
-                  x={currentMousePos.x}
-                  y={currentMousePos.y}
+                  x={router.currentMousePos.x}
+                  y={router.currentMousePos.y}
                   radius={eraserBrushSize / 2}
                   stroke="#FF5555"
-                  strokeWidth={2 / scale}
+                  strokeWidth={2 / camera.scale}
                   fill="rgba(255, 85, 85, 0.15)"
-                  dash={[4 / scale, 4 / scale]}
+                  dash={[4 / camera.scale, 4 / camera.scale]}
                   listening={false}
                 />
               )}
 
-              {/* Crop selection overlay */}
               {cropToolActive && crop.cropSelection && (() => {
                 const sel = crop.cropSelection;
                 const sx = Math.min(sel.x1, sel.x2);
@@ -1755,23 +572,19 @@ const Canvas = React.memo(forwardRef(({
                 const sw = Math.abs(sel.x2 - sel.x1);
                 const sh = Math.abs(sel.y2 - sel.y1);
                 return (
-                  <>
-                    {/* Selection border */}
-                    <Rect
-                      x={sx}
-                      y={sy}
-                      width={sw}
-                      height={sh}
-                      stroke="#8BE9FD"
-                      strokeWidth={2 / scale}
-                      dash={[6 / scale, 4 / scale]}
-                      listening={false}
-                    />
-                  </>
+                  <Rect
+                    x={sx}
+                    y={sy}
+                    width={sw}
+                    height={sh}
+                    stroke="#8BE9FD"
+                    strokeWidth={2 / camera.scale}
+                    dash={[6 / camera.scale, 4 / camera.scale]}
+                    listening={false}
+                  />
                 );
               })()}
             </Group>
-            
           </Layer>
         </Stage>
       )}
