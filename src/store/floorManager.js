@@ -1,14 +1,13 @@
-import useAppStore from './appStore';
 import * as undoManager from './undoManager';
 import { calculateArea } from '../utils/areaCalculator';
 
 /**
- * Floor Manager Slice — refactored to manage multiple perimeter traces
- * on a single, globally calibrated canvas.
+ * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
+ * on a single, globally calibrated canvas using trace-centric terminology.
  *
  * Each perimeter trace represents an independent polygon on the canvas.
- * Legacy methods are preserved for toolbar and app state compatibility,
- * but mapped to perimeter trace actions.
+ * Legacy floor properties are removed from active Zustand state. Compatibility
+ * translation is encapsulated inside the serialization layer.
  */
 
 const TRACE_COLORS = [
@@ -24,7 +23,7 @@ const TRACE_COLORS = [
 let nextTraceNumber = 2;
 
 /**
- * Generate a sequential floor/trace name.
+ * Generate a sequential trace name.
  */
 function generateTraceName() {
   const num = nextTraceNumber++;
@@ -32,58 +31,12 @@ function generateTraceName() {
   return `${num}${suffix} Floor`;
 }
 
-// Fields persisted inside project files per trace session:
-// Kept for structure, but serialization uses a single canonical canvas.
-const FLOOR_STATE_FIELDS = [
-  'image',
-  'roomOverlay',
-  'roomDimensions',
-  'calibration',
-  'mode',
-  'detectedDimensions',
-  'showSideLengths',
-  'useInteriorWalls',
-  'autoSnapEnabled',
-  'manualEntryMode',
-  'ocrFailed',
-  'unit',
-  'lineToolActive',
-  'measurementLines',
-  'currentMeasurementLine',
-  'drawAreaActive',
-  'customShapes',
-  'currentCustomShape',
-  'perimeterTraces',
-  'activeTraceId',
-  'tracedBoundaries',
-  'debugDetection',
-  'detectionDebugData',
-  'eraserToolActive',
-  'eraserBrushSize',
-  'cropToolActive',
-  'zoomScale',
-  'stageX',
-  'stageY',
-];
-
 export function createFloorSlice(set, get) {
   return {
-    // We maintain a dummy floors structure for project serialization schema compatibility.
-    // There is always exactly one floor session recorded in the project file,
-    // which holds all the traces.
-    floors: [
-      {
-        id: 'floor-1',
-        name: '1st Floor',
-        state: null, // active
-      },
-    ],
-    activeFloorId: 'floor-1',
-
     /**
      * Add a new empty perimeter trace and select it.
      */
-    addFloor: () => {
+    addPerimeterTrace: () => {
       undoManager.save();
       const state = get();
 
@@ -115,7 +68,7 @@ export function createFloorSlice(set, get) {
      * Switch / select a perimeter trace.
      * Selection change does not save an undo snapshot.
      */
-    switchFloor: (targetTraceId) => {
+    switchPerimeterTrace: (targetTraceId) => {
       const state = get();
       if (targetTraceId === state.activeTraceId) return;
 
@@ -130,7 +83,7 @@ export function createFloorSlice(set, get) {
      * Delete a perimeter trace.
      * Deterministically shifts selection to neighboring trace if active trace is deleted.
      */
-    closeFloor: (traceId) => {
+    deletePerimeterTrace: (traceId) => {
       undoManager.save();
       const state = get();
 
@@ -162,7 +115,7 @@ export function createFloorSlice(set, get) {
     /**
      * Rename a perimeter trace.
      */
-    renameFloor: (traceId, newName) => {
+    renamePerimeterTrace: (traceId, newName) => {
       const state = get();
       const updated = (state.perimeterTraces || []).map((t) =>
         t.id === traceId ? { ...t, name: newName } : t
@@ -189,22 +142,20 @@ export function createFloorSlice(set, get) {
     /**
      * Get area for a specific trace.
      */
-    getFloorArea: (traceId) => {
+    getPerimeterTraceArea: (traceId) => {
       const state = get();
       const trace = (state.perimeterTraces || []).find((t) => t.id === traceId);
-      const feetPerPixel = state.calibration?.feetPerPixel || 1.0;
+      const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
       return trace ? calculateArea(trace.vertices, feetPerPixel) : 0;
     },
 
     /**
-     * Reset floor manager to initial state.
+     * Reset floor manager/trace slice to initial state.
      */
-    resetFloors: () => {
+    resetPerimeterTraces: () => {
       nextTraceNumber = 2;
       const defaultTraceId = `trace-${Date.now()}`;
       set({
-        floors: [{ id: 'floor-1', name: '1st Floor', state: null }],
-        activeFloorId: 'floor-1',
         perimeterTraces: [
           {
             id: defaultTraceId,

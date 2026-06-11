@@ -13,15 +13,7 @@ const createMockStoreState = () => ({
   projectId: 'test-uuid-1234',
   projectName: 'My Test Project',
   createdAt: '2026-06-07T12:00:00.000Z',
-  activeFloorId: 'floor-1',
   canvasRotation: 90,
-  floors: [
-    {
-      id: 'floor-1',
-      name: '1st Floor',
-      state: null, // active
-    },
-  ],
   // Active floor state on root
   image: 'data:image/png;base64,FloorOneImageContent',
   roomOverlay: { x1: 5, y1: 5, x2: 50, y2: 50 },
@@ -163,10 +155,6 @@ describe('projectSerializer', () => {
       });
       expect(statePatch.projectId).toBe('test-uuid-1234');
       expect(statePatch.canvasRotation).toBe(90);
-
-      // Verify active floor state is null in floors list for runtime Zustand
-      const activeFloor = statePatch.floors.find(f => f.id === 'floor-1');
-      expect(activeFloor.state).toBeNull();
 
       // Verify history stack is restored correctly
       expect(historyPatch).toBeDefined();

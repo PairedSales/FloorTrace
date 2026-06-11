@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hashDataUrl } from './hash';
 
 // List of floor state fields that should be persisted (excludes transient/ephemeral states)
 export const PERSISTENT_FLOOR_FIELDS = [
@@ -175,20 +176,7 @@ const projectSchema = z.object({
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Fast, non-cryptographic hash of a string (FNV-1a, 32-bit).
- * Keeps keys consistent with undoManager's hashing.
- */
-function hashImage(dataUrl) {
-  if (!dataUrl) return null;
-  const sample = dataUrl.slice(0, 8192) + '|' + dataUrl.length;
-  let h = 0x811c9dc5;
-  for (let i = 0; i < sample.length; i++) {
-    h ^= sample.charCodeAt(i);
-    h = (Math.imul(h, 0x01000193) >>> 0);
-  }
-  return h.toString(16);
-}
+// Centralized hashing helper imported from './hash'
 
 /**
  * Recursively sanitizes numeric values to prevent Konva stage instability
@@ -253,28 +241,25 @@ export function serializeSketch(storeState, historyState = null) {
     activeFloorState[key] = storeState[key];
   }
 
-  // De-duplicate floor background images
-  const floorsForExport = storeState.floors.map((floor) => {
-    const rawState = floor.id === storeState.activeFloorId ? activeFloorState : floor.state;
-    const serializedState = { ...rawState };
-    
-    let imageRef = null;
-    if (serializedState.image) {
-      const hash = hashImage(serializedState.image);
-      images[hash] = serializedState.image;
-      imageRef = hash;
-    }
-    delete serializedState.image;
+  let imageRef = null;
+  if (activeFloorState.image) {
+    const hash = hashDataUrl(activeFloorState.image);
+    images[hash] = activeFloorState.image;
+    imageRef = hash;
+  }
+  delete activeFloorState.image;
 
-    return {
-      id: floor.id,
-      name: floor.name,
+  // Construct a legacy single-floor array for file schema compatibility
+  const floorsForExport = [
+    {
+      id: 'floor-1',
+      name: '1st Floor',
       state: {
-        ...serializedState,
+        ...activeFloorState,
         imageRef,
       },
-    };
-  });
+    }
+  ];
 
   // Collect history stacks
   const historyForExport = historyState ? {
@@ -302,7 +287,7 @@ export function serializeSketch(storeState, historyState = null) {
       canvasRotation: storeState.canvasRotation ?? 0,
     },
     floors: floorsForExport,
-    activeFloorId: storeState.activeFloorId,
+    activeFloorId: 'floor-1',
     images,
     history: historyForExport,
   };
@@ -350,14 +335,6 @@ export function deserializeSketch(project) {
   }
 
   const activeTraceId = state.activeTraceId || perimeterTraces[0].id;
-  const activeFloorId = 'floor-1';
-  const floors = [
-    {
-      id: 'floor-1',
-      name: '1st Floor',
-      state: null,
-    }
-  ];
 
   const statePatch = {
     ...state,
@@ -365,8 +342,6 @@ export function deserializeSketch(project) {
     activeTraceId,
     traceInteractionMode: 'idle',
     perimeterVertices: null,
-    floors,
-    activeFloorId,
     canvasRotation: project.globalSettings?.canvasRotation ?? 0,
     projectId: project.metadata.projectId,
     isDirty: false,

@@ -19,6 +19,8 @@ import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useToolManager } from './hooks/useToolManager';
+import { useProjectIO } from './hooks/useProjectIO';
+import { useDragAndDrop } from './hooks/useDragAndDrop';
 
 function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
@@ -60,15 +62,13 @@ function App() {
   const angleToolState = useAppStore((s) => s.angleToolState);
 
   // Floor management
-  const floors = useAppStore((s) => s.floors);
-  const addFloor = useAppStore((s) => s.addFloor);
+  const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
   const setRoomOverlay = useAppStore((s) => s.setRoomOverlay);
   const setPerimeterOverlay = useAppStore((s) => s.setPerimeterOverlay);
   const setRoomDimensions = useAppStore((s) => s.setRoomDimensions);
-  const setArea = useAppStore((s) => s.setArea);
   const setMode = useAppStore((s) => s.setMode);
   const applyRoomCalibration = useAppStore((s) => s.applyRoomCalibration);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
@@ -261,7 +261,6 @@ function App() {
         // Clear overlays
         setRoomOverlay(null);
         setPerimeterOverlay(null);
-        setArea(0);
       }
       
       if (!imgSrc) {
@@ -369,7 +368,6 @@ function App() {
     
     setRoomOverlay(null);
     setPerimeterOverlay(null);
-    setArea(0);
     setPerimeterVertices(null);
     setDetectedDimensions([]);
 
@@ -380,142 +378,25 @@ function App() {
     perimeterOverlay,
     setRoomOverlay,
     setPerimeterOverlay,
-    setArea,
     setPerimeterVertices,
     setDetectedDimensions,
     handleManualMode,
   ]);
 
-  const checkUnsavedChanges = useCallback(() => {
-    const state = useAppStore.getState();
-    if (state.isDirty || state.image) {
-      return window.confirm(
-        'You have unsaved changes in your current project. Opening a new project or image will discard these changes. Are you sure you want to proceed?'
-      );
-    }
-    return true;
-  }, []);
+  const {
+    checkUnsavedChanges,
+    handleFileOpen,
+    handleFileUpload,
+    handleSaveProject,
+    handleSaveProjectNormal,
+    handleSaveProjectAs,
+  } = useProjectIO(notify, handleManualMode, fileInputRef);
 
-  // Handle file upload
-  const handleFileUpload = useCallback(async (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      if (!checkUnsavedChanges()) {
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-        return;
-      }
-
-      try {
-        if (file.name.endsWith('.floorplan')) {
-          setIsProcessing(true, 'Loading project…');
-          const text = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = (err) => reject(err);
-            reader.readAsText(file);
-          });
-
-          const { importProject } = await import('./utils/projectSerializer');
-          const { statePatch, historyPatch } = importProject(text);
-
-          useAppStore.getState().loadProject(statePatch);
-          undoManager.setHistoryState(historyPatch);
-
-          notify('Project loaded successfully');
-        } else {
-          // Clear existing image before loading new one to ensure state change
-          setImage(null);
-          // Clear overlays as well
-          resetOverlays();
-          undoManager.clear();
-
-          const loadedImage = await loadImageFromFile(file);
-          setImage(loadedImage);
-          handleManualMode(loadedImage, true); // Automatically enter manual mode
-        }
-      } catch (error) {
-        console.error('Error loading file:', error);
-        notify(`Failed to load file: ${error.message}`);
-      } finally {
-        setIsProcessing(false);
-        // Reset file input so the same file can be selected again
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-      }
-    }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage]);
-
-  // Handle clipboard paste
-  const handlePasteImage = useCallback(async () => {
-    if (!checkUnsavedChanges()) return;
-
-    try {
-      // Clear existing image before loading new one to ensure state change
-      setImage(null);
-      // Clear overlays as well
-      resetOverlays();
-      undoManager.clear();
-
-      const loadedImage = await loadImageFromClipboard();
-      if (loadedImage) {
-        setImage(loadedImage);
-        handleManualMode(loadedImage, true); // Automatically enter manual mode
-      }
-    } catch (error) {
-      console.error('Error pasting image:', error);
-      notify('Failed to paste image. Make sure an image is copied to your clipboard.');
-    }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage]);
-
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-  }, []);
-
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-
-    const isFloorplan = file.name.endsWith('.floorplan');
-    const isImage = file.type.startsWith('image/');
-    if (!isFloorplan && !isImage) return;
-
-    if (!checkUnsavedChanges()) return;
-
-    try {
-      if (isFloorplan) {
-        setIsProcessing(true, 'Loading project…');
-        const text = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
-          reader.onerror = (err) => reject(err);
-          reader.readAsText(file);
-        });
-
-        const { importProject } = await import('./utils/projectSerializer');
-        const { statePatch, historyPatch } = importProject(text);
-
-        useAppStore.getState().loadProject(statePatch);
-        undoManager.setHistoryState(historyPatch);
-
-        notify('Project loaded successfully');
-      } else {
-        resetOverlays();
-        undoManager.clear();
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        handleManualMode(loadedImage, true);
-      }
-    } catch (error) {
-      console.error('Error loading dropped file:', error);
-      notify(`Failed to load file: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage]);
+  const {
+    handlePasteImage,
+    handleDragOver,
+    handleDrop,
+  } = useDragAndDrop(notify, handleManualMode, checkUnsavedChanges);
 
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
     const activeBoundary = getBoundaryForMode(boundaryResult, interiorMode);
@@ -622,30 +503,7 @@ function App() {
     setCustomShapes(nextShapes);
   }, [setCustomShapes]);
 
-  // Handle project export/save
-  const handleSaveProject = useCallback(async (isSaveAs = false) => {
-    setIsProcessing(true, isSaveAs ? 'Saving project as…' : 'Saving project…');
-    try {
-      const storeState = useAppStore.getState();
-      const historyState = undoManager.getHistoryState();
 
-      const { exportProject } = await import('./utils/projectSerializer');
-      const success = await exportProject(storeState, historyState, isSaveAs);
-
-      if (success) {
-        useAppStore.getState().setIsDirty(false);
-        notify(isSaveAs ? 'Project saved successfully' : 'Project exported');
-      }
-    } catch (error) {
-      console.error('Error exporting project:', error);
-      notify(`Failed to save project: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [setIsProcessing, notify]);
-
-  const handleSaveProjectNormal = useCallback(() => handleSaveProject(false), [handleSaveProject]);
-  const handleSaveProjectAs = useCallback(() => handleSaveProject(true), [handleSaveProject]);
 
 
   // Update scale based on room dimensions and overlay
@@ -742,7 +600,6 @@ function App() {
   const handleManualOutlineMode = () => {
     undoManager.save();
     setPerimeterOverlay(null);
-    setArea(0);
     setPerimeterVertices([]); // activate manual vertex placement
   };
 
@@ -898,7 +755,7 @@ function App() {
   }, [manualEntryMode, roomDimensions, image, setIsProcessing, setDetectionDebugData, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
-  const handleFileOpen = useCallback(() => fileInputRef.current?.click(), []);
+
   const handleOptionsToggle = useCallback(() => {
     const s = useAppStore.getState();
     s.setShowPanelOptions(!s.showPanelOptions);
@@ -995,7 +852,7 @@ function App() {
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}
-        onAddFloor={addFloor}
+        onAddFloor={addPerimeterTrace}
         floorCount={perimeterTraces.length}
       />
 

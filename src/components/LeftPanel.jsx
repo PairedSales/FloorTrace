@@ -23,10 +23,10 @@ const LeftPanel = ({
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
-  const addFloor = useAppStore((s) => s.addFloor);
-  const switchFloor = useAppStore((s) => s.switchFloor);
-  const closeFloor = useAppStore((s) => s.closeFloor);
-  const renameFloor = useAppStore((s) => s.renameFloor);
+  const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
+  const switchPerimeterTrace = useAppStore((s) => s.switchPerimeterTrace);
+  const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
+  const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
   const scale = useAppStore((s) => s.scale);
 
@@ -251,7 +251,7 @@ const LeftPanel = ({
               </h3>
               {perimeterTraces.length < 7 && (
                 <button
-                  onClick={addFloor}
+                  onClick={addPerimeterTrace}
                   className="flex items-center gap-1 text-[10px] font-semibold text-accent hover:text-accent/80 transition-colors cursor-pointer"
                   title="Add new perimeter trace"
                 >
@@ -277,7 +277,7 @@ const LeftPanel = ({
                   return (
                     <div
                       key={trace.id}
-                      onClick={() => switchFloor(trace.id)}
+                      onClick={() => switchPerimeterTrace(trace.id)}
                       className={`group flex flex-col gap-1 px-2 py-1.5 rounded-md transition-all border cursor-pointer ${
                         isActive
                           ? 'bg-chrome-950/70 border-accent/40 shadow-sm'
@@ -295,10 +295,10 @@ const LeftPanel = ({
                         <input
                           type="text"
                           value={trace.name}
-                          onChange={(e) => renameFloor(trace.id, e.target.value)}
+                          onChange={(e) => renamePerimeterTrace(trace.id, e.target.value)}
                           onClick={(e) => e.stopPropagation()}
                           onFocus={() => {
-                            if (!isActive) switchFloor(trace.id);
+                            if (!isActive) switchPerimeterTrace(trace.id);
                           }}
                           className={`flex-1 bg-transparent border-0 p-0 text-[11px] font-medium focus:ring-0 focus:outline-none focus:border-b focus:border-accent/50 min-w-0 select-none focus:select-text ${
                             isActive ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-300'
@@ -330,7 +330,7 @@ const LeftPanel = ({
                           onClick={(e) => {
                             e.stopPropagation();
                             const traceName = trace.name;
-                            closeFloor(trace.id);
+                            deletePerimeterTrace(trace.id);
                             toast.success(`Removed perimeter: ${traceName}`);
                           }}
                           className="p-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-chrome-800 transition-colors shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
