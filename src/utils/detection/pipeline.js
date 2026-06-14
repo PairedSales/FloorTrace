@@ -1,6 +1,5 @@
 import { normalizeImageData, mapPointToNormalized } from './preprocess';
 import { estimateDominantOrientations } from './orientation';
-import { closeMask, erode, dilate } from './wallMask';
 import {
   labelConnectedComponents,
   componentToPolygon,
@@ -8,12 +7,116 @@ import {
   mapPolygonFromNormalized,
 } from './vectorize';
 
-const invertMask = (mask) => {
+const dilate = (mask, width, height, radius) => {
+  if (radius <= 0) return mask;
+  const temp = new Uint8Array(mask.length);
   const out = new Uint8Array(mask.length);
-  for (let i = 0; i < mask.length; i += 1) {
-    out[i] = mask[i] ? 0 : 1;
+
+  for (let y = 0; y < height; y += 1) {
+    const offset = y * width;
+    for (let x = 0; x < width; x += 1) {
+      let on = 0;
+      const xMin = Math.max(0, x - radius);
+      const xMax = Math.min(width - 1, x + radius);
+      for (let kx = xMin; kx <= xMax; kx += 1) {
+        if (mask[offset + kx]) {
+          on = 1;
+          break;
+        }
+      }
+      temp[offset + x] = on;
+    }
   }
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      let on = 0;
+      const yMin = Math.max(0, y - radius);
+      const yMax = Math.min(height - 1, y + radius);
+      for (let ky = yMin; ky <= yMax; ky += 1) {
+        if (temp[ky * width + x]) {
+          on = 1;
+          break;
+        }
+      }
+      out[y * width + x] = on;
+    }
+  }
+
   return out;
+};
+
+const erode = (mask, width, height, radius) => {
+  if (radius <= 0) return mask;
+  const temp = new Uint8Array(mask.length);
+  const out = new Uint8Array(mask.length);
+
+  for (let y = 0; y < height; y += 1) {
+    const offset = y * width;
+    for (let x = 0; x < width; x += 1) {
+      let on = 1;
+      const xMin = Math.max(0, x - radius);
+      const xMax = Math.min(width - 1, x + radius);
+      for (let kx = xMin; kx <= xMax; kx += 1) {
+        if (!mask[offset + kx]) {
+          on = 0;
+          break;
+        }
+      }
+      temp[offset + x] = on;
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      let on = 1;
+      const yMin = Math.max(0, y - radius);
+      const yMax = Math.min(height - 1, y + radius);
+      for (let ky = yMin; ky <= yMax; ky += 1) {
+        if (!temp[ky * width + x]) {
+          on = 0;
+          break;
+        }
+      }
+      out[y * width + x] = on;
+    }
+  }
+
+  return out;
+};
+
+const closeMask = (mask, width, height, radius) => {
+  return erode(dilate(mask, width, height, radius), width, height, radius);
+};
+
+const neighbors4 = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
+  if (freeMask[cy * width + cx]) return { x: cx, y: cy };
+
+  const tryPixel = (px, py) => {
+    if (px >= 0 && py >= 0 && px < width && py < height && freeMask[py * width + px]) {
+      return { x: px, y: py };
+    }
+    return null;
+  };
+
+  for (let r = 1; r <= maxRadius; r += 1) {
+    for (let dx = -r; dx <= r; dx += 1) {
+      const hit = tryPixel(cx + dx, cy - r) ?? tryPixel(cx + dx, cy + r);
+      if (hit) return hit;
+    }
+    for (let dy = -r + 1; dy < r; dy += 1) {
+      const hit = tryPixel(cx - r, cy + dy) ?? tryPixel(cx + r, cy + dy);
+      if (hit) return hit;
+    }
+  }
+  return null;
 };
 
 const floodFillFromEdges = (wallMask, width, height) => {
@@ -51,954 +154,101 @@ const floodFillFromEdges = (wallMask, width, height) => {
   return visited;
 };
 
-const getFloorplanFootprint = (wallMask, width, height) => {
-  const exterior = floodFillFromEdges(wallMask, width, height);
-  const footprint = new Uint8Array(width * height);
-  for (let i = 0; i < footprint.length; i += 1) {
-    footprint[i] = exterior[i] ? 0 : 1;
+export const snapPolygonToGrid = (polygon) => {
+  const N = polygon.length;
+  if (N < 3) return polygon;
+  const snapped = polygon.map((p) => ({ ...p }));
+
+  for (let i = 0; i < N - 1; i += 1) {
+    const curr = snapped[i];
+    const next = snapped[i + 1];
+    const dx = next.x - curr.x;
+    const dy = next.y - curr.y;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx > 0 && absDy > 0) {
+      const ratio = absDx / absDy;
+      if (ratio > 0.5 && ratio < 2.0) {
+        continue;
+      }
+    }
+
+    if (absDx >= absDy) {
+      next.y = curr.y;
+    } else {
+      next.x = curr.x;
+    }
   }
-  return footprint;
-};
 
-const normalizedRoomResult = (polygon, preprocessResult, confidence, debug = {}) => {
-  const mapped = mapPolygonFromNormalized(polygon, preprocessResult.scale);
-  const bounds = polygonToBounds(mapped);
-  if (!bounds) return null;
+  const last = snapped[N - 1];
+  const first = snapped[0];
+  const dx = first.x - last.x;
+  const dy = first.y - last.y;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
 
-  return {
-    polygon: mapped,
-    overlay: {
-      x1: bounds.minX,
-      y1: bounds.minY,
-      x2: bounds.maxX,
-      y2: bounds.maxY,
-    },
-    confidence,
-    debug,
-  };
-};
-
-/* ---------- Room Detection (Problem 1) ----------
- * Expansion-based room detection: from the OCR/click point,
- * expand outward in 4 directions (left, right, up, down) until
- * rectangular room walls are found.
- *
- * Step 1: Preprocess – convert to binary wall mask and apply
- *         morphological closing to bridge door/window gaps.
- * Step 2: Start from the OCR/click location (find free-space seed
- *         if the click lands on a wall pixel).
- * Step 3: Expand outward in each direction, scanning for walls
- *         with sufficient perpendicular continuity.
- * Step 4: Handle wall gaps via the preprocessed image and
- *         configurable gap tolerance.
- * Step 5: Construct a rectangle from the four detected boundaries.
- * Step 6: Validate the rectangle (minimum size, OCR point inside).
- *
- * Configurable parameters:
- *   - roomCloseRadius: morphological closing radius (default 4)
- *   - gapTolerance:    max gap in wall continuity (default 8)
- *   - minWallThickness: min perpendicular wall extent (default 15)
- *   - minRoomSize:     min room area in pixels² (default 400)
- */
-
-// Room detection tuning constants
-const MIN_WALL_THICKNESS_PIXELS = 20;          // Absolute floor for wall thickness threshold
-const WALL_THICKNESS_IMAGE_RATIO = 0.06;       // Wall thickness as fraction of shorter dimension
-const HORIZONTAL_WALL_WIDTH_RATIO = 0.4;       // Horizontal wall must span this fraction of room width
-const MAX_ROOM_AREA_RATIO = 0.9;               // Reject rooms covering >90% of image area
-const MAX_SCAN_BAND = 3;                        // Max pixel band to check around scan line
-const MIN_SCAN_BAND = 1;                        // Min pixel band to check around scan line
-const SCAN_BAND_DIVISOR = 2;                    // Divide gap tolerance by this for scan band
-
-/**
- * Measure wall continuity in the perpendicular direction at (x, y).
- * For a vertical wall, measures how far the wall extends vertically.
- * For a horizontal wall, measures how far the wall extends horizontally.
- * Allows small gaps up to gapTolerance pixels.
- */
-const measureWallContinuity = (wallMask, x, y, isVerticalWall, width, height, gapTolerance) => {
-  let count = 0;
-  let gap = 0;
-
-  if (isVerticalWall) {
-    for (let dy = 0; y - dy >= 0; dy += 1) {
-      if (wallMask[(y - dy) * width + x]) { count += 1; gap = 0; }
-      else { gap += 1; if (gap > gapTolerance) break; }
+  if (absDx > 0 && absDy > 0) {
+    const ratio = absDx / absDy;
+    if (ratio > 0.5 && ratio < 2.0) {
+      // diagonal, keep it
+    } else if (absDx >= absDy) {
+      last.y = first.y;
+    } else {
+      last.x = first.x;
     }
-    gap = 0;
-    for (let dy = 1; y + dy < height; dy += 1) {
-      if (wallMask[(y + dy) * width + x]) { count += 1; gap = 0; }
-      else { gap += 1; if (gap > gapTolerance) break; }
-    }
+  } else if (absDx >= absDy) {
+    last.y = first.y;
   } else {
-    for (let dx = 0; x - dx >= 0; dx += 1) {
-      if (wallMask[y * width + (x - dx)]) { count += 1; gap = 0; }
-      else { gap += 1; if (gap > gapTolerance) break; }
-    }
-    gap = 0;
-    for (let dx = 1; x + dx < width; dx += 1) {
-      if (wallMask[y * width + (x + dx)]) { count += 1; gap = 0; }
-      else { gap += 1; if (gap > gapTolerance) break; }
-    }
+    last.x = first.x;
   }
 
-  return count;
+  return snapped;
 };
 
-/**
- * Expand from (startX, startY) in the given direction until a wall
- * with sufficient perpendicular continuity is found.
- *
- * Checks a small band of pixels around the scan line to handle
- * cases where a door gap aligns with the scan row/column.
- *
- * Returns { position, continuity, wallsChecked }.
- */
-const expandToFindWall = (wallMask, startX, startY, direction, width, height, options) => {
-  const { gapTolerance = 8, minWallThickness = 15 } = options;
-  const isHorizontalScan = direction === 'left' || direction === 'right';
-  const step = direction === 'left' || direction === 'up' ? -1 : 1;
-  const isVerticalWall = isHorizontalScan;
-
-  let pos = isHorizontalScan ? startX : startY;
-  const limit = step > 0
-    ? (isHorizontalScan ? width - 1 : height - 1)
-    : 0;
-  const fixedPos = isHorizontalScan ? startY : startX;
-  const scanBand = Math.min(MAX_SCAN_BAND, Math.max(MIN_SCAN_BAND, Math.floor(gapTolerance / SCAN_BAND_DIVISOR)));
-  const wallsChecked = [];
-
-  while (pos !== limit) {
-    pos += step;
-
-    // Check a small band around the fixed position for wall pixels.
-    let wallX = -1;
-    let wallY = -1;
-    for (let d = -scanBand; d <= scanBand; d += 1) {
-      const fp = fixedPos + d;
-      if (fp < 0 || fp >= (isHorizontalScan ? height : width)) continue;
-      const idx = isHorizontalScan ? fp * width + pos : pos * width + fp;
-      if (wallMask[idx]) {
-        wallX = isHorizontalScan ? pos : fp;
-        wallY = isHorizontalScan ? fp : pos;
-        break;
-      }
-    }
-
-    if (wallX >= 0) {
-      const continuity = measureWallContinuity(
-        wallMask, wallX, wallY, isVerticalWall, width, height, gapTolerance,
-      );
-      wallsChecked.push({ pos, continuity });
-
-      if (continuity >= minWallThickness) {
-        return { position: pos, continuity, wallsChecked };
-      }
-    }
-  }
-
-  // Reached image boundary.
-  return { position: pos, continuity: 0, wallsChecked };
-};
-
-const findFreeSpaceSeed = (freeMask, cx, cy, width, height, maxRadius = 30) => {
-  if (freeMask[cy * width + cx]) return { x: cx, y: cy };
-
-  const tryPixel = (px, py) => {
-    if (px >= 0 && py >= 0 && px < width && py < height && freeMask[py * width + px]) {
-      return { x: px, y: py };
-    }
-    return null;
-  };
-
-  // Search the perimeter of expanding squares around the click point.
-  for (let r = 1; r <= maxRadius; r += 1) {
-    // Top and bottom edges of the square
-    for (let dx = -r; dx <= r; dx += 1) {
-      const hit = tryPixel(cx + dx, cy - r) ?? tryPixel(cx + dx, cy + r);
-      if (hit) return hit;
-    }
-    // Left and right edges (excluding corners already checked)
-    for (let dy = -r + 1; dy < r; dy += 1) {
-      const hit = tryPixel(cx - r, cy + dy) ?? tryPixel(cx + r, cy + dy);
-      if (hit) return hit;
-    }
-  }
-  return null;
-};
-
-export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
-  // Step 1: Preprocess – binary wall mask + morphological closing.
-  const preprocess = normalizeImageData(imageData, options.preprocess);
-  const orientation = estimateDominantOrientations(
-    preprocess.gray, preprocess.width, preprocess.height, options.orientation,
-  );
-
-  const roomCloseRadius = options.roomCloseRadius ?? 4;
-  const roomWallMask = closeMask(
-    preprocess.wallMask,
-    preprocess.width,
-    preprocess.height,
-    roomCloseRadius,
-  );
-  const freeMask = invertMask(roomWallMask);
-
-  // Step 2: Map click/OCR point to normalized coordinates.
-  const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
-  const clampedPoint = {
-    x: Math.max(0, Math.min(preprocess.width - 1, nPoint.x)),
-    y: Math.max(0, Math.min(preprocess.height - 1, nPoint.y)),
-  };
-
-  // Find free-space seed near the click point (handles clicks on wall/text).
-  const seed = findFreeSpaceSeed(
-    freeMask, clampedPoint.x, clampedPoint.y, preprocess.width, preprocess.height,
-  );
-  if (!seed) return null;
-
-  // Step 3 & 4: Expand in 4 directions to find walls.
-  // Two-pass approach: find vertical walls first (reliable because horizontal
-  // text labels rarely masquerade as vertical walls), then use the detected
-  // room width to set a higher threshold for horizontal wall detection so
-  // text labels and dimension lines are filtered out.
-  const w = preprocess.width;
-  const h = preprocess.height;
-  const gapTolerance = options.gapTolerance ?? 8;
-  const minWallThickness = options.minWallThickness
-    ?? Math.max(MIN_WALL_THICKNESS_PIXELS, Math.floor(Math.min(w, h) * WALL_THICKNESS_IMAGE_RATIO));
-  const minRoomSize = options.minRoomSize ?? 400;
-  const expandOpts = { gapTolerance, minWallThickness };
-
-  // Pass 1: Find vertical walls (left/right).
-  const leftResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'left', w, h, expandOpts);
-  const rightResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'right', w, h, expandOpts);
-
-  // Pass 2: Find horizontal walls (up/down) with an adaptive threshold.
-  // Horizontal room walls should span a significant portion of the room
-  // width; text labels and dimension lines are shorter and get filtered.
-  const detectedWidth = rightResult.position - leftResult.position;
-  const horzWallThreshold = Math.max(minWallThickness, Math.floor(detectedWidth * HORIZONTAL_WALL_WIDTH_RATIO));
-  const horzExpandOpts = { gapTolerance, minWallThickness: horzWallThreshold };
-  const upResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'up', w, h, horzExpandOpts);
-  const downResult = expandToFindWall(roomWallMask, seed.x, seed.y, 'down', w, h, horzExpandOpts);
-
-  // Step 5: Construct room rectangle from the four boundaries.
-  const left = leftResult.position;
-  const right = rightResult.position;
-  const top = upResult.position;
-  const bottom = downResult.position;
-
-  // Step 6: Validate room.
-  const roomWidth = right - left + 1;
-  const roomHeight = bottom - top + 1;
-  const roomArea = roomWidth * roomHeight;
-  const imageArea = w * h;
-
-  // Reject if too small (noise) or too large (detection failure).
-  if (roomArea < minRoomSize) return null;
-  if (roomArea > imageArea * MAX_ROOM_AREA_RATIO) return null;
-
-  // Ensure seed point lies inside the rectangle.
-  if (seed.x < left || seed.x > right || seed.y < top || seed.y > bottom) return null;
-
-  const polygon = [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: right, y: bottom },
-    { x: left, y: bottom },
-  ];
-
-  const confidenceBase = Math.min(1, roomArea / (imageArea * 0.2));
-  const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
-
-  return normalizedRoomResult(polygon, preprocess, confidence, {
-    normalizedSize: { width: w, height: h },
-    dominantAngles: orientation.dominant,
-    startPoint: { x: seed.x, y: seed.y },
-    expansionPaths: {
-      left: { position: left, continuity: leftResult.continuity },
-      right: { position: right, continuity: rightResult.continuity },
-      up: { position: top, continuity: upResult.continuity },
-      down: { position: bottom, continuity: downResult.continuity },
-    },
-    wallsDetected: {
-      left: leftResult.wallsChecked,
-      right: rightResult.wallsChecked,
-      up: upResult.wallsChecked,
-      down: downResult.wallsChecked,
-    },
-    roomBounds: { left, right, top, bottom },
-    roomArea,
-  });
-};
-
-const getLargestComponentPolygon = (mask, preprocess, orientation, options) => {
-  const labels = labelConnectedComponents(mask, preprocess.width, preprocess.height, 1);
-  if (!labels.components.length) return null;
-  const component = labels.components.sort((a, b) => b.size - a.size)[0];
-  if (!component) return null;
-  const polygon = componentToPolygon(labels.labels, preprocess.width, preprocess.height, component.id, {
-    simplifyEpsilon: options.simplifyEpsilon ?? 2.5,
-    angleBins: orientation.dominant,
-  });
-  if (!polygon.length) return null;
-  return { polygon, component };
-};
-
-// Brightness below which a pixel is considered part of a wall.
-// 200 detects 1-pixel-wide walls after box-blur (gray ≈ 170 for a thin
-// line on white background) while rejecting background near walls (≈ 225)
-// and JPEG artifacts (≈ 250).
-const DARK_PIXEL_THRESHOLD = 200;
-
-/* ---------- Exterior Wall Tracing (Problem 2) ----------
- * Exterior boundary detection using edge-inward scanning on raw
- * grayscale brightness (global threshold).
- *
- * For clean inputs (black-on-white, no extraneous noise outside the
- * floorplan), a simple global brightness threshold is more accurate
- * than adaptive thresholding: it correctly captures the full thickness
- * of thick walls (no hollow centers) and preserves thin lines such as
- * window outlines (no morphological erosion).
- *
- * Starting from the outermost edges of the image, the algorithm scans
- * inward to find the first dark pixel in each row/column.  The
- * intersection of the 4 edge profiles defines the exterior perimeter,
- * correctly handling rectangular polygons with concavities and
- * 45-degree angles.
- */
-
-/**
- * Edge-inward scanning for exterior wall detection.
- * Scans from all 4 edges of the image towards the center, recording
- * the position of the first wall (black) pixel encountered in each
- * row/column.  Returns 4 profile arrays.
- *
- * Supports multi-candidate scoring with tunable options:
- * - minRunLength: minimum contiguous dark run considered stable.
- * - neighborSupportRadius: how many prior rows/columns to use for local support.
- * - consistencyWeight: penalty for diverging from previously regularized position.
- *
- * For clean, preprocessed inputs this directly identifies the exterior
- * wall positions without any line detection or segment merging.
- */
-const collectDarkRuns1D = (length, getAt, edgeStep) => {
-  const runs = [];
-  let i = edgeStep > 0 ? 0 : length - 1;
-  while (i >= 0 && i < length) {
-    if (!getAt(i)) {
-      i += edgeStep;
-      continue;
-    }
-    const start = i;
-    let end = i;
-    while (end + edgeStep >= 0 && end + edgeStep < length && getAt(end + edgeStep)) {
-      end += edgeStep;
-    }
-    const runLength = Math.abs(end - start) + 1;
-    const edgePos = edgeStep > 0 ? Math.min(start, end) : Math.max(start, end);
-    runs.push({
-      edgePos,
-      length: runLength,
-      start: Math.min(start, end),
-      end: Math.max(start, end),
-    });
-    i = end + edgeStep;
-  }
-  return runs;
-};
-
-const scoreRunCandidate = (run, previousPos, neighborAvg, options) => {
-  const {
-    minRunLength = 2,
-    consistencyWeight = 0.75,
-    neighborSupportWeight = 1.0,
-  } = options;
-  const lengthScore = Math.max(0, run.length - minRunLength + 1);
-  const consistencyPenalty = previousPos == null
-    ? 0
-    : Math.abs(run.edgePos - previousPos) * consistencyWeight;
-  const neighborPenalty = neighborAvg == null
-    ? 0
-    : Math.abs(run.edgePos - neighborAvg) * neighborSupportWeight;
-  return lengthScore - consistencyPenalty - neighborPenalty;
-};
-
-const chooseRunByContinuity = (runs, context, options) => {
-  if (!runs.length) return null;
-  const {
-    minRunLength = 2,
-    stabilityScoreThreshold = 0.25,
-    fallbackToFirstHit = true,
-  } = options;
-
-  const stableRuns = runs.filter((run) => run.length >= minRunLength);
-  const candidates = stableRuns.length ? stableRuns : runs;
-  let bestRun = candidates[0];
-  let bestScore = Number.NEGATIVE_INFINITY;
-  for (const run of candidates) {
-    const score = scoreRunCandidate(run, context.previousPos, context.neighborAvg, options);
-    if (score > bestScore || (score === bestScore && run.length > bestRun.length)) {
-      bestRun = run;
-      bestScore = score;
-    }
-  }
-
-  if (stableRuns.length && bestScore >= stabilityScoreThreshold) return bestRun;
-  if (!stableRuns.length && fallbackToFirstHit) return runs[0];
-  return bestScore >= stabilityScoreThreshold ? bestRun : (fallbackToFirstHit ? runs[0] : null);
-};
-
-const scanEdgeInward = (wallMask, width, height, options = {}) => {
+const getSimpleEdgeProfiles = (wallMask, width, height) => {
   const topProfile = new Int32Array(width).fill(height);
   const bottomProfile = new Int32Array(width).fill(-1);
   const leftProfile = new Int32Array(height).fill(width);
   const rightProfile = new Int32Array(height).fill(-1);
-  const {
-    neighborSupportRadius = 2,
-  } = options;
 
-  // Top & bottom profiles: scan each column vertically.
   for (let x = 0; x < width; x += 1) {
-    let topNeighborSum = 0;
-    let topNeighborCount = 0;
-    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
-      if (topProfile[nx] < height) {
-        topNeighborSum += topProfile[nx];
-        topNeighborCount += 1;
+    for (let y = 0; y < height; y += 1) {
+      if (wallMask[y * width + x]) {
+        topProfile[x] = y;
+        break;
       }
     }
-    const topRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], 1);
-    const topChosen = chooseRunByContinuity(
-      topRuns,
-      {
-        previousPos: x > 0 && topProfile[x - 1] < height ? topProfile[x - 1] : null,
-        neighborAvg: topNeighborCount ? topNeighborSum / topNeighborCount : null,
-      },
-      options,
-    );
-    if (topChosen) {
-      topProfile[x] = topChosen.edgePos;
-    }
-
-    let bottomNeighborSum = 0;
-    let bottomNeighborCount = 0;
-    for (let nx = Math.max(0, x - neighborSupportRadius); nx < x; nx += 1) {
-      if (bottomProfile[nx] >= 0) {
-        bottomNeighborSum += bottomProfile[nx];
-        bottomNeighborCount += 1;
+    for (let y = height - 1; y >= 0; y -= 1) {
+      if (wallMask[y * width + x]) {
+        bottomProfile[x] = y;
+        break;
       }
-    }
-    const bottomRuns = collectDarkRuns1D(height, (y) => wallMask[y * width + x], -1);
-    const bottomChosen = chooseRunByContinuity(
-      bottomRuns,
-      {
-        previousPos: x > 0 && bottomProfile[x - 1] >= 0 ? bottomProfile[x - 1] : null,
-        neighborAvg: bottomNeighborCount ? bottomNeighborSum / bottomNeighborCount : null,
-      },
-      options,
-    );
-    if (bottomChosen) {
-      bottomProfile[x] = bottomChosen.edgePos;
     }
   }
 
-  // Left & right profiles: scan each row horizontally.
   for (let y = 0; y < height; y += 1) {
-    let leftNeighborSum = 0;
-    let leftNeighborCount = 0;
-    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
-      if (leftProfile[ny] < width) {
-        leftNeighborSum += leftProfile[ny];
-        leftNeighborCount += 1;
+    for (let x = 0; x < width; x += 1) {
+      if (wallMask[y * width + x]) {
+        leftProfile[y] = x;
+        break;
       }
     }
-    const leftRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], 1);
-    const leftChosen = chooseRunByContinuity(
-      leftRuns,
-      {
-        previousPos: y > 0 && leftProfile[y - 1] < width ? leftProfile[y - 1] : null,
-        neighborAvg: leftNeighborCount ? leftNeighborSum / leftNeighborCount : null,
-      },
-      options,
-    );
-    if (leftChosen) {
-      leftProfile[y] = leftChosen.edgePos;
-    }
-
-    let rightNeighborSum = 0;
-    let rightNeighborCount = 0;
-    for (let ny = Math.max(0, y - neighborSupportRadius); ny < y; ny += 1) {
-      if (rightProfile[ny] >= 0) {
-        rightNeighborSum += rightProfile[ny];
-        rightNeighborCount += 1;
+    for (let x = width - 1; x >= 0; x -= 1) {
+      if (wallMask[y * width + x]) {
+        rightProfile[y] = x;
+        break;
       }
-    }
-    const rightRuns = collectDarkRuns1D(width, (x) => wallMask[y * width + x], -1);
-    const rightChosen = chooseRunByContinuity(
-      rightRuns,
-      {
-        previousPos: y > 0 && rightProfile[y - 1] >= 0 ? rightProfile[y - 1] : null,
-        neighborAvg: rightNeighborCount ? rightNeighborSum / rightNeighborCount : null,
-      },
-      options,
-    );
-    if (rightChosen) {
-      rightProfile[y] = rightChosen.edgePos;
     }
   }
 
   return { topProfile, bottomProfile, leftProfile, rightProfile };
 };
 
-const profileToArray = (profile) => Array.from(profile);
-
-const clampProfileValue = (value, min, max) => Math.max(min, Math.min(max, value));
-
-const regularizeProfile = (profile, invalidValue) => {
-  const smoothed = profile.slice();
-  for (let i = 0; i < profile.length; i += 1) {
-    const prev = profile[i - 1];
-    const curr = profile[i];
-    const next = profile[i + 1];
-    if (curr === invalidValue) continue;
-
-    const neighbors = [prev, curr, next].filter((value) => value != null && value !== invalidValue);
-    if (!neighbors.length) continue;
-    neighbors.sort((a, b) => a - b);
-    smoothed[i] = neighbors[Math.floor(neighbors.length / 2)];
-  }
-  return smoothed;
-};
-
-const buildHorizontalSegments = (profile, width, height, edge) => {
-  const segments = [];
-  const invalidValue = edge === 'top' ? height : -1;
-  let start = null;
-  let prevY = null;
-
-  const pushSegment = (endX) => {
-    if (!start || prevY == null) return;
-    segments.push({
-      edge,
-      start: { x: start.x, y: start.y },
-      end: { x: endX, y: prevY },
-    });
-  };
-
-  for (let x = 0; x < profile.length; x += 1) {
-    const y = profile[x];
-    if (y === invalidValue) {
-      pushSegment(x - 1);
-      start = null;
-      prevY = null;
-      continue;
-    }
-
-    if (!start) {
-      start = { x, y };
-      prevY = y;
-      continue;
-    }
-
-    if (Math.abs(y - prevY) > 2) {
-      pushSegment(x - 1);
-      start = { x, y };
-    }
-
-    prevY = y;
-  }
-
-  pushSegment(profile.length - 1);
-  return segments;
-};
-
-const buildVerticalSegments = (profile, width, height, edge) => {
-  const segments = [];
-  const invalidValue = edge === 'left' ? width : -1;
-  let start = null;
-  let prevX = null;
-
-  const pushSegment = (endY) => {
-    if (!start || prevX == null) return;
-    segments.push({
-      edge,
-      start: { x: start.x, y: start.y },
-      end: { x: prevX, y: endY },
-    });
-  };
-
-  for (let y = 0; y < profile.length; y += 1) {
-    const x = profile[y];
-    if (x === invalidValue) {
-      pushSegment(y - 1);
-      start = null;
-      prevX = null;
-      continue;
-    }
-
-    if (!start) {
-      start = { x, y };
-      prevX = x;
-      continue;
-    }
-
-    if (Math.abs(x - prevX) > 2) {
-      pushSegment(y - 1);
-      start = { x, y };
-    }
-
-    prevX = x;
-  }
-
-  pushSegment(profile.length - 1);
-  return segments;
-};
-
-const cloneProfiles = (profiles) => ({
-  topProfile: new Int32Array(profiles.topProfile),
-  bottomProfile: new Int32Array(profiles.bottomProfile),
-  leftProfile: new Int32Array(profiles.leftProfile),
-  rightProfile: new Int32Array(profiles.rightProfile),
-});
-
-const fillShortInvalidRuns = (profile, invalidValue, maxRunLength) => {
-  const out = new Int32Array(profile);
-  let i = 0;
-  while (i < out.length) {
-    if (out[i] !== invalidValue) {
-      i += 1;
-      continue;
-    }
-
-    const start = i;
-    while (i < out.length && out[i] === invalidValue) i += 1;
-    const end = i - 1;
-    const runLength = end - start + 1;
-    if (runLength > maxRunLength) continue;
-
-    const left = start - 1 >= 0 ? out[start - 1] : invalidValue;
-    const right = i < out.length ? out[i] : invalidValue;
-    const hasLeft = left !== invalidValue;
-    const hasRight = right !== invalidValue;
-    if (!hasLeft && !hasRight) continue;
-
-    for (let j = start; j <= end; j += 1) {
-      if (hasLeft && hasRight) {
-        const t = (j - start + 1) / (runLength + 1);
-        out[j] = Math.round(left * (1 - t) + right * t);
-      } else if (hasLeft) {
-        out[j] = left;
-      } else {
-        out[j] = right;
-      }
-    }
-  }
-  return out;
-};
-
-const medianFilterProfile = (profile, invalidValue, windowSize) => {
-  const out = new Int32Array(profile.length);
-  const radius = Math.floor(windowSize / 2);
-  for (let i = 0; i < profile.length; i += 1) {
-    if (profile[i] === invalidValue) {
-      out[i] = invalidValue;
-      continue;
-    }
-    const values = [];
-    for (let j = Math.max(0, i - radius); j <= Math.min(profile.length - 1, i + radius); j += 1) {
-      if (profile[j] !== invalidValue) values.push(profile[j]);
-    }
-    if (!values.length) {
-      out[i] = profile[i];
-      continue;
-    }
-    values.sort((a, b) => a - b);
-    out[i] = values[Math.floor(values.length / 2)];
-  }
-  return out;
-};
-
-const clampProfileDelta = (profile, invalidValue, maxDelta) => {
-  const out = new Int32Array(profile);
-  let lastIdx = -1;
-  for (let i = 0; i < out.length; i += 1) {
-    if (out[i] === invalidValue) continue;
-    if (lastIdx >= 0) {
-      const minV = out[lastIdx] - maxDelta * (i - lastIdx);
-      const maxV = out[lastIdx] + maxDelta * (i - lastIdx);
-      out[i] = Math.max(minV, Math.min(maxV, out[i]));
-    }
-    lastIdx = i;
-  }
-  return out;
-};
-
-const robustLinearFit = (xs, ys, huberDelta = 2, iterations = 4) => {
-  let slope = 0;
-  let intercept = ys.reduce((sum, y) => sum + y, 0) / ys.length;
-  let weights = new Float32Array(xs.length).fill(1);
-
-  for (let iter = 0; iter < iterations; iter += 1) {
-    let sumW = 0;
-    let sumX = 0;
-    let sumY = 0;
-    let sumXX = 0;
-    let sumXY = 0;
-    for (let i = 0; i < xs.length; i += 1) {
-      const w = weights[i];
-      const x = xs[i];
-      const y = ys[i];
-      sumW += w;
-      sumX += w * x;
-      sumY += w * y;
-      sumXX += w * x * x;
-      sumXY += w * x * y;
-    }
-    const denom = (sumW * sumXX) - (sumX * sumX);
-    if (Math.abs(denom) < 1e-6) break;
-    slope = ((sumW * sumXY) - (sumX * sumY)) / denom;
-    intercept = (sumY - (slope * sumX)) / sumW;
-
-    for (let i = 0; i < xs.length; i += 1) {
-      const residual = ys[i] - (slope * xs[i] + intercept);
-      const absResidual = Math.abs(residual);
-      weights[i] = absResidual <= huberDelta ? 1 : huberDelta / absResidual;
-    }
-  }
-
-  return { slope, intercept };
-};
-
-const piecewiseLinearRegularize = (profile, invalidValue, options = {}) => {
-  const {
-    segmentLength = 64,
-    minSegmentLength = 16,
-    huberDelta = 2,
-    iterations = 4,
-  } = options;
-  const out = new Int32Array(profile);
-  let runStart = -1;
-
-  const flushRun = (runEnd) => {
-    if (runStart < 0) return;
-    const runLength = runEnd - runStart + 1;
-    if (runLength < minSegmentLength) {
-      runStart = -1;
-      return;
-    }
-    for (let segStart = runStart; segStart <= runEnd; segStart += segmentLength) {
-      const segEnd = Math.min(runEnd, segStart + segmentLength - 1);
-      const len = segEnd - segStart + 1;
-      if (len < minSegmentLength) continue;
-      const xs = new Array(len);
-      const ys = new Array(len);
-      for (let i = 0; i < len; i += 1) {
-        xs[i] = segStart + i;
-        ys[i] = out[segStart + i];
-      }
-      const fit = robustLinearFit(xs, ys, huberDelta, iterations);
-      for (let i = 0; i < len; i += 1) {
-        out[segStart + i] = Math.round(fit.slope * xs[i] + fit.intercept);
-      }
-    }
-    runStart = -1;
-  };
-
-  for (let i = 0; i < out.length; i += 1) {
-    const valid = out[i] !== invalidValue;
-    if (valid && runStart < 0) runStart = i;
-    if (!valid && runStart >= 0) flushRun(i - 1);
-  }
-  flushRun(out.length - 1);
-
-  return out;
-};
-
-const regularizeEdgeProfiles = (profiles, width, height, options = {}) => {
-  const {
-    maxInvalidRun = 6,
-    medianWindow = 7,
-    maxDeltaX = 2,
-    maxDeltaY = 2,
-    piecewiseLinear = false,
-    piecewiseOptions = {},
-  } = options;
-  const window = Math.max(3, Math.min(11, medianWindow | 1));
-  const out = cloneProfiles(profiles);
-
-  const processProfile = (profile, invalidValue, maxDelta) => {
-    let cur = fillShortInvalidRuns(profile, invalidValue, maxInvalidRun);
-    cur = medianFilterProfile(cur, invalidValue, window);
-    cur = clampProfileDelta(cur, invalidValue, maxDelta);
-    if (piecewiseLinear) {
-      cur = piecewiseLinearRegularize(cur, invalidValue, piecewiseOptions);
-    }
-    return cur;
-  };
-
-  out.leftProfile = processProfile(out.leftProfile, width, maxDeltaX);
-  out.rightProfile = processProfile(out.rightProfile, -1, maxDeltaX);
-  out.topProfile = processProfile(out.topProfile, height, maxDeltaY);
-  out.bottomProfile = processProfile(out.bottomProfile, -1, maxDeltaY);
-  return out;
-};
-
-/**
- * Build a footprint mask from provided edge-scan profiles.
- * A pixel is inside the footprint if it falls within the first-wall
- * boundaries from all 4 edges.  This efficiently outlines the exterior
- * perimeter, correctly handling rectangular polygons with concavities
- * and 45-degree angles.
- */
-const buildEdgeScanFootprintFromProfiles = (profiles, width, height) => {
-  const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
-  const footprint = new Uint8Array(width * height);
-
-  for (let y = 0; y < height; y += 1) {
-    const xLeft = leftProfile[y];
-    const xRight = rightProfile[y];
-    if (xLeft >= width || xRight < 0 || xLeft > xRight) continue;
-    for (let x = xLeft; x <= xRight; x += 1) {
-      if (y >= topProfile[x] && y <= bottomProfile[x]) {
-        footprint[y * width + x] = 1;
-      }
-    }
-  }
-
-  return footprint;
-};
-
-const getLargestComponentEnvelopeProfiles = (mask, width, height) => {
-  const labeled = labelConnectedComponents(mask, width, height, 1);
-  if (!labeled.components.length) return null;
-
-  const largest = labeled.components.reduce(
-    (best, component) => (!best || component.size > best.size ? component : best),
-    null,
-  );
-  if (!largest) return null;
-
-  const topProfile = new Int32Array(width).fill(height);
-  const bottomProfile = new Int32Array(width).fill(-1);
-  const leftProfile = new Int32Array(height).fill(width);
-  const rightProfile = new Int32Array(height).fill(-1);
-
-  for (let y = largest.bbox.minY; y <= largest.bbox.maxY; y += 1) {
-    for (let x = largest.bbox.minX; x <= largest.bbox.maxX; x += 1) {
-      if (labeled.labels[y * width + x] !== largest.id) continue;
-      if (y < topProfile[x]) topProfile[x] = y;
-      if (y > bottomProfile[x]) bottomProfile[x] = y;
-      if (x < leftProfile[y]) leftProfile[y] = x;
-      if (x > rightProfile[y]) rightProfile[y] = x;
-    }
-  }
-
-  return {
-    topProfile,
-    bottomProfile,
-    leftProfile,
-    rightProfile,
-    componentSize: largest.size,
-  };
-};
-
-const replaceShortSuspiciousRuns = (source, envelope, threshold, maxSpan, inwardDelta, isValid) => {
-  const corrected = new Int32Array(source);
-  let runStart = -1;
-
-  const flushRun = (runEndExclusive) => {
-    if (runStart < 0) return;
-    const runLength = runEndExclusive - runStart;
-    if (runLength <= maxSpan) {
-      for (let i = runStart; i < runEndExclusive; i += 1) {
-        corrected[i] = envelope[i];
-      }
-    }
-    runStart = -1;
-  };
-
-  for (let i = 0; i < source.length; i += 1) {
-    if (!isValid(source[i], envelope[i])) {
-      flushRun(i);
-      continue;
-    }
-    const suspicious = inwardDelta(source[i], envelope[i]) > threshold;
-    if (suspicious) {
-      if (runStart < 0) runStart = i;
-    } else {
-      flushRun(i);
-    }
-  }
-  flushRun(source.length);
-
-  return corrected;
-};
-
-const applyOuterEnvelopeCorrection = (edgeProfiles, envelopeProfiles, width, height, options = {}) => {
-  if (!envelopeProfiles) return edgeProfiles;
-
-  const threshold = options.outerEnvelopeDeviationThreshold
-    ?? Math.max(2, Math.round(Math.min(width, height) * 0.0075));
-  const maxSpan = options.outerEnvelopeShortSpan
-    ?? Math.max(3, Math.round(Math.min(width, height) * 0.03));
-
-  return {
-    topProfile: replaceShortSuspiciousRuns(
-      edgeProfiles.topProfile,
-      envelopeProfiles.topProfile,
-      threshold,
-      maxSpan,
-      (edge, env) => edge - env,
-      (edge, env) => edge < height && env < height,
-    ),
-    bottomProfile: replaceShortSuspiciousRuns(
-      edgeProfiles.bottomProfile,
-      envelopeProfiles.bottomProfile,
-      threshold,
-      maxSpan,
-      (edge, env) => env - edge,
-      (edge, env) => edge >= 0 && env >= 0,
-    ),
-    leftProfile: replaceShortSuspiciousRuns(
-      edgeProfiles.leftProfile,
-      envelopeProfiles.leftProfile,
-      threshold,
-      maxSpan,
-      (edge, env) => edge - env,
-      (edge, env) => edge < width && env < width,
-    ),
-    rightProfile: replaceShortSuspiciousRuns(
-      edgeProfiles.rightProfile,
-      envelopeProfiles.rightProfile,
-      threshold,
-      maxSpan,
-      (edge, env) => env - edge,
-      (edge, env) => edge >= 0 && env >= 0,
-    ),
-  };
-};
-
-/**
- * Measure wall thickness at each exterior wall position by scanning inward
- * through the first dark pixel until the wall ends (transitions to white).
- *
- * Each edge profile records where the exterior wall begins; this function
- * continues scanning inward from those positions to measure how thick the
- * wall band is at each row/column.  Short measurements from windows, doors,
- * or dashes are included but can be filtered by the caller.
- *
- * @param {Uint8Array} wallMask  Binary wall mask (1 = dark/wall, 0 = light/space).
- * @param {number}     width     Mask width in pixels.
- * @param {number}     height    Mask height in pixels.
- * @param {object}     profiles  Edge-scan profiles from scanEdgeInward().
- * @returns {number[]} Array of per-row/column wall thickness measurements (px).
- */
 export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) => {
   const { topProfile, bottomProfile, leftProfile, rightProfile } = profiles;
   const measurements = [];
 
-  // Top edge: scan downward from topProfile[x] through the wall.
   for (let x = 0; x < width; x += 1) {
     const y0 = topProfile[x];
     if (y0 >= height) continue;
@@ -1010,7 +260,6 @@ export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) 
     if (t > 0) measurements.push(t);
   }
 
-  // Bottom edge: scan upward from bottomProfile[x] through the wall.
   for (let x = 0; x < width; x += 1) {
     const y0 = bottomProfile[x];
     if (y0 < 0) continue;
@@ -1022,7 +271,6 @@ export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) 
     if (t > 0) measurements.push(t);
   }
 
-  // Left edge: scan rightward from leftProfile[y] through the wall.
   for (let y = 0; y < height; y += 1) {
     const x0 = leftProfile[y];
     if (x0 >= width) continue;
@@ -1034,7 +282,6 @@ export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) 
     if (t > 0) measurements.push(t);
   }
 
-  // Right edge: scan leftward from rightProfile[y] through the wall.
   for (let y = 0; y < height; y += 1) {
     const x0 = rightProfile[y];
     if (x0 < 0) continue;
@@ -1049,34 +296,17 @@ export const measureWallThicknessFromEdge = (wallMask, width, height, profiles) 
   return measurements;
 };
 
-// Minimum thickness (px) to treat a measurement as a solid wall section.
-// Values below this are likely window/door gaps or thin decorative lines.
 const MIN_WALL_THICKNESS_MEASUREMENT = 3;
 
-/**
- * Derive a single robust wall-thickness estimate from an array of
- * per-row/column measurements, ignoring thin outliers (windows, doors).
- *
- * Filters out measurements below MIN_WALL_THICKNESS_MEASUREMENT, then
- * returns the mode (most frequent value) of the remaining distribution.
- * Ties are broken in favour of the larger value to prefer the dominant
- * thick-wall sections over incidental thin ones.
- *
- * @param {number[]} measurements  Output of measureWallThicknessFromEdge().
- * @param {number}   [fallback=2]  Returned when no measurements survive filtering.
- * @returns {number} Estimated wall thickness in pixels.
- */
 export const computeRobustWallThickness = (measurements, fallback = 2) => {
   const thick = measurements.filter((t) => t >= MIN_WALL_THICKNESS_MEASUREMENT);
   if (thick.length === 0) return fallback;
 
-  // Build frequency histogram.
   const hist = new Map();
   for (const t of thick) {
     hist.set(t, (hist.get(t) ?? 0) + 1);
   }
 
-  // Return mode; ties broken in favour of the larger value.
   let modeVal = fallback;
   let modeCount = 0;
   for (const [val, count] of hist) {
@@ -1089,6 +319,251 @@ export const computeRobustWallThickness = (measurements, fallback = 2) => {
   return modeVal;
 };
 
+export const estimateWallThickness = (wallMask, width, height) => {
+  const profiles = getSimpleEdgeProfiles(wallMask, width, height);
+  const measurements = measureWallThicknessFromEdge(wallMask, width, height, profiles);
+  return computeRobustWallThickness(measurements, 10);
+};
+
+export const buildWallMask = (gray, width, height, options = {}) => {
+  const darkThreshold = options.darkThreshold ?? 200;
+  const rawWallMask = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i += 1) {
+    rawWallMask[i] = gray[i] < darkThreshold ? 1 : 0;
+  }
+
+  const labelsObj = labelConnectedComponents(rawWallMask, width, height, 1);
+  const cleanedWallMask = new Uint8Array(width * height);
+  const minSize = options.minWallComponentSize ?? 100;
+  const minDim = options.minWallComponentDim ?? 40;
+
+  for (const comp of labelsObj.components) {
+    const wComp = comp.bbox.maxX - comp.bbox.minX + 1;
+    const hComp = comp.bbox.maxY - comp.bbox.minY + 1;
+    if (comp.size >= minSize || wComp >= minDim || hComp >= minDim) {
+      for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+        for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+          const idx = y * width + x;
+          if (labelsObj.labels[idx] === comp.id) {
+            cleanedWallMask[idx] = 1;
+          }
+        }
+      }
+    }
+  }
+
+  return { rawWallMask, cleanedWallMask };
+};
+
+export const traceExterior = (wallMask, width, height, options = {}) => {
+  const wallThickness = options.innerErode != null
+    ? options.innerErode
+    : estimateWallThickness(wallMask, width, height);
+
+  const closeRadius = options.outerCloseRadius ?? options.wallMask?.closeRadius ?? 12;
+  const closedWallMask = closeMask(wallMask, width, height, closeRadius);
+
+  const exterior = floodFillFromEdges(closedWallMask, width, height);
+  const footprintMask = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i += 1) {
+    footprintMask[i] = exterior[i] ? 0 : 1;
+  }
+
+  const footprintLabels = labelConnectedComponents(footprintMask, width, height, 1);
+  let outerPolygon = [];
+  if (footprintLabels.components.length > 0) {
+    const mainComponent = footprintLabels.components.sort((a, b) => b.size - a.size)[0];
+    const rawOuter = componentToPolygon(footprintLabels.labels, width, height, mainComponent.id, {
+      simplifyEpsilon: options.simplifyEpsilon ?? 2.5,
+      angleBins: options.angleBins,
+    });
+    outerPolygon = snapPolygonToGrid(rawOuter);
+  }
+
+  const innerFootprint = erode(footprintMask, width, height, wallThickness);
+  const innerLabelsObj = labelConnectedComponents(innerFootprint, width, height, 1);
+  let innerPolygon = [];
+  if (innerLabelsObj.components.length > 0) {
+    const largestInner = innerLabelsObj.components.sort((a, b) => b.size - a.size)[0];
+    const rawInner = componentToPolygon(innerLabelsObj.labels, width, height, largestInner.id, {
+      simplifyEpsilon: options.simplifyEpsilon ?? 2.5,
+      angleBins: options.angleBins,
+    });
+    innerPolygon = snapPolygonToGrid(rawInner);
+  }
+
+  return {
+    footprintMask,
+    closedWallMask,
+    outerPolygon,
+    innerPolygon,
+    wallThickness,
+  };
+};
+
+export const detectRoom = (wallMask, footprintMask, width, height, clickPoint, options = {}) => {
+  const cx = Math.max(0, Math.min(width - 1, Math.round(clickPoint.x)));
+  const cy = Math.max(0, Math.min(height - 1, Math.round(clickPoint.y)));
+
+  if (footprintMask && !footprintMask[cy * width + cx]) {
+    return null;
+  }
+
+  let closingRadius = options.roomCloseRadius ?? 10;
+  let roomMask = null;
+  let seed = null;
+  let finalClosedMask = null;
+  let leakDetected = false;
+
+  const maxClosingRadius = Math.min(20, closingRadius + 5);
+
+  while (closingRadius <= maxClosingRadius) {
+    finalClosedMask = closeMask(wallMask, width, height, closingRadius);
+    const freeMask = new Uint8Array(width * height);
+    for (let i = 0; i < freeMask.length; i += 1) {
+      freeMask[i] = finalClosedMask[i] ? 0 : 1;
+    }
+
+    seed = findFreeSpaceSeed(freeMask, cx, cy, width, height, 40);
+    if (!seed) {
+      break;
+    }
+
+    roomMask = new Uint8Array(width * height);
+    const queue = [seed.y * width + seed.x];
+    roomMask[seed.y * width + seed.x] = 1;
+    let head = 0;
+    let leaked = false;
+    let area = 0;
+
+    let footprintArea = 0;
+    for (let i = 0; i < footprintMask.length; i += 1) {
+      if (footprintMask[i]) footprintArea += 1;
+    }
+    if (footprintArea === 0) footprintArea = width * height;
+
+    while (head < queue.length) {
+      const idx = queue[head];
+      head += 1;
+      const x = idx % width;
+      const y = Math.floor(idx / width);
+      area += 1;
+
+      if (area > footprintArea * 0.55) {
+        leaked = true;
+        break;
+      }
+
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+        leaked = true;
+        break;
+      }
+
+      if (footprintMask && !footprintMask[idx]) {
+        leaked = true;
+        break;
+      }
+
+      for (const [dx, dy] of neighbors4) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
+          const nIdx = ny * width + nx;
+          if (!roomMask[nIdx] && freeMask[nIdx]) {
+            roomMask[nIdx] = 1;
+            queue.push(nIdx);
+          }
+        }
+      }
+    }
+
+    if (leaked) {
+      leakDetected = true;
+      closingRadius += 5;
+    } else {
+      break;
+    }
+  }
+
+  if (!roomMask || !seed) return null;
+
+  const roomLabels = new Int32Array(width * height);
+  for (let i = 0; i < roomMask.length; i += 1) {
+    roomLabels[i] = roomMask[i] ? 1 : -1;
+  }
+  const rawRoomPolygon = componentToPolygon(roomLabels, width, height, 1, {
+    simplifyEpsilon: options.simplifyEpsilon ?? 2.0,
+    angleBins: options.angleBins,
+  });
+
+  if (rawRoomPolygon.length < 3) return null;
+  const roomPolygon = snapPolygonToGrid(rawRoomPolygon);
+
+  return {
+    roomMask,
+    closedWallMask: finalClosedMask,
+    roomPolygon,
+    seed,
+    leakDetected,
+  };
+};
+
+export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
+  const preprocess = normalizeImageData(imageData, options.preprocess);
+  const orientation = estimateDominantOrientations(
+    preprocess.gray, preprocess.width, preprocess.height, options.orientation,
+  );
+
+  const w = preprocess.width;
+  const h = preprocess.height;
+
+  const { rawWallMask, cleanedWallMask } = buildWallMask(preprocess.gray, w, h, options);
+
+  const exterior = traceExterior(cleanedWallMask, w, h, {
+    ...options,
+    angleBins: orientation.dominant,
+  });
+
+  if (!exterior) return null;
+
+  const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
+
+  const roomRes = detectRoom(cleanedWallMask, exterior.footprintMask, w, h, nPoint, {
+    ...options,
+    angleBins: orientation.dominant,
+  });
+
+  if (!roomRes) return null;
+
+  const mappedPolygon = mapPolygonFromNormalized(roomRes.roomPolygon, preprocess.scale);
+  const bounds = polygonToBounds(mappedPolygon);
+  if (!bounds) return null;
+
+  const confidenceBase = Math.min(1, roomRes.roomPolygon.length / 20);
+  const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
+
+  return {
+    polygon: mappedPolygon,
+    overlay: {
+      x1: bounds.minX,
+      y1: bounds.minY,
+      x2: bounds.maxX,
+      y2: bounds.maxY,
+    },
+    confidence,
+    debug: {
+      normalizedSize: { width: w, height: h },
+      dominantAngles: orientation.dominant,
+      startPoint: roomRes.seed,
+      thresholdedMask: rawWallMask,
+      filteredMask: cleanedWallMask,
+      closedMask: roomRes.closedWallMask,
+      roomMask: roomRes.roomMask,
+      leakDetected: roomRes.leakDetected,
+    },
+  };
+};
+
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const preprocess = normalizeImageData(imageData, options.preprocess);
   const orientation = estimateDominantOrientations(
@@ -1098,134 +573,30 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const w = preprocess.width;
   const h = preprocess.height;
 
-  /* --- Edge-scan footprint using global brightness threshold ---
-   * Use a simple global threshold on the grayscale image to identify
-   * wall pixels.  Unlike adaptive thresholding, this correctly captures
-   * the full thickness of walls (no hollow centers for thick walls) and
-   * preserves thin lines such as window outlines (no morphological
-   * erosion of fine features).
-   *
-   * Since the input is guaranteed black-on-white with no noise outside
-   * the floorplan, a global threshold is robust and accurate.  The
-   * edge-inward scan naturally ignores interior features because it
-   * only records the first dark pixel from each image edge.            */
-  const darkThreshold = options.darkThreshold ?? DARK_PIXEL_THRESHOLD;
-  const edgeScanMask = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i += 1) {
-    edgeScanMask[i] = preprocess.gray[i] < darkThreshold ? 1 : 0;
-  }
+  const { rawWallMask, cleanedWallMask } = buildWallMask(preprocess.gray, w, h, options);
 
-  // Build footprint from edge profiles, retaining profiles for wall thickness measurement.
-  //
-  // Pipeline stages (unified from PRs #160, #163, #164):
-  //   1. Raw edge-inward scan with multi-candidate scoring options (PR #164)
-  //   2. Outer envelope correction to fix short suspicious profile dips (PR #163)
-  //   3. Edge profile regularization/smoothing (PR #160)
-  //   4. Build footprint from fully post-processed profiles
-
-  // Stage 1: Scan edges inward with multi-candidate scoring.
-  const rawEdgeProfiles = scanEdgeInward(edgeScanMask, w, h, {
-    minRunLength: options.minRunLength,
-    neighborSupportRadius: options.neighborSupportRadius,
-    consistencyWeight: options.consistencyWeight,
-    neighborSupportWeight: options.neighborSupportWeight,
-    stabilityScoreThreshold: options.stabilityScoreThreshold,
-    fallbackToFirstHit: options.fallbackToFirstHit,
+  const exterior = traceExterior(cleanedWallMask, w, h, {
+    ...options,
+    angleBins: orientation.dominant,
   });
 
-  // Stage 2: Outer envelope correction (PR #163).
-  let correctedEdgeProfiles = rawEdgeProfiles;
-  const useOuterEnvelopeCorrection = options.outerEnvelopeCorrection !== false;
-  if (useOuterEnvelopeCorrection) {
-    const candidateMask = dilate(edgeScanMask, w, h, options.outerEnvelopeDilate ?? 2);
-    const envelopeProfiles = getLargestComponentEnvelopeProfiles(candidateMask, w, h);
-    correctedEdgeProfiles = applyOuterEnvelopeCorrection(
-      rawEdgeProfiles,
-      envelopeProfiles,
-      w,
-      h,
-      options,
-    );
-  }
+  if (!exterior) return null;
 
-  // Stage 3: Edge profile regularization/smoothing (PR #160).
-  const smoothingOptions = options.edgeProfileSmoothing;
-  const useEdgeProfileSmoothing = smoothingOptions !== false;
-  const finalEdgeProfiles = useEdgeProfileSmoothing
-    ? regularizeEdgeProfiles(
-      correctedEdgeProfiles,
-      w,
-      h,
-      typeof smoothingOptions === 'object' ? smoothingOptions : {},
-    )
-    : correctedEdgeProfiles;
+  const mappedOuter = exterior.outerPolygon.length >= 3
+    ? mapPolygonFromNormalized(exterior.outerPolygon, preprocess.scale)
+    : null;
+  const mappedInner = exterior.innerPolygon.length >= 3
+    ? mapPolygonFromNormalized(exterior.innerPolygon, preprocess.scale)
+    : null;
 
-  // Debug overlay data (PR #161): simple 3-point median on raw profiles for visualization.
-  const debugRawProfiles = {
-    top: profileToArray(rawEdgeProfiles.topProfile),
-    bottom: profileToArray(rawEdgeProfiles.bottomProfile),
-    left: profileToArray(rawEdgeProfiles.leftProfile),
-    right: profileToArray(rawEdgeProfiles.rightProfile),
-  };
-  const debugRegularizedProfiles = {
-    top: regularizeProfile(debugRawProfiles.top, h).map((value) => clampProfileValue(value, 0, h)),
-    bottom: regularizeProfile(debugRawProfiles.bottom, -1).map((value) => clampProfileValue(value, -1, h - 1)),
-    left: regularizeProfile(debugRawProfiles.left, w).map((value) => clampProfileValue(value, 0, w)),
-    right: regularizeProfile(debugRawProfiles.right, -1).map((value) => clampProfileValue(value, -1, w - 1)),
-  };
-  const correctedEnvelopeSegments = [
-    ...buildHorizontalSegments(debugRegularizedProfiles.top, w, h, 'top'),
-    ...buildHorizontalSegments(debugRegularizedProfiles.bottom, w, h, 'bottom'),
-    ...buildVerticalSegments(debugRegularizedProfiles.left, w, h, 'left'),
-    ...buildVerticalSegments(debugRegularizedProfiles.right, w, h, 'right'),
-  ];
+  if (!mappedOuter && !mappedInner) return null;
 
-  // Stage 4: Build footprint from fully post-processed profiles.
-  let footprint = buildEdgeScanFootprintFromProfiles(finalEdgeProfiles, w, h);
-  let usedEdgeScan = true;
-
-  // Verify footprint is non-trivial.
-  let fpSize = 0;
-  for (let i = 0; i < footprint.length; i += 1) {
-    if (footprint[i]) fpSize += 1;
-  }
-
-  if (fpSize < w * h * 0.02) {
-    // Fallback: flood-fill from edges.
-    footprint = getFloorplanFootprint(
-      dilate(edgeScanMask, w, h, options.outerDilate ?? 2), w, h,
-    );
-    usedEdgeScan = false;
-  }
-
-  /* --- Step 4: Extract outer and inner boundary polygons ---
-   * Measure actual wall thickness from edge profiles so the inner boundary
-   * reflects the true interior wall face, not just a fixed 2-pixel erosion.  */
-  const wallThicknessMeasurements = measureWallThicknessFromEdge(edgeScanMask, w, h, finalEdgeProfiles);
-  const wallThickness = options.innerErode != null
-    ? options.innerErode
-    : computeRobustWallThickness(wallThicknessMeasurements);
-
-  const outerResult = getLargestComponentPolygon(
-    footprint, preprocess, orientation, options,
-  );
-  const innerFootprint = erode(footprint, w, h, wallThickness);
-  const innerResult = getLargestComponentPolygon(
-    innerFootprint, preprocess, orientation, options,
-  );
-
-  if (!outerResult && !innerResult) return null;
-
-  const outerPolygon = outerResult
-    ? mapPolygonFromNormalized(outerResult.polygon, preprocess.scale) : null;
-  const innerPolygon = innerResult
-    ? mapPolygonFromNormalized(innerResult.polygon, preprocess.scale) : null;
-  const outerBounds = outerPolygon ? polygonToBounds(outerPolygon) : null;
-  const innerBounds = innerPolygon ? polygonToBounds(innerPolygon) : null;
+  const outerBounds = mappedOuter ? polygonToBounds(mappedOuter) : null;
+  const innerBounds = mappedInner ? polygonToBounds(mappedInner) : null;
 
   return {
-    outer: outerPolygon ? {
-      polygon: outerPolygon,
+    outer: mappedOuter ? {
+      polygon: mappedOuter,
       overlay: {
         x1: outerBounds.minX,
         y1: outerBounds.minY,
@@ -1233,8 +604,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
         y2: outerBounds.maxY,
       },
     } : null,
-    inner: innerPolygon ? {
-      polygon: innerPolygon,
+    inner: mappedInner ? {
+      polygon: mappedInner,
       overlay: {
         x1: innerBounds.minX,
         y1: innerBounds.minY,
@@ -1245,29 +616,14 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     debug: {
       dominantAngles: orientation.dominant,
       normalizedSize: { width: w, height: h },
-      hasOuter: Boolean(outerPolygon),
-      hasInner: Boolean(innerPolygon),
-      usedEdgeScan,
-      outerEnvelopeCorrection: useOuterEnvelopeCorrection,
-      wallThickness,
-      edgeProfiles: {
-        raw: debugRawProfiles,
-        regularized: debugRegularizedProfiles,
-      },
-      correctedEnvelopeSegments,
-      rawProfiles: {
-        topProfile: profileToArray(rawEdgeProfiles.topProfile),
-        bottomProfile: profileToArray(rawEdgeProfiles.bottomProfile),
-        leftProfile: profileToArray(rawEdgeProfiles.leftProfile),
-        rightProfile: profileToArray(rawEdgeProfiles.rightProfile),
-      },
-      regularizedProfiles: {
-        topProfile: profileToArray(finalEdgeProfiles.topProfile),
-        bottomProfile: profileToArray(finalEdgeProfiles.bottomProfile),
-        leftProfile: profileToArray(finalEdgeProfiles.leftProfile),
-        rightProfile: profileToArray(finalEdgeProfiles.rightProfile),
-      },
-      edgeProfileSmoothing: useEdgeProfileSmoothing,
+      hasOuter: Boolean(mappedOuter),
+      hasInner: Boolean(mappedInner),
+      usedEdgeScan: true,
+      wallThickness: exterior.wallThickness,
+      thresholdedMask: rawWallMask,
+      filteredMask: cleanedWallMask,
+      closedMask: exterior.closedWallMask,
+      footprintMask: exterior.footprintMask,
     },
   };
 };

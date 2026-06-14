@@ -6,6 +6,7 @@ import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
 import OptionsOverlay from './components/OptionsOverlay';
+import DebugPipelinePanel from './components/DebugPipelinePanel';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import {
   detectRoomFromClick,
@@ -129,6 +130,15 @@ function App() {
     terminateDetectionWorker();
     terminateOcrWorker();
   }, []);
+
+  // Expose debugPipeline on window
+  useEffect(() => {
+    if (debugDetection && detectionDebugData) {
+      window.debugPipeline = detectionDebugData;
+    } else {
+      window.debugPipeline = null;
+    }
+  }, [debugDetection, detectionDebugData]);
 
   // Manage instructions toasts
   useEffect(() => {
@@ -943,6 +953,10 @@ function App() {
             debugDetection={debugDetection}
             onDebugDetectionChange={handleDebugDetectionChange}
           />
+        )}
+
+        {debugDetection && (
+          <DebugPipelinePanel debugData={detectionDebugData} />
         )}
 
         {/* Right-side overlay panels — stacked vertically */}
