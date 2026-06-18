@@ -48,7 +48,8 @@ const DebugPipelinePanel = ({ debugData }) => {
   const handleMouseMove = (e) => {
     if (!isResizingRef.current) return;
     const computedWidth = window.innerWidth - e.clientX;
-    if (computedWidth >= 280 && computedWidth <= 600) {
+    const maxWidth = window.innerWidth - 280; // Allow it to expand all the way to the left tools panel
+    if (computedWidth >= 280 && computedWidth <= maxWidth) {
       setPanelWidth(computedWidth);
     }
   };
@@ -202,7 +203,7 @@ const DebugPipelinePanel = ({ debugData }) => {
                           <img
                             src={img.url}
                             alt={img.name}
-                            className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            className="max-h-full max-w-full object-contain"
                             onClick={() => {
                               const newTab = window.open();
                               if (newTab) {
