@@ -260,6 +260,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
   setDebugDetection: (v) => set({ debugDetection: v }),
   setDetectionDebugData: (v) => set({ detectionDebugData: v }),
+  setActiveStageIndex: (v) => set((s) => ({
+    detectionDebugData: s.detectionDebugData ? { ...s.detectionDebugData, activeStageIndex: v } : null
+  })),
+  setSelectedGeometryId: (v) => set((s) => ({
+    detectionDebugData: s.detectionDebugData ? { ...s.detectionDebugData, selectedGeometryId: v } : null
+  })),
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
