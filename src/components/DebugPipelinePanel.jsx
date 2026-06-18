@@ -168,6 +168,24 @@ const DebugPipelinePanel = ({ debugData }) => {
                 </div>
               </div>
 
+              {/* Step Explanations (What I'm seeing / What I should see) */}
+              {currentStage.explanation && (
+                <div className="flex flex-col gap-2.5 bg-chrome-950/40 border border-chrome-800/60 rounded-xl p-3 text-xs leading-relaxed">
+                  <div>
+                    <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block mb-0.5">
+                      What you are seeing:
+                    </span>
+                    <p className="text-slate-300">{currentStage.explanation.seeing}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-0.5">
+                      What to expect:
+                    </span>
+                    <p className="text-slate-300">{currentStage.explanation.expected}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Stage Metadata diagnostics */}
               <div className="flex flex-col gap-2">
                 <h4 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
