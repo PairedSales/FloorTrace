@@ -186,6 +186,37 @@ const DebugPipelinePanel = ({ debugData }) => {
                 </div>
               )}
 
+              {/* HQ Screenshots section */}
+              {currentStage.images?.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <h4 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                    HQ Screenshot Previews
+                  </h4>
+                  <div className="flex flex-col gap-3">
+                    {currentStage.images.map((img, idx) => (
+                      <div key={idx} className="flex flex-col gap-1.5 rounded-xl border border-chrome-800 bg-chrome-950 p-2 shadow-inner">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 pt-1">
+                          {img.name}
+                        </span>
+                        <div className="relative aspect-video w-full rounded-lg bg-chrome-900 border border-chrome-800/80 overflow-hidden flex items-center justify-center group shadow-md cursor-zoom-in">
+                          <img
+                            src={img.url}
+                            alt={img.name}
+                            className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            onClick={() => {
+                              const newTab = window.open();
+                              if (newTab) {
+                                newTab.document.write(`<img src="${img.url}" style="max-width:100%; max-height:100vh; display:block; margin:auto;" />`);
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Stage Metadata diagnostics */}
               <div className="flex flex-col gap-2">
                 <h4 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">

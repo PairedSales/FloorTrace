@@ -26,7 +26,7 @@ export const formatPoint = (p) => {
 /**
  * Compile stages list for Room Tracing.
  */
-export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
+export const buildRoomDebugStages = async (debug, generateScreenshot) => {
   const stages = [];
   const scale = debug.scale ?? 1.0;
   const w = debug.normalizedSize.width;
@@ -36,11 +36,14 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   const mapPoly = (poly) => (poly ? poly.map(mapPt) : []);
 
   // 1. Raw Thresholded Mask
-  const thresholdedMaskUrl = await maskToDataUrl(debug.thresholdedMask, w, h, 'thresholded');
+  const thresholdedMaskUrl = await generateScreenshot(debug.thresholdedMask, w, h, 'thresholded');
   stages.push({
     id: 'thresholded',
     name: '1. Raw Thresholded Mask',
-    maskUrl: thresholdedMaskUrl,
+    maskUrl: null, // do not render on canvas automatically to avoid overlapping the original image if undesired, or keep it. Let's keep it null on canvas so it doesn't overlay, or let the user toggle! Wait, if we keep maskUrl: null, then it won't overlay on the main canvas at all! The canvas will only draw the geometries. The side panel will show the high quality screenshot. This is perfect and matches the request exactly!
+    images: [
+      { name: 'Raw Binarized Wall Pixels', url: thresholdedMaskUrl }
+    ],
     geometry: { polygons: [], lines: [], points: [] },
     explanation: {
       seeing: 'A raw binary black-and-white mask of the floor plan where all pixels darker than the global threshold are binarized as wall candidates.',
@@ -57,8 +60,10 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 2. Filtered / Cleaned Mask
-  const filteredMaskUrl = await maskToDataUrl(debug.filteredMask, w, h, 'filtered');
+  const filteredMaskUrl = await generateScreenshot(debug.filteredMask, w, h, 'filtered');
   const componentsGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotComponents = [];
+
   if (debug.rawComponents) {
     debug.rawComponents.forEach((comp) => {
       const bbox = comp.bbox;
@@ -67,12 +72,14 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
         { x: bbox.maxX, y: bbox.minY },
         { x: bbox.maxX, y: bbox.maxY },
         { x: bbox.minX, y: bbox.maxY },
-      ].map(mapPt);
+      ];
       
       const isKept = debug.filteredComponents?.some((fc) => fc.id === comp.id);
+      
+      // Bounding box mapped coordinates for main canvas
       componentsGeometry.polygons.push({
         id: `comp-${comp.id}`,
-        points: polyPoints,
+        points: polyPoints.map(mapPt),
         label: `Comp ${comp.id} (size: ${comp.size})`,
         type: isKept ? 'temporary' : 'rejected',
         properties: {
@@ -82,13 +89,26 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
           'Status': isKept ? 'Kept' : 'Rejected (noise/text)',
         }
       });
+
+      // Bounding box normalized coordinates for screenshot
+      screenshotComponents.push({
+        type: 'polygon',
+        points: polyPoints,
+        class: isKept ? 'temporary' : 'rejected'
+      });
     });
   }
+
+  const componentsScreenshotUrl = await generateScreenshot(debug.filteredMask, w, h, 'filtered', screenshotComponents);
 
   stages.push({
     id: 'filtered',
     name: '2. Noise & Text Filtered Mask',
-    maskUrl: filteredMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Cleaned Wall Mask', url: filteredMaskUrl },
+      { name: 'Classified Noise & Text Bounds', url: componentsScreenshotUrl }
+    ],
     geometry: componentsGeometry,
     explanation: {
       seeing: 'A cleaned mask overlay where small noise components, labels, and text characters have been filtered out (shown as red/rejected bounding boxes).',
@@ -104,11 +124,14 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 3. Closed Mask
-  const closedMaskUrl = await maskToDataUrl(debug.closedMask, w, h, 'closed');
+  const closedMaskUrl = await generateScreenshot(debug.closedMask, w, h, 'closed');
   stages.push({
     id: 'closed',
     name: '3. Morphologically Closed Mask',
-    maskUrl: closedMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Closed Wall Gaps', url: closedMaskUrl }
+    ],
     geometry: { polygons: [], lines: [], points: [] },
     explanation: {
       seeing: 'The binarized walls after morphological closing, which dilates (thickens) and then erodes wall components to seal small openings.',
@@ -123,8 +146,10 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 4. Room Flood Filled Mask
-  const roomMaskUrl = await maskToDataUrl(debug.roomMask, w, h, 'room');
+  const roomMaskUrl = await generateScreenshot(debug.roomMask, w, h, 'room');
   const seedGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotSeed = [];
+
   if (debug.seed) {
     const mappedSeed = mapPt(debug.seed);
     seedGeometry.points.push({
@@ -138,12 +163,25 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
         'Leak Detected': debug.leakDetected ? 'YES (Adaptive closing applied)' : 'NO (Successfully sealed)',
       }
     });
+
+    screenshotSeed.push({
+      type: 'point',
+      x: debug.seed.x,
+      y: debug.seed.y,
+      class: 'final'
+    });
   }
+
+  const seedScreenshotUrl = await generateScreenshot(debug.closedMask, w, h, 'closed', screenshotSeed);
 
   stages.push({
     id: 'floodFilled',
     name: '4. Flood-Filled Room',
-    maskUrl: roomMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Room Flood Fill Region', url: roomMaskUrl },
+      { name: 'Room Click Seed Point', url: seedScreenshotUrl }
+    ],
     geometry: seedGeometry,
     explanation: {
       seeing: 'The active room chamber flooded using a 4-neighbor queue starting from your click (the blue seed point), overlaid in green.',
@@ -160,6 +198,8 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   // 5. Raw Traced Polygon
   const rawRoomPoly = mapPoly(debug.rawRoomPolygon);
   const rawPolyGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotRawPoly = [];
+
   if (rawRoomPoly.length >= 3) {
     rawPolyGeometry.polygons.push({
       id: 'raw-room-poly',
@@ -183,12 +223,31 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
         }
       });
     });
+
+    screenshotRawPoly.push({
+      type: 'polygon',
+      points: debug.rawRoomPolygon,
+      class: 'interior'
+    });
+    debug.rawRoomPolygon.forEach((pt) => {
+      screenshotRawPoly.push({
+        type: 'point',
+        x: pt.x,
+        y: pt.y,
+        class: 'interior'
+      });
+    });
   }
+
+  const rawPolyScreenshotUrl = await generateScreenshot(debug.roomMask, w, h, 'room', screenshotRawPoly);
 
   stages.push({
     id: 'rawPolygon',
     name: '5. Raw Boundary Tracing',
-    maskUrl: roomMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Raw Moore Contour Outline', url: rawPolyScreenshotUrl }
+    ],
     geometry: rawPolyGeometry,
     explanation: {
       seeing: 'The raw polygon boundary generated by tracing the contours of the green flood-filled room component using Moore Boundary Tracing.',
@@ -204,6 +263,8 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
   // 6. Snapped & Final Solution
   const snappedRoomPoly = mapPoly(debug.snappedRoomPolygon);
   const snappedPolyGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotSnappedPoly = [];
+
   if (snappedRoomPoly.length >= 3) {
     snappedPolyGeometry.polygons.push({
       id: 'snapped-room-poly',
@@ -216,11 +277,18 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
       }
     });
 
+    screenshotSnappedPoly.push({
+      type: 'polygon',
+      points: debug.snappedRoomPolygon,
+      class: 'final'
+    });
+
     for (let i = 0; i < snappedRoomPoly.length; i++) {
       const p1 = snappedRoomPoly[i];
       const p2 = snappedRoomPoly[(i + 1) % snappedRoomPoly.length];
       const len = calculateDistance(p1, p2);
       const angle = calculateAngle(p1, p2);
+      
       snappedPolyGeometry.lines.push({
         id: `wall-edge-${i}`,
         start: p1,
@@ -234,6 +302,13 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
           'Start Vertex': formatPoint(p1),
           'End Vertex': formatPoint(p2),
         }
+      });
+
+      screenshotSnappedPoly.push({
+        type: 'line',
+        start: debug.snappedRoomPolygon[i],
+        end: debug.snappedRoomPolygon[(i + 1) % debug.snappedRoomPolygon.length],
+        class: 'final'
       });
     }
 
@@ -250,13 +325,27 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
           'Connected Edges': `${i === 0 ? snappedRoomPoly.length - 1 : i - 1} and ${i}`,
         }
       });
+
+      screenshotSnappedPoly.push({
+        type: 'point',
+        x: debug.snappedRoomPolygon[i].x,
+        y: debug.snappedRoomPolygon[i].y,
+        class: 'final'
+      });
     });
   }
+
+  const finalCleanScreenshotUrl = await generateScreenshot(null, w, h, null, screenshotSnappedPoly);
+  const finalAlignedScreenshotUrl = await generateScreenshot(debug.filteredMask, w, h, 'filtered', screenshotSnappedPoly);
 
   stages.push({
     id: 'finalSolution',
     name: '6. Final Snapped Wall Solution',
     maskUrl: null,
+    images: [
+      { name: 'Final Wall Trace Geometry', url: finalCleanScreenshotUrl },
+      { name: 'Traces Aligned to Wall Mask', url: finalAlignedScreenshotUrl }
+    ],
     geometry: snappedPolyGeometry,
     explanation: {
       seeing: 'The final, grid-aligned wall tracing mapped back to original coordinates, with simplified segments and snap-locked wall angles.',
@@ -277,7 +366,7 @@ export const buildRoomDebugStages = async (debug, maskToDataUrl) => {
 /**
  * Compile stages list for Boundary Tracing.
  */
-export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
+export const buildBoundaryDebugStages = async (debug, generateScreenshot) => {
   const stages = [];
   const scale = debug.scale ?? 1.0;
   const w = debug.normalizedSize.width;
@@ -287,11 +376,14 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   const mapPoly = (poly) => (poly ? poly.map(mapPt) : []);
 
   // 1. Raw Thresholded Mask
-  const thresholdedMaskUrl = await maskToDataUrl(debug.thresholdedMask, w, h, 'thresholded');
+  const thresholdedMaskUrl = await generateScreenshot(debug.thresholdedMask, w, h, 'thresholded');
   stages.push({
     id: 'thresholded',
     name: '1. Raw Thresholded Mask',
-    maskUrl: thresholdedMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Raw Binarized Wall Pixels', url: thresholdedMaskUrl }
+    ],
     geometry: { polygons: [], lines: [], points: [] },
     explanation: {
       seeing: 'A raw binary black-and-white mask of the floor plan where all pixels darker than the global threshold are binarized as wall candidates.',
@@ -308,8 +400,10 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 2. Filtered / Cleaned Mask
-  const filteredMaskUrl = await maskToDataUrl(debug.filteredMask, w, h, 'filtered');
+  const filteredMaskUrl = await generateScreenshot(debug.filteredMask, w, h, 'filtered');
   const componentsGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotComponents = [];
+
   if (debug.rawComponents) {
     debug.rawComponents.forEach((comp) => {
       const bbox = comp.bbox;
@@ -318,12 +412,12 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
         { x: bbox.maxX, y: bbox.minY },
         { x: bbox.maxX, y: bbox.maxY },
         { x: bbox.minX, y: bbox.maxY },
-      ].map(mapPt);
+      ];
       
       const isKept = debug.filteredComponents?.some((fc) => fc.id === comp.id);
       componentsGeometry.polygons.push({
         id: `comp-${comp.id}`,
-        points: polyPoints,
+        points: polyPoints.map(mapPt),
         label: `Comp ${comp.id} (size: ${comp.size})`,
         type: isKept ? 'temporary' : 'rejected',
         properties: {
@@ -332,13 +426,25 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
           'Status': isKept ? 'Kept' : 'Rejected',
         }
       });
+
+      screenshotComponents.push({
+        type: 'polygon',
+        points: polyPoints,
+        class: isKept ? 'temporary' : 'rejected'
+      });
     });
   }
+
+  const componentsScreenshotUrl = await generateScreenshot(debug.filteredMask, w, h, 'filtered', screenshotComponents);
 
   stages.push({
     id: 'filtered',
     name: '2. Noise & Text Filtered Mask',
-    maskUrl: filteredMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Cleaned Wall Mask', url: filteredMaskUrl },
+      { name: 'Classified Component Bounds', url: componentsScreenshotUrl }
+    ],
     geometry: componentsGeometry,
     explanation: {
       seeing: 'A cleaned mask overlay where small noise components, labels, and text characters have been filtered out (shown as red/rejected bounding boxes).',
@@ -354,11 +460,14 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 3. Closed Mask
-  const closedMaskUrl = await maskToDataUrl(debug.closedMask, w, h, 'closed');
+  const closedMaskUrl = await generateScreenshot(debug.closedMask, w, h, 'closed');
   stages.push({
     id: 'closed',
     name: '3. Morphologically Closed Mask',
-    maskUrl: closedMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Closed Wall Gaps', url: closedMaskUrl }
+    ],
     geometry: { polygons: [], lines: [], points: [] },
     explanation: {
       seeing: 'The binarized walls after morphological closing, which dilates (thickens) and then erodes wall components to seal small openings.',
@@ -373,11 +482,14 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   });
 
   // 4. Exterior Footprint Mask
-  const footprintMaskUrl = await maskToDataUrl(debug.footprintMask, w, h, 'footprint');
+  const footprintMaskUrl = await generateScreenshot(debug.footprintMask, w, h, 'footprint');
   stages.push({
     id: 'footprint',
     name: '4. Footprint Mask',
-    maskUrl: footprintMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Building Footprint', url: footprintMaskUrl }
+    ],
     geometry: { polygons: [], lines: [], points: [] },
     explanation: {
       seeing: 'The building footprint mask representing the interior space (shown in indigo), computed by flooding outward from the page edges.',
@@ -394,6 +506,7 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   const rawOuter = mapPoly(debug.rawOuterPolygon);
   const rawInner = mapPoly(debug.rawInnerPolygon);
   const rawBoundariesGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotRawBounds = [];
 
   if (rawOuter.length >= 3) {
     rawBoundariesGeometry.polygons.push({
@@ -405,6 +518,12 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
         'Vertices': rawOuter.length,
         'Type': 'Exterior Footprint Edge',
       }
+    });
+
+    screenshotRawBounds.push({
+      type: 'polygon',
+      points: debug.rawOuterPolygon,
+      class: 'exterior'
     });
   }
 
@@ -419,12 +538,23 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
         'Type': 'Interior Wall Edge',
       }
     });
+
+    screenshotRawBounds.push({
+      type: 'polygon',
+      points: debug.rawInnerPolygon,
+      class: 'interior'
+    });
   }
+
+  const rawBoundsScreenshotUrl = await generateScreenshot(debug.footprintMask, w, h, 'footprint', screenshotRawBounds);
 
   stages.push({
     id: 'rawBoundaries',
     name: '5. Raw Boundaries Tracing',
-    maskUrl: footprintMaskUrl,
+    maskUrl: null,
+    images: [
+      { name: 'Raw Moore Boundaries Traces', url: rawBoundsScreenshotUrl }
+    ],
     geometry: rawBoundariesGeometry,
     explanation: {
       seeing: 'The raw contours traced along the outer footprint edge (shown in purple) and eroded inner walls (shown in cyan) before simplification.',
@@ -442,6 +572,7 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
   const snappedOuter = mapPoly(debug.snappedOuterPolygon);
   const snappedInner = mapPoly(debug.snappedInnerPolygon);
   const snappedBoundariesGeometry = { polygons: [], lines: [], points: [] };
+  const screenshotSnappedBounds = [];
 
   if (snappedOuter.length >= 3) {
     snappedBoundariesGeometry.polygons.push({
@@ -455,11 +586,18 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
       }
     });
 
+    screenshotSnappedBounds.push({
+      type: 'polygon',
+      points: debug.snappedOuterPolygon,
+      class: 'exterior'
+    });
+
     for (let i = 0; i < snappedOuter.length; i++) {
       const p1 = snappedOuter[i];
       const p2 = snappedOuter[(i + 1) % snappedOuter.length];
       const len = calculateDistance(p1, p2);
       const angle = calculateAngle(p1, p2);
+      
       snappedBoundariesGeometry.lines.push({
         id: `outer-wall-edge-${i}`,
         start: p1,
@@ -473,6 +611,13 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
           'Start Vertex': formatPoint(p1),
           'End Vertex': formatPoint(p2),
         }
+      });
+
+      screenshotSnappedBounds.push({
+        type: 'line',
+        start: debug.snappedOuterPolygon[i],
+        end: debug.snappedOuterPolygon[(i + 1) % debug.snappedOuterPolygon.length],
+        class: 'exterior'
       });
     }
 
@@ -489,6 +634,13 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
           'Coordinates': formatPoint(pt),
         }
       });
+
+      screenshotSnappedBounds.push({
+        type: 'point',
+        x: debug.snappedOuterPolygon[i].x,
+        y: debug.snappedOuterPolygon[i].y,
+        class: 'exterior'
+      });
     });
   }
 
@@ -504,11 +656,18 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
       }
     });
 
+    screenshotSnappedBounds.push({
+      type: 'polygon',
+      points: debug.snappedInnerPolygon,
+      class: 'interior'
+    });
+
     for (let i = 0; i < snappedInner.length; i++) {
       const p1 = snappedInner[i];
       const p2 = snappedInner[(i + 1) % snappedInner.length];
       const len = calculateDistance(p1, p2);
       const angle = calculateAngle(p1, p2);
+      
       snappedBoundariesGeometry.lines.push({
         id: `inner-wall-edge-${i}`,
         start: p1,
@@ -522,6 +681,13 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
           'Start Vertex': formatPoint(p1),
           'End Vertex': formatPoint(p2),
         }
+      });
+
+      screenshotSnappedBounds.push({
+        type: 'line',
+        start: debug.snappedInnerPolygon[i],
+        end: debug.snappedInnerPolygon[(i + 1) % debug.snappedInnerPolygon.length],
+        class: 'interior'
       });
     }
 
@@ -538,13 +704,27 @@ export const buildBoundaryDebugStages = async (debug, maskToDataUrl) => {
           'Coordinates': formatPoint(pt),
         }
       });
+
+      screenshotSnappedBounds.push({
+        type: 'point',
+        x: debug.snappedInnerPolygon[i].x,
+        y: debug.snappedInnerPolygon[i].y,
+        class: 'interior'
+      });
     });
   }
+
+  const finalCleanScreenshotUrl = await generateScreenshot(null, w, h, null, screenshotSnappedBounds);
+  const finalAlignedScreenshotUrl = await generateScreenshot(debug.footprintMask, w, h, 'footprint', screenshotSnappedBounds);
 
   stages.push({
     id: 'finalSolution',
     name: '6. Final Snapped Boundaries Solution',
     maskUrl: null,
+    images: [
+      { name: 'Final Boundaries Geometry', url: finalCleanScreenshotUrl },
+      { name: 'Trace Aligned to Footprint', url: finalAlignedScreenshotUrl }
+    ],
     geometry: snappedBoundariesGeometry,
     explanation: {
       seeing: 'The final, grid-aligned inner and outer boundaries mapped to original scale, simplified, and locked to the dominant floor plan orientations.',
