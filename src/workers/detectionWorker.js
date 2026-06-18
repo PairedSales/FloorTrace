@@ -1,4 +1,5 @@
 import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../utils/detection/pipeline';
+import { buildRoomDebugStages, buildBoundaryDebugStages } from '../utils/detection/debugManager';
 
 const imageBitmapToImageData = async (imageDataUrl) => {
   const response = await fetch(imageDataUrl);
@@ -68,25 +69,26 @@ self.onmessage = async (event) => {
 
     if (data?.debug) {
       const debug = data.debug;
-      const w = debug.normalizedSize.width;
-      const h = debug.normalizedSize.height;
+      const isDebugEnabled = payload.options?.debugDetection === true;
 
-      // Convert intermediate masks to base64 Data URLs asynchronously
-      debug.thresholded = await maskToDataUrl(debug.thresholdedMask, w, h, 'thresholded');
-      debug.filtered = await maskToDataUrl(debug.filteredMask, w, h, 'filtered');
-      debug.closed = await maskToDataUrl(debug.closedMask, w, h, 'closed');
-      debug.footprint = await maskToDataUrl(debug.footprintMask, w, h, 'footprint');
-      debug.floodFilled = await maskToDataUrl(debug.roomMask, w, h, 'room');
-
-      // Expose the final polygon inside debug
-      debug.finalPolygon = data.polygon ?? (data.outer?.polygon ?? null);
-
-      // Delete raw arrays to avoid cloning overhead
-      delete debug.thresholdedMask;
-      delete debug.filteredMask;
-      delete debug.closedMask;
-      delete debug.footprintMask;
-      delete debug.roomMask;
+      if (isDebugEnabled) {
+        let stages = [];
+        if (type === 'detectRoomFromClick') {
+          stages = await buildRoomDebugStages(debug, maskToDataUrl);
+        } else if (type === 'traceFloorplanBoundary') {
+          stages = await buildBoundaryDebugStages(debug, maskToDataUrl);
+        }
+        
+        data.debug = {
+          stages,
+          activeStageIndex: 0,
+          selectedGeometryId: null,
+          dominantAngles: debug.dominantAngles,
+        };
+      } else {
+        // Negligible overhead when debugging is disabled
+        data.debug = null;
+      }
     }
 
     self.postMessage({ id, ok: true, data });

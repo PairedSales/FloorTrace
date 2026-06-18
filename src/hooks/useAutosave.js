@@ -8,6 +8,7 @@ import { getDraft, setDraft, removeDraft } from '../utils/draftStorage';
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
 const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
+const DEBUG_DETECTION_KEY = 'floortrace:debugDetection';
 
 // Selector: pick only the autosave-relevant fields from the store.
 const autosaveSelector = (state) =>
@@ -65,6 +66,10 @@ export function useAutosave(notify) {
   useEffect(() => {
     const restoreAutosavedDraft = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
+      const savedDebugDetectionRaw = localStorage.getItem(DEBUG_DETECTION_KEY);
+      if (savedDebugDetectionRaw === 'true' || savedDebugDetectionRaw === 'false') {
+        useAppStore.getState().setDebugDetection(savedDebugDetectionRaw === 'true');
+      }
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
         const savedData = saveOnExitEnabled ? await getDraft(LOCAL_DRAFT_STORAGE_KEY) : null;
@@ -110,6 +115,18 @@ export function useAutosave(notify) {
       (state) => state.useInteriorWalls,
       (value) => {
         localStorage.setItem(WALL_MODE_KEY, String(value));
+      },
+    );
+    return () => unsub();
+  }, []);
+
+  // Persist debug detection preference independently so it survives when no image
+  // draft is present.
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(
+      (state) => state.debugDetection,
+      (value) => {
+        localStorage.setItem(DEBUG_DETECTION_KEY, String(value));
       },
     );
     return () => unsub();

@@ -509,29 +509,42 @@ export const detectRoom = (wallMask, footprintMask, width, height, clickPoint, o
 };
 
 export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
+  const tStart = performance.now();
+
+  const tPreprocessStart = performance.now();
   const preprocess = normalizeImageData(imageData, options.preprocess);
+  const tPreprocess = performance.now() - tPreprocessStart;
+
+  const tOrientationStart = performance.now();
   const orientation = estimateDominantOrientations(
     preprocess.gray, preprocess.width, preprocess.height, options.orientation,
   );
+  const tOrientation = performance.now() - tOrientationStart;
 
   const w = preprocess.width;
   const h = preprocess.height;
 
+  const tWallMaskStart = performance.now();
   const { rawWallMask, cleanedWallMask } = buildWallMask(preprocess.gray, w, h, options);
+  const tWallMask = performance.now() - tWallMaskStart;
 
+  const tTraceExteriorStart = performance.now();
   const exterior = traceExterior(cleanedWallMask, w, h, {
     ...options,
     angleBins: orientation.dominant,
   });
+  const tTraceExterior = performance.now() - tTraceExteriorStart;
 
   if (!exterior) return null;
 
   const nPoint = mapPointToNormalized(clickPoint, preprocess.scale);
 
+  const tDetectRoomStart = performance.now();
   const roomRes = detectRoom(cleanedWallMask, exterior.footprintMask, w, h, nPoint, {
     ...options,
     angleBins: orientation.dominant,
   });
+  const tDetectRoom = performance.now() - tDetectRoomStart;
 
   if (!roomRes) return null;
 
@@ -541,6 +554,11 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
 
   const confidenceBase = Math.min(1, roomRes.roomPolygon.length / 20);
   const confidence = Math.max(0.2, Math.min(0.98, confidenceBase));
+
+  const totalTime = performance.now() - tStart;
+
+  const wallLabels = labelConnectedComponents(rawWallMask, w, h, 1);
+  const filteredWallLabels = labelConnectedComponents(cleanedWallMask, w, h, 1);
 
   return {
     polygon: mappedPolygon,
@@ -553,6 +571,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     confidence,
     debug: {
       normalizedSize: { width: w, height: h },
+      scale: preprocess.scale,
       dominantAngles: orientation.dominant,
       startPoint: roomRes.seed,
       thresholdedMask: rawWallMask,
@@ -560,25 +579,52 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
       closedMask: roomRes.closedWallMask,
       roomMask: roomRes.roomMask,
       leakDetected: roomRes.leakDetected,
+
+      // Detailed diagnostics and steps
+      timings: {
+        total: totalTime,
+        preprocess: tPreprocess,
+        orientation: tOrientation,
+        wallMask: tWallMask,
+        traceExterior: tTraceExterior,
+        detectRoom: tDetectRoom,
+      },
+      rawComponents: wallLabels.components,
+      filteredComponents: filteredWallLabels.components,
+      rawRoomPolygon: roomRes.roomPolygon, // Pass un-snapped polygon
+      snappedRoomPolygon: roomRes.roomPolygon, // Snapped is same as it's already snapped inside detectRoom
+      seed: roomRes.seed,
+      closeRadius: options.roomCloseRadius ?? 10,
     },
   };
 };
 
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
+  const tStart = performance.now();
+
+  const tPreprocessStart = performance.now();
   const preprocess = normalizeImageData(imageData, options.preprocess);
+  const tPreprocess = performance.now() - tPreprocessStart;
+
+  const tOrientationStart = performance.now();
   const orientation = estimateDominantOrientations(
     preprocess.gray, preprocess.width, preprocess.height, options.orientation,
   );
+  const tOrientation = performance.now() - tOrientationStart;
 
   const w = preprocess.width;
   const h = preprocess.height;
 
+  const tWallMaskStart = performance.now();
   const { rawWallMask, cleanedWallMask } = buildWallMask(preprocess.gray, w, h, options);
+  const tWallMask = performance.now() - tWallMaskStart;
 
+  const tTraceExteriorStart = performance.now();
   const exterior = traceExterior(cleanedWallMask, w, h, {
     ...options,
     angleBins: orientation.dominant,
   });
+  const tTraceExterior = performance.now() - tTraceExteriorStart;
 
   if (!exterior) return null;
 
@@ -593,6 +639,11 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 
   const outerBounds = mappedOuter ? polygonToBounds(mappedOuter) : null;
   const innerBounds = mappedInner ? polygonToBounds(mappedInner) : null;
+
+  const totalTime = performance.now() - tStart;
+
+  const wallLabels = labelConnectedComponents(rawWallMask, w, h, 1);
+  const filteredWallLabels = labelConnectedComponents(cleanedWallMask, w, h, 1);
 
   return {
     outer: mappedOuter ? {
@@ -616,6 +667,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     debug: {
       dominantAngles: orientation.dominant,
       normalizedSize: { width: w, height: h },
+      scale: preprocess.scale,
       hasOuter: Boolean(mappedOuter),
       hasInner: Boolean(mappedInner),
       usedEdgeScan: true,
@@ -624,6 +676,22 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       filteredMask: cleanedWallMask,
       closedMask: exterior.closedWallMask,
       footprintMask: exterior.footprintMask,
+
+      // Detailed diagnostics and steps
+      timings: {
+        total: totalTime,
+        preprocess: tPreprocess,
+        orientation: tOrientation,
+        wallMask: tWallMask,
+        traceExterior: tTraceExterior,
+      },
+      rawComponents: wallLabels.components,
+      filteredComponents: filteredWallLabels.components,
+      rawOuterPolygon: exterior.outerPolygon,
+      rawInnerPolygon: exterior.innerPolygon,
+      snappedOuterPolygon: exterior.outerPolygon,
+      snappedInnerPolygon: exterior.innerPolygon,
+      closeRadius: options.outerCloseRadius ?? options.wallMask?.closeRadius ?? 12,
     },
   };
 };

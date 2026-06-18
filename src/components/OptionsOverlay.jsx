@@ -43,13 +43,11 @@ const OptionsOverlay = ({
           checked={saveOnExit}
           onChange={onSaveOnExitChange}
         />
-        {import.meta.env.DEV && (
-          <Toggle
-            label="Detection Debug"
-            checked={debugDetection}
-            onChange={onDebugDetectionChange}
-          />
-        )}
+        <Toggle
+          label="Enable Wall Detection Debugging"
+          checked={debugDetection}
+          onChange={onDebugDetectionChange}
+        />
       </div>
     </div>
   );
