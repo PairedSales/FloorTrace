@@ -3,7 +3,7 @@ import { EyeOff, ChevronLeft, ChevronRight, Terminal, Box, Compass, Activity, Al
 import useAppStore from '../store/appStore';
 
 const DebugPipelinePanel = ({ debugData }) => {
-  const [isCollapsed, setIsCollapsed] = useState(true); // Hidden by default (starts collapsed)
+  const [isCollapsed, setIsCollapsed] = useState(false); // Expanded by default
   const [panelWidth, setPanelWidth] = useState(340);
   const isResizingRef = useRef(false);
 

@@ -69,6 +69,9 @@ export function useAutosave(notify) {
       const savedDebugDetectionRaw = localStorage.getItem(DEBUG_DETECTION_KEY);
       if (savedDebugDetectionRaw === 'true' || savedDebugDetectionRaw === 'false') {
         useAppStore.getState().setDebugDetection(savedDebugDetectionRaw === 'true');
+      } else {
+        useAppStore.getState().setDebugDetection(true);
+        localStorage.setItem(DEBUG_DETECTION_KEY, 'true');
       }
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);

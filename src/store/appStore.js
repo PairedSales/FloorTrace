@@ -53,7 +53,7 @@ const WORKING_STATE_DEFAULTS = {
   currentCustomShape: null,
   perimeterVertices: null,
   tracedBoundaries: null,
-  debugDetection: false,
+  debugDetection: true,
   detectionDebugData: null,
   eraserToolActive: false,
   eraserBrushSize: 60,
