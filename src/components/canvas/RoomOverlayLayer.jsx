@@ -1,20 +1,16 @@
 import React from 'react';
-import { Rect, Line, Circle, Text } from 'react-konva';
-import useAppStore from '../../store/appStore';
+import { Rect, Line, Circle } from 'react-konva';
 
 /**
  * RoomOverlayLayer renders the room detection rectangle, its corner drag handles,
- * the optional polygon outline, and the optional debug confidence label.
+ * and the optional polygon outline.
  */
 const RoomOverlayLayer = ({
   roomOverlay,
   scale,
-  debugDetection,
   onRoomMouseDown,
   onRoomCornerMouseDown,
 }) => {
-  const canvasRotation = useAppStore((s) => s.canvasRotation);
-
   if (!roomOverlay) return null;
 
   return (
@@ -60,18 +56,6 @@ const RoomOverlayLayer = ({
           onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
         />
       ))}
-      {debugDetection && typeof roomOverlay.confidence === 'number' && (
-        <Text
-          x={Math.min(roomOverlay.x1, roomOverlay.x2)}
-          y={Math.min(roomOverlay.y1, roomOverlay.y2) - 16 / scale}
-          text={`Room confidence ${Math.round(roomOverlay.confidence * 100)}%`}
-          fontSize={11 / scale}
-          fill="#50FA7B"
-          fontStyle="bold"
-          rotation={-canvasRotation}
-          listening={false}
-        />
-      )}
     </>
   );
 };

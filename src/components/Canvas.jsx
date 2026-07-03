@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Circle } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore from '../store/appStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DetectionDebugOverlay, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
@@ -51,8 +51,6 @@ const Canvas = React.memo(forwardRef(({
   onDeletePerimeterVertex,
   onLineToolToggle,
   autoSnapEnabled,
-  debugDetection,
-  detectionDebugData,
   onSaveUndoPoint,
   onCancelUndoSave,
   eraserToolActive,
@@ -437,7 +435,6 @@ const Canvas = React.memo(forwardRef(({
             <RoomOverlayLayer
               roomOverlay={router.activeRoomOverlay}
               scale={camera.scale}
-              debugDetection={debugDetection}
               onRoomMouseDown={router.handleRoomMouseDown}
               onRoomCornerMouseDown={router.handleRoomCornerMouseDown}
             />
@@ -461,25 +458,6 @@ const Canvas = React.memo(forwardRef(({
               }}
               isSelfIntersecting={perimeter.isSelfIntersecting}
             />
-
-            {debugDetection && (
-              <DetectionDebugOverlay
-                debugData={detectionDebugData}
-                scale={camera.scale}
-              />
-            )}
-
-            {debugDetection && detectionDebugData?.dominantAngles?.length > 0 && (
-              <Text
-                x={10}
-                y={34}
-                text={`Angles: ${detectionDebugData.dominantAngles.join(', ')}`}
-                fontSize={12 / camera.scale}
-                fill="#8BE9FD"
-                rotation={-canvasRotation}
-                listening={false}
-              />
-            )}
 
             <DimensionOverlay
               mode={mode}

@@ -6,7 +6,6 @@ import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
 import OptionsOverlay from './components/OptionsOverlay';
-import DebugPipelinePanel from './components/DebugPipelinePanel';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import {
   detectRoomFromClick,
@@ -52,8 +51,6 @@ function App() {
   const currentCustomShape = useAppStore((s) => s.currentCustomShape);
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
-  const debugDetection = useAppStore((s) => s.debugDetection);
-  const detectionDebugData = useAppStore((s) => s.detectionDebugData);
   const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -83,13 +80,11 @@ function App() {
   const setCustomShapes = useAppStore((s) => s.setCustomShapes);
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
-  const setDetectionDebugData = useAppStore((s) => s.setDetectionDebugData);
   const setAngleToolState = useAppStore((s) => s.setAngleToolState);
   const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
-  const setDebugDetection = useAppStore((s) => s.setDebugDetection);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
 
   const resetOverlays = useAppStore((s) => s.resetOverlays);
@@ -130,15 +125,6 @@ function App() {
     terminateDetectionWorker();
     terminateOcrWorker();
   }, []);
-
-  // Expose debugPipeline on window
-  useEffect(() => {
-    if (debugDetection && detectionDebugData) {
-      window.debugPipeline = detectionDebugData;
-    } else {
-      window.debugPipeline = null;
-    }
-  }, [debugDetection, detectionDebugData]);
 
   // Manage instructions toasts
   useEffect(() => {
@@ -444,7 +430,6 @@ function App() {
       }
 
       setTracedBoundaries(traced);
-      setDetectionDebugData(traced.debug ?? null);
       const applied = applyTracedBoundary(traced, useInteriorWalls);
 
       if (!applied) {
@@ -624,7 +609,6 @@ function App() {
       if (useAppStore.getState().image !== startImage) return;
       if (!traced) return;
       setTracedBoundaries(traced);
-      setDetectionDebugData({ ...(useAppStore.getState().detectionDebugData ?? {}), ...(traced.debug ?? {}) });
 
       const activeBoundary = getBoundaryForMode(traced, useInteriorWalls);
       if (!activeBoundary?.polygon?.length) return;
@@ -644,7 +628,7 @@ function App() {
         setIsProcessing(false);
       }
     }
-  }, [image, useInteriorWalls, setTracedBoundaries, setDetectionDebugData, setPerimeterVertices, setPerimeterOverlay, setIsProcessing, notify]);
+  }, [image, useInteriorWalls, setTracedBoundaries, setPerimeterVertices, setPerimeterOverlay, setIsProcessing, notify]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback(async (dimension) => {
@@ -679,7 +663,6 @@ function App() {
           polygon: roomResult.polygon,
           confidence: roomResult.confidence,
         };
-        setDetectionDebugData(roomResult.debug ?? null);
       }
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
@@ -700,7 +683,7 @@ function App() {
     // Automatically detect exterior boundary after room overlay is placed.
     // autoTraceExterior manages its own isProcessing state.
     autoTraceExterior(nextOverlay, dims);
-  }, [setRoomDimensions, setIsProcessing, image, setDetectionDebugData, setRoomOverlay, updateScale, setPerimeterVertices, setMode, setDetectedDimensions, setManualEntryMode, autoTraceExterior]);
+  }, [setRoomDimensions, setIsProcessing, image, setRoomOverlay, updateScale, setPerimeterVertices, setMode, setDetectedDimensions, setManualEntryMode, autoTraceExterior]);
 
   // Handle canvas click for manual overlay placement
   const handleCanvasClick = useCallback((clickPoint) => {
@@ -740,7 +723,6 @@ function App() {
             polygon: roomResult.polygon,
             confidence: roomResult.confidence,
           };
-          setDetectionDebugData(roomResult.debug ?? null);
         }
       } catch (error) {
         if (useAppStore.getState().image === startImage) {
@@ -762,7 +744,7 @@ function App() {
     };
 
     placeOverlay();
-  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setDetectionDebugData, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
+  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -806,10 +788,6 @@ function App() {
     notify(value ? 'Autosave on exit enabled' : 'Autosave on exit disabled');
   }, [handleSaveOnExitChange, notify]);
 
-  const handleDebugDetectionChange = useCallback((value) => {
-    setDebugDetection(value);
-    notify(value ? 'Detection debug overlay enabled' : 'Detection debug overlay disabled');
-  }, [setDebugDetection, notify]);
   const handleDimensionFocus = useCallback(() => {
     if (!dimensionEditActiveRef.current) {
       dimensionEditActiveRef.current = true;
@@ -906,8 +884,6 @@ function App() {
             onAddPerimeterVertex={handleAddPerimeterVertex}
             onClosePerimeter={handleClosePerimeter}
             autoSnapEnabled={autoSnapEnabled}
-            debugDetection={debugDetection}
-            detectionDebugData={detectionDebugData}
             onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onSaveUndoPoint={handleSaveUndoPoint}
@@ -950,13 +926,7 @@ function App() {
             perimeterOverlay={perimeterOverlay}
             saveOnExit={saveOnExit}
             onSaveOnExitChange={handleSaveOnExitChangeWithToast}
-            debugDetection={debugDetection}
-            onDebugDetectionChange={handleDebugDetectionChange}
           />
-        )}
-
-        {debugDetection && (
-          <DebugPipelinePanel debugData={detectionDebugData} />
         )}
 
         {/* Right-side overlay panels — stacked vertically */}
