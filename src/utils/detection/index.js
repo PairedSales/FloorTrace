@@ -1,5 +1,4 @@
 import { boundaryByMode } from './pipeline';
-import useAppStore from '../../store/appStore';
 
 let detectionWorker = null;
 let nextRequestId = 1;
@@ -47,20 +46,18 @@ const runWorkerRequest = (type, payload, timeoutMs = 30_000) => new Promise((res
 
 export const detectRoomFromClick = async (image, clickPoint, options = {}) => {
   if (!image || !clickPoint) return null;
-  const debugDetection = useAppStore.getState().debugDetection;
   return runWorkerRequest('detectRoomFromClick', {
     image,
     clickPoint,
-    options: { ...options, debugDetection },
+    options,
   });
 };
 
 export const traceFloorplanBoundary = async (image, options = {}) => {
   if (!image) return null;
-  const debugDetection = useAppStore.getState().debugDetection;
   return runWorkerRequest('traceFloorplanBoundary', {
     image,
-    options: { ...options, debugDetection },
+    options,
   });
 };
 

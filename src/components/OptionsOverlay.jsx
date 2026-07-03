@@ -8,8 +8,6 @@ const OptionsOverlay = ({
   perimeterOverlay,
   saveOnExit,
   onSaveOnExitChange,
-  debugDetection,
-  onDebugDetectionChange,
 }) => {
   return (
     <div className="absolute top-2 right-2 z-50 w-56 rounded-lg bg-chrome-800 border border-chrome-700 p-3 shadow-2xl flex flex-col gap-3 pointer-events-auto select-none">
@@ -42,11 +40,6 @@ const OptionsOverlay = ({
           label="Save on Exit"
           checked={saveOnExit}
           onChange={onSaveOnExitChange}
-        />
-        <Toggle
-          label="Enable Wall Detection Debugging"
-          checked={debugDetection}
-          onChange={onDebugDetectionChange}
         />
       </div>
     </div>
