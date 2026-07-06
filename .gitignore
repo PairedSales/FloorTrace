@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Tesseract training data downloaded by Node benchmark runs
+eng.traineddata
