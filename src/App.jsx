@@ -13,7 +13,7 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
-import { terminateOcrWorker } from './utils/DimensionsOCR';
+import { terminateOcrWorker, warmupOcrEngines } from './utils/DimensionsOCR';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
@@ -120,10 +120,15 @@ function App() {
   // Declared after handlePasteImage / handleFileOpen (see below) so the
   // shortcut hook can close over the stable callback references.
 
-  // ── Cleanup ──────────────────────────────────────────────────────────────
-  useEffect(() => () => {
-    terminateDetectionWorker();
-    terminateOcrWorker();
+  // ── OCR engine warm-up & cleanup ─────────────────────────────────────────
+  // Boot the OCR engines in the background at mount so the first dimension
+  // scan doesn't pay multi-second engine initialisation.
+  useEffect(() => {
+    warmupOcrEngines();
+    return () => {
+      terminateDetectionWorker();
+      terminateOcrWorker();
+    };
   }, []);
 
   // Manage instructions toasts
