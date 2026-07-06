@@ -22,7 +22,7 @@
  *   env.budgetMs                  -> wall-clock budget (default 2600)
  */
 
-import { parseDimensionLine, inferDominantFormat } from './parse.js';
+import { parseDimensionLine, inferDominantFormat, formatDimensionText } from './parse.js';
 import {
   toGray, grayToImageDataLike, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray
@@ -522,7 +522,11 @@ export const detectDimensionsCore = async (imageData, env) => {
   const dimensions = deduped.map((c, idx) => ({
     width: c.width,
     height: c.height,
-    text: c.text,
+    // Canonical text from the parsed values — raw OCR reads can be garbled
+    // ("125x164\"") even when the values parsed correctly. Raw read kept
+    // in ocrText for debugging.
+    text: formatDimensionText(c.width, c.height, c.format),
+    ocrText: c.text,
     bbox: c.bbox
       ? {
           x: Math.round(c.bbox.x),

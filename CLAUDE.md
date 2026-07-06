@@ -39,12 +39,13 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 
 Both pipelines take a raw image and run expensive per-pixel work off the main thread; both were rebuilt from scratch (see `docs/status.md`, `tasks/tasks.md`) with an emphasis on real inner/outer wall geometry rather than fixed-size placeholders.
 
-**1. Wall/boundary detection** (`src/utils/detection/`) — runs in `src/workers/detectionWorker.js`, invoked via `src/utils/detection/index.js` (`detectRoomFromClick`, `traceFloorplanBoundary`). Pipeline stages, in `src/utils/detection/pipeline.js` and siblings:
-  - `preprocess.js` — grayscale/blur/adaptive threshold/normalize
-  - `orientation.js` — dominant wall-angle estimation for snapping
-  - `wallMask.js` — morphological cleanup of the wall mask
-  - `vectorize.js` — connected components → contours → simplified polygon
-  - Produces both `inner` and `outer` boundary candidates from one mask/topology pass; `useInteriorWalls` (UI toggle) just selects which candidate is active (`getBoundaryForMode` in `detection/index.js`). See `docs/architecture.md` / `docs/technical.md` for the geometry contract (`polygon`, `overlay`, `confidence` for rooms; `inner`/`outer`/`debug` for boundaries).
+**1. Wall/boundary detection** (`src/utils/detection/`) — runs in `src/workers/detectionWorker.js`, invoked via `src/utils/detection/index.js` (`detectRoomFromClick`, `traceFloorplanBoundary`). Pure-JS cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.js`) take a plain `{width, height, data}` object and run identically in the worker and in `scripts/detectionBenchmark.mjs` (Node, pngjs — run it before/after changing detection behavior; ground truth via `<image>.truth.json` sidecars). Stages:
+  - `raster.js` — Otsu binarize + OR-pool downscale, run-based morphology, components, flood fill, SATs
+  - `analyze.js` — text/speck strip, structural stroke extraction (kills door arcs/curves), wall-thickness estimate
+  - `boundary.js` — seal-radius search (escalating closing until the border flood no longer leaks), footprint contour, inner envelope via sampled exterior wall depth
+  - `room.js` — rectangle growth from the label with wall-coverage stops (door gaps don't leak), thin-line candidates + label-aspect arbitration (closets/counters), open-plan virtual sides
+  - `polygon.js` — Moore trace → RDP → rectilinear line fit
+  - Produces both `inner` and `outer` boundary candidates from one footprint pass; `useInteriorWalls` (UI toggle) just selects which candidate is active (`getBoundaryForMode` in `detection/index.js`). See `docs/architecture.md` / `docs/technical.md` for the geometry contract (`polygon`, `overlay`, `confidence` for rooms; `inner`/`outer`/`debug` for boundaries). Room callers pass `options.labelBbox`/`options.labelDims` through from the OCR result.
   - Reference material (papers, annotated examples) for this pipeline lives in `Reference Data for Wall Detection System/`.
 
 **2. Dimension OCR** (`src/utils/dimensions/`, entry point `src/utils/DimensionsOCR.js`) — a multi-pass hybrid pipeline documented in detail at the top of `src/utils/dimensions/pipeline.js`:

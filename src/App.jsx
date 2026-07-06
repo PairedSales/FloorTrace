@@ -658,6 +658,8 @@ function App() {
     try {
       const roomResult = await detectRoomFromClick(image, { x: centerX, y: centerY }, {
         preprocess: { maxDimension: 1300 },
+        labelBbox: dimension.bbox,
+        labelDims: { width: dimension.width, height: dimension.height },
       });
 
       if (useAppStore.getState().image !== startImage) return;
@@ -718,6 +720,7 @@ function App() {
       try {
         const roomResult = await detectRoomFromClick(image, clickPoint, {
           preprocess: { maxDimension: 1300 },
+          labelDims: { width, height },
         });
 
         if (useAppStore.getState().image !== startImage) return;

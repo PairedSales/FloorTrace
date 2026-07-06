@@ -450,6 +450,40 @@ export const parseDimensionLine = (line) => {
 };
 
 // ---------------------------------------------------------------------------
+// Display formatting
+// ---------------------------------------------------------------------------
+
+const formatFeetInches = (value) => {
+  let feet = Math.floor(value);
+  let inches = Math.round((value - feet) * 12);
+  if (inches === 12) {
+    feet += 1;
+    inches = 0;
+  }
+  return `${feet}' ${inches}"`;
+};
+
+const trimNumber = (value) => {
+  const s = value.toFixed(2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return s || '0';
+};
+
+/**
+ * Canonical display text for a parsed dimension pair. OCR reads are often
+ * legible-but-garbled ("125x164\""); the UI should show the values we
+ * actually parsed, not the raw glyph soup.
+ */
+export const formatDimensionText = (width, height, format) => {
+  if (format === 'inches') {
+    return `${formatFeetInches(width)} x ${formatFeetInches(height)}`;
+  }
+  if (format === 'meters') {
+    return `${trimNumber(width / METERS_TO_FEET)} m x ${trimNumber(height / METERS_TO_FEET)} m`;
+  }
+  return `${trimNumber(width)} x ${trimNumber(height)}`;
+};
+
+// ---------------------------------------------------------------------------
 // Format inference
 // ---------------------------------------------------------------------------
 

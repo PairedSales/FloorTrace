@@ -2,12 +2,15 @@
 
 ## Detection Modules
 
-- `preprocess.js`: grayscale conversion, blur, adaptive threshold, image normalization.
-- `orientation.js`: dominant angle estimation and edge-angle snapping bins.
-- `wallMask.js`: morphological close/open and wall mask cleanup.
-- `vectorize.js`: connected components, contour point extraction, hull/simplification.
-- `pipeline.js`: room-from-click and boundary tracing orchestration.
+- `raster.js`: binary raster primitives — Otsu binarization with OR-pool downscale (thin lines survive), run-based 1D/rect morphology, run-length opening in 4 directions, connected components, border flood fill, summed-area tables.
+- `polygon.js`: Moore boundary trace, RDP simplification, rectilinear line fit (edges refit as axis-aligned lines and intersected; genuine diagonals kept), area/bounds helpers.
+- `analyze.js`: shared analysis — binarize, strip small components (text/ticks/arrows), extract structural strokes (long straight runs + thick-opening survivors, which drops door arcs and curves), estimate dominant wall thickness, build coverage SATs.
+- `boundary.js`: exterior tracing — escalate the morphological closing radius until the border flood fill stops leaking into the building ("seal search"), polygonize the footprint contour, sample exterior wall depth along the contour, erode by it for the inner envelope.
+- `room.js`: room-from-label — grow a rectangle from the label; sides stop at columns/rows with high wall coverage across the current span (door gaps only dent coverage, so no leaks). Thin lines (counters, closet fronts, window glass) become stop *candidates*; a combinatorial search picks the per-side candidates whose rectangle best matches the parsed label aspect ratio. Sides with no wall at all (open plan) are placed from the scale implied by the wall-confirmed axis.
+- `pipeline.js`: environment-agnostic cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore`) taking `{width, height, data}`; coordinate mapping back to original pixel space; `boundaryByMode`.
 - `index.js`: main-thread API and worker request/response lifecycle.
+
+All stages are pure JS (no OpenCV/WASM dependency), so the identical code runs in the worker and in `scripts/detectionBenchmark.mjs` under Node.
 
 ## Worker Execution
 
@@ -16,24 +19,32 @@ Detection requests are sent to `detectionWorker.js`:
 - `detectRoomFromClick`
 - `traceFloorplanBoundary`
 
-The worker decodes an image data URL, runs CV processing, and returns geometry and debug metadata.
+The worker decodes an image data URL, runs the detection cores, and returns geometry (debug metadata is stripped before posting).
 
 ## Geometry Contract
 
 Room detection returns:
 
-- `polygon`: room polygon in image coordinates.
+- `polygon`: room rectangle (4 corners) in original image coordinates.
 - `overlay`: axis-aligned room bounds (`x1`, `y1`, `x2`, `y2`).
-- `confidence`: 0..1 confidence score.
+- `confidence`: 0..1 — per-side wall evidence (coverage x thickness), penalized for footprint clamps, aspect mismatch against the parsed label, and virtual (open-plan) sides.
+
+Options: `labelBbox` (the OCR label's bbox, used as the grow seed) and `labelDims` (parsed feet, used for aspect arbitration) — both optional.
 
 Boundary detection returns:
 
-- `inner`: inner-wall polygon + overlay.
-- `outer`: outer-wall polygon + overlay.
-- `debug`: dominant angles and normalized processing size.
+- `outer`: building footprint polygon + overlay (exterior face of exterior walls).
+- `inner`: interior envelope polygon + overlay (footprint eroded by sampled exterior wall thickness).
+- `debug`: working size/scale, wall thickness estimates, chosen seal radius, seal-search trace.
+
+Both come from the same analysis + footprint pass.
+
+## Benchmarking
+
+`node scripts/detectionBenchmark.mjs [image.png|folder ...]` mirrors `ocrBenchmark.mjs`: PNGs load via pngjs, a `<image>.truth.json` sidecar supplies ground truth (wall-face rects, boundary bbox/polygon/areas, optional `pixelsPerFoot` and per-room `minIou`), and the script reports per-check HIT/MISS and timings. With no arguments it runs ExampleFloorplan.png against measured built-in truth.
 
 ## Performance
 
-- Normalization downscales large images prior to analysis.
-- Worker offloads expensive pixel loops.
-- Debug overlays are optional and disabled by default.
+- Binarization happens at full resolution; the mask is OR-pooled down to a ~1400px working scale.
+- Full pipeline runs in ~200-300ms per request on a 2000px floorplan (pure JS, no WASM warm-up).
+- The worker offloads all pixel loops; debug masks never cross the worker boundary.

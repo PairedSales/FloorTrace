@@ -33,11 +33,13 @@ export { terminateOcrWorker } from './dimensions/ocrTesseract.js';
 /**
  * Pre-warm the OCR engines (Tesseract worker, OpenCV WASM). Call at app
  * startup so the first real detection doesn't pay multi-second engine
- * bootstrap inside its time budget. PaddleOCR is deliberately NOT warmed
- * here — its WebGL shader compilation (~10s) contends with the main thread
- * and would degrade a detection that runs while it compiles; it is kicked
- * off after the first detection completes instead. Safe to call
- * repeatedly; never throws.
+ * bootstrap inside its time budget. Safe to call repeatedly; never throws.
+ *
+ * PaddleOCR is deliberately never auto-initialised: its WebGL shader
+ * compilation blocks the main thread for ~10s, which is unacceptable both
+ * during a detection and right after one (the app must be fully responsive
+ * once scanning finishes). The neural rescue pass therefore only activates
+ * if warmupNeuralOcr() is explicitly called (e.g. behind a future setting).
  */
 export const warmupOcrEngines = () => {
   try {
@@ -47,6 +49,9 @@ export const warmupOcrEngines = () => {
     // warm-up is best-effort
   }
 };
+
+/** Opt-in warm-up for the PaddleOCR rescue pass (main-thread heavy). */
+export const warmupNeuralOcr = () => ensurePaddle();
 
 /** Grayscale/RGBA image-data-like -> canvas (what tesseract.js consumes). */
 const imageDataLikeToCanvas = (imageDataLike) => {
@@ -93,10 +98,6 @@ export const detectAllDimensions = async (imageDataUrl) => {
 
     const { dimensions, detectedFormat, timings } =
       await detectDimensionsCore(imageData, browserEnv());
-
-    // Start the (heavy, main-thread-contending) neural engine init only
-    // once a detection has finished, so it never slows an active run.
-    ensurePaddle();
 
     if (import.meta.env?.DEV) {
       console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length);
