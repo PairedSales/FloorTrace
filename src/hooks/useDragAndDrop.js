@@ -9,7 +9,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
   const handlePasteImage = useCallback(async () => {
-    if (!checkUnsavedChanges()) return;
+    if (!(await checkUnsavedChanges())) return;
 
     try {
       // Clear existing image before loading new one to ensure state change
@@ -42,7 +42,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
     const isImage = file.type.startsWith('image/');
     if (!isFloorplan && !isImage) return;
 
-    if (!checkUnsavedChanges()) return;
+    if (!(await checkUnsavedChanges())) return;
 
     try {
       if (isFloorplan) {

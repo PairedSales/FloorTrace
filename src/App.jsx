@@ -7,6 +7,7 @@ import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
 import OptionsOverlay from './components/OptionsOverlay';
 import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
+import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
   getBoundaryForMode,
@@ -238,9 +239,11 @@ function App() {
 
 
   // Reset entire application
-  const handleRestart = () => {
+  const handleRestart = async () => {
     if (image) {
-      const confirmed = window.confirm('Are you sure you want to restart and clear the current project?');
+      const confirmed = await confirmToast('Restart and clear the current project?', {
+        confirmLabel: 'Restart',
+      });
       if (!confirmed) return;
     }
     clearAutosavedDraft();
@@ -261,8 +264,9 @@ function App() {
     } else {
       // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
       if (!forceEnter && (roomOverlay || perimeterOverlay)) {
-        const confirmed = window.confirm(
-          'Entering Manual Mode will clear existing overlays. Are you sure?'
+        const confirmed = await confirmToast(
+          'Entering Manual Mode will clear existing overlays. Continue?',
+          { confirmLabel: 'Continue' }
         );
         if (!confirmed) {
           return;
@@ -371,8 +375,9 @@ function App() {
     if (!image) return;
 
     if (roomOverlay || perimeterOverlay) {
-      const confirmed = window.confirm(
-        'Scanning for room size will clear your existing room and perimeter overlays. Are you sure?'
+      const confirmed = await confirmToast(
+        'Scanning for room size will clear your existing room and perimeter overlays. Continue?',
+        { confirmLabel: 'Scan' }
       );
       if (!confirmed) return;
     }
@@ -1012,6 +1017,8 @@ function App() {
             error: '!text-[#FF5555] !border-[#FF5555]/30',
             info: '!text-[#8BE9FD] !border-[#8BE9FD]/30',
             warning: '!text-[#FFB86C] !border-[#FFB86C]/30',
+            actionButton: '!bg-[#BD93F9] !text-[#282A36] !font-semibold hover:!bg-[#A97EF0]',
+            cancelButton: '!bg-[#44475A] !text-[#F8F8F2] hover:!bg-[#6272A4]',
             closeButton: '!bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] hover:!bg-[#44475A]',
           }
         }}

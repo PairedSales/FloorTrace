@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
+import { confirmToast } from '../utils/confirmToast';
 
 export function useProjectIO(notify, handleManualMode, fileInputRef) {
   const image = useAppStore((s) => s.image);
@@ -12,11 +13,12 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
 
   const checkUnsavedChanges = useCallback(() => {
     if (isDirty || image) {
-      return window.confirm(
-        'You have unsaved changes in your current project. Opening a new project or image will discard these changes. Are you sure you want to proceed?'
+      return confirmToast(
+        'You have unsaved changes. Opening a new project or image will discard them. Continue?',
+        { confirmLabel: 'Discard' }
       );
     }
-    return true;
+    return Promise.resolve(true);
   }, [isDirty, image]);
 
   const handleFileOpen = useCallback(() => {
@@ -26,7 +28,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
   const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
     if (file) {
-      if (!checkUnsavedChanges()) {
+      if (!(await checkUnsavedChanges())) {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
