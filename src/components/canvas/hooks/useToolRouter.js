@@ -26,10 +26,9 @@ export function useToolRouter({
   
   // Sub-system: Snapping
   findVertexSnapPoint,
-  findVerticalSnap,
-  findHorizontalSnap,
-  snapRoomOverlayPosition,
-  ensureImageSnapAnalyzer,
+  snapRoomOverlayMove,
+  snapRoomOverlayResize,
+  ensureWallSnapEngine,
 
   // Sub-system: Perimeter Editor
   perimeterOverlay,
@@ -97,6 +96,12 @@ export function useToolRouter({
   const getCanvasCoords = useCallback(
     (stage) => getCanvasCoordinates(stage, scaleRef, contentLayerRef),
     [scaleRef, contentLayerRef]
+  );
+
+  // ~12 screen px converted to image px so snap reach feels the same at any zoom.
+  const getSnapTolerance = useCallback(
+    () => Math.min(40, Math.max(6, 12 / (scaleRef.current || 1))),
+    [scaleRef]
   );
 
   const activeRoomOverlay = localRoomOverlay || roomOverlay;
@@ -210,59 +215,59 @@ export function useToolRouter({
       }
     }
 
-    // Handle room overlay dragging
-    if (draggingRoom && roomStart && activeRoomOverlay) {
+    // Handle room overlay dragging. Raw position always derives from the
+    // drag-origin overlay plus the cumulative mouse delta, so snap offsets
+    // never accumulate frame-to-frame and the cursor can always pull the
+    // overlay off a wall.
+    if (draggingRoom && roomStart && lastRoomDragStartRef.current) {
+      const origin = lastRoomDragStartRef.current;
       const deltaX = mousePoint.x - roomStart.x;
       const deltaY = mousePoint.y - roomStart.y;
-      
+
       const movedOverlay = {
-        x1: activeRoomOverlay.x1 + deltaX,
-        y1: activeRoomOverlay.y1 + deltaY,
-        x2: activeRoomOverlay.x2 + deltaX,
-        y2: activeRoomOverlay.y2 + deltaY,
-        ...(Array.isArray(activeRoomOverlay.polygon)
-          ? { polygon: activeRoomOverlay.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
+        x1: origin.x1 + deltaX,
+        y1: origin.y1 + deltaY,
+        x2: origin.x2 + deltaX,
+        y2: origin.y2 + deltaY,
+        ...(Array.isArray(origin.polygon)
+          ? { polygon: origin.polygon.map(p => ({ x: p.x + deltaX, y: p.y + deltaY })) }
           : {}),
-        ...(activeRoomOverlay.confidence !== undefined ? { confidence: activeRoomOverlay.confidence } : {}),
+        ...(origin.confidence !== undefined ? { confidence: origin.confidence } : {}),
       };
-      
+
       const shiftHeld = e.evt.shiftKey;
-      const newOverlay = (autoSnapEnabled && !shiftHeld) ? snapRoomOverlayPosition(movedOverlay) : movedOverlay;
+      const newOverlay = (autoSnapEnabled && !shiftHeld)
+        ? snapRoomOverlayMove(movedOverlay, getSnapTolerance())
+        : movedOverlay;
       setLocalRoomOverlay(newOverlay);
-      setRoomStart(mousePoint);
       return;
     }
 
     // Handle room corner resizing
-    if (draggingRoomCorner && activeRoomOverlay) {
-      const newOverlay = { x1: activeRoomOverlay.x1, y1: activeRoomOverlay.y1, x2: activeRoomOverlay.x2, y2: activeRoomOverlay.y2 };
-      if (activeRoomOverlay.confidence !== undefined) {
-        newOverlay.confidence = activeRoomOverlay.confidence;
-      }
-      const shiftHeld = e.evt.shiftKey;
-      
+    if (draggingRoomCorner && lastRoomDragStartRef.current) {
+      const origin = lastRoomDragStartRef.current;
+      const rawOverlay = { x1: origin.x1, y1: origin.y1, x2: origin.x2, y2: origin.y2 };
       if (draggingRoomCorner === 'tl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
+        rawOverlay.x1 = mousePoint.x;
+        rawOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'tr') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y2, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y1 = snappedY !== null ? snappedY : mousePoint.y;
+        rawOverlay.x2 = mousePoint.x;
+        rawOverlay.y1 = mousePoint.y;
       } else if (draggingRoomCorner === 'bl') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, mousePoint.x, activeRoomOverlay.x2) : null;
-        newOverlay.x1 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
+        rawOverlay.x1 = mousePoint.x;
+        rawOverlay.y2 = mousePoint.y;
       } else if (draggingRoomCorner === 'br') {
-        const snappedX = !shiftHeld ? findVerticalSnap(mousePoint.x, activeRoomOverlay.y1, mousePoint.y) : null;
-        const snappedY = !shiftHeld ? findHorizontalSnap(mousePoint.y, activeRoomOverlay.x1, mousePoint.x) : null;
-        newOverlay.x2 = snappedX !== null ? snappedX : mousePoint.x;
-        newOverlay.y2 = snappedY !== null ? snappedY : mousePoint.y;
+        rawOverlay.x2 = mousePoint.x;
+        rawOverlay.y2 = mousePoint.y;
       }
-      
+
+      const shiftHeld = e.evt.shiftKey;
+      const newOverlay = (autoSnapEnabled && !shiftHeld)
+        ? snapRoomOverlayResize(draggingRoomCorner, rawOverlay, getSnapTolerance())
+        : rawOverlay;
+      if (origin.confidence !== undefined) {
+        newOverlay.confidence = origin.confidence;
+      }
       setLocalRoomOverlay(newOverlay);
       return;
     }
@@ -286,12 +291,11 @@ export function useToolRouter({
     crop,
     draggingRoom,
     roomStart,
-    activeRoomOverlay,
     autoSnapEnabled,
-    snapRoomOverlayPosition,
+    snapRoomOverlayMove,
+    snapRoomOverlayResize,
+    getSnapTolerance,
     draggingRoomCorner,
-    findVerticalSnap,
-    findHorizontalSnap,
     lineToolActive,
     currentMeasurementLine,
     drawAreaActive,
@@ -731,12 +735,12 @@ export function useToolRouter({
     }
 
     if (autoSnapEnabled) {
-      ensureImageSnapAnalyzer();
+      ensureWallSnapEngine();
     }
-    
+
     setLocalRoomOverlay(roomOverlay);
     setDraggingRoom(true);
-  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
+  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureWallSnapEngine, onSaveUndoPoint]);
 
   const handleRoomCornerMouseDown = useCallback((corner, e) => {
     if (!roomOverlay) return;
@@ -754,12 +758,12 @@ export function useToolRouter({
     }
 
     if (autoSnapEnabled) {
-      ensureImageSnapAnalyzer();
+      ensureWallSnapEngine();
     }
-    
+
     setLocalRoomOverlay(roomOverlay);
     setDraggingRoomCorner(corner);
-  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureImageSnapAnalyzer, onSaveUndoPoint]);
+  }, [roomOverlay, getCanvasCoords, autoSnapEnabled, ensureWallSnapEngine, onSaveUndoPoint]);
 
   return {
     currentMousePos,

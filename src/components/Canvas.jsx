@@ -213,10 +213,9 @@ const Canvas = React.memo(forwardRef(({
     
     // Snapping
     findVertexSnapPoint: snapper.findVertexSnapPoint,
-    findVerticalSnap: snapper.findVerticalSnap,
-    findHorizontalSnap: snapper.findHorizontalSnap,
-    snapRoomOverlayPosition: snapper.snapRoomOverlayPosition,
-    ensureImageSnapAnalyzer: snapper.ensureImageSnapAnalyzer,
+    snapRoomOverlayMove: snapper.snapRoomOverlayMove,
+    snapRoomOverlayResize: snapper.snapRoomOverlayResize,
+    ensureWallSnapEngine: snapper.ensureWallSnapEngine,
 
     // Perimeter
     perimeterOverlay,
