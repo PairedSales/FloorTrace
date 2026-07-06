@@ -6,6 +6,7 @@
 import {
   closeRect,
   erodeRect,
+  openRect,
   floodOutside,
   labelComponents,
 } from './raster.js';
@@ -46,6 +47,7 @@ const measureFootprint = (wallMask, width, height, radius) => {
   return {
     mask,
     labels,
+    closed,
     componentId: component.id,
     area: component.size,
     bbox: component.bbox,
@@ -112,6 +114,96 @@ const sampleExteriorThickness = (boundary, wallMask, footprint, width, height, s
   return samples[(samples.length / 2) | 0];
 };
 
+// Carve OCR-labelled exterior features (porch/patio/deck/balcony) out of the
+// sealed footprint. Each label bbox seeds the enclosed open cavity it sits in
+// (labelled on footprint minus the closed wall mask, so doorways bridged by
+// the seal keep house rooms separate); the cavity is cleared and a rect
+// opening then drops its orphaned railing/outline ring — the shared house
+// wall survives as part of the solid footprint body and becomes the new
+// boundary, i.e. the trace lands on the exterior wall face.
+const carveExcludedRegions = (footprint, width, height, regions, exteriorThickness) => {
+  const open = new Uint8Array(footprint.mask.length);
+  for (let i = 0; i < open.length; i += 1) {
+    open[i] = footprint.mask[i] && !footprint.closed[i] ? 1 : 0;
+  }
+  const { labels, components } = labelComponents(open, width, height);
+  if (!components.length) return null;
+
+  const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
+  const targets = new Set();
+  for (const region of regions) {
+    // Vote over a small sample grid: label bboxes are approximate and their
+    // centre can land on a stroke or a stray glyph pixel.
+    const votes = new Map();
+    for (let sy = 0; sy <= 4; sy += 1) {
+      for (let sx = 0; sx <= 4; sx += 1) {
+        const x = Math.round(region.x + (region.width * sx) / 4);
+        const y = Math.round(region.y + (region.height * sy) / 4);
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        const id = labels[y * width + x];
+        if (id >= 0) votes.set(id, (votes.get(id) ?? 0) + 1);
+      }
+    }
+    let best = -1;
+    let bestVotes = 0;
+    for (const [id, count] of votes) {
+      if (count > bestVotes) {
+        best = id;
+        bestVotes = count;
+      }
+    }
+    if (best < 0) continue;
+    const size = components[best].size;
+    // Sanity: skip noise slivers and anything big enough to be the house
+    // interior itself (a misplaced label must not gut the footprint).
+    if (size < minCavity || size > 0.45 * footprint.area) continue;
+    targets.add(best);
+  }
+  if (!targets.size) return null;
+
+  const mask = footprint.mask.slice();
+  for (const id of targets) {
+    const { minX, minY, maxX, maxY } = components[id].bbox;
+    for (let y = minY; y <= maxY; y += 1) {
+      const row = y * width;
+      for (let x = minX; x <= maxX; x += 1) {
+        if (labels[row + x] === id) mask[row + x] = 0;
+      }
+    }
+  }
+
+  // Clip the opening back to the carved mask so its dilation cannot refill
+  // the cavity we just removed.
+  const opened = openRect(mask, width, height, Math.max(2, exteriorThickness + 2));
+  for (let i = 0; i < opened.length; i += 1) {
+    if (!mask[i]) opened[i] = 0;
+  }
+  const labeled = largestComponent(opened, width, height);
+  if (!labeled || labeled.component.size < 0.35 * footprint.area) return null;
+
+  const { component, labels: newLabels } = labeled;
+  const newMask = new Uint8Array(opened.length);
+  const { minX, minY, maxX, maxY } = component.bbox;
+  for (let y = minY; y <= maxY; y += 1) {
+    const row = y * width;
+    for (let x = minX; x <= maxX; x += 1) {
+      if (newLabels[row + x] === component.id) newMask[row + x] = 1;
+    }
+  }
+  return {
+    excluded: targets.size,
+    footprint: {
+      ...footprint,
+      mask: newMask,
+      labels: newLabels,
+      componentId: component.id,
+      area: component.size,
+      bbox: component.bbox,
+      bboxArea: (maxX - minX + 1) * (maxY - minY + 1),
+    },
+  };
+};
+
 const polygonize = (labels, width, height, componentId, epsilon, fitOptions) => {
   const ring = traceComponentBoundary(labels, width, height, componentId);
   if (ring.length < 3) return null;
@@ -152,7 +244,8 @@ export const traceBoundary = (analysis, options = {}) => {
   if (!footprint) {
     usedFallback = true;
     const filled = new Uint8Array(wallMask.length);
-    const outside = floodOutside(closeRect(wallMask, width, height, maxRadius), width, height);
+    const closed = closeRect(wallMask, width, height, maxRadius);
+    const outside = floodOutside(closed, width, height);
     for (let i = 0; i < filled.length; i += 1) filled[i] = outside[i] ? 0 : 1;
     const labeled = largestComponent(filled, width, height);
     if (!labeled) return null;
@@ -163,6 +256,7 @@ export const traceBoundary = (analysis, options = {}) => {
     footprint = {
       mask,
       labels: labeled.labels,
+      closed,
       componentId: labeled.component.id,
       area: labeled.component.size,
       bbox: labeled.component.bbox,
@@ -172,14 +266,36 @@ export const traceBoundary = (analysis, options = {}) => {
   }
 
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
-  const outerResult = polygonize(
+  let outerResult = polygonize(
     footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
   );
   if (!outerResult) return null;
 
-  const exteriorThickness = sampleExteriorThickness(
+  let exteriorThickness = sampleExteriorThickness(
     outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
   );
+
+  // OCR-labelled exterior features (porch/patio/deck…) are removed after the
+  // seal so the trace covers the main structure only.
+  let excluded = 0;
+  if (options.excludeRegions?.length) {
+    const carved = carveExcludedRegions(
+      footprint, width, height, options.excludeRegions, exteriorThickness,
+    );
+    if (carved) {
+      const carvedOuter = polygonize(
+        carved.footprint.labels, width, height, carved.footprint.componentId, epsilon, options.fit,
+      );
+      if (carvedOuter) {
+        footprint = carved.footprint;
+        outerResult = carvedOuter;
+        excluded = carved.excluded;
+        exteriorThickness = sampleExteriorThickness(
+          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+        );
+      }
+    }
+  }
 
   let innerPolygon = null;
   const eroded = erodeRect(footprint.mask, width, height, exteriorThickness);
@@ -202,6 +318,7 @@ export const traceBoundary = (analysis, options = {}) => {
     sealRadius: footprint.radius,
     exteriorThickness,
     usedFallback,
+    excluded,
     debug: { tried, wallBbox: wb, wallBboxArea },
   };
 };

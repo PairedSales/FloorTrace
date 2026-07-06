@@ -2,8 +2,10 @@
  * Room-dimension extraction from floorplan images.
  *
  * Public API:
- *   detectAllDimensions(imageDataUrl) -> { dimensions, detectedFormat }
+ *   detectAllDimensions(imageDataUrl) -> { dimensions, exteriorLabels, detectedFormat }
  *     dimensions: [{ width, height, text, bbox, confidence, format }]
+ *     exteriorLabels: [{ keyword, text, bbox }] — porch/patio/deck/balcony
+ *       name labels, fed to the boundary tracer as footprint exclusions
  *   terminateOcrWorker()
  *
  * Parsing primitives (normalizeOcrText, parseSingleToken, parseDimensionLine,
@@ -79,7 +81,7 @@ const browserEnv = () => ({
 /**
  * Detect all room dimensions in a floorplan image.
  * @param {string} imageDataUrl base64 data URL (PNG/JPG)
- * @returns {Promise<{dimensions: Array, detectedFormat: string|null}>}
+ * @returns {Promise<{dimensions: Array, exteriorLabels: Array, detectedFormat: string|null}>}
  */
 export const detectAllDimensions = async (imageDataUrl) => {
   try {
@@ -96,16 +98,17 @@ export const detectAllDimensions = async (imageDataUrl) => {
     ctx.drawImage(img, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    const { dimensions, detectedFormat, timings } =
+    const { dimensions, exteriorLabels, detectedFormat, timings } =
       await detectDimensionsCore(imageData, browserEnv());
 
     if (import.meta.env?.DEV) {
-      console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length);
+      console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length,
+        'exterior:', exteriorLabels.map((l) => l.keyword));
     }
 
-    return { dimensions, detectedFormat };
+    return { dimensions, exteriorLabels, detectedFormat };
   } catch (error) {
     console.error('DimensionsOCR error:', error);
-    return { dimensions: [], detectedFormat: null };
+    return { dimensions: [], exteriorLabels: [], detectedFormat: null };
   }
 };

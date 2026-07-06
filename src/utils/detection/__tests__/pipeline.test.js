@@ -128,6 +128,109 @@ describe('traceFloorplanBoundaryCore', () => {
   });
 });
 
+describe('traceFloorplanBoundaryCore excludeRegions (porch carving)', () => {
+  // House (50..450 x 50..250, 8px walls) with a full-width porch attached
+  // below it (thin 4px railing walls down to y=380). The house bottom wall at
+  // y=250 is the shared exterior wall.
+  const houseWithPorch = () => {
+    const img = createImage(500, 460);
+    wall(img, 50, 50, 450, 50, 8);
+    wall(img, 50, 50, 50, 250, 8);
+    wall(img, 450, 50, 450, 250, 8);
+    wall(img, 50, 250, 450, 250, 8);
+    wall(img, 60, 250, 60, 380, 4);
+    wall(img, 440, 250, 440, 380, 4);
+    wall(img, 60, 380, 440, 380, 4);
+    return img;
+  };
+
+  it('carves a labelled porch and stops at the shared house wall', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithPorch(), {
+      excludeRegions: [{ x: 210, y: 300, width: 80, height: 20 }],
+    });
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(1);
+    const b = polygonBounds(traced.outer.polygon);
+    expect(b.maxY).toBeLessThanOrEqual(262); // outer face of the shared wall
+    expect(b.maxY).toBeGreaterThanOrEqual(244);
+    expect(b.minY).toBeLessThanOrEqual(48);  // rest of the house untouched
+    expect(b.maxX).toBeGreaterThanOrEqual(450);
+  });
+
+  it('keeps the porch when no exclude region is given', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithPorch());
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxY).toBeGreaterThanOrEqual(375);
+  });
+
+  it('ignores an exclude region outside any enclosed cavity', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithPorch(), {
+      excludeRegions: [{ x: 10, y: 420, width: 60, height: 20 }],
+    });
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxY).toBeGreaterThanOrEqual(375);
+  });
+
+  it('refuses to carve when the label lands in the main interior', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithPorch(), {
+      excludeRegions: [{ x: 200, y: 140, width: 100, height: 30 }],
+    });
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxY).toBeGreaterThanOrEqual(375);
+  });
+
+  it('carves multiple exterior features independently', () => {
+    // Add a balcony on the right side of the house as well.
+    const img = createImage(620, 460);
+    wall(img, 50, 50, 450, 50, 8);
+    wall(img, 50, 50, 50, 250, 8);
+    wall(img, 450, 50, 450, 250, 8);
+    wall(img, 50, 250, 450, 250, 8);
+    wall(img, 60, 250, 60, 380, 4);   // porch below
+    wall(img, 440, 250, 440, 380, 4);
+    wall(img, 60, 380, 440, 380, 4);
+    wall(img, 450, 70, 580, 70, 4);   // balcony right
+    wall(img, 580, 70, 580, 220, 4);
+    wall(img, 450, 220, 580, 220, 4);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [
+        { x: 210, y: 300, width: 80, height: 20 },
+        { x: 490, y: 130, width: 60, height: 16 },
+      ],
+    });
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(2);
+    const b = polygonBounds(traced.outer.polygon);
+    expect(b.maxY).toBeLessThanOrEqual(262);
+    expect(b.maxX).toBeLessThanOrEqual(462);
+  });
+
+  it('maps exclude regions from original px when downscaled', () => {
+    const img = createImage(3000, 2760);
+    wall(img, 300, 300, 2700, 300, 24);
+    wall(img, 300, 300, 300, 1500, 24);
+    wall(img, 2700, 300, 2700, 1500, 24);
+    wall(img, 300, 1500, 2700, 1500, 24);
+    wall(img, 360, 1500, 360, 2280, 12);
+    wall(img, 2640, 1500, 2640, 2280, 12);
+    wall(img, 360, 2280, 2640, 2280, 12);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      preprocess: { maxDimension: 1000 },
+      excludeRegions: [{ x: 1260, y: 1800, width: 480, height: 120 }],
+    });
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(1);
+    const b = polygonBounds(traced.outer.polygon);
+    expect(b.maxY).toBeLessThanOrEqual(1600);
+    expect(b.maxY).toBeGreaterThanOrEqual(1450);
+  });
+});
+
 describe('detectRoomFromClickCore', () => {
   // Two rooms sharing a wall with a door gap; outer shell solid.
   const twoRooms = () => {

@@ -13,8 +13,9 @@
  *     "outerBbox": [x1, y1, x2, y2],            // px, original image space
  *     "outerPolygon": [[x, y], ...],            // px; scored by mask IoU
  *     "outerAreaSqFt": 1234,
- *     "innerAreaSqFt": 1100
- *   },
+ *     "innerAreaSqFt": 1100,
+ *     "excludeRegions": [[x, y, w, h], ...]     // porch/patio label bboxes,
+ *   },                                          // as OCR would supply them
  *   "rooms": [
  *     { "name": "KITCHEN",
  *       "click": [x, y],                        // px; usually the label centre
@@ -228,10 +229,17 @@ const run = () => {
     console.log(`   ${imageData.width}x${imageData.height}px`);
     const ppf = truth?.pixelsPerFoot;
 
+    const boundaryOpts = truth?.boundary?.excludeRegions
+      ? {
+        excludeRegions: truth.boundary.excludeRegions.map(
+          ([x, y, w, h]) => ({ x, y, width: w, height: h }),
+        ),
+      }
+      : {};
     const t0 = Date.now();
-    const boundary = traceFloorplanBoundaryCore(imageData, {});
+    const boundary = traceFloorplanBoundaryCore(imageData, boundaryOpts);
     const boundaryMs = Date.now() - t0;
-    console.log(`   boundary: ${boundaryMs}ms  ${boundary ? `sealRadius=${boundary.debug.sealRadius} wallThickness=${boundary.debug.wallThickness} extThickness=${boundary.debug.exteriorThickness}${boundary.debug.usedFallback ? ' (fallback)' : ''}` : 'FAILED'}`);
+    console.log(`   boundary: ${boundaryMs}ms  ${boundary ? `sealRadius=${boundary.debug.sealRadius} wallThickness=${boundary.debug.wallThickness} extThickness=${boundary.debug.exteriorThickness} excluded=${boundary.excludedRegions}${boundary.debug.usedFallback ? ' (fallback)' : ''}` : 'FAILED'}`);
     const bScore = scoreBoundary(boundary, truth?.boundary, ppf);
     for (const line of bScore.lines) console.log(line);
     if (truth?.boundary) {

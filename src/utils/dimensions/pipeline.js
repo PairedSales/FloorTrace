@@ -23,6 +23,7 @@
  */
 
 import { parseDimensionLine, inferDominantFormat, formatDimensionText } from './parse.js';
+import { matchExteriorFeature } from './exteriorLabels.js';
 import {
   toGray, grayToImageDataLike, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray
@@ -293,6 +294,31 @@ export const detectDimensionsCore = async (imageData, env) => {
   // window, even if that stretches a first-ever run past the soft budget.
   const effectiveBudget = Math.max(budget, elapsed() + 900);
 
+  // ---- Exterior-feature labels ----------------------------------------------
+  // Porch/patio/deck/balcony… name lines from the full-page pass. Their bboxes
+  // seed the boundary tracer's footprint carve so exterior features never
+  // count toward area. Runs over raw lines (before the dedupe below) so two
+  // identically-named porches both register.
+  const exteriorLabels = [];
+  for (const line of lines) {
+    const raw = lineText(line);
+    const keyword = raw ? matchExteriorFeature(raw) : null;
+    if (!keyword) continue;
+    const bbox = tessBboxToFull(line.bbox, ocrScale);
+    if (!bbox || meanWordConfidence(line) < 35) continue;
+    if (exteriorLabels.some((l) => overlapRatio(l.bbox, bbox) > 0.5)) continue;
+    exteriorLabels.push({
+      keyword,
+      text: raw,
+      bbox: {
+        x: Math.round(bbox.x),
+        y: Math.round(bbox.y),
+        width: Math.round(bbox.width),
+        height: Math.round(bbox.height)
+      }
+    });
+  }
+
   // ---- Mine pass-1 output ---------------------------------------------------
   const candidates = [];
   const digitLineRois = [];
@@ -548,6 +574,7 @@ export const detectDimensionsCore = async (imageData, env) => {
 
   const result = {
     dimensions,
+    exteriorLabels,
     detectedFormat: inferDominantFormat(dimensions),
     timings
   };

@@ -72,6 +72,7 @@ function App() {
   const applyRoomCalibration = useAppStore((s) => s.applyRoomCalibration);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
   const setDetectedDimensions = useAppStore((s) => s.setDetectedDimensions);
+  const setExteriorLabels = useAppStore((s) => s.setExteriorLabels);
   const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
@@ -295,6 +296,10 @@ function App() {
         // Handle new return format (object with dimensions and detectedFormat)
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
+
+        // Porch/patio/deck/balcony labels: kept for perimeter tracing so
+        // exterior features get carved out of the footprint.
+        setExteriorLabels(result.exteriorLabels || []);
         
         console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
         
@@ -441,6 +446,7 @@ function App() {
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
+        excludeRegions: useAppStore.getState().exteriorLabels.map((l) => l.bbox),
       });
 
       if (useAppStore.getState().image !== startImage) return;
@@ -460,7 +466,8 @@ function App() {
         return;
       }
 
-      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, { type: 'success', duration: 2200 });
+      const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
+      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`, { type: 'success', duration: 2200 });
       setIsProcessing(false);
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
@@ -627,6 +634,7 @@ function App() {
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
+        excludeRegions: useAppStore.getState().exteriorLabels.map((l) => l.bbox),
       });
       if (useAppStore.getState().image !== startImage) return;
       if (!traced) return;
@@ -639,7 +647,8 @@ function App() {
       setPerimeterVertices(null);
       setPerimeterOverlay({ vertices });
 
-      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, { type: 'success', duration: 2500 });
+      const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
+      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`, { type: 'success', duration: 2500 });
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Auto exterior tracing failed:', error);

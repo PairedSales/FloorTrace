@@ -5,7 +5,7 @@
 - `raster.js`: binary raster primitives — Otsu binarization with OR-pool downscale (thin lines survive), run-based 1D/rect morphology, run-length opening in 4 directions, connected components, border flood fill, summed-area tables.
 - `polygon.js`: Moore boundary trace, RDP simplification, rectilinear line fit (edges refit as axis-aligned lines and intersected; genuine diagonals kept), area/bounds helpers.
 - `analyze.js`: shared analysis — binarize, strip small components (text/ticks/arrows), extract structural strokes (long straight runs + thick-opening survivors, which drops door arcs and curves), estimate dominant wall thickness, build coverage SATs.
-- `boundary.js`: exterior tracing — escalate the morphological closing radius until the border flood fill stops leaking into the building ("seal search"), polygonize the footprint contour, sample exterior wall depth along the contour, erode by it for the inner envelope.
+- `boundary.js`: exterior tracing — escalate the morphological closing radius until the border flood fill stops leaking into the building ("seal search"), polygonize the footprint contour, sample exterior wall depth along the contour, erode by it for the inner envelope. Optional `excludeRegions` (OCR porch/patio/deck/balcony label bboxes) carve exterior features out of the sealed footprint: each label seeds the enclosed open cavity it sits in, the cavity is cleared, and a rect opening drops the orphaned railing ring so the trace lands on the shared house wall's outer face. Guards skip labels that hit no cavity, a noise sliver, or a cavity large enough to be the main interior.
 - `room.js`: room-from-label — grow a rectangle from the label; sides stop at columns/rows with high wall coverage across the current span (door gaps only dent coverage, so no leaks). Thin lines (counters, closet fronts, window glass) become stop *candidates*; a combinatorial search picks the per-side candidates whose rectangle best matches the parsed label aspect ratio. Sides with no wall at all (open plan) are placed from the scale implied by the wall-confirmed axis.
 - `pipeline.js`: environment-agnostic cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore`) taking `{width, height, data}`; coordinate mapping back to original pixel space; `boundaryByMode`.
 - `index.js`: main-thread API and worker request/response lifecycle.
@@ -35,9 +35,10 @@ Boundary detection returns:
 
 - `outer`: building footprint polygon + overlay (exterior face of exterior walls).
 - `inner`: interior envelope polygon + overlay (footprint eroded by sampled exterior wall thickness).
+- `excludedRegions`: count of exterior features carved via `options.excludeRegions` (top-level, since the worker strips `debug`).
 - `debug`: working size/scale, wall thickness estimates, chosen seal radius, seal-search trace.
 
-Both come from the same analysis + footprint pass.
+Both come from the same analysis + footprint pass. `options.excludeRegions` takes exterior-feature label bboxes in original image pixels (the app supplies `exteriorLabels` collected by the dimension OCR pass — see `src/utils/dimensions/exteriorLabels.js`).
 
 ## Benchmarking
 

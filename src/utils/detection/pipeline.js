@@ -35,7 +35,14 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     maxDimension: options.preprocess?.maxDimension ?? 1400,
     ...options.analyze,
   });
-  const boundary = traceBoundary(analysis, options.boundary);
+  // Exterior-feature label bboxes (original image px) -> working scale.
+  const excludeRegions = (options.excludeRegions ?? []).map((r) => ({
+    x: r.x * analysis.scaleX,
+    y: r.y * analysis.scaleY,
+    width: r.width * analysis.scaleX,
+    height: r.height * analysis.scaleY,
+  }));
+  const boundary = traceBoundary(analysis, { ...options.boundary, excludeRegions });
   if (!boundary) return null;
 
   const outer = boundaryEntry(boundary.outerPolygon, analysis.scaleX, analysis.scaleY);
@@ -45,6 +52,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   return {
     outer,
     inner,
+    // Top-level (not debug): the worker strips debug before posting back.
+    excludedRegions: boundary.excluded,
     debug: {
       workingSize: { width: analysis.width, height: analysis.height },
       scale: { x: analysis.scaleX, y: analysis.scaleY },
