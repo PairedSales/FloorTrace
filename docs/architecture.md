@@ -6,7 +6,8 @@ FloorTrace is a single-page React app with all image processing in-browser. The 
 
 - `src/App.jsx`: application state orchestration and workflow control.
 - `src/components/*`: rendering and interactions (toolbar, panels, canvas overlays).
-- `src/utils/DimensionsOCR.js`: OCR detection and dimension parsing.
+- `src/utils/DimensionsOCR.js`: public API for room-dimension extraction (detect, warm-up, parser re-exports).
+- `src/utils/dimensions/*`: the dimension-OCR engine — text parsing (`parse.js`), raster preprocessing (`raster.js`), glyph-cluster spatial analysis (`regions.js`), Tesseract/PaddleOCR/OpenCV wrappers, and the multi-pass pipeline (`pipeline.js`). PaddleOCR models are served locally from `public/models/`. `scripts/ocrBenchmark.mjs` runs the pipeline in Node against ground-truth images.
 - `src/utils/detection/*`: wall/region/boundary extraction pipeline.
 - `src/workers/detectionWorker.js`: off-main-thread execution for detection tasks.
 
