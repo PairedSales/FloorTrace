@@ -25,7 +25,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       }
     } catch (error) {
       console.error('Error pasting image:', error);
-      notify('Failed to paste image. Make sure an image is copied to your clipboard.');
+      notify('Failed to paste image. Make sure an image is copied to your clipboard.', { type: 'error' });
     }
   }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, notify]);
 
@@ -60,7 +60,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
         useAppStore.getState().loadProject(statePatch);
         undoManager.setHistoryState(historyPatch);
 
-        notify('Project loaded successfully');
+        notify('Project loaded.', { type: 'success' });
       } else {
         resetOverlays();
         undoManager.clear();
@@ -70,7 +70,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);
-      notify(`Failed to load file: ${error.message}`);
+      notify(`Failed to load file: ${error.message}`, { type: 'error' });
     } finally {
       setIsProcessing(false);
     }

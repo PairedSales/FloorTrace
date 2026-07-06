@@ -49,7 +49,7 @@ export function useAutosave(notify) {
       await setDraft(LOCAL_DRAFT_STORAGE_KEY, payload);
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
-      if (notify) notify('Autosave unavailable (storage full or blocked).');
+      if (notify) notify('Autosave unavailable (storage full or blocked).', { type: 'warning' });
     }
   }, [notify]);
 
@@ -87,7 +87,7 @@ export function useAutosave(notify) {
               undoManager.clear();
             }
             setHasRestoredState(true);
-            if (notify) notify('Autosaved project restored.');
+            if (notify) notify('Autosaved project restored.', { type: 'info' });
             return;
           }
         }

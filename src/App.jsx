@@ -93,15 +93,25 @@ function App() {
   const canvasRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
 
-  const notify = useCallback((message, durationMs = 3000) => {
-    const msg = message.toLowerCase();
-    if (msg.includes('error') || msg.includes('fail') || msg.includes('unable')) {
-      toast.error(message, { duration: durationMs });
-    } else if (msg.includes('success') || msg.includes('detected') || msg.includes('loaded')) {
-      toast.success(message, { duration: durationMs });
-    } else {
-      toast(message, { duration: durationMs });
+  // Central toast helper. Prefer an explicit type so severity isn't guessed
+  // from wording: notify('Saved', { type: 'success' }).
+  // Back-compat: a bare number is still treated as the duration, and when no
+  // type is given the severity is inferred from the message text.
+  const notify = useCallback((message, options = {}) => {
+    const opts = typeof options === 'number' ? { duration: options } : options;
+    const { duration = 3000, id } = opts;
+    const toastOpts = id ? { duration, id } : { duration };
+
+    let type = opts.type;
+    if (!type) {
+      const msg = message.toLowerCase();
+      if (msg.includes('error') || msg.includes('fail') || msg.includes('unable')) type = 'error';
+      else if (msg.includes('success') || msg.includes('detected') || msg.includes('loaded')) type = 'success';
+      else type = 'default';
     }
+
+    const emit = { success: toast.success, error: toast.error, warning: toast.warning, info: toast.info }[type] || toast;
+    emit(message, toastOpts);
   }, []);
 
   // ── Custom hooks ─────────────────────────────────────────────────────────
@@ -236,7 +246,7 @@ function App() {
     clearAutosavedDraft();
     undoManager.clear();
     useAppStore.getState().restart();
-    notify('Project reset successfully');
+    notify('Project reset.', { type: 'success' });
   };
 
   // Handle manual mode
@@ -265,7 +275,7 @@ function App() {
       }
       
       if (!imgSrc) {
-        notify('Error: Please load an image first');
+        notify('Please load an image first.', { type: 'error' });
         return;
       }
       
@@ -290,7 +300,7 @@ function App() {
         if (dimensions.length === 0) {
           // OCR failed - automatically create 200x200 room overlay at center
           setOcrFailed(true);
-          notify('No dimensions found. Please enter manually.');
+          notify('No dimensions found — enter room size manually.', { type: 'warning' });
 
           // Get image dimensions to center the overlay
           const img = new Image();
@@ -314,19 +324,21 @@ function App() {
         } else {
           // OCR succeeded - clear the failed flag
           setOcrFailed(false);
+          const count = dimensions.length;
+          notify(`Detected ${count} dimension${count === 1 ? '' : 's'}. Select one to place the room.`, { type: 'success' });
           // Auto-switch unit based on detected format
           if (detectedFormat && unit !== detectedFormat) {
             console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
             setUnit(detectedFormat);
             const label = detectedFormat === 'inches' ? 'feet-inches' : 'decimal feet';
-            notify(`Switched to ${label} mode based on detected dimensions.`);
+            notify(`Switched to ${label} mode based on detected dimensions.`, { type: 'info' });
           }
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
         // OCR failed - automatically create 200x200 room overlay at center
         setOcrFailed(true);
-        notify('Error detecting dimensions. Please enter manually.');
+        notify('Could not scan dimensions — enter room size manually.', { type: 'error' });
 
         // Get image dimensions to center the overlay
         const img = new Image();
@@ -429,7 +441,7 @@ function App() {
       if (useAppStore.getState().image !== startImage) return;
 
       if (!traced) {
-        notify('Unable to trace perimeter from this image.', 2500);
+        notify('Unable to trace perimeter from this image.', { type: 'warning', duration: 2500 });
         setIsProcessing(false);
         return;
       }
@@ -438,17 +450,17 @@ function App() {
       const applied = applyTracedBoundary(traced, useInteriorWalls);
 
       if (!applied) {
-        notify('No valid perimeter detected.', 2500);
+        notify('No valid perimeter detected.', { type: 'warning', duration: 2500 });
         setIsProcessing(false);
         return;
       }
 
-      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2200);
+      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, { type: 'success', duration: 2200 });
       setIsProcessing(false);
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Perimeter detection failed:', error);
-        notify('Perimeter detection failed. Try another image region.');
+        notify('Perimeter detection failed. Try another image region.', { type: 'error' });
         setIsProcessing(false);
       }
     }
@@ -622,7 +634,7 @@ function App() {
       setPerimeterVertices(null);
       setPerimeterOverlay({ vertices });
 
-      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, 2500);
+      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).`, { type: 'success', duration: 2500 });
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Auto exterior tracing failed:', error);
@@ -700,7 +712,7 @@ function App() {
     const width = parseFloat(roomDimensions.width);
     const height = parseFloat(roomDimensions.height);
     if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      notify('Error: Please enter valid room dimensions first');
+      notify('Please enter valid room dimensions first.', { type: 'error' });
       return;
     }
 

@@ -49,7 +49,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
           useAppStore.getState().loadProject(statePatch);
           undoManager.setHistoryState(historyPatch);
 
-          notify('Project loaded successfully');
+          notify('Project loaded.', { type: 'success' });
         } else {
           // Clear existing image before loading new one to ensure state change
           setImage(null);
@@ -63,7 +63,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
         }
       } catch (error) {
         console.error('Error loading file:', error);
-        notify(`Failed to load file: ${error.message}`);
+        notify(`Failed to load file: ${error.message}`, { type: 'error' });
       } finally {
         setIsProcessing(false);
         // Reset file input so the same file can be selected again
@@ -85,11 +85,11 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
 
       if (success) {
         useAppStore.getState().setIsDirty(false);
-        notify(isSaveAs ? 'Project saved successfully' : 'Project exported');
+        notify(isSaveAs ? 'Project saved.' : 'Project exported.', { type: 'success' });
       }
     } catch (error) {
       console.error('Error exporting project:', error);
-      notify(`Failed to save project: ${error.message}`);
+      notify(`Failed to save project: ${error.message}`, { type: 'error' });
     } finally {
       setIsProcessing(false);
     }
