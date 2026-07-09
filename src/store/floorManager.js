@@ -22,13 +22,15 @@ const TRACE_COLORS = [
 
 let nextTraceNumber = 2;
 
+const ordinalSuffix = (num) =>
+  num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
+
 /**
  * Generate a sequential trace name.
  */
 function generateTraceName() {
   const num = nextTraceNumber++;
-  const suffix = num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
-  return `${num}${suffix} Floor`;
+  return `${num}${ordinalSuffix(num)} Floor`;
 }
 
 export function createFloorSlice(set, get) {
@@ -135,6 +137,50 @@ export function createFloorSlice(set, get) {
       );
       set({
         perimeterTraces: updated,
+        isDirty: true,
+      });
+    },
+
+    /**
+     * Replace all traces with auto-detected floor polygons (one per floor,
+     * already in page reading order). When the count matches the existing
+     * traces, identity (ids/names/colors) is kept so re-applying — e.g. the
+     * interior/exterior wall toggle — preserves user renames. Callers are
+     * responsible for the undo snapshot.
+     */
+    applyDetectedTraces: (floorPolygons) => {
+      if (!floorPolygons?.length) return;
+      const state = get();
+      const current = state.perimeterTraces || [];
+
+      let traces;
+      if (current.length === floorPolygons.length) {
+        traces = current.map((t, i) => ({
+          ...t,
+          vertices: floorPolygons[i],
+          closed: true,
+          visible: true,
+        }));
+      } else {
+        const stamp = Date.now();
+        traces = floorPolygons.map((vertices, i) => ({
+          id: `trace-${stamp}-${i}`,
+          name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
+          vertices,
+          closed: true,
+          visible: true,
+          locked: false,
+          color: TRACE_COLORS[i % TRACE_COLORS.length],
+        }));
+        nextTraceNumber = floorPolygons.length + 1;
+      }
+
+      const activeStillExists = traces.some((t) => t.id === state.activeTraceId);
+      set({
+        perimeterTraces: traces,
+        activeTraceId: activeStillExists ? state.activeTraceId : traces[0].id,
+        traceInteractionMode: 'idle',
+        perimeterVertices: null,
         isDirty: true,
       });
     },

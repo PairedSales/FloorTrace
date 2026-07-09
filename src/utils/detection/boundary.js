@@ -28,15 +28,10 @@ const largestComponent = (mask, width, height) => {
   return { labels, component: best };
 };
 
-const measureFootprint = (wallMask, width, height, radius) => {
-  const closed = radius > 0 ? closeRect(wallMask, width, height, radius) : wallMask;
-  const outside = floodOutside(closed, width, height);
-  const footprint = new Uint8Array(closed.length);
-  for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
-  const labeled = largestComponent(footprint, width, height);
-  if (!labeled) return null;
-  const { labels, component } = labeled;
-  const mask = new Uint8Array(footprint.length);
+const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
+
+const componentMask = (labels, component, width) => {
+  const mask = new Uint8Array(labels.length);
   const { minX, minY, maxX, maxY } = component.bbox;
   for (let y = minY; y <= maxY; y += 1) {
     const row = y * width;
@@ -44,15 +39,28 @@ const measureFootprint = (wallMask, width, height, radius) => {
       if (labels[row + x] === component.id) mask[row + x] = 1;
     }
   }
+  return mask;
+};
+
+const measureFootprint = (wallMask, width, height, radius) => {
+  const closed = radius > 0 ? closeRect(wallMask, width, height, radius) : wallMask;
+  const outside = floodOutside(closed, width, height);
+  const footprint = new Uint8Array(closed.length);
+  for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
+  const { labels, components } = labelComponents(footprint, width, height);
+  if (!components.length) return null;
+  const sorted = [...components].sort((a, b) => b.size - a.size);
+  const best = sorted[0];
   return {
-    mask,
+    mask: componentMask(labels, best, width),
     labels,
     closed,
-    componentId: component.id,
-    area: component.size,
-    bbox: component.bbox,
-    bboxArea: (maxX - minX + 1) * (maxY - minY + 1),
+    componentId: best.id,
+    area: best.size,
+    bbox: best.bbox,
+    bboxArea: bboxAreaOf(best.bbox),
     radius,
+    components: sorted,
   };
 };
 
@@ -212,6 +220,67 @@ const polygonize = (labels, width, height, componentId, epsilon, fitOptions) => 
   return { polygon: rectilinearFit(simplified, fitOptions), ring };
 };
 
+// One sealed footprint component -> floor entry: outer contour, per-floor
+// exterior thickness, OCR exclusion carving, and eroded inner envelope.
+const buildFloor = (initialFootprint, analysis, epsilon, options) => {
+  const { wallMask, width, height, wallThickness } = analysis;
+  let footprint = initialFootprint;
+  let outerResult = polygonize(
+    footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
+  );
+  if (!outerResult) return null;
+
+  let exteriorThickness = sampleExteriorThickness(
+    outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+  );
+
+  // OCR-labelled exterior features (porch/patio/deck…) are removed after the
+  // seal so the trace covers the main structure only. Labels sitting in a
+  // different floor's cavity get no votes here, so passing all regions to
+  // every floor is safe.
+  let excluded = 0;
+  if (options.excludeRegions?.length) {
+    const carved = carveExcludedRegions(
+      footprint, width, height, options.excludeRegions, exteriorThickness,
+    );
+    if (carved) {
+      const carvedOuter = polygonize(
+        carved.footprint.labels, width, height, carved.footprint.componentId, epsilon, options.fit,
+      );
+      if (carvedOuter) {
+        footprint = carved.footprint;
+        outerResult = carvedOuter;
+        excluded = carved.excluded;
+        exteriorThickness = sampleExteriorThickness(
+          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+        );
+      }
+    }
+  }
+
+  let innerPolygon = null;
+  const eroded = erodeRect(footprint.mask, width, height, exteriorThickness);
+  const innerComp = largestComponent(eroded, width, height);
+  if (innerComp && innerComp.component.size > 0.2 * footprint.area) {
+    const innerResult = polygonize(
+      innerComp.labels, width, height, innerComp.component.id, epsilon, options.fit,
+    );
+    if (innerResult && polygonArea(innerResult.polygon) > 0) {
+      innerPolygon = innerResult.polygon;
+    }
+  }
+
+  return {
+    outerPolygon: outerResult.polygon,
+    innerPolygon,
+    footprintMask: footprint.mask,
+    footprintArea: footprint.area,
+    footprintBbox: footprint.bbox,
+    exteriorThickness,
+    excluded,
+  };
+};
+
 export const traceBoundary = (analysis, options = {}) => {
   const { wallMask, width, height, wallThickness } = analysis;
 
@@ -266,59 +335,58 @@ export const traceBoundary = (analysis, options = {}) => {
   }
 
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
-  let outerResult = polygonize(
-    footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
-  );
-  if (!outerResult) return null;
 
-  let exteriorThickness = sampleExteriorThickness(
-    outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-  );
-
-  // OCR-labelled exterior features (porch/patio/deck…) are removed after the
-  // seal so the trace covers the main structure only.
-  let excluded = 0;
-  if (options.excludeRegions?.length) {
-    const carved = carveExcludedRegions(
-      footprint, width, height, options.excludeRegions, exteriorThickness,
-    );
-    if (carved) {
-      const carvedOuter = polygonize(
-        carved.footprint.labels, width, height, carved.footprint.componentId, epsilon, options.fit,
-      );
-      if (carvedOuter) {
-        footprint = carved.footprint;
-        outerResult = carvedOuter;
-        excluded = carved.excluded;
-        exteriorThickness = sampleExteriorThickness(
-          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-        );
-      }
+  // Disconnected sibling footprints (multi-floor pages): components that are
+  // also solid at the sealing radius and big enough to be a floor outline.
+  const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
+  const footprints = [footprint];
+  if (!usedFallback && footprint.components) {
+    for (const comp of footprint.components) {
+      if (footprints.length >= maxFloors) break;
+      if (comp.id === footprint.componentId) continue;
+      if (comp.size < 0.12 * footprint.area) break; // sorted by size desc
+      if (comp.size < 0.4 * bboxAreaOf(comp.bbox)) continue; // leaked sliver, not a sealed floor
+      footprints.push({
+        ...footprint,
+        mask: componentMask(footprint.labels, comp, width),
+        componentId: comp.id,
+        area: comp.size,
+        bbox: comp.bbox,
+        bboxArea: bboxAreaOf(comp.bbox),
+      });
     }
   }
 
-  let innerPolygon = null;
-  const eroded = erodeRect(footprint.mask, width, height, exteriorThickness);
-  const innerComp = largestComponent(eroded, width, height);
-  if (innerComp && innerComp.component.size > 0.2 * footprint.area) {
-    const innerResult = polygonize(
-      innerComp.labels, width, height, innerComp.component.id, epsilon, options.fit,
-    );
-    if (innerResult && polygonArea(innerResult.polygon) > 0) {
-      innerPolygon = innerResult.polygon;
-    }
+  const floors = [];
+  for (const fp of footprints) {
+    const floor = buildFloor(fp, analysis, epsilon, options);
+    if (floor) floors.push(floor);
   }
+  if (!floors.length) return null;
+
+  // Reading order (rows top-to-bottom, left-to-right within a row) so floor
+  // numbering matches how the page reads; the largest floor stays the primary
+  // for the single-boundary top-level fields.
+  floors.sort((a, b) => {
+    const ab = a.footprintBbox;
+    const bb = b.footprintBbox;
+    const overlap = Math.min(ab.maxY, bb.maxY) - Math.max(ab.minY, bb.minY);
+    const minH = Math.min(ab.maxY - ab.minY, bb.maxY - bb.minY);
+    return overlap > 0.3 * minH ? ab.minX - bb.minX : ab.minY - bb.minY;
+  });
+  const primary = floors.reduce((best, f) => (f.footprintArea > best.footprintArea ? f : best));
 
   return {
-    outerPolygon: outerResult.polygon,
-    innerPolygon,
-    footprintMask: footprint.mask,
-    footprintArea: footprint.area,
-    footprintBbox: footprint.bbox,
+    floors,
+    outerPolygon: primary.outerPolygon,
+    innerPolygon: primary.innerPolygon,
+    footprintMask: primary.footprintMask,
+    footprintArea: primary.footprintArea,
+    footprintBbox: primary.footprintBbox,
     sealRadius: footprint.radius,
-    exteriorThickness,
+    exteriorThickness: primary.exteriorThickness,
     usedFallback,
-    excluded,
+    excluded: floors.reduce((sum, f) => sum + f.excluded, 0),
     debug: { tried, wallBbox: wb, wallBboxArea },
   };
 };

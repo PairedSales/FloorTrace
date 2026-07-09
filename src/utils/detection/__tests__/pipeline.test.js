@@ -231,6 +231,102 @@ describe('traceFloorplanBoundaryCore excludeRegions (porch carving)', () => {
   });
 });
 
+describe('traceFloorplanBoundaryCore multi-floor', () => {
+  // Two disconnected floor outlines on one page (1st/2nd floor sheet). The
+  // left floor (370x320 outline) is larger than the right (390x260).
+  const twoFloorPlan = () => {
+    const img = createImage(1000, 420);
+    wall(img, 50, 50, 420, 50, 8);
+    wall(img, 50, 370, 420, 370, 8);
+    wall(img, 50, 50, 50, 370, 8);
+    wall(img, 420, 50, 420, 370, 8);
+    wall(img, 560, 80, 950, 80, 8);
+    wall(img, 560, 340, 950, 340, 8);
+    wall(img, 560, 80, 560, 340, 8);
+    wall(img, 950, 80, 950, 340, 8);
+    return img;
+  };
+
+  it('traces both disconnected floors, left to right', () => {
+    const traced = traceFloorplanBoundaryCore(twoFloorPlan());
+    expect(traced?.floors?.length).toBe(2);
+
+    const [left, right] = traced.floors;
+    expect(left.outer).toBeTruthy();
+    expect(right.outer).toBeTruthy();
+    const lb = polygonBounds(left.outer.polygon);
+    const rb = polygonBounds(right.outer.polygon);
+    expect(lb.maxX).toBeLessThan(500);
+    expect(rb.minX).toBeGreaterThan(500);
+
+    // Each floor also gets its own inner envelope.
+    expect(left.inner).toBeTruthy();
+    expect(right.inner).toBeTruthy();
+    expect(polygonArea(left.inner.polygon)).toBeLessThan(polygonArea(left.outer.polygon));
+
+    // Top-level boundary stays the largest floor for single-boundary callers.
+    expect(traced.outer.polygon).toEqual(left.outer.polygon);
+  });
+
+  it('reports a single floor for a single-outline plan', () => {
+    const img = createImage(500, 400);
+    wall(img, 50, 50, 450, 50, 10);
+    wall(img, 50, 350, 450, 350, 10);
+    wall(img, 50, 50, 50, 350, 10);
+    wall(img, 450, 50, 450, 350, 10);
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced?.floors?.length).toBe(1);
+    expect(traced.floors[0].outer.polygon).toEqual(traced.outer.polygon);
+  });
+
+  it('does not promote small sealed boxes (legends) to floors', () => {
+    const img = createImage(700, 400);
+    wall(img, 50, 50, 450, 50, 8);
+    wall(img, 50, 350, 450, 350, 8);
+    wall(img, 50, 50, 50, 350, 8);
+    wall(img, 450, 50, 450, 350, 8);
+    // Small sealed legend box far from the floor outline.
+    wall(img, 560, 60, 660, 60, 3);
+    wall(img, 560, 120, 660, 120, 3);
+    wall(img, 560, 60, 560, 120, 3);
+    wall(img, 660, 60, 660, 120, 3);
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced?.floors?.length).toBe(1);
+  });
+
+  it('clamps room detection to the floor under the click', () => {
+    // Click inside the smaller right floor: before multi-floor support the
+    // footprint clamp only covered the largest floor and this returned null.
+    const room = detectRoomFromClickCore(twoFloorPlan(), { x: 750, y: 210 });
+    expect(room).toBeTruthy();
+    const [x1, y1, x2, y2] = bboxOf(room);
+    expect(x1).toBeGreaterThanOrEqual(550);
+    expect(x2).toBeLessThanOrEqual(960);
+    expect(y1).toBeGreaterThanOrEqual(70);
+    expect(y2).toBeLessThanOrEqual(350);
+  });
+
+  it('carves a labelled porch only from the floor it belongs to', () => {
+    const img = twoFloorPlan();
+    // Porch attached below the right floor (thin railing walls).
+    wall(img, 580, 340, 580, 410, 3);
+    wall(img, 930, 340, 930, 410, 3);
+    wall(img, 580, 410, 930, 410, 3);
+
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [{ x: 720, y: 365, width: 70, height: 20 }],
+    });
+    expect(traced?.floors?.length).toBe(2);
+    expect(traced.excludedRegions).toBe(1);
+    const [left, right] = traced.floors;
+    // Right floor trimmed back to the shared wall; left floor untouched.
+    expect(polygonBounds(right.outer.polygon).maxY).toBeLessThanOrEqual(352);
+    expect(polygonBounds(left.outer.polygon).maxY).toBeGreaterThanOrEqual(368);
+  });
+});
+
 describe('detectRoomFromClickCore', () => {
   // Two rooms sharing a wall with a door gap; outer shell solid.
   const twoRooms = () => {

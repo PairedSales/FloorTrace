@@ -49,12 +49,23 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const inner = boundaryEntry(boundary.innerPolygon, analysis.scaleX, analysis.scaleY);
   if (!outer && !inner) return null;
 
+  // One entry per disconnected floor outline, in page reading order. The
+  // top-level outer/inner stay the largest floor for single-boundary callers.
+  const floors = (boundary.floors ?? [])
+    .map((floor) => ({
+      outer: boundaryEntry(floor.outerPolygon, analysis.scaleX, analysis.scaleY),
+      inner: boundaryEntry(floor.innerPolygon, analysis.scaleX, analysis.scaleY),
+    }))
+    .filter((floor) => floor.outer || floor.inner);
+
   return {
     outer,
     inner,
+    floors,
     // Top-level (not debug): the worker strips debug before posting back.
     excludedRegions: boundary.excluded,
     debug: {
+      floorCount: floors.length,
       workingSize: { width: analysis.width, height: analysis.height },
       scale: { x: analysis.scaleX, y: analysis.scaleY },
       wallThickness: analysis.wallThickness,
@@ -75,21 +86,29 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     ...options.analyze,
   });
 
-  // The boundary pass supplies the footprint clamp so room growth can never
-  // escape the building. Detection still works (unclamped) if it fails.
-  const boundary = traceBoundary(analysis, options.boundary);
-  const footprintInfo = boundary
-    ? {
-      footprintMask: boundary.footprintMask,
-      footprintArea: boundary.footprintArea,
-      satFootprint: buildSat(boundary.footprintMask, analysis.width, analysis.height),
-    }
-    : null;
-
   const workPoint = {
     x: clickPoint.x * analysis.scaleX,
     y: clickPoint.y * analysis.scaleY,
   };
+
+  // The boundary pass supplies the footprint clamp so room growth can never
+  // escape the building. Detection still works (unclamped) if it fails.
+  // On multi-floor pages, clamp to the floor under the click so rooms outside
+  // the largest footprint aren't rejected.
+  const boundary = traceBoundary(analysis, options.boundary);
+  let footprintInfo = null;
+  if (boundary) {
+    const px = Math.min(analysis.width - 1, Math.max(0, Math.round(workPoint.x)));
+    const py = Math.min(analysis.height - 1, Math.max(0, Math.round(workPoint.y)));
+    const clickedFloor = (boundary.floors ?? [])
+      .find((floor) => floor.footprintMask[py * analysis.width + px]);
+    const target = clickedFloor ?? boundary;
+    footprintInfo = {
+      footprintMask: target.footprintMask,
+      footprintArea: target.footprintArea,
+      satFootprint: buildSat(target.footprintMask, analysis.width, analysis.height),
+    };
+  }
   const labelBbox = options.labelBbox
     ? {
       x: options.labelBbox.x * analysis.scaleX,

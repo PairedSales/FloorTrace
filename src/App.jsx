@@ -10,7 +10,7 @@ import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
-  getBoundaryForMode,
+  getFloorBoundariesForMode,
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
@@ -421,19 +421,25 @@ function App() {
     handleDrop,
   } = useDragAndDrop(notify, handleManualMode, checkUnsavedChanges);
 
+  // Apply detected boundaries to perimeter traces. Returns the number of
+  // floors applied (0 = nothing usable). A single floor updates the active
+  // trace as before; multiple floors replace the trace list with one trace
+  // per floor, each independently editable afterwards.
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
-    const activeBoundary = getBoundaryForMode(boundaryResult, interiorMode);
-    if (!activeBoundary?.polygon?.length) {
-      return false;
-    }
+    const floors = getFloorBoundariesForMode(boundaryResult, interiorMode);
+    if (!floors.length) return 0;
 
-    const vertices = activeBoundary.polygon.map((point) => ({
-      x: point.x,
-      y: point.y,
-    }));
-    setPerimeterVertices(null);
-    setPerimeterOverlay({ vertices });
-    return true;
+    const polygons = floors.map((boundary) =>
+      boundary.polygon.map((point) => ({ x: point.x, y: point.y }))
+    );
+
+    if (polygons.length === 1) {
+      setPerimeterVertices(null);
+      setPerimeterOverlay({ vertices: polygons[0] });
+    } else {
+      useAppStore.getState().applyDetectedTraces(polygons);
+    }
+    return polygons.length;
   }, []);
 
   // Handle trace perimeter using the detection worker.
@@ -458,16 +464,19 @@ function App() {
       }
 
       setTracedBoundaries(traced);
-      const applied = applyTracedBoundary(traced, useInteriorWalls);
+      const floorCount = applyTracedBoundary(traced, useInteriorWalls);
 
-      if (!applied) {
+      if (!floorCount) {
         notify('No valid perimeter detected.', { type: 'warning', duration: 2500 });
         setIsProcessing(false);
         return;
       }
 
       const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
-      notify(`Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`, { type: 'success', duration: 2200 });
+      const message = floorCount > 1
+        ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
+        : `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
+      notify(message, { type: 'success', duration: 2200 });
       setIsProcessing(false);
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
@@ -640,15 +649,14 @@ function App() {
       if (!traced) return;
       setTracedBoundaries(traced);
 
-      const activeBoundary = getBoundaryForMode(traced, useInteriorWalls);
-      if (!activeBoundary?.polygon?.length) return;
-
-      const vertices = activeBoundary.polygon.map((p) => ({ x: p.x, y: p.y }));
-      setPerimeterVertices(null);
-      setPerimeterOverlay({ vertices });
+      const floorCount = applyTracedBoundary(traced, useInteriorWalls);
+      if (!floorCount) return;
 
       const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
-      notify(`Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`, { type: 'success', duration: 2500 });
+      const message = floorCount > 1
+        ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
+        : `Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
+      notify(message, { type: 'success', duration: 2500 });
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Auto exterior tracing failed:', error);
@@ -659,7 +667,7 @@ function App() {
         setIsProcessing(false);
       }
     }
-  }, [image, useInteriorWalls, setTracedBoundaries, setPerimeterVertices, setPerimeterOverlay, setIsProcessing, notify]);
+  }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing, notify]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback(async (dimension) => {

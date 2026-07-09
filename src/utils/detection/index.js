@@ -66,6 +66,17 @@ export const getBoundaryForMode = (tracedBoundary, useInteriorWalls) => {
   return boundaryByMode(tracedBoundary, mode);
 };
 
+// Per-floor boundaries in page reading order; falls back to the single
+// top-level boundary for results predating the floors array (old autosaves).
+export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
+  if (!tracedBoundary) return [];
+  const mode = useInteriorWalls ? 'inner' : 'outer';
+  const floors = tracedBoundary.floors?.length ? tracedBoundary.floors : [tracedBoundary];
+  return floors
+    .map((floor) => boundaryByMode(floor, mode))
+    .filter((boundary) => boundary?.polygon?.length);
+};
+
 export const terminateDetectionWorker = () => {
   if (!detectionWorker) return;
   detectionWorker.terminate();

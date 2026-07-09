@@ -28,7 +28,7 @@ const LeftPanel = ({
   const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
-  const scale = useAppStore((s) => s.scale);
+  const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
 
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -102,6 +102,9 @@ const LeftPanel = ({
   };
 
   const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
+  const floorsInTotal = perimeterTraces.filter(
+    (t) => t.visible && t.vertices && t.vertices.length >= 3
+  ).length;
 
   const handleCopyArea = () => {
     navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
@@ -236,6 +239,11 @@ const LeftPanel = ({
               {areaText}
               <span className="text-accent/60 text-sm font-medium ml-1">{areaSuffix}</span>
             </div>
+            {floorsInTotal > 1 && (
+              <p className="mt-1 text-[10px] text-slate-500 text-center">
+                Combined total · {floorsInTotal} floors
+              </p>
+            )}
         </div>
       </section>
 
@@ -269,8 +277,8 @@ const LeftPanel = ({
               ) : (
                 perimeterTraces.map((trace) => {
                   const isActive = trace.id === activeTraceId;
-                  const traceArea = trace.vertices && trace.vertices.length >= 3 
-                    ? calculateArea(trace.vertices, scale) 
+                  const traceArea = trace.vertices && trace.vertices.length >= 3
+                    ? calculateArea(trace.vertices, feetPerPixel)
                     : 0;
                   const { value: tAreaText, suffix: tAreaSuffix } = formatArea(traceArea, unit);
 
