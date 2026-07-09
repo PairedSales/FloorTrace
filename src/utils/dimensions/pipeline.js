@@ -86,9 +86,12 @@ const makeCandidate = (parsed, bbox, ocrConfidence, source) => {
     bbox,
     confidence,
     format: parsed.format,
+    quality: parsed.quality,
     source
   };
 };
+
+const digitsOf = (s) => ((s || '').match(/\d/g) || []).join('');
 
 const dedupeCandidates = (candidates) => {
   const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
@@ -484,22 +487,39 @@ export const detectDimensionsCore = async (imageData, env) => {
       const roiBbox = { x: roi.x, y: roi.y, width: roi.width, height: roi.height };
 
       if (roi.priority === 8) {
-        // Verification read: the zoomed, whitelisted re-read supersedes the
-        // sparse full-page read of the same region. Agreement raises
-        // confidence; disagreement trusts the re-read but caps it.
-        let maxOriginal = 0;
-        let agrees = false;
+        // Verification read: the zoomed, whitelisted re-read double-checks
+        // the sparse full-page read of the same region.
+        let original = null;
         for (let i = candidates.length - 1; i >= 0; i--) {
           if (overlapRatio(candidates[i].bbox, roiBbox) > 0.6) {
-            maxOriginal = Math.max(maxOriginal, candidates[i].confidence);
-            if (valuesMatch(candidates[i], bestParsed)) agrees = true;
+            const c = candidates[i];
+            if (!original || c.quality > original.quality ||
+                (c.quality === original.quality && c.confidence > original.confidence)) {
+              original = c;
+            }
             candidates.splice(i, 1);
           }
         }
-        const conf = agrees
-          ? Math.min(97, Math.max(bestConf, maxOriginal) + 8)
-          : Math.max(bestConf + 4, maxOriginal - 4);
-        candidates.push(makeCandidate(bestParsed, roiBbox, conf, 'tess-verify'));
+        const maxOriginal = original ? original.confidence : 0;
+        const agrees = original && valuesMatch(original, bestParsed);
+        if (original && original.quality > bestParsed.quality) {
+          // Zoomed re-reads eat thin tick marks, so a corrupted-symbol
+          // reconstruction must not supersede an explicit-symbol original
+          // parse. Matching values or digits mean the re-read confirmed the
+          // content and only lost the symbols — that raises confidence.
+          const confirmed = agrees || digitsOf(original.text) === digitsOf(bestParsed.text);
+          const conf = confirmed
+            ? Math.min(97, Math.max(maxOriginal, bestConf) + 8)
+            : maxOriginal;
+          candidates.push({ ...original, confidence: Math.round(conf), source: 'tess-verify' });
+        } else {
+          // Agreement raises confidence; disagreement trusts the re-read
+          // but caps it.
+          const conf = agrees
+            ? Math.min(97, Math.max(bestConf, maxOriginal) + 8)
+            : Math.max(bestConf + 4, maxOriginal - 4);
+          candidates.push(makeCandidate(bestParsed, roiBbox, conf, 'tess-verify'));
+        }
       } else {
         candidates.push(makeCandidate(bestParsed, roiBbox, bestConf, 'tess-roi'));
       }

@@ -344,6 +344,36 @@ describe('parseDimensionLine', () => {
     expect(parseDimensionLine('')).toBeNull();
   });
 
+  // Lost-tick recovery: zoomed OCR eats tick marks ("9'6\"" -> "96\"")
+  describe('lost-tick recovery against a feet-inches partner', () => {
+    it('parses "207\\" x 96\\"" as 20\'7" x 9\'6", not 96 feet', () => {
+      const r = parseDimensionLine('207" x 96"');
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(20 + 7 / 12, 5);
+      expect(r.height).toBeCloseTo(9 + 6 / 12, 5);
+    });
+
+    it('parses "93x 108\\"" as 9\'3" x 10\'8", not 93 feet', () => {
+      const r = parseDimensionLine('93x 108"');
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(9 + 3 / 12, 5);
+      expect(r.height).toBeCloseTo(10 + 8 / 12, 5);
+    });
+
+    it('leaves a plausible bare-feet side alone: "15 x 10\'4\\""', () => {
+      const r = parseDimensionLine("15 x 10'4\"");
+      expect(r).not.toBeNull();
+      expect(r.width).toBe(15);
+      expect(r.height).toBeCloseTo(10 + 4 / 12, 5);
+    });
+
+    it('never rewrites a side with an explicit foot tick: "96\' x 10\'4\\""', () => {
+      const r = parseDimensionLine("96' x 10'4\"");
+      expect(r).not.toBeNull();
+      expect(r.width).toBe(96);
+    });
+  });
+
   // Blurry quotes: comma/backtick misreading across full dimension lines
   it('parses blurry comma-tick: "10,5 x 13,4"', () => {
     const r = parseDimensionLine('10,5 x 13,4');

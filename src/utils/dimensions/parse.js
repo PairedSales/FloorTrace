@@ -344,6 +344,23 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   left = recoverPoint(left, right);
   right = recoverPoint(right, left);
 
+  // Lost-tick recovery: zoomed re-reads eat thin tick marks, turning 9'6"
+  // into "96". A unit-less 2-digit integer paired with a feet-inches partner
+  // at an implausible aspect ratio is a collapsed feet-inches token, not a
+  // 96-foot room.
+  const recoverTicks = (tk, other) => {
+    if (tk.explicitUnit || other.format !== 'inches') return tk;
+    if (!Number.isInteger(tk.raw) || tk.raw < 13 || tk.raw > 99) return tk;
+    const asIs = Math.max(tk.value, other.value) / Math.min(tk.value, other.value);
+    if (asIs <= 4) return tk;
+    const v = Math.floor(tk.raw / 10) + (tk.raw % 10) / 12;
+    const reRatio = Math.max(v, other.value) / Math.min(v, other.value);
+    if (reRatio > 3 || !isReasonableFeet(v)) return tk;
+    return { ...tk, value: v, raw: v, format: 'inches', quality: 1 };
+  };
+  left = recoverTicks(left, right);
+  right = recoverTicks(right, left);
+
   if (!isReasonableFeet(left.value) || !isReasonableFeet(right.value)) return null;
 
   // Rooms with a >25:1 aspect ratio are almost certainly misparses

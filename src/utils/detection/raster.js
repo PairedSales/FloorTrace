@@ -191,15 +191,15 @@ export const openRect = (mask, width, height, r) =>
 // Fill gaps of <= maxGap between colinear ink runs along rows and columns —
 // window spans interrupting exterior walls — without the corner rounding or
 // notch filling a large square closing would cause. A gap is only bridged
-// when BOTH flanking runs are at least minFlank long: window gaps sit between
-// long chunks of the same wall, whereas the mouth of a genuine notch in the
-// outline is flanked by a perpendicular wall's thin cross-section.
+// between runs at least minFlank long: window gaps sit between long chunks of
+// the same wall, whereas the mouth of a genuine notch in the outline is
+// flanked by a perpendicular wall's thin cross-section. Sub-flank runs inside
+// a gap (window sill ticks, dashed openings) neither bridge nor break it.
 export const bridgeRuns = (mask, width, height, maxGap, minFlank = 0) => {
   const out = mask.slice();
   for (let y = 0; y < height; y += 1) {
     const row = y * width;
     let lastEnd = -1;
-    let lastLen = 0;
     let x = 0;
     while (x < width) {
       if (!mask[row + x]) {
@@ -208,18 +208,17 @@ export const bridgeRuns = (mask, width, height, maxGap, minFlank = 0) => {
       }
       let end = x;
       while (end < width && mask[row + end]) end += 1;
-      const len = end - x;
-      if (lastEnd >= 0 && x - lastEnd <= maxGap && lastLen >= minFlank && len >= minFlank) {
-        for (let k = lastEnd; k < x; k += 1) out[row + k] = 1;
+      if (end - x >= minFlank) {
+        if (lastEnd >= 0 && x - lastEnd <= maxGap) {
+          for (let k = lastEnd; k < x; k += 1) out[row + k] = 1;
+        }
+        lastEnd = end;
       }
-      lastEnd = end;
-      lastLen = len;
       x = end;
     }
   }
   for (let x = 0; x < width; x += 1) {
     let lastEnd = -1;
-    let lastLen = 0;
     let y = 0;
     while (y < height) {
       if (!mask[y * width + x]) {
@@ -228,12 +227,12 @@ export const bridgeRuns = (mask, width, height, maxGap, minFlank = 0) => {
       }
       let end = y;
       while (end < height && mask[end * width + x]) end += 1;
-      const len = end - y;
-      if (lastEnd >= 0 && y - lastEnd <= maxGap && lastLen >= minFlank && len >= minFlank) {
-        for (let k = lastEnd; k < y; k += 1) out[k * width + x] = 1;
+      if (end - y >= minFlank) {
+        if (lastEnd >= 0 && y - lastEnd <= maxGap) {
+          for (let k = lastEnd; k < y; k += 1) out[k * width + x] = 1;
+        }
+        lastEnd = end;
       }
-      lastEnd = end;
-      lastLen = len;
       y = end;
     }
   }

@@ -14,6 +14,8 @@
  *     "outerPolygon": [[x, y], ...],            // px; scored by mask IoU
  *     "outerAreaSqFt": 1234,
  *     "innerAreaSqFt": 1100,
+ *     "floors": [[x1, y1, x2, y2], ...],        // per-floor outer bboxes in
+ *                                               // reading order (multi-floor)
  *     "excludeRegions": [[x, y, w, h], ...]     // porch/patio label bboxes,
  *   },                                          // as OCR would supply them
  *   "rooms": [
@@ -40,21 +42,29 @@ import { polygonArea } from '../src/utils/detection/polygon.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Ground truth for ExampleFloorplan.png (px in the 2036x1440 original).
- * Wall-face positions were measured from the image; ENTRY is an open-plan
- * label (no physical wall on two sides) so it is scored with a looser IoU.
+ * Ground truth for ExampleFloorplan.png (px in the 987x956 original): a
+ * two-floor sheet — FLOOR 2 on top, FLOOR 1 with an attached garage below.
+ * Wall-face positions were measured from the image. KITCHEN is open-plan
+ * toward the dining area (no physical wall on that side) so it is unscored;
+ * the app flags such labels with reduced confidence instead.
  */
 const EXAMPLE_TRUTH = {
-  pixelsPerFoot: 39.3,
+  pixelsPerFoot: 16.0,
   boundary: {
-    outerBbox: [77, 97, 1960, 1156],
+    outerBbox: [29, 491, 950, 878],
+    floors: [
+      [29, 15, 620, 415],
+      [29, 491, 950, 878],
+    ],
   },
   rooms: [
-    { name: 'PRIMARY BEDROOM', click: [344, 479], dims: [12.42, 16.33], rect: [97, 119, 583, 758] },
-    { name: 'BEDROOM', click: [872, 359], dims: [13.42, 12.92], rect: [598, 119, 1123, 624] },
-    { name: 'LIVING/DINING', click: [1462, 490], dims: [16.58, 25.83], rect: [1136, 119, 1803, 1133] },
-    { name: 'ENTRY', click: [938, 748], dims: [13.42, 10.58], rect: [616, 660, 1143, 1076], minIou: 0.5 },
-    { name: 'KITCHEN', click: [1229, 1000], dims: [10.75, 7.92], rect: [1000, 820, 1428, 1133] },
+    { name: 'BEDROOM (top-left)', click: [205, 105], dims: [7.75, 10.33], rect: [149, 25, 269, 188] },
+    { name: 'PRIMARY BEDROOM', click: [512, 128], dims: [12.58, 13.25], rect: [417, 25, 611, 231] },
+    { name: 'BEDROOM (bottom-right)', click: [512, 322], dims: [12.58, 10.83], rect: [417, 233, 611, 406] },
+    { name: 'UTILITY', click: [513, 585], dims: [10.0, 9.25], rect: [456, 500, 611, 643] },
+    { name: 'GARAGE', click: [778, 672], dims: [20.58, 9.5], rect: [620, 596, 943, 743] },
+    { name: 'FAMILY ROOM', click: [495, 753], dims: [14.83, 14.08], rect: [380, 650, 611, 868] },
+    { name: 'KITCHEN (open-plan)', click: [250, 573], dims: [10.08, 10.33] },
   ],
 };
 
@@ -146,6 +156,24 @@ const scoreBoundary = (result, truth, ppf) => {
     const ok = iou >= 0.9;
     pass = pass && ok;
     lines.push(`   ${ok ? 'HIT ' : 'MISS'}  outer bbox IoU=${pct(iou)}`);
+  }
+  if (truth?.floors) {
+    const floors = result.floors ?? [];
+    const countOk = floors.length === truth.floors.length;
+    pass = pass && countOk;
+    lines.push(`   ${countOk ? 'HIT ' : 'MISS'}  floor count ${floors.length} vs ${truth.floors.length}`);
+    for (let i = 0; i < truth.floors.length; i += 1) {
+      const outer = floors[i]?.outer;
+      if (!outer) {
+        pass = false;
+        lines.push(`   MISS  floor ${i}: no outer polygon`);
+        continue;
+      }
+      const iou = bboxIou(bboxOf(outer.overlay), truth.floors[i]);
+      const ok = iou >= 0.9;
+      pass = pass && ok;
+      lines.push(`   ${ok ? 'HIT ' : 'MISS'}  floor ${i} bbox IoU=${pct(iou)}`);
+    }
   }
   if (truth?.outerPolygon) {
     const iou = polygonIou(result.outer.polygon, truth.outerPolygon);

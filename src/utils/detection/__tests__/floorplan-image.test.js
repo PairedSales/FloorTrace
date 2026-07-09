@@ -1,6 +1,9 @@
-// Integration tests against the real ExampleFloorplan.png. Ground-truth wall
+// Integration tests against the real ExampleFloorplan.png: a two-floor sheet
+// (FLOOR 2 on top, FLOOR 1 with an attached garage below, ~16 px/ft). Wall
 // faces were measured from the image (see scripts/detectionBenchmark.mjs,
-// which shares these expectations).
+// which shares these expectations). The sheet stresses the seal search:
+// window spans up to ~142px, window gaps wrapping corners, and dashed
+// stair-opening edges.
 import fs from 'fs';
 import path from 'path';
 import { describe, expect, it, beforeAll } from 'vitest';
@@ -9,6 +12,7 @@ import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../pipeline
 import { polygonArea } from '../polygon.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+const PPF = 16.0;
 
 const loadPng = (filePath) => {
   const png = PNG.sync.read(fs.readFileSync(filePath));
@@ -32,47 +36,63 @@ beforeAll(() => {
   image = loadPng(path.join(ROOT, 'ExampleFloorplan.png'));
 });
 
-describe('boundary tracing on ExampleFloorplan.png', () => {
+describe('multi-floor boundary tracing on ExampleFloorplan.png', () => {
   let traced;
 
   beforeAll(() => {
     traced = traceFloorplanBoundaryCore(image, {});
   });
 
-  it('produces outer and inner boundaries', () => {
-    expect(traced?.outer?.polygon?.length).toBeGreaterThanOrEqual(4);
-    expect(traced?.inner?.polygon?.length).toBeGreaterThanOrEqual(4);
+  it('finds both floors, in page reading order', () => {
+    expect(traced?.floors?.length).toBe(2);
+    const [top, bottom] = traced.floors;
+    expect(bboxIou(bboxOf(top.outer.overlay), [29, 15, 620, 415])).toBeGreaterThan(0.9);
+    expect(bboxIou(bboxOf(bottom.outer.overlay), [29, 491, 950, 878])).toBeGreaterThan(0.9);
+    expect(top.outer.overlay.y2).toBeLessThan(bottom.outer.overlay.y1);
   });
 
-  it('outer bbox matches the measured building extents', () => {
-    const iou = bboxIou(bboxOf(traced.outer.overlay), [77, 97, 1960, 1156]);
-    expect(iou).toBeGreaterThan(0.95);
+  it('keeps the floors as separate polygons with plausible areas', () => {
+    const [top, bottom] = traced.floors;
+    // FLOOR 2 is close to a plain rectangle; FLOOR 1 must include the garage
+    // wing (L-shape), so its polygon needs more corners than a rectangle.
+    expect(bottom.outer.polygon.length).toBeGreaterThanOrEqual(6);
+    const topSqFt = polygonArea(top.outer.polygon) / (PPF * PPF);
+    const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
+    expect(topSqFt).toBeGreaterThan(850);
+    expect(topSqFt).toBeLessThan(980);
+    expect(bottomSqFt).toBeGreaterThan(1030);
+    expect(bottomSqFt).toBeLessThan(1180);
   });
 
-  it('inner envelope nests inside the outer footprint', () => {
-    expect(polygonArea(traced.inner.polygon)).toBeLessThan(polygonArea(traced.outer.polygon));
-    expect(traced.inner.overlay.x1).toBeGreaterThan(traced.outer.overlay.x1);
-    expect(traced.inner.overlay.x2).toBeLessThan(traced.outer.overlay.x2);
-    expect(traced.inner.overlay.y1).toBeGreaterThan(traced.outer.overlay.y1);
-    expect(traced.inner.overlay.y2).toBeLessThan(traced.outer.overlay.y2);
+  it('produces a nested inner envelope for each floor', () => {
+    for (const floor of traced.floors) {
+      expect(floor.inner?.polygon?.length).toBeGreaterThanOrEqual(4);
+      expect(polygonArea(floor.inner.polygon)).toBeLessThan(polygonArea(floor.outer.polygon));
+      expect(floor.inner.overlay.x1).toBeGreaterThan(floor.outer.overlay.x1);
+      expect(floor.inner.overlay.x2).toBeLessThan(floor.outer.overlay.x2);
+      expect(floor.inner.overlay.y1).toBeGreaterThan(floor.outer.overlay.y1);
+      expect(floor.inner.overlay.y2).toBeLessThan(floor.outer.overlay.y2);
+    }
   });
 
-  it('footprint area lands in the plausible range for this condo', () => {
-    // ~39.3 px/ft measured; the unit is ~1100-1250 sq ft including walls.
-    const sqFt = polygonArea(traced.outer.polygon) / (39.3 * 39.3);
-    expect(sqFt).toBeGreaterThan(1000);
-    expect(sqFt).toBeLessThan(1350);
+  it('keeps the largest floor as the top-level boundary for single-boundary callers', () => {
+    const bottom = traced.floors[1];
+    expect(traced.outer.polygon).toEqual(bottom.outer.polygon);
   });
 });
 
 describe('room detection on ExampleFloorplan.png', () => {
   const cases = [
-    { name: 'PRIMARY BEDROOM', click: [344, 479], dims: [12.42, 16.33], rect: [97, 119, 583, 758], minIou: 0.9 },
-    { name: 'BEDROOM (with closet band)', click: [872, 359], dims: [13.42, 12.92], rect: [598, 119, 1123, 624], minIou: 0.9 },
-    { name: 'LIVING/DINING', click: [1462, 490], dims: [16.58, 25.83], rect: [1136, 119, 1803, 1133], minIou: 0.85 },
-    { name: 'KITCHEN (thin counter lines)', click: [1229, 1000], dims: [10.75, 7.92], rect: [1000, 820, 1428, 1133], minIou: 0.75 },
+    { name: 'BEDROOM (top-left, floor 2)', click: [205, 105], dims: [7.75, 10.33], rect: [149, 25, 269, 188] },
+    { name: 'PRIMARY BEDROOM (floor 2)', click: [512, 128], dims: [12.58, 13.25], rect: [417, 25, 611, 231] },
+    { name: 'BEDROOM (bottom-right, floor 2)', click: [512, 322], dims: [12.58, 10.83], rect: [417, 233, 611, 406] },
+    { name: 'UTILITY (floor 1)', click: [513, 585], dims: [10.0, 9.25], rect: [456, 500, 611, 643] },
+    { name: 'GARAGE (floor 1)', click: [778, 672], dims: [20.58, 9.5], rect: [620, 596, 943, 743] },
+    { name: 'FAMILY ROOM (floor 1)', click: [495, 753], dims: [14.83, 14.08], rect: [380, 650, 611, 868], minIou: 0.85 },
   ];
 
+  // Rooms span both floors: before per-floor footprints, clicks on the floor
+  // that was not the largest footprint returned null or leaked.
   for (const c of cases) {
     it(`finds ${c.name}`, () => {
       const room = detectRoomFromClickCore(image, { x: c.click[0], y: c.click[1] }, {
@@ -80,68 +100,23 @@ describe('room detection on ExampleFloorplan.png', () => {
       });
       expect(room).toBeTruthy();
       const iou = bboxIou(bboxOf(room.overlay), c.rect);
-      expect(iou).toBeGreaterThan(c.minIou);
+      expect(iou).toBeGreaterThan(c.minIou ?? 0.9);
       expect(room.confidence).toBeGreaterThan(0.5);
       expect(room.polygon.length).toBe(4);
     });
   }
 
-  it('flags the open-plan ENTRY label with reduced confidence', () => {
-    const room = detectRoomFromClickCore(image, { x: 938, y: 748 }, {
-      labelDims: { width: 13.42, height: 10.58 },
+  it('flags the open-plan KITCHEN label with reduced confidence', () => {
+    const room = detectRoomFromClickCore(image, { x: 250, y: 573 }, {
+      labelDims: { width: 10.08, height: 10.33 },
     });
     expect(room).toBeTruthy();
-    // No physical wall bounds this label on all sides; the result must be
-    // bounded (not the whole floor) and marked less certain.
+    // No physical wall separates the kitchen from the dining area; the result
+    // must stay bounded within floor 1 and be marked less certain.
     const [x1, y1, x2, y2] = bboxOf(room.overlay);
-    expect((x2 - x1) * (y2 - y1)).toBeLessThan(0.35 * 1883 * 1059);
-    expect(room.confidence).toBeLessThan(0.75);
-  });
-});
-
-// TwoFloorExample.png: two disconnected floor outlines on one page, drawn in
-// a style that stresses the seal — window spans (79-101px) wider than the
-// inter-floor gap (80px), walls ~17px from the image border, and genuinely
-// open entry/stairwell breaks in the exterior walls.
-describe('multi-floor tracing on TwoFloorExample.png', () => {
-  let twoFloor;
-  let traced;
-
-  beforeAll(() => {
-    twoFloor = loadPng(path.join(ROOT, 'TwoFloorExample.png'));
-    traced = traceFloorplanBoundaryCore(twoFloor, {});
-  });
-
-  it('finds both floors, in page reading order', () => {
-    expect(traced?.floors?.length).toBe(2);
-    const [left, right] = traced.floors;
-    expect(bboxIou(bboxOf(left.outer.overlay), [29, 17, 403, 623])).toBeGreaterThan(0.9);
-    expect(bboxIou(bboxOf(right.outer.overlay), [483, 17, 857, 640])).toBeGreaterThan(0.9);
-    expect(left.outer.overlay.x2).toBeLessThan(right.outer.overlay.x1);
-  });
-
-  it('produces an inner envelope for each floor', () => {
-    for (const floor of traced.floors) {
-      expect(floor.inner?.polygon?.length).toBeGreaterThanOrEqual(4);
-      expect(polygonArea(floor.inner.polygon)).toBeLessThan(polygonArea(floor.outer.polygon));
-    }
-  });
-
-  it('detects rooms on both floors', () => {
-    // FAMILY ROOM sits on the left floor — before per-floor footprints this
-    // returned null because the clamp only covered the largest floor.
-    const family = detectRoomFromClickCore(twoFloor, { x: 123, y: 143 }, {
-      labelDims: { width: 11.75, height: 14.42 },
-    });
-    expect(family).toBeTruthy();
-    expect(family.overlay.x2).toBeLessThan(420);
-    expect(family.confidence).toBeGreaterThan(0.5);
-
-    const primary = detectRoomFromClickCore(twoFloor, { x: 577, y: 131 }, {
-      labelDims: { width: 10.25, height: 13.17 },
-    });
-    expect(primary).toBeTruthy();
-    expect(primary.overlay.x1).toBeGreaterThan(450);
-    expect(primary.overlay.x2).toBeLessThan(880);
+    expect(y1).toBeGreaterThanOrEqual(491);
+    expect(x2).toBeLessThanOrEqual(620);
+    expect((x2 - x1) * (y2 - y1)).toBeLessThan(0.4 * 921 * 387);
+    expect(room.confidence).toBeLessThan(0.8);
   });
 });

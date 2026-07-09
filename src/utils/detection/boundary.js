@@ -49,20 +49,28 @@ const measureFootprint = (wallMask, width, height, radius) => {
   const outside = floodOutside(closed, width, height);
   const footprint = new Uint8Array(closed.length);
   for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
-  const labeled = largestComponent(footprint, width, height);
-  if (!labeled) return null;
-  const { labels, component } = labeled;
-  return {
-    mask: componentMask(labels, component, width),
-    labels,
-    closed,
-    componentId: component.id,
-    area: component.size,
-    bbox: component.bbox,
-    bboxArea: bboxAreaOf(component.bbox),
-    radius,
-  };
+  const { labels, components } = labelComponents(footprint, width, height);
+  if (!components.length) return null;
+  let largest = components[0];
+  let totalEnclosed = 0;
+  for (const comp of components) {
+    totalEnclosed += comp.size;
+    if (comp.size > largest.size) largest = comp;
+  }
+  return { labels, closed, components, largest, totalEnclosed, radius };
 };
+
+// One footprint component -> the shape buildFloor consumes.
+const footprintEntry = (measured, component, width) => ({
+  mask: componentMask(measured.labels, component, width),
+  labels: measured.labels,
+  closed: measured.closed,
+  componentId: component.id,
+  area: component.size,
+  bbox: component.bbox,
+  bboxArea: bboxAreaOf(component.bbox),
+  radius: measured.radius,
+});
 
 // Sealed = the footprint is a filled building region, not a leaked sliver:
 // it must cover most of the wall network's bounding box and be reasonably
@@ -281,80 +289,103 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
   };
 };
 
-// Single-floor detection against one wall mask: seal-radius search with a
-// bridge guard, falling back to the outer contour of the wall network (walls
-// plus everything they enclose) when the interior never seals — window gaps
-// stripped from the wall mask make that common on real plans.
-const detectOneFloor = (wallMask, width, height, wallThickness, options) => {
-  const wallExtent = largestComponent(wallMask, width, height);
-  if (!wallExtent) return null;
-  const wb = wallExtent.component.bbox;
-  const wallBboxArea = bboxAreaOf(wb);
-  if (wallBboxArea < 0.01 * width * height) return null;
+// Partition the wall mask into disconnected wall networks (one per floor
+// outline drawn on the page): dilate to associate nearby strokes, label, and
+// project the original wall pixels onto the groups. Networks much smaller
+// than the largest are legends or stray fragments, not floors.
+const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetworks) => {
+  const groupR = Math.max(6, wallThickness * 2);
+  const grouped = dilateRect(wallMask, width, height, groupR);
+  const { labels } = labelComponents(grouped, width, height);
+
+  const stats = new Map();
+  for (let i = 0; i < wallMask.length; i += 1) {
+    if (!wallMask[i]) continue;
+    const id = labels[i];
+    const x = i % width;
+    const y = (i / width) | 0;
+    let s = stats.get(id);
+    if (!s) {
+      s = { id, size: 0, bbox: { minX: x, minY: y, maxX: x, maxY: y } };
+      stats.set(id, s);
+    }
+    s.size += 1;
+    if (x < s.bbox.minX) s.bbox.minX = x;
+    if (x > s.bbox.maxX) s.bbox.maxX = x;
+    if (y < s.bbox.minY) s.bbox.minY = y;
+    if (y > s.bbox.maxY) s.bbox.maxY = y;
+  }
+
+  const nets = [...stats.values()].sort((a, b) => b.size - a.size);
+  if (!nets.length) return [];
+  const minSize = Math.max(200, 0.15 * nets[0].size);
+  return nets
+    .filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= 0.01 * width * height)
+    .slice(0, maxNetworks)
+    .map((n) => {
+      const mask = new Uint8Array(wallMask.length);
+      for (let y = n.bbox.minY; y <= n.bbox.maxY; y += 1) {
+        const row = y * width;
+        for (let x = n.bbox.minX; x <= n.bbox.maxX; x += 1) {
+          if (wallMask[row + x] && labels[row + x] === n.id) mask[row + x] = 1;
+        }
+      }
+      return { mask, bbox: n.bbox, wallSize: n.size };
+    });
+};
+
+// Seal one isolated wall network. Window spans (including ticks/dashes inside
+// them) are bridged colinearly across the whole network, then an escalating
+// closing ladder handles what bridging cannot (window gaps wrapping corners).
+// Leaks shrink the enclosed area, so the truly sealed footprint is the ladder
+// entry with (near-)maximal enclosed area at the smallest radius — a greedy
+// "first radius that looks sealed" accepts partial footprints when one wing
+// of the floor seals before the rest.
+const detectFloorNet = (net, width, height, wallThickness, options) => {
+  const wallBboxArea = bboxAreaOf(net.bbox);
+  const compW = net.bbox.maxX - net.bbox.minX + 1;
+  const compH = net.bbox.maxY - net.bbox.minY + 1;
+  const maxGap = Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3));
+  const minFlank = Math.max(8, wallThickness * 2);
+  const bridged = bridgeRuns(net.mask, width, height, maxGap, minFlank);
 
   const longest = Math.max(width, height);
-  const maxRadius = options.maxCloseRadius ?? Math.max(24, Math.round(longest * 0.03));
+  const maxRadius = options.maxCloseRadius ?? Math.max(32, Math.round(longest * 0.045));
   const radii = [];
   for (let r = 2; r < maxRadius; r = Math.round(r * 1.45) + 1) radii.push(r);
   radii.push(maxRadius);
 
-  const searchSeal = (mask, tried, retry) => {
-    let sealed = null;
-    let lastGood = null;
-    for (const r of radii) {
-      const fp = measureFootprint(mask, width, height, r);
-      tried.push({ radius: r, area: fp?.area ?? 0, retry });
-      if (!fp) continue;
-      // A footprint spanning far beyond the wall network means the closing
-      // has bridged into a neighbouring floor outline: stop before accepting.
-      if (fp.bboxArea > 1.35 * wallBboxArea) break;
-      lastGood = fp;
-      if (isSealed(fp, wallBboxArea)) {
-        sealed = fp;
-        break;
-      }
-    }
-    return { sealed, lastGood };
-  };
-
   const tried = [];
-  let { sealed: footprint, lastGood } = searchSeal(wallMask, tried, false);
-
-  let usedFallback = false;
-  if (!footprint) {
-    const fallback = lastGood ?? measureFootprint(wallMask, width, height, radii[0]);
-    if (!fallback) return null;
-
-    // Never sealed — usually window spans in the exterior walls wider than
-    // any radius that is safe while neighbouring floors share the mask. The
-    // fallback blob isolates this network's walls, so retry on them alone
-    // with colinear gaps bridged; without neighbours, sealing is safe.
-    const zone = dilateRect(fallback.mask, width, height, 4);
-    const isolated = new Uint8Array(wallMask.length);
-    for (let i = 0; i < isolated.length; i += 1) {
-      isolated[i] = wallMask[i] && zone[i] ? 1 : 0;
-    }
-    const maxGap = Math.max(24, wallThickness * 10);
-    const minFlank = Math.max(8, wallThickness * 2);
-    const bridged = bridgeRuns(isolated, width, height, maxGap, minFlank);
-    footprint = searchSeal(bridged, tried, true).sealed;
-
-    if (!footprint) {
-      // Still leaking: use the wall network's own outer contour (walls plus
-      // everything they enclose, ignoring unreachable-gap leaks).
-      usedFallback = true;
-      footprint = fallback;
-    }
+  const measured = [];
+  for (const r of radii) {
+    const fp = measureFootprint(bridged, width, height, r);
+    tried.push({ radius: r, area: fp?.totalEnclosed ?? 0 });
+    if (!fp) continue;
+    // Sanity: a footprint spanning far beyond the network means the closing
+    // annexed something that is not this floor.
+    if (bboxAreaOf(fp.largest.bbox) > 1.35 * wallBboxArea) break;
+    measured.push(fp);
   }
+  if (!measured.length) return null;
 
-  return {
-    footprint,
-    usedFallback,
-    tried,
-    wallBbox: wb,
-    wallBboxArea,
-    wallSize: wallExtent.component.size,
-  };
+  const maxEnclosed = measured.reduce((best, fp) => Math.max(best, fp.totalEnclosed), 0);
+  const pick = measured.find((fp) => fp.totalEnclosed >= 0.98 * maxEnclosed);
+
+  // A never-sealing network (genuinely open side) still yields its walls plus
+  // whatever they enclose; flag it so callers know the trace is best-effort.
+  const largestFp = footprintEntry(pick, pick.largest, width);
+  const usedFallback = !isSealed(largestFp, wallBboxArea);
+
+  // Floors drawn touching (joined by a stray line) share one network but seal
+  // into separate footprint components — keep every component of comparable
+  // size, not just the largest.
+  const minCompSize = Math.max(0.25 * pick.largest.size, 0.01 * width * height);
+  const floorComps = pick.components
+    .filter((c) => c.size >= minCompSize)
+    .sort((a, b) => b.size - a.size)
+    .map((c) => (c === pick.largest ? largestFp : footprintEntry(pick, c, width)));
+
+  return { floorComps, usedFallback, tried, wallBbox: net.bbox, wallBboxArea };
 };
 
 export const traceBoundary = (analysis, options = {}) => {
@@ -362,44 +393,35 @@ export const traceBoundary = (analysis, options = {}) => {
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
   const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
 
-  // Multi-floor pages: detect one floor at a time, erase its wall network,
-  // and re-run on the remainder. Each pass reuses the full single-floor
-  // algorithm, so floors that seal at different radii (or never seal) still
-  // trace independently — a single global closing radius cannot both bridge
-  // window gaps and keep nearby floors separate.
+  // Multi-floor pages: split the wall mask into disconnected networks first,
+  // then run the full seal search on each network in isolation. Bridging and
+  // large closing radii are safe per network — there is no neighbouring floor
+  // left in the mask to merge into.
+  const nets = partitionWallNetworks(analysis.wallMask, width, height, wallThickness, maxFloors);
   const floors = [];
   const searches = [];
-  let first = null;
-  let workMask = analysis.wallMask;
 
-  for (let i = 0; i < maxFloors; i += 1) {
-    const detected = detectOneFloor(workMask, width, height, wallThickness, options);
-    if (!detected) break;
-    // Much smaller wall networks than the first floor's are legends or
-    // leftover fragments, not floors.
-    if (first && detected.wallSize < 0.15 * first.wallSize) break;
-    if (!first) first = detected;
+  for (const net of nets) {
+    if (floors.length >= maxFloors) break;
+    // A network sitting inside an already-traced footprint is interior
+    // detail (stair block, island), not another floor.
+    const cx = (net.bbox.minX + net.bbox.maxX) >> 1;
+    const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
+    if (floors.some((f) => f.footprintMask[cy * width + cx])) continue;
+
+    const detected = detectFloorNet(net, width, height, wallThickness, options);
+    if (!detected) continue;
     searches.push(detected.tried);
 
-    const floor = buildFloor(detected.footprint, { ...analysis, wallMask: workMask }, epsilon, options);
-    if (floor) {
-      floor.sealRadius = detected.footprint.radius;
-      floor.usedFallback = detected.usedFallback;
-      floors.push(floor);
+    for (const footprint of detected.floorComps) {
+      if (floors.length >= maxFloors) break;
+      const floor = buildFloor(footprint, { ...analysis, wallMask: net.mask }, epsilon, options);
+      if (floor) {
+        floor.sealRadius = footprint.radius;
+        floor.usedFallback = detected.usedFallback;
+        floors.push(floor);
+      }
     }
-    if (floors.length >= maxFloors) break;
-
-    const margin = Math.max(4, detected.footprint.radius);
-    const eraseZone = dilateRect(detected.footprint.mask, width, height, margin);
-    const next = new Uint8Array(workMask.length);
-    let remaining = 0;
-    for (let p = 0; p < workMask.length; p += 1) {
-      const keep = workMask[p] && !eraseZone[p] ? 1 : 0;
-      next[p] = keep;
-      remaining += keep;
-    }
-    if (remaining < 0.15 * first.wallSize) break;
-    workMask = next;
   }
   if (!floors.length) return null;
 
@@ -434,7 +456,12 @@ export const traceBoundary = (analysis, options = {}) => {
     exteriorThickness: primary.exteriorThickness,
     usedFallback: primary.usedFallback,
     excluded: kept.reduce((sum, f) => sum + f.excluded, 0),
-    debug: { tried: searches[0], sealSearches: searches, wallBbox: first.wallBbox, wallBboxArea: first.wallBboxArea },
+    debug: {
+      tried: searches[0],
+      sealSearches: searches,
+      wallBbox: nets[0].bbox,
+      wallBboxArea: bboxAreaOf(nets[0].bbox),
+    },
   };
 };
 
