@@ -98,3 +98,50 @@ describe('room detection on ExampleFloorplan.png', () => {
     expect(room.confidence).toBeLessThan(0.75);
   });
 });
+
+// TwoFloorExample.png: two disconnected floor outlines on one page, drawn in
+// a style that stresses the seal — window spans (79-101px) wider than the
+// inter-floor gap (80px), walls ~17px from the image border, and genuinely
+// open entry/stairwell breaks in the exterior walls.
+describe('multi-floor tracing on TwoFloorExample.png', () => {
+  let twoFloor;
+  let traced;
+
+  beforeAll(() => {
+    twoFloor = loadPng(path.join(ROOT, 'TwoFloorExample.png'));
+    traced = traceFloorplanBoundaryCore(twoFloor, {});
+  });
+
+  it('finds both floors, in page reading order', () => {
+    expect(traced?.floors?.length).toBe(2);
+    const [left, right] = traced.floors;
+    expect(bboxIou(bboxOf(left.outer.overlay), [29, 17, 403, 623])).toBeGreaterThan(0.9);
+    expect(bboxIou(bboxOf(right.outer.overlay), [483, 17, 857, 640])).toBeGreaterThan(0.9);
+    expect(left.outer.overlay.x2).toBeLessThan(right.outer.overlay.x1);
+  });
+
+  it('produces an inner envelope for each floor', () => {
+    for (const floor of traced.floors) {
+      expect(floor.inner?.polygon?.length).toBeGreaterThanOrEqual(4);
+      expect(polygonArea(floor.inner.polygon)).toBeLessThan(polygonArea(floor.outer.polygon));
+    }
+  });
+
+  it('detects rooms on both floors', () => {
+    // FAMILY ROOM sits on the left floor — before per-floor footprints this
+    // returned null because the clamp only covered the largest floor.
+    const family = detectRoomFromClickCore(twoFloor, { x: 123, y: 143 }, {
+      labelDims: { width: 11.75, height: 14.42 },
+    });
+    expect(family).toBeTruthy();
+    expect(family.overlay.x2).toBeLessThan(420);
+    expect(family.confidence).toBeGreaterThan(0.5);
+
+    const primary = detectRoomFromClickCore(twoFloor, { x: 577, y: 131 }, {
+      labelDims: { width: 10.25, height: 13.17 },
+    });
+    expect(primary).toBeTruthy();
+    expect(primary.overlay.x1).toBeGreaterThan(450);
+    expect(primary.overlay.x2).toBeLessThan(880);
+  });
+});

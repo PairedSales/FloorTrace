@@ -165,11 +165,80 @@ export const dilateRect = (mask, width, height, r) =>
 export const erodeRect = (mask, width, height, r) =>
   erodeCols(erodeRows(mask, width, height, r), width, height, r);
 
-export const closeRect = (mask, width, height, r) =>
-  erodeRect(dilateRect(mask, width, height, r), width, height, r);
+// Closing runs on a mask padded by r so content near the image border is not
+// eroded away — without padding, a wall hugging the edge vanishes once the
+// closing radius exceeds its distance to the border, guaranteeing seal leaks
+// on tightly-cropped floorplans.
+export const closeRect = (mask, width, height, r) => {
+  if (r <= 0) return mask.slice();
+  const pw = width + 2 * r;
+  const ph = height + 2 * r;
+  const padded = new Uint8Array(pw * ph);
+  for (let y = 0; y < height; y += 1) {
+    padded.set(mask.subarray(y * width, y * width + width), (y + r) * pw + r);
+  }
+  const closed = erodeRect(dilateRect(padded, pw, ph, r), pw, ph, r);
+  const out = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    out.set(closed.subarray((y + r) * pw + r, (y + r) * pw + r + width), y * width);
+  }
+  return out;
+};
 
 export const openRect = (mask, width, height, r) =>
   dilateRect(erodeRect(mask, width, height, r), width, height, r);
+
+// Fill gaps of <= maxGap between colinear ink runs along rows and columns —
+// window spans interrupting exterior walls — without the corner rounding or
+// notch filling a large square closing would cause. A gap is only bridged
+// when BOTH flanking runs are at least minFlank long: window gaps sit between
+// long chunks of the same wall, whereas the mouth of a genuine notch in the
+// outline is flanked by a perpendicular wall's thin cross-section.
+export const bridgeRuns = (mask, width, height, maxGap, minFlank = 0) => {
+  const out = mask.slice();
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    let lastEnd = -1;
+    let lastLen = 0;
+    let x = 0;
+    while (x < width) {
+      if (!mask[row + x]) {
+        x += 1;
+        continue;
+      }
+      let end = x;
+      while (end < width && mask[row + end]) end += 1;
+      const len = end - x;
+      if (lastEnd >= 0 && x - lastEnd <= maxGap && lastLen >= minFlank && len >= minFlank) {
+        for (let k = lastEnd; k < x; k += 1) out[row + k] = 1;
+      }
+      lastEnd = end;
+      lastLen = len;
+      x = end;
+    }
+  }
+  for (let x = 0; x < width; x += 1) {
+    let lastEnd = -1;
+    let lastLen = 0;
+    let y = 0;
+    while (y < height) {
+      if (!mask[y * width + x]) {
+        y += 1;
+        continue;
+      }
+      let end = y;
+      while (end < height && mask[end * width + x]) end += 1;
+      const len = end - y;
+      if (lastEnd >= 0 && y - lastEnd <= maxGap && lastLen >= minFlank && len >= minFlank) {
+        for (let k = lastEnd; k < y; k += 1) out[k * width + x] = 1;
+      }
+      lastEnd = end;
+      lastLen = len;
+      y = end;
+    }
+  }
+  return out;
+};
 
 // Run-length opening: keep only runs of >= minLen along a scan direction.
 // Equivalent to morphological opening with a 1xL line kernel, but exact for
