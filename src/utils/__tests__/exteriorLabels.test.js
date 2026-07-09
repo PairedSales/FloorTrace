@@ -3,6 +3,10 @@ import { matchExteriorFeature } from '../dimensions/exteriorLabels.js';
 
 describe('matchExteriorFeature', () => {
   it.each([
+    ['GARAGE', 'garage'],
+    ["GARAGE 20'7\" x 9'6\"", 'garage'],
+    ['2 Car Garage', 'garage'],
+    ['ATTACHED GARAGE', 'garage'],
     ['PORCH', 'porch'],
     ['Covered Porch', 'porch'],
     ["PORCH 20'7\" x 5'1\"", 'porch'],
@@ -24,8 +28,8 @@ describe('matchExteriorFeature', () => {
     'LIVING ROOM',
     'BEDROOM 2 10-0 x 10-4',
     'KITCHEN',
-    'GARAGE',          // enclosed — part of the main structure
-    'PORCHESTER ROAD', // no bare keyword inside longer words
+    'GARBAGE',         // no bare keyword inside longer words
+    'PORCHESTER ROAD',
     'deckard',
     '',
   ])('does not match %s', (text) => {

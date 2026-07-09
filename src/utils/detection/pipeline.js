@@ -35,12 +35,13 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     maxDimension: options.preprocess?.maxDimension ?? 1400,
     ...options.analyze,
   });
-  // Exterior-feature label bboxes (original image px) -> working scale.
+  // Non-GLA label bboxes (original image px) -> working scale.
   const excludeRegions = (options.excludeRegions ?? []).map((r) => ({
     x: r.x * analysis.scaleX,
     y: r.y * analysis.scaleY,
     width: r.width * analysis.scaleX,
     height: r.height * analysis.scaleY,
+    keyword: r.keyword,
   }));
   const boundary = traceBoundary(analysis, { ...options.boundary, excludeRegions });
   if (!boundary) return null;
@@ -64,6 +65,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     floors,
     // Top-level (not debug): the worker strips debug before posting back.
     excludedRegions: boundary.excluded,
+    excludedGarages: boundary.excludedGarages,
     debug: {
       floorCount: floors.length,
       workingSize: { width: analysis.width, height: analysis.height },
@@ -94,8 +96,9 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // The boundary pass supplies the footprint clamp so room growth can never
   // escape the building. Detection still works (unclamped) if it fails.
   // On multi-floor pages, clamp to the floor under the click so rooms outside
-  // the largest footprint aren't rejected.
-  const boundary = traceBoundary(analysis, options.boundary);
+  // the largest footprint aren't rejected. Garage carving is off here:
+  // clicking a garage label must still detect the garage room.
+  const boundary = traceBoundary(analysis, { ...options.boundary, autoGarage: false });
   let footprintInfo = null;
   if (boundary) {
     const px = Math.min(analysis.width - 1, Math.max(0, Math.round(workPoint.x)));

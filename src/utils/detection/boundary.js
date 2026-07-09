@@ -19,6 +19,7 @@ import {
   polygonArea,
   polygonBounds,
 } from './polygon.js';
+import { findGarageCavities } from './garage.js';
 
 const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);
@@ -130,23 +131,22 @@ const sampleExteriorThickness = (boundary, wallMask, footprint, width, height, s
   return samples[(samples.length / 2) | 0];
 };
 
-// Carve OCR-labelled exterior features (porch/patio/deck/balcony) out of the
-// sealed footprint. Each label bbox seeds the enclosed open cavity it sits in
-// (labelled on footprint minus the closed wall mask, so doorways bridged by
-// the seal keep house rooms separate); the cavity is cleared and a rect
-// opening then drops its orphaned railing/outline ring — the shared house
-// wall survives as part of the solid footprint body and becomes the new
-// boundary, i.e. the trace lands on the exterior wall face.
-const carveExcludedRegions = (footprint, width, height, regions, exteriorThickness) => {
+// Enclosed open cavities of the footprint: footprint minus the closed wall
+// mask, so doorways bridged by the seal keep house rooms separate.
+const openCavities = (footprint, width, height) => {
   const open = new Uint8Array(footprint.mask.length);
   for (let i = 0; i < open.length; i += 1) {
     open[i] = footprint.mask[i] && !footprint.closed[i] ? 1 : 0;
   }
-  const { labels, components } = labelComponents(open, width, height);
-  if (!components.length) return null;
+  return labelComponents(open, width, height);
+};
 
-  const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
+// OCR-labelled non-GLA features (garage/porch/patio/deck…): each label bbox
+// votes for the enclosed cavity it sits in, and that cavity becomes a carve
+// target. Garage-keyword labels are tracked separately for reporting.
+const selectLabelledCavities = (regions, labels, components, footprint, minCavity, width, height) => {
   const targets = new Set();
+  const garages = new Set();
   for (const region of regions) {
     // Vote over a small sample grid: label bboxes are approximate and their
     // centre can land on a stroke or a stray glyph pixel.
@@ -174,7 +174,16 @@ const carveExcludedRegions = (footprint, width, height, regions, exteriorThickne
     // interior itself (a misplaced label must not gut the footprint).
     if (size < minCavity || size > 0.45 * footprint.area) continue;
     targets.add(best);
+    if (region.keyword && /garage/i.test(region.keyword)) garages.add(best);
   }
+  return { targets, garages };
+};
+
+// Carve the target cavities out of the sealed footprint: each cavity is
+// cleared and a rect opening then drops its orphaned railing/outline ring —
+// the shared house wall survives as part of the solid footprint body and
+// becomes the new boundary, i.e. the trace lands on the exterior wall face.
+const carveCavities = (footprint, width, height, labels, components, targets, exteriorThickness) => {
   if (!targets.size) return null;
 
   const mask = footprint.mask.slice();
@@ -207,16 +216,13 @@ const carveExcludedRegions = (footprint, width, height, regions, exteriorThickne
     }
   }
   return {
-    excluded: targets.size,
-    footprint: {
-      ...footprint,
-      mask: newMask,
-      labels: newLabels,
-      componentId: component.id,
-      area: component.size,
-      bbox: component.bbox,
-      bboxArea: (maxX - minX + 1) * (maxY - minY + 1),
-    },
+    ...footprint,
+    mask: newMask,
+    labels: newLabels,
+    componentId: component.id,
+    area: component.size,
+    bbox: component.bbox,
+    bboxArea: (maxX - minX + 1) * (maxY - minY + 1),
   };
 };
 
@@ -242,26 +248,59 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
   );
 
-  // OCR-labelled exterior features (porch/patio/deck…) are removed after the
-  // seal so the trace covers the main structure only. Labels sitting in a
-  // different floor's cavity get no votes here, so passing all regions to
-  // every floor is safe.
+  // Non-GLA regions are removed after the seal so the trace covers the living
+  // area only: cavities voted in by OCR labels (garage/porch/patio/deck…) plus
+  // cavities with strong geometric garage evidence, which fires even when OCR
+  // read nothing. Labels sitting in a different floor's cavity get no votes
+  // here, so passing all regions to every floor is safe.
   let excluded = 0;
-  if (options.excludeRegions?.length) {
-    const carved = carveExcludedRegions(
-      footprint, width, height, options.excludeRegions, exteriorThickness,
-    );
-    if (carved) {
-      const carvedOuter = polygonize(
-        carved.footprint.labels, width, height, carved.footprint.componentId, epsilon, options.fit,
-      );
-      if (carvedOuter) {
-        footprint = carved.footprint;
-        outerResult = carvedOuter;
-        excluded = carved.excluded;
-        exteriorThickness = sampleExteriorThickness(
-          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+  let excludedGarages = 0;
+  if (options.excludeRegions?.length || options.autoGarage !== false) {
+    const cavities = openCavities(footprint, width, height);
+    if (cavities.components.length) {
+      const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
+      let targets = new Set();
+      const garageIds = new Set();
+      if (options.excludeRegions?.length) {
+        const picked = selectLabelledCavities(
+          options.excludeRegions, cavities.labels, cavities.components, footprint,
+          minCavity, width, height,
         );
+        targets = picked.targets;
+        for (const id of picked.garages) garageIds.add(id);
+      }
+      if (options.autoGarage !== false) {
+        const garages = findGarageCavities({
+          labels: cavities.labels,
+          components: cavities.components,
+          footprint,
+          wallMask,
+          width,
+          height,
+          exteriorThickness,
+          minCavity,
+        });
+        for (const id of garages) {
+          targets.add(id);
+          garageIds.add(id);
+        }
+      }
+      const carved = carveCavities(
+        footprint, width, height, cavities.labels, cavities.components, targets, exteriorThickness,
+      );
+      if (carved) {
+        const carvedOuter = polygonize(
+          carved.labels, width, height, carved.componentId, epsilon, options.fit,
+        );
+        if (carvedOuter) {
+          footprint = carved;
+          outerResult = carvedOuter;
+          excluded = targets.size;
+          excludedGarages = garageIds.size;
+          exteriorThickness = sampleExteriorThickness(
+            outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+          );
+        }
       }
     }
   }
@@ -286,6 +325,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     footprintBbox: footprint.bbox,
     exteriorThickness,
     excluded,
+    excludedGarages,
   };
 };
 
@@ -456,6 +496,7 @@ export const traceBoundary = (analysis, options = {}) => {
     exteriorThickness: primary.exteriorThickness,
     usedFallback: primary.usedFallback,
     excluded: kept.reduce((sum, f) => sum + f.excluded, 0),
+    excludedGarages: kept.reduce((sum, f) => sum + f.excludedGarages, 0),
     debug: {
       tried: searches[0],
       sealSearches: searches,

@@ -231,6 +231,72 @@ describe('traceFloorplanBoundaryCore excludeRegions (porch carving)', () => {
   });
 });
 
+describe('traceFloorplanBoundaryCore geometric garage exclusion', () => {
+  // House (50..450 x 50..350, 10px walls) with a garage wing attached on the
+  // right (450..640 x 150..330): real walls on top/bottom, shared house wall
+  // on the left, and the garage door drawn as a 2px stroke at x=640.
+  const houseWithGarage = (doorThickness = 2) => {
+    const img = createImage(700, 460);
+    wall(img, 50, 50, 450, 50, 10);
+    wall(img, 50, 350, 450, 350, 10);
+    wall(img, 50, 50, 50, 350, 10);
+    wall(img, 450, 50, 450, 350, 10);
+    wall(img, 450, 150, 640, 150, 10);
+    wall(img, 450, 330, 640, 330, 10);
+    wall(img, 640, 150, 640, 330, doorThickness);
+    return img;
+  };
+
+  it('carves the garage with no OCR label at all', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithGarage());
+    expect(traced?.outer).toBeTruthy();
+    expect(traced.excludedRegions).toBe(1);
+    expect(traced.excludedGarages).toBe(1);
+    const b = polygonBounds(traced.outer.polygon);
+    expect(b.maxX).toBeLessThanOrEqual(470); // stops at the shared house wall
+    expect(b.maxX).toBeGreaterThanOrEqual(448);
+    expect(b.minX).toBeLessThanOrEqual(48);  // rest of the house untouched
+  });
+
+  it('keeps the garage when autoGarage is disabled', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithGarage(), {
+      boundary: { autoGarage: false },
+    });
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxX).toBeGreaterThanOrEqual(635);
+  });
+
+  it('does not treat a fully-walled wing as a garage', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithGarage(10));
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxX).toBeGreaterThanOrEqual(635);
+  });
+
+  it('carves a fully-walled wing from a garage OCR label instead', () => {
+    const traced = traceFloorplanBoundaryCore(houseWithGarage(10), {
+      excludeRegions: [{ x: 510, y: 230, width: 70, height: 18, keyword: 'garage' }],
+    });
+    expect(traced.excludedRegions).toBe(1);
+    expect(traced.excludedGarages).toBe(1);
+    expect(polygonBounds(traced.outer.polygon).maxX).toBeLessThanOrEqual(470);
+  });
+
+  it('does not fire on a porch ringed by thin railings', () => {
+    // Same wing but every non-shared side is a thin railing stroke.
+    const img = createImage(700, 460);
+    wall(img, 50, 50, 450, 50, 10);
+    wall(img, 50, 350, 450, 350, 10);
+    wall(img, 50, 50, 50, 350, 10);
+    wall(img, 450, 50, 450, 350, 10);
+    wall(img, 450, 150, 640, 150, 2);
+    wall(img, 450, 330, 640, 330, 2);
+    wall(img, 640, 150, 640, 330, 2);
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonBounds(traced.outer.polygon).maxX).toBeGreaterThanOrEqual(635);
+  });
+});
+
 describe('traceFloorplanBoundaryCore multi-floor', () => {
   // Two disconnected floor outlines on one page (1st/2nd floor sheet). The
   // left floor (370x320 outline) is larger than the right (390x260).

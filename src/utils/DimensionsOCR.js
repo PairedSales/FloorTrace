@@ -4,8 +4,8 @@
  * Public API:
  *   detectAllDimensions(imageDataUrl) -> { dimensions, exteriorLabels, detectedFormat }
  *     dimensions: [{ width, height, text, bbox, confidence, format }]
- *     exteriorLabels: [{ keyword, text, bbox }] — porch/patio/deck/balcony
- *       name labels, fed to the boundary tracer as footprint exclusions
+ *     exteriorLabels: [{ keyword, text, bbox }] — garage/porch/patio/deck/
+ *       balcony name labels, fed to the boundary tracer as footprint exclusions
  *   terminateOcrWorker()
  *
  * Parsing primitives (normalizeOcrText, parseSingleToken, parseDimensionLine,

@@ -47,21 +47,53 @@ describe('multi-floor boundary tracing on ExampleFloorplan.png', () => {
     expect(traced?.floors?.length).toBe(2);
     const [top, bottom] = traced.floors;
     expect(bboxIou(bboxOf(top.outer.overlay), [29, 15, 620, 415])).toBeGreaterThan(0.9);
-    expect(bboxIou(bboxOf(bottom.outer.overlay), [29, 491, 950, 878])).toBeGreaterThan(0.9);
+    // FLOOR 1 excludes the garage wing: the trace stops at the house's right
+    // exterior wall instead of following the garage out to x=950.
+    expect(bboxIou(bboxOf(bottom.outer.overlay), [29, 491, 620, 878])).toBeGreaterThan(0.9);
     expect(top.outer.overlay.y2).toBeLessThan(bottom.outer.overlay.y1);
+  });
+
+  it('excludes the garage geometrically, without any OCR label', () => {
+    expect(traced.excludedRegions).toBe(1);
+    expect(traced.excludedGarages).toBe(1);
+    const bottom = traced.floors[1];
+    const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
+    // Living area only (~893 sq ft); with the garage the wing pushed this
+    // above 1030 sq ft.
+    expect(bottomSqFt).toBeGreaterThan(840);
+    expect(bottomSqFt).toBeLessThan(950);
   });
 
   it('keeps the floors as separate polygons with plausible areas', () => {
     const [top, bottom] = traced.floors;
-    // FLOOR 2 is close to a plain rectangle; FLOOR 1 must include the garage
-    // wing (L-shape), so its polygon needs more corners than a rectangle.
-    expect(bottom.outer.polygon.length).toBeGreaterThanOrEqual(6);
     const topSqFt = polygonArea(top.outer.polygon) / (PPF * PPF);
     const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
     expect(topSqFt).toBeGreaterThan(850);
     expect(topSqFt).toBeLessThan(980);
+    expect(bottomSqFt).toBeGreaterThan(840);
+    expect(bottomSqFt).toBeLessThan(950);
+  });
+
+  it('keeps the garage wing when auto garage exclusion is disabled', () => {
+    const kept = traceFloorplanBoundaryCore(image, { boundary: { autoGarage: false } });
+    expect(kept.excludedRegions).toBe(0);
+    const bottom = kept.floors[1];
+    expect(bboxIou(bboxOf(bottom.outer.overlay), [29, 491, 950, 878])).toBeGreaterThan(0.9);
+    // Garage wing makes FLOOR 1 an L-shape with more corners than a rectangle.
+    expect(bottom.outer.polygon.length).toBeGreaterThanOrEqual(6);
+    const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
     expect(bottomSqFt).toBeGreaterThan(1030);
     expect(bottomSqFt).toBeLessThan(1180);
+  });
+
+  it('carves the same garage from an OCR label when geometry is off', () => {
+    const labelled = traceFloorplanBoundaryCore(image, {
+      boundary: { autoGarage: false },
+      excludeRegions: [{ x: 757, y: 658, width: 50, height: 14, keyword: 'garage' }],
+    });
+    expect(labelled.excludedRegions).toBe(1);
+    expect(labelled.excludedGarages).toBe(1);
+    expect(bboxIou(bboxOf(labelled.floors[1].outer.overlay), [29, 491, 620, 878])).toBeGreaterThan(0.9);
   });
 
   it('produces a nested inner envelope for each floor', () => {
@@ -76,8 +108,9 @@ describe('multi-floor boundary tracing on ExampleFloorplan.png', () => {
   });
 
   it('keeps the largest floor as the top-level boundary for single-boundary callers', () => {
-    const bottom = traced.floors[1];
-    expect(traced.outer.polygon).toEqual(bottom.outer.polygon);
+    // With the garage carved from FLOOR 1, FLOOR 2 (909 sq ft) edges it out.
+    const top = traced.floors[0];
+    expect(traced.outer.polygon).toEqual(top.outer.polygon);
   });
 });
 

@@ -23,6 +23,20 @@ import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
 
+// OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
+// be reported distinctly from porch/patio carves).
+const nonGlaExcludeRegions = () =>
+  useAppStore.getState().exteriorLabels.map((l) => ({ ...l.bbox, keyword: l.keyword }));
+
+const excludedAreasNote = (traced) => {
+  const garages = traced.excludedGarages ?? 0;
+  const others = (traced.excludedRegions ?? 0) - garages;
+  if (garages && others > 0) return ' Garage and porch/patio areas excluded.';
+  if (garages) return ' Garage area excluded.';
+  if (others > 0) return ' Porch/patio areas excluded.';
+  return '';
+};
+
 function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
   const image = useAppStore((s) => s.image);
@@ -297,8 +311,8 @@ function App() {
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
 
-        // Porch/patio/deck/balcony labels: kept for perimeter tracing so
-        // exterior features get carved out of the footprint.
+        // Garage/porch/patio/deck/balcony labels: kept for perimeter tracing
+        // so non-GLA features get carved out of the footprint.
         setExteriorLabels(result.exteriorLabels || []);
         
         console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
@@ -452,7 +466,7 @@ function App() {
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
-        excludeRegions: useAppStore.getState().exteriorLabels.map((l) => l.bbox),
+        excludeRegions: nonGlaExcludeRegions(),
       });
 
       if (useAppStore.getState().image !== startImage) return;
@@ -472,7 +486,7 @@ function App() {
         return;
       }
 
-      const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
+      const excludedNote = excludedAreasNote(traced);
       const message = floorCount > 1
         ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
         : `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
@@ -643,7 +657,7 @@ function App() {
     try {
       const traced = await traceFloorplanBoundary(image, {
         preprocess: { maxDimension: 1400 },
-        excludeRegions: useAppStore.getState().exteriorLabels.map((l) => l.bbox),
+        excludeRegions: nonGlaExcludeRegions(),
       });
       if (useAppStore.getState().image !== startImage) return;
       if (!traced) return;
@@ -652,7 +666,7 @@ function App() {
       const floorCount = applyTracedBoundary(traced, useInteriorWalls);
       if (!floorCount) return;
 
-      const excludedNote = traced.excludedRegions ? ' Porch/patio areas excluded.' : '';
+      const excludedNote = excludedAreasNote(traced);
       const message = floorCount > 1
         ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
         : `Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;

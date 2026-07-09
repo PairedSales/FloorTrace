@@ -44,17 +44,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /**
  * Ground truth for ExampleFloorplan.png (px in the 987x956 original): a
  * two-floor sheet — FLOOR 2 on top, FLOOR 1 with an attached garage below.
- * Wall-face positions were measured from the image. KITCHEN is open-plan
- * toward the dining area (no physical wall on that side) so it is unscored;
- * the app flags such labels with reduced confidence instead.
+ * Wall-face positions were measured from the image. The garage (non-GLA) is
+ * excluded geometrically, so FLOOR 1 traces to the house's right wall and
+ * FLOOR 2 becomes the largest floor / top-level boundary. KITCHEN is
+ * open-plan toward the dining area (no physical wall on that side) so it is
+ * unscored; the app flags such labels with reduced confidence instead.
  */
 const EXAMPLE_TRUTH = {
   pixelsPerFoot: 16.0,
   boundary: {
-    outerBbox: [29, 491, 950, 878],
+    outerBbox: [29, 15, 620, 415],
     floors: [
       [29, 15, 620, 415],
-      [29, 491, 950, 878],
+      [29, 491, 620, 878],
     ],
   },
   rooms: [
