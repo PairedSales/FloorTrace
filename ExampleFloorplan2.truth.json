@@ -1,0 +1,36 @@
+{
+  "boundary": {
+    "outerBbox": [512, 439, 1007, 777],
+    "floors": [
+      [33, 16, 426, 353],
+      [653, 16, 1037, 354],
+      [33, 439, 378, 777],
+      [512, 439, 1007, 777]
+    ],
+    "excludeRegions": [[555, 175, 64, 11]]
+  },
+  "rooms": [
+    { "name": "FAMILY ROOM (L-shaped)", "click": [205, 240], "labelBbox": [165, 211, 82, 27], "dims": [20.83, 12.08], "rect": [44, 128, 415, 345], "minIou": 0.5 },
+    { "name": "LIVING ROOM", "click": [838, 185], "labelBbox": [794, 162, 89, 27], "dims": [20.83, 17.75], "rect": [665, 28, 1035, 345] },
+    { "name": "BASEMENT-L", "click": [150, 660], "labelBbox": [115, 651, 74, 27], "dims": [8.83, 17.75], "rect": [45, 450, 201, 767] },
+    { "name": "BEDROOM (floor 3)", "click": [802, 517], "labelBbox": [768, 508, 69, 27], "dims": [11.33, 7.67], "rect": [697, 455, 908, 590], "minIou": 0.5 },
+    { "name": "BASEMENT-R (thin divider)", "click": [287, 610], "labelBbox": [252, 601, 74, 27], "dims": [9.0, 17.75] },
+    { "name": "KITCHEN (open-plan)", "click": [905, 664], "labelBbox": [880, 655, 62, 27], "dims": [8.75, 9.83] },
+    { "name": "FOYER (open-plan)", "click": [640, 640], "labelBbox": [618, 630, 56, 27], "dims": [6.17, 13.0] }
+  ],
+  "ocr": [
+    { "name": "BATH (floor 2)", "w": 8.3333, "h": 5.3333 },
+    { "name": "W.I.C. (floor 2)", "w": 8.75, "h": 5.3333 },
+    { "name": "FAMILY ROOM", "w": 20.8333, "h": 12.0833 },
+    { "name": "BALCONY", "w": 7.5833, "h": 18.0833 },
+    { "name": "LIVING ROOM", "w": 20.8333, "h": 17.75 },
+    { "name": "BASEMENT (left)", "w": 8.8333, "h": 17.75 },
+    { "name": "BASEMENT (right)", "w": 9.0, "h": 17.75 },
+    { "name": "W.I.C. (floor 3, vertical)", "w": 2.6667, "h": 4.5 },
+    { "name": "BEDROOM", "w": 11.3333, "h": 7.6667 },
+    { "name": "BATH (floor 3, vertical)", "w": 4.9167, "h": 7.6667 },
+    { "name": "FOYER", "w": 6.1667, "h": 13.0 },
+    { "name": "DINING AREA", "w": 8.25, "h": 9.8333 },
+    { "name": "KITCHEN", "w": 8.75, "h": 9.8333 }
+  ]
+}

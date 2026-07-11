@@ -512,18 +512,39 @@ export const detectDimensionsCore = async (imageData, env) => {
             ? Math.min(97, Math.max(maxOriginal, bestConf) + 8)
             : maxOriginal;
           candidates.push({ ...original, confidence: Math.round(conf), source: 'tess-verify' });
-        } else {
-          // Agreement raises confidence; disagreement trusts the re-read
-          // but caps it.
-          const conf = agrees
-            ? Math.min(97, Math.max(bestConf, maxOriginal) + 8)
-            : Math.max(bestConf + 4, maxOriginal - 4);
+        } else if (agrees) {
+          const conf = Math.min(97, Math.max(bestConf, maxOriginal) + 8);
           candidates.push(makeCandidate(bestParsed, roiBbox, conf, 'tess-verify'));
+        } else {
+          // Disagreement: keep whichever read scores better once parse
+          // penalties are applied — a garbled re-read ("59\" x90") must not
+          // displace a plausible original just because the engine was surer.
+          const reRead = makeCandidate(
+            bestParsed, roiBbox, Math.max(bestConf + 4, maxOriginal - 4), 'tess-verify'
+          );
+          const winner = original && original.confidence > reRead.confidence
+            ? { ...original, source: 'tess-verify' }
+            : reRead;
+          candidates.push(winner);
+          // Neither read is trustworthy: this label is exactly what the
+          // neural rescue pass is for.
+          if (winner.confidence < MIN_CONFIDENCE && paddleAvailable &&
+              failedTiles.length < 10) {
+            failedTiles.push({ gray: bestVariant, bbox: roi });
+          }
         }
       } else {
         candidates.push(makeCandidate(bestParsed, roiBbox, bestConf, 'tess-roi'));
       }
-    } else if (roi.priority >= 2 && roi.priority < 8) {
+    } else if (roi.priority === 8) {
+      // Verification re-read failed outright; when the original parse is weak
+      // enough to be filtered later anyway, give the neural pass a shot.
+      const original = candidates.find((c) => overlapRatio(c.bbox, roi) > 0.6);
+      if ((!original || original.confidence < MIN_CONFIDENCE) && paddleAvailable &&
+          maxDigitsSeen >= 2 && failedTiles.length < 10) {
+        failedTiles.push({ gray: bestVariant, bbox: roi });
+      }
+    } else if (roi.priority >= 2) {
       // Only regions with number-ish evidence are worth the neural pass:
       // Tesseract saw digits, or it's a glyph-dense vertical label whose
       // rotated reads garbled entirely (the classic Paddle-rescue case).

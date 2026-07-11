@@ -356,7 +356,36 @@ const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetwor
     if (y > s.bbox.maxY) s.bbox.maxY = y;
   }
 
-  const nets = [...stats.values()].sort((a, b) => b.size - a.size);
+  // Long window runs erase whole wall spans, so one floor outline can land
+  // here as several components whose bboxes overlap (distinct floors drawn on
+  // a page do not overlap). Merge those before size-filtering so a fragmented
+  // outline neither spawns phantom floors nor loses its small pieces.
+  const nets = [...stats.values()].map((n) => ({ ...n, ids: new Set([n.id]) }));
+  const margin = groupR;
+  const intersects = (a, b) =>
+    a.minX <= b.maxX + margin && b.minX <= a.maxX + margin &&
+    a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
+  for (let merged = true; merged;) {
+    merged = false;
+    for (let i = 0; i < nets.length && !merged; i += 1) {
+      for (let j = i + 1; j < nets.length; j += 1) {
+        if (!intersects(nets[i].bbox, nets[j].bbox)) continue;
+        const a = nets[i];
+        const b = nets[j];
+        a.size += b.size;
+        for (const id of b.ids) a.ids.add(id);
+        a.bbox.minX = Math.min(a.bbox.minX, b.bbox.minX);
+        a.bbox.minY = Math.min(a.bbox.minY, b.bbox.minY);
+        a.bbox.maxX = Math.max(a.bbox.maxX, b.bbox.maxX);
+        a.bbox.maxY = Math.max(a.bbox.maxY, b.bbox.maxY);
+        nets.splice(j, 1);
+        merged = true;
+        break;
+      }
+    }
+  }
+
+  nets.sort((a, b) => b.size - a.size);
   if (!nets.length) return [];
   const minSize = Math.max(200, 0.15 * nets[0].size);
   return nets
@@ -367,7 +396,7 @@ const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetwor
       for (let y = n.bbox.minY; y <= n.bbox.maxY; y += 1) {
         const row = y * width;
         for (let x = n.bbox.minX; x <= n.bbox.maxX; x += 1) {
-          if (wallMask[row + x] && labels[row + x] === n.id) mask[row + x] = 1;
+          if (wallMask[row + x] && n.ids.has(labels[row + x])) mask[row + x] = 1;
         }
       }
       return { mask, bbox: n.bbox, wallSize: n.size };

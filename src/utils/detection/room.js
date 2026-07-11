@@ -203,9 +203,18 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
   if (labelDims?.width > 0 && labelDims?.height > 0) {
     const target = labelDims.width / labelDims.height;
     const comboCost = (p) => {
-      const w = cands.right.list[p.right].edge - cands.left.list[p.left].edge;
-      const h = cands.bottom.list[p.bottom].edge - cands.top.list[p.top].edge;
+      const left = cands.left.list[p.left].edge;
+      const right = cands.right.list[p.right].edge;
+      const top = cands.top.list[p.top].edge;
+      const bottom = cands.bottom.list[p.bottom].edge;
+      const w = right - left;
+      const h = bottom - top;
       if (w < 6 || h < 6) return Infinity;
+      // The room must still contain the click — a nicely-aspected rectangle
+      // between other candidates (counters, a neighbouring room) is not it.
+      if (px < left - 2 || px > right + 2 || py < top - 2 || py > bottom + 2) {
+        return Infinity;
+      }
       const aspect = w / h;
       const err = Math.min(
         Math.abs(Math.log(aspect / target)),
@@ -263,19 +272,34 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         : c.kind === 'thin' ? c.cov * 0.5 : 0);
       const xScore = Math.min(evidence(chosen.left), evidence(chosen.right));
       const yScore = Math.min(evidence(chosen.top), evidence(chosen.bottom));
+      // A virtual side may only pull the rect inward: pushing past the
+      // wall-confirmed (or footprint-clamped) edge would leave the room, and
+      // it must not cut the clicked point out of the rect.
       if (yScore >= xScore && yScore > 0.5 && h0 > 6) {
         const expected = (h0 / labelDims.height) * labelDims.width;
         if (evidence(chosen.left) >= evidence(chosen.right)) {
-          chosen.right = { edge: Math.min(width - 1, Math.round(chosen.left.edge + expected)), cov: 0, thick: 0, kind: 'virtual' };
+          const edge = Math.round(chosen.left.edge + expected);
+          if (edge < chosen.right.edge && edge >= px - 2) {
+            chosen.right = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          }
         } else {
-          chosen.left = { edge: Math.max(0, Math.round(chosen.right.edge - expected)), cov: 0, thick: 0, kind: 'virtual' };
+          const edge = Math.round(chosen.right.edge - expected);
+          if (edge > chosen.left.edge && edge <= px + 2) {
+            chosen.left = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          }
         }
       } else if (xScore > 0.5 && w0 > 6) {
         const expected = (w0 / labelDims.width) * labelDims.height;
         if (evidence(chosen.top) >= evidence(chosen.bottom)) {
-          chosen.bottom = { edge: Math.min(height - 1, Math.round(chosen.top.edge + expected)), cov: 0, thick: 0, kind: 'virtual' };
+          const edge = Math.round(chosen.top.edge + expected);
+          if (edge < chosen.bottom.edge && edge >= py - 2) {
+            chosen.bottom = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          }
         } else {
-          chosen.top = { edge: Math.max(0, Math.round(chosen.bottom.edge - expected)), cov: 0, thick: 0, kind: 'virtual' };
+          const edge = Math.round(chosen.bottom.edge - expected);
+          if (edge > chosen.top.edge && edge <= py + 2) {
+            chosen.top = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          }
         }
       }
     }

@@ -231,11 +231,18 @@ export const parseSingleToken = (token) => {
       }
     }
 
-    // 3 digits: feet + 1-digit inches (102 -> 10'2"). bareDigits is kept so
+    // 3 digits: feet + 1-digit inches (102 -> 10'2"). When that split claims
+    // an implausibly large room and 1+2 makes valid inches, the tick sat
+    // after the first digit (810 -> 8'10", not 81'0"). bareDigits is kept so
     // pair context can reinterpret as a lost decimal point (105 -> 10.5)
     if (digits.length === 3) {
-      const feet = parseInt(digits.slice(0, 2), 10);
-      const inches = parseInt(digits.slice(2), 10);
+      let feet = parseInt(digits.slice(0, 2), 10);
+      let inches = parseInt(digits.slice(2), 10);
+      const altInches = parseInt(digits.slice(1), 10);
+      if (feet > 30 && altInches < 12) {
+        feet = parseInt(digits[0], 10);
+        inches = altInches;
+      }
       if (feet <= MAX_FALLBACK_FEET) {
         const value = feet + inches / 12;
         if (isReasonableFeet(value)) {
@@ -300,10 +307,16 @@ const parseTokenStripRight = (token) => {
   for (let i = token.length - 2; i >= 0; i--) {
     // Only cut at the end of a digit run (keep an optional closing tick/quote)
     if (!isDigit(token[i]) || (i + 1 < token.length && isDigit(token[i + 1]))) continue;
-    const sub = token.slice(0, i + 1).trim();
-    if (!sub) continue;
-    const parsed = parseSingleToken(sub);
-    if (parsed) return { ...parsed, stripped: true };
+    // A tick/quote right after the digit run belongs to the value
+    // ("17'¢…" -> "17'"), so try keeping it before cutting it away too.
+    const subs = token[i + 1] === "'" || token[i + 1] === '"'
+      ? [token.slice(0, i + 2).trim(), token.slice(0, i + 1).trim()]
+      : [token.slice(0, i + 1).trim()];
+    for (const sub of subs) {
+      if (!sub) continue;
+      const parsed = parseSingleToken(sub);
+      if (parsed) return { ...parsed, stripped: true };
+    }
   }
   return null;
 };
@@ -353,7 +366,16 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
     if (!Number.isInteger(tk.raw) || tk.raw < 13 || tk.raw > 99) return tk;
     const asIs = Math.max(tk.value, other.value) / Math.min(tk.value, other.value);
     if (asIs <= 4) return tk;
-    const v = Math.floor(tk.raw / 10) + (tk.raw % 10) / 12;
+    // Re-split from the original digits when we have them; re-splitting the
+    // parsed value would silently drop a digit ("130" -> 1'3").
+    let v;
+    if (tk.bareDigits) {
+      const inches = parseInt(tk.bareDigits.slice(1), 10);
+      if (inches >= 12) return tk;
+      v = parseInt(tk.bareDigits[0], 10) + inches / 12;
+    } else {
+      v = Math.floor(tk.raw / 10) + (tk.raw % 10) / 12;
+    }
     const reRatio = Math.max(v, other.value) / Math.min(v, other.value);
     if (reRatio > 3 || !isReasonableFeet(v)) return tk;
     return { ...tk, value: v, raw: v, format: 'inches', quality: 1 };
@@ -378,8 +400,13 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   const weakStripped = [left, right].filter(
     (t) => t.stripped && !t.explicitUnit && t.format === 'decimal'
   ).length;
+  // A unit-less side claiming a huge room is usually a collapsed feet-inches
+  // read the recoveries above could not fix ("59\" x90" -> 59 x 90); make it
+  // lose to any plausible competing read of the same label.
+  const oversize = [left, right].filter((t) => !t.explicitUnit && t.value > 35).length;
   const penalty =
-    (3 - quality) * 7 + strippedCount * 4 + weakStripped * 8 + (separatorMissing ? 6 : 0);
+    (3 - quality) * 7 + strippedCount * 4 + weakStripped * 8 + oversize * 8 +
+    (separatorMissing ? 6 : 0);
 
   return {
     width: left.value,

@@ -18,13 +18,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Known labels on ExampleFloorplan.png (feet; [width, height]). */
 const EXAMPLE_GROUND_TRUTH = [
-  { name: 'PRIMARY BEDROOM', w: 12 + 5 / 12, h: 16 + 4 / 12 },
-  { name: 'BEDROOM', w: 13 + 5 / 12, h: 12 + 11 / 12 },
-  { name: 'LIVING/DINING', w: 16 + 7 / 12, h: 25 + 10 / 12 },
-  { name: 'ENTRY', w: 13 + 5 / 12, h: 10 + 7 / 12 },
-  { name: 'KITCHEN', w: 10 + 9 / 12, h: 7 + 11 / 12 },
-  { name: 'PRIMARY BATH (vertical)', w: 4 + 11 / 12, h: 7 + 2 / 12 },
-  { name: 'BATHROOM (vertical)', w: 5 + 2 / 12, h: 7 + 2 / 12 }
+  { name: 'W.I.C.', w: 8 + 8 / 12, h: 4 + 11 / 12 },
+  { name: 'BEDROOM (top-left)', w: 7 + 9 / 12, h: 10 + 4 / 12 },
+  { name: 'PRIMARY BEDROOM', w: 12 + 7 / 12, h: 13 + 3 / 12 },
+  { name: 'BATH (floor 2)', w: 8 + 8 / 12, h: 5 + 1 / 12 },
+  { name: 'BEDROOM (floor 2 right)', w: 12 + 7 / 12, h: 10 + 10 / 12 },
+  { name: 'DINING AREA', w: 9 + 3 / 12, h: 10 + 8 / 12 },
+  { name: 'KITCHEN', w: 10 + 1 / 12, h: 10 + 4 / 12 },
+  { name: 'BATH (floor 1)', w: 8 + 7 / 12, h: 5 + 11 / 12 },
+  { name: 'UTILITY', w: 10, h: 9 + 3 / 12 },
+  { name: 'GARAGE', w: 20 + 7 / 12, h: 9 + 6 / 12 },
+  { name: 'LIVING ROOM', w: 19 + 9 / 12, h: 12 + 11 / 12 },
+  { name: 'FAMILY ROOM', w: 14 + 10 / 12, h: 14 + 1 / 12 }
 ];
 
 const loadPng = (filePath) => {
@@ -55,11 +60,13 @@ const matches = (dim, gt, tol = 0.05) => {
 const run = async () => {
   const args = process.argv.slice(2);
   // A "<image>.truth.json" file next to an image supplies ground truth:
-  // [{ name, w, h }] in decimal feet.
+  // either a bare array [{ name, w, h }] in decimal feet, or the combined
+  // detectionBenchmark sidecar object with that array under an "ocr" key.
   const truthFor = (file) => {
     const truthPath = file.replace(/\.(png|jpg)$/i, '.truth.json');
-    if (fs.existsSync(truthPath)) return JSON.parse(fs.readFileSync(truthPath, 'utf8'));
-    return null;
+    if (!fs.existsSync(truthPath)) return null;
+    const parsed = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+    return Array.isArray(parsed) ? parsed : parsed.ocr ?? null;
   };
   const targets = args.length > 0
     ? args.map((a) => ({ file: path.resolve(a), truth: truthFor(path.resolve(a)) }))
