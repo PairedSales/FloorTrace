@@ -295,6 +295,69 @@ export const binarizeGray = (gray) => {
   return { data: out, width: gray.width, height: gray.height };
 };
 
+/**
+ * Whiten every cross-axis ink band except the one covering the crop's
+ * centre. Generous ROI padding often drags in a clipped sliver of the
+ * neighbouring text row (room name above a dimension line); partial glyphs
+ * reliably derail single-line Tesseract even when the target line is clean.
+ */
+export const isolateCenterBand = (gray, { vertical = false } = {}) => {
+  const { data, width, height } = gray;
+  const t = otsu(gray);
+  const n = vertical ? width : height;
+  const counts = new Uint32Array(n);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < t) counts[vertical ? x : y]++;
+    }
+  }
+
+  // Contiguous inked bands, bridging single blank lines inside a glyph row
+  const inked = (i) => counts[i] >= 2;
+  const bands = [];
+  let start = -1;
+  let blanks = 0;
+  for (let i = 0; i < n; i++) {
+    if (inked(i)) {
+      if (start === -1) start = i;
+      blanks = 0;
+    } else if (start !== -1 && ++blanks > 1) {
+      bands.push({ start, end: i - blanks });
+      start = -1;
+    }
+  }
+  if (start !== -1) bands.push({ start, end: n - 1 - Math.min(blanks, n - 1 - start) });
+  if (bands.length <= 1) return gray;
+
+  // Keep the band best covering the central third (the ROI bbox is the text
+  // line, so its ink sits at the crop centre); everything else is spillover.
+  const lo = n * 0.33;
+  const hi = n * 0.67;
+  let keep = bands[0];
+  let bestCover = -1;
+  for (const b of bands) {
+    const cover = Math.min(b.end, hi) - Math.max(b.start, lo);
+    if (cover > bestCover) {
+      bestCover = cover;
+      keep = b;
+    }
+  }
+
+  const out = new Uint8Array(data.length);
+  out.set(data);
+  const clear = (i) => {
+    if (vertical) {
+      for (let y = 0; y < height; y++) out[y * width + i] = 255;
+    } else {
+      out.fill(255, i * width, (i + 1) * width);
+    }
+  };
+  for (let i = 0; i < Math.max(0, keep.start - 1); i++) clear(i);
+  for (let i = Math.min(n, keep.end + 2); i < n; i++) clear(i);
+  return { data: out, width, height };
+};
+
 /** Min/max contrast stretch with percentile clipping (per-ROI cleanup). */
 export const stretchGray = (gray, lowPct = 0.01, highPct = 0.99) => {
   const { data, width, height } = gray;

@@ -53,24 +53,35 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
   const width = longest > maxDimension ? Math.max(1, Math.round((ow * maxDimension) / longest)) : ow;
   const height = longest > maxDimension ? Math.max(1, Math.round((oh * maxDimension) / longest)) : oh;
   const ink = new Uint8Array(width * height);
+  const grayWork = new Uint8Array(width * height);
 
   if (width === ow && height === oh) {
-    for (let i = 0; i < gray.length; i += 1) ink[i] = gray[i] < threshold ? 1 : 0;
+    for (let i = 0; i < gray.length; i += 1) {
+      ink[i] = gray[i] < threshold ? 1 : 0;
+      grayWork[i] = gray[i];
+    }
   } else {
+    // Box-average the grayscale alongside the OR-pooled ink (screened fills
+    // must keep their tone at working scale for shaded-region detection).
+    const sums = new Float64Array(width * height);
+    const counts = new Uint32Array(width * height);
     for (let sy = 0; sy < oh; sy += 1) {
       const ty = Math.min(height - 1, (sy * height / oh) | 0);
       const srcRow = sy * ow;
       const dstRow = ty * width;
       for (let sx = 0; sx < ow; sx += 1) {
-        if (gray[srcRow + sx] < threshold) {
-          const tx = Math.min(width - 1, (sx * width / ow) | 0);
-          ink[dstRow + tx] = 1;
-        }
+        const tx = Math.min(width - 1, (sx * width / ow) | 0);
+        if (gray[srcRow + sx] < threshold) ink[dstRow + tx] = 1;
+        sums[dstRow + tx] += gray[srcRow + sx];
+        counts[dstRow + tx] += 1;
       }
+    }
+    for (let i = 0; i < grayWork.length; i += 1) {
+      grayWork[i] = counts[i] > 0 ? Math.round(sums[i] / counts[i]) : 255;
     }
   }
 
-  return { width, height, scaleX: width / ow, scaleY: height / oh, ink, threshold };
+  return { width, height, scaleX: width / ow, scaleY: height / oh, ink, gray: grayWork, threshold };
 };
 
 // 1D dilation along rows: pixel on if any ink within +-r in its row.

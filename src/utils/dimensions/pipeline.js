@@ -26,7 +26,8 @@ import { parseDimensionLine, inferDominantFormat, formatDimensionText } from './
 import { matchExteriorFeature } from './exteriorLabels.js';
 import {
   toGray, grayToImageDataLike, clahe, unsharp, binarizeInk,
-  scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray
+  scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray,
+  isolateCenterBand
 } from './raster.js';
 import { findTextRegions } from './regions.js';
 import { recognizeSparse, recognizeLine, lineText } from './ocrTesseract.js';
@@ -51,6 +52,15 @@ const overlapRatio = (a, b) => {
   const oy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
   const minArea = Math.min(a.width * a.height, b.width * b.height);
   return minArea > 0 ? (ox * oy) / minArea : 0;
+};
+
+/** Intersection area as a fraction of b's area (how much of b is covered by a). */
+const coverRatio = (a, b) => {
+  if (!a || !b) return 0;
+  const ox = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const oy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  const area = b.width * b.height;
+  return area > 0 ? (ox * oy) / area : 0;
 };
 
 const tessBboxToFull = (bbox, scale) => bbox && {
@@ -200,10 +210,13 @@ const prepareRoiVariants = (fullGray, roi) => {
   // clipped leading/trailing glyphs are recovered.
   const padX = roi.vertical ? roi.width * 0.08 + 2 : roi.width * 0.12 + 6;
   const padY = roi.vertical ? roi.height * 0.3 + 4 : roi.height * 0.45 + 4;
-  const crop = cropGray(
-    fullGray,
-    roi.x - padX, roi.y - padY,
-    roi.width + padX * 2, roi.height + padY * 2
+  const crop = isolateCenterBand(
+    cropGray(
+      fullGray,
+      roi.x - padX, roi.y - padY,
+      roi.width + padX * 2, roi.height + padY * 2
+    ),
+    { vertical: roi.vertical }
   );
 
   const textHeight = roi.vertical ? roi.width : roi.height;
@@ -342,8 +355,8 @@ export const detectDimensionsCore = async (imageData, env) => {
       candidates.push(makeCandidate(parsed, bbox, conf, 'tess-full'));
     } else if (digits >= 2 && conf > 15 && bbox) {
       digitLineRois.push(bbox);
-    } else if (digits === 0 && conf > 40 && /[a-z]{3,}/i.test(raw) && bbox) {
-      alphaBoxes.push(bbox); // room names / titles — veto spatial ROIs here
+    } else if (digits <= 1 && conf > 40 && /[a-z]{4,}/i.test(raw) && bbox) {
+      alphaBoxes.push(bbox); // room names / titles (incl. "BEDROOM 2") — veto spatial ROIs here
     }
   }
 
@@ -370,8 +383,12 @@ export const detectDimensionsCore = async (imageData, env) => {
 
   for (const box of spatialBoxes) {
     if (candidates.some((c) => overlapRatio(c.bbox, box) > 0.4)) continue;
-    if (alphaBoxes.some((a) => overlapRatio(a, box) > 0.6)) continue;
-    if (rois.some((r) => overlapRatio(r, box) > 0.5)) continue;
+    // Height guard: an alpha line whose bbox is 2+ text rows tall has likely
+    // swallowed the dimension row under a room name — it must not veto it.
+    if (alphaBoxes.some((a) => overlapRatio(a, box) > 0.6 && a.height < box.height * 1.8)) continue;
+    // Cover-based, not min-area: a small fragment ROI (one number of a split
+    // dimension line) must not veto the full-line box that contains it.
+    if (rois.some((r) => coverRatio(r, box) > 0.65)) continue;
 
     const long = Math.max(box.width, box.height);
     const short = Math.max(1, Math.min(box.width, box.height));
@@ -398,6 +415,13 @@ export const detectDimensionsCore = async (imageData, env) => {
   }
 
   rois.sort((a, b) => b.priority - a.priority);
+  const roiQueueDebug = env.debug
+    ? rois.map((r) => ({
+      x: Math.round(r.x), y: Math.round(r.y),
+      width: Math.round(r.width), height: Math.round(r.height),
+      priority: r.priority, vertical: !!r.vertical
+    }))
+    : null;
   rois.length = Math.min(rois.length, MAX_ROIS);
 
   // ---- Phase 4: targeted ROI OCR --------------------------------------------
@@ -622,6 +646,11 @@ export const detectDimensionsCore = async (imageData, env) => {
   if (env.debug) {
     result.debug = {
       rois: roiDebug,
+      roiQueue: roiQueueDebug,
+      alphaBoxes: alphaBoxes.map((b) => ({
+        x: Math.round(b.x), y: Math.round(b.y),
+        width: Math.round(b.width), height: Math.round(b.height)
+      })),
       spatialBoxes: spatialBoxes.map((b) => ({
         x: Math.round(b.x), y: Math.round(b.y),
         width: Math.round(b.width), height: Math.round(b.height),

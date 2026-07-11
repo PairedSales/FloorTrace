@@ -98,6 +98,14 @@ const run = async () => {
       for (const b of result.debug.spatialBoxes) {
         console.log(`     ${b.vertical ? 'V' : 'H'} (${b.x},${b.y},${b.width},${b.height}) glyphs=${b.glyphCount}`);
       }
+      console.log('   --- alpha boxes ---');
+      for (const b of result.debug.alphaBoxes ?? []) {
+        console.log(`     (${b.x},${b.y},${b.width},${b.height})`);
+      }
+      console.log('   --- ROI queue ---');
+      for (const q of result.debug.roiQueue ?? []) {
+        console.log(`     ${q.vertical ? 'V' : 'H'} p=${q.priority} (${q.x},${q.y},${q.width},${q.height})`);
+      }
       console.log('   --- ROI reads ---');
       for (const r of result.debug.rois) {
         console.log(`     ${r.vertical ? 'V' : 'H'} p=${r.priority} (${r.bbox.x},${r.bbox.y},${r.bbox.width},${r.bbox.height}) -> ${r.parsed} ${JSON.stringify(r.reads)}`);

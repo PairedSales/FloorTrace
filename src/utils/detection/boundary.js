@@ -179,6 +179,55 @@ const selectLabelledCavities = (regions, labels, components, footprint, minCavit
   return { targets, garages };
 };
 
+// Screened (grey-filled) pockets: condo plans shade terraces/balconies
+// instead of labelling them. Works on the footprint's grayscale directly —
+// a narrow terrace is swallowed whole by a large seal closing, so it never
+// shows up as an open cavity. Ink pixels are excluded so a carve can't eat
+// the shared house wall; anti-aliasing halos around interior linework only
+// form specks that the size floor drops. Hatched tile floors survive because
+// most of their pixels sit at page-white between the hatch lines.
+const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exteriorThickness) => {
+  if (!gray || !ink) return null;
+  const hist = new Uint32Array(256);
+  let count = 0;
+  for (let i = 0; i < footprint.mask.length; i += 1) {
+    if (footprint.mask[i] && !ink[i]) {
+      hist[gray[i]] += 1;
+      count += 1;
+    }
+  }
+  if (!count) return null;
+  let cum = 0;
+  let pageMedian = 255;
+  for (let v = 0; v < 256; v += 1) {
+    cum += hist[v];
+    if (cum >= count / 2) {
+      pageMedian = v;
+      break;
+    }
+  }
+
+  const thr = pageMedian - 12;
+  const shaded = new Uint8Array(footprint.mask.length);
+  for (let i = 0; i < shaded.length; i += 1) {
+    shaded[i] = footprint.mask[i] && !ink[i] && gray[i] < thr ? 1 : 0;
+  }
+  const { labels, components } = labelComponents(shaded, width, height);
+  const targets = new Set();
+  for (const comp of components) {
+    if (comp.size < minCavity || comp.size > 0.45 * footprint.area) continue;
+    // Uniform shading fills its bbox; halo rings around linework do not.
+    if (comp.size < 0.35 * bboxAreaOf(comp.bbox)) continue;
+    // A room-sized feature is wide both ways; thin dark strips are window
+    // glazing bands, not terraces.
+    const w = comp.bbox.maxX - comp.bbox.minX + 1;
+    const h = comp.bbox.maxY - comp.bbox.minY + 1;
+    if (Math.min(w, h) < 3 * exteriorThickness) continue;
+    targets.add(comp.id);
+  }
+  return targets.size ? { labels, components, targets } : null;
+};
+
 // Carve the target cavities out of the sealed footprint: each cavity is
 // cleared and a rect opening then drops its orphaned railing/outline ring —
 // the shared house wall survives as part of the solid footprint body and
@@ -187,21 +236,30 @@ const carveCavities = (footprint, width, height, labels, components, targets, ex
   if (!targets.size) return null;
 
   const mask = footprint.mask.slice();
+  const carvedZone = new Uint8Array(mask.length);
   for (const id of targets) {
     const { minX, minY, maxX, maxY } = components[id].bbox;
     for (let y = minY; y <= maxY; y += 1) {
       const row = y * width;
       for (let x = minX; x <= maxX; x += 1) {
-        if (labels[row + x] === id) mask[row + x] = 0;
+        if (labels[row + x] === id) {
+          mask[row + x] = 0;
+          carvedZone[row + x] = 1;
+        }
       }
     }
   }
 
   // Clip the opening back to the carved mask so its dilation cannot refill
-  // the cavity we just removed.
-  const opened = openRect(mask, width, height, Math.max(2, exteriorThickness + 2));
+  // the cavity we just removed, and apply it only near the carved regions —
+  // a global opening would also shave every narrow footprint protrusion
+  // (bay windows) on the far side of the plan.
+  const openR = Math.max(2, exteriorThickness + 2);
+  const opened = openRect(mask, width, height, openR);
+  const zone = dilateRect(carvedZone, width, height, openR + 2);
   for (let i = 0; i < opened.length; i += 1) {
     if (!mask[i]) opened[i] = 0;
+    else if (!zone[i]) opened[i] = mask[i];
   }
   const labeled = largestComponent(opened, width, height);
   if (!labeled || labeled.component.size < 0.35 * footprint.area) return null;
@@ -255,10 +313,13 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
   // here, so passing all regions to every floor is safe.
   let excluded = 0;
   let excludedGarages = 0;
-  if (options.excludeRegions?.length || options.autoGarage !== false) {
+  if (options.excludeRegions?.length || options.autoGarage !== false ||
+      options.autoShaded !== false) {
+    const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
+    const carves = [];
+
     const cavities = openCavities(footprint, width, height);
     if (cavities.components.length) {
-      const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
       let targets = new Set();
       const garageIds = new Set();
       if (options.excludeRegions?.length) {
@@ -285,23 +346,41 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
           garageIds.add(id);
         }
       }
-      const carved = carveCavities(
-        footprint, width, height, cavities.labels, cavities.components, targets, exteriorThickness,
-      );
-      if (carved) {
-        const carvedOuter = polygonize(
-          carved.labels, width, height, carved.componentId, epsilon, options.fit,
-        );
-        if (carvedOuter) {
-          footprint = carved;
-          outerResult = carvedOuter;
-          excluded = targets.size;
-          excludedGarages = garageIds.size;
-          exteriorThickness = sampleExteriorThickness(
-            outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-          );
-        }
+      if (targets.size) {
+        carves.push({
+          labels: cavities.labels, components: cavities.components,
+          targets, garages: garageIds.size,
+        });
       }
+    }
+    if (options.autoShaded !== false) {
+      const pockets = findShadedPockets(
+        analysis.gray, analysis.ink, footprint, width, height, minCavity, exteriorThickness,
+      );
+      if (pockets) {
+        carves.push({
+          labels: pockets.labels, components: pockets.components,
+          targets: pockets.targets, garages: 0,
+        });
+      }
+    }
+
+    for (const carve of carves) {
+      const carved = carveCavities(
+        footprint, width, height, carve.labels, carve.components, carve.targets, exteriorThickness,
+      );
+      if (!carved) continue;
+      const carvedOuter = polygonize(
+        carved.labels, width, height, carved.componentId, epsilon, options.fit,
+      );
+      if (!carvedOuter) continue;
+      footprint = carved;
+      outerResult = carvedOuter;
+      excluded += carve.targets.size;
+      excludedGarages += carve.garages;
+      exteriorThickness = sampleExteriorThickness(
+        outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+      );
     }
   }
 
@@ -466,7 +545,9 @@ export const traceBoundary = (analysis, options = {}) => {
   // then run the full seal search on each network in isolation. Bridging and
   // large closing radii are safe per network — there is no neighbouring floor
   // left in the mask to merge into.
-  const nets = partitionWallNetworks(analysis.wallMask, width, height, wallThickness, maxFloors);
+  const nets = partitionWallNetworks(
+    analysis.boundaryMask ?? analysis.wallMask, width, height, wallThickness, maxFloors,
+  );
   const floors = [];
   const searches = [];
 

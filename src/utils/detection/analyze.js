@@ -89,6 +89,39 @@ export const analyzeFloorplan = (imageData, options = {}) => {
 
   const wallThickness = estimateStrokeThickness(wallMask, width, height);
 
+  // Boundary-only mask: rescue line-like ink components the two filters above
+  // destroy — bay windows and screened-porch rails are thin, often oblique,
+  // and drawn as disconnected segments, so the speck filter drops the short
+  // ones and the run filter drops every non-canonical angle. Long-but-sparse
+  // components (low mass per unit length) are lines, not text or furniture
+  // blobs. Room detection keeps the strict mask — door arcs must not read as
+  // walls there — but the seal search needs these lines or an exterior bay
+  // reads as a mouth the closing ladder can never span.
+  const lineMin = Math.max(16, Math.round(minRun * 0.7));
+  const boundaryMask = wallMask.slice();
+  {
+    // Residual ink (ink minus walls) so a window band that touches the wall
+    // network is judged on its own shape, not as part of one huge component.
+    const residual = new Uint8Array(ink.length);
+    for (let i = 0; i < ink.length; i += 1) residual[i] = ink[i] && !wallMask[i] ? 1 : 0;
+    const inkLabeled = labelComponents(residual, width, height);
+    for (const comp of inkLabeled.components) {
+      const w = comp.bbox.maxX - comp.bbox.minX + 1;
+      const h = comp.bbox.maxY - comp.bbox.minY + 1;
+      const maxDim = Math.max(w, h);
+      // Sparse (bare lines) or non-solid bbox (hatched window bands, bay
+      // outlines with glazing); solid blocks are already in wallMask.
+      const lineLike = comp.size <= Math.max(5 * maxDim, 0.7 * w * h);
+      if (maxDim < lineMin || !lineLike) continue;
+      for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+        const row = y * width;
+        for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+          if (inkLabeled.labels[row + x] === comp.id) boundaryMask[row + x] = 1;
+        }
+      }
+    }
+  }
+
   // Thick-stroke evidence: survives an opening proportional to the dominant
   // wall thickness. Distinguishes walls from fixture/counter lines when the
   // plan uses thick walls; degrades to ~wallMask on thin-wall plans.
@@ -110,8 +143,10 @@ export const analyzeFloorplan = (imageData, options = {}) => {
     scaleY: scaled.scaleY,
     threshold: scaled.threshold,
     ink,
+    gray: scaled.gray,
     cleaned,
     wallMask,
+    boundaryMask,
     thickMask,
     wallThickness,
     band,

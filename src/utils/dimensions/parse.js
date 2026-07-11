@@ -87,7 +87,7 @@ export const normalizeOcrText = (text) => {
 const RE_FEET_INCHES = /^(\d{1,3})\s*'\s*(\d{1,2})\s*"?$/;
 const RE_FEET_ONLY = /^(\d{1,3})\s*'$/;
 const RE_EXPLICIT_FT_IN = /^(\d{1,3})\s*(?:ft|feet)\s+(\d{1,2})\s*(?:in|inch|inches)?$/;
-const RE_DECIMAL_FEET = /^(\d{1,3}\.\d+)\s*(ft|feet|')?$/;
+const RE_DECIMAL_FEET = /^(\d{1,3}\.\d+)\s*(ft|feet|'|")?$/;
 const RE_INT_FEET = /^(\d{1,3})\s*(?:ft|feet)$/;
 const RE_METERS = /^(\d{1,3}(?:\.\d+)?)\s*(?:m|meter|meters)$/;
 const RE_SPACED_PAIR = /^(\d{1,3})\s+(\d{1,2})\s*["']?$/;
@@ -118,6 +118,17 @@ export const parseSingleToken = (token) => {
   m = t.match(RE_FEET_ONLY);
   if (m) {
     const value = parseInt(m[1], 10);
+    // "125'" is a 12.5' whose decimal point was eaten — no labelled room is
+    // 100+ feet. The surviving trailing tick says the interior mark was a
+    // fragile dot, not a foot tick (12'5" would need the mid-tick eaten
+    // while the trailing one survived).
+    if (value > 99) {
+      const v = value / 10;
+      if (isReasonableFeet(v)) {
+        return { value: v, format: 'decimal', quality: 2, explicitUnit: true, raw: v };
+      }
+      return null;
+    }
     if (isReasonableFeet(value)) {
       return { value, format: 'inches', quality: 3, explicitUnit: true, raw: value };
     }
@@ -138,13 +149,14 @@ export const parseSingleToken = (token) => {
     return null;
   }
 
-  // 1.2 ft / 12.75ft / 1.2' / bare 10.5
+  // 1.2 ft / 12.75ft / 1.2' / bare 10.5 / 12.5" (inch mark = misread tick)
   m = t.match(RE_DECIMAL_FEET);
   if (m) {
     const value = parseFloat(m[1]);
     const explicitUnit = Boolean(m[2]);
     if (isReasonableFeet(value)) {
-      return { value, format: 'decimal', quality: explicitUnit ? 3 : 2, explicitUnit, raw: value };
+      const quality = explicitUnit ? (m[2] === '"' ? 2 : 3) : 2;
+      return { value, format: 'decimal', quality, explicitUnit, raw: value };
     }
     return null;
   }

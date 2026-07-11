@@ -1,0 +1,19 @@
+{
+  "boundary": {
+    "outerBbox": [210, 13, 1063, 1585],
+    "floors": [
+      [210, 13, 1063, 1585]
+    ]
+  },
+  "ocr": [
+    { "name": "MASTER BEDROOM", "w": 12.5, "h": 15 },
+    { "name": "BEDROOM 3", "w": 11.5, "h": 12.5 },
+    { "name": "BEDROOM 2", "w": 12.5, "h": 13 },
+    { "name": "GALLERY", "w": 5, "h": 10 },
+    { "name": "FOYER", "w": 6.5, "h": 11 },
+    { "name": "LIBRARY", "w": 10, "h": 12.5 },
+    { "name": "KITCHEN", "w": 11.5, "h": 16 },
+    { "name": "GREAT ROOM/DINING ROOM", "w": 19, "h": 34.5 },
+    { "name": "FAMILY ROOM", "w": 12, "h": 17.5 }
+  ]
+}

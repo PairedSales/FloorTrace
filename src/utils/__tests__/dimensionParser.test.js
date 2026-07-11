@@ -374,6 +374,30 @@ describe('parseDimensionLine', () => {
     });
   });
 
+  // Lost decimal point on a ticked side: no labelled room is 100+ feet
+  describe('lost decimal point recovery', () => {
+    it('parses "125\' x 15\'" as 12.5 x 15, not 125 feet', () => {
+      const r = parseDimensionLine("125' x 15'");
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(12.5, 5);
+      expect(r.height).toBe(15);
+    });
+
+    it('parses a decimal whose tick was misread as an inch mark: "12.5\\" x 15\\""', () => {
+      const r = parseDimensionLine('12.5" x 15"');
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(12.5, 5);
+      expect(r.height).toBe(15);
+    });
+
+    it('parses with garbled prefix: "t12.5\\" x 15\\""', () => {
+      const r = parseDimensionLine('t12.5" x 15"');
+      expect(r).not.toBeNull();
+      expect(r.width).toBeCloseTo(12.5, 5);
+      expect(r.height).toBe(15);
+    });
+  });
+
   // Blurry quotes: comma/backtick misreading across full dimension lines
   it('parses blurry comma-tick: "10,5 x 13,4"', () => {
     const r = parseDimensionLine('10,5 x 13,4');
