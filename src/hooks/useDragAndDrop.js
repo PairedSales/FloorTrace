@@ -5,6 +5,7 @@ import { loadImageFromFile, loadImageFromClipboard } from '../utils/imageLoader'
 
 export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
   const setImage = useAppStore((s) => s.setImage);
+  const setImageMimeType = useAppStore((s) => s.setImageMimeType);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
@@ -18,16 +19,17 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       resetOverlays();
       undoManager.clear();
 
-      const loadedImage = await loadImageFromClipboard();
-      if (loadedImage) {
-        setImage(loadedImage);
-        handleManualMode(loadedImage, true); // Automatically enter manual mode
+      const { dataUrl, mimeType } = await loadImageFromClipboard();
+      if (dataUrl) {
+        setImage(dataUrl);
+        setImageMimeType(mimeType);
+        handleManualMode(dataUrl, true); // Automatically enter manual mode
       }
     } catch (error) {
       console.error('Error pasting image:', error);
       notify('Failed to paste image. Make sure an image is copied to your clipboard.', { type: 'error' });
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, notify]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, setImageMimeType, notify]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -64,9 +66,10 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       } else {
         resetOverlays();
         undoManager.clear();
-        const loadedImage = await loadImageFromFile(file);
-        setImage(loadedImage);
-        handleManualMode(loadedImage, true);
+        const { dataUrl, mimeType } = await loadImageFromFile(file);
+        setImage(dataUrl);
+        setImageMimeType(mimeType);
+        handleManualMode(dataUrl, true);
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);
@@ -74,7 +77,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
     } finally {
       setIsProcessing(false);
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage, setImageMimeType]);
 
   return {
     handlePasteImage,

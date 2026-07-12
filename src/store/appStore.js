@@ -11,6 +11,7 @@ import { calculateArea } from '../utils/areaCalculator';
 const DEFAULT_TRACE_ID = 'trace-default';
 const WORKING_STATE_DEFAULTS = {
   image: null,
+  imageMimeType: 'image/png',
   roomOverlay: null,
   perimeterTraces: [
     {
@@ -148,6 +149,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   // ── setters (thin wrappers so call-sites remain terse) ─────────────────────
   setImage: (v) => set({ image: v }),
+  setImageMimeType: (v) => set({ imageMimeType: v }),
   setRoomOverlay: (v) => set({ roomOverlay: v }),
   setPerimeterOverlay: (v) => {
     const state = get();

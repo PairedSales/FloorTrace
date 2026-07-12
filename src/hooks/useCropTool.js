@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import useAppStore from '../store/appStore';
 
 /**
  * useCropTool
@@ -87,6 +88,7 @@ export function useCropTool({
     // Accept the selection as a parameter so callers can pass the latest value
     // directly — avoids stale-closure issues with the cropSelection state.
     const currentSel = sel ?? cropSelection;
+    const imageMimeType = useAppStore((s) => s.imageMimeType);
 
     if (!isCroppingRef.current || !cropStartRef.current || !imageObj || !onImageUpdate) {
       resetCropState();
@@ -116,7 +118,7 @@ export function useCropTool({
     ctx.fillRect(0, 0, imageObj.width, imageObj.height);
     ctx.drawImage(imageObj, cx1, cy1, cw, ch, cx1, cy1, cw, ch);
 
-    const dataUrl = canvas.toDataURL('image/png');
+    const dataUrl = canvas.toDataURL(imageMimeType);
     onImageUpdate(dataUrl);
 
     // Deactivate the crop tool — one crop per activation

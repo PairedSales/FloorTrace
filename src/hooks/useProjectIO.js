@@ -8,6 +8,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
   const image = useAppStore((s) => s.image);
   const isDirty = useAppStore((s) => s.isDirty);
   const setImage = useAppStore((s) => s.setImage);
+  const setImageMimeType = useAppStore((s) => s.setImageMimeType);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
@@ -59,9 +60,10 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
           resetOverlays();
           undoManager.clear();
 
-          const loadedImage = await loadImageFromFile(file);
-          setImage(loadedImage);
-          handleManualMode(loadedImage, true); // Automatically enter manual mode
+          const { dataUrl, mimeType } = await loadImageFromFile(file);
+          setImage(dataUrl);
+          setImageMimeType(mimeType);
+          handleManualMode(dataUrl, true); // Automatically enter manual mode
         }
       } catch (error) {
         console.error('Error loading file:', error);
@@ -74,7 +76,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
         }
       }
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage, fileInputRef]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
 
   const handleSaveProject = useCallback(async (isSaveAs = false) => {
     setIsProcessing(true, isSaveAs ? 'Saving project as…' : 'Saving project…');

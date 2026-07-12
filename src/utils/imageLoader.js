@@ -66,14 +66,17 @@ export const loadImageFromFile = async (file) => {
 
   validateImageSize(file);
   const dataUrl = await fileOrBlobToDataUrl(file);
-  return maybeDownscaleDataUrl(dataUrl, file.type);
+  return {
+    dataUrl: await maybeDownscaleDataUrl(dataUrl, file.type),
+    mimeType: file.type,
+  };
 };
 
 // Load image from clipboard
 export const loadImageFromClipboard = async () => {
   try {
     const clipboardItems = await navigator.clipboard.read();
-    
+
     for (const clipboardItem of clipboardItems) {
       for (const type of clipboardItem.types) {
         if (type.startsWith('image/')) {
@@ -81,11 +84,14 @@ export const loadImageFromClipboard = async () => {
           validateImageSize(blob);
 
           const dataUrl = await fileOrBlobToDataUrl(blob);
-          return maybeDownscaleDataUrl(dataUrl, blob.type);
+          return {
+            dataUrl: await maybeDownscaleDataUrl(dataUrl, blob.type),
+            mimeType: blob.type,
+          };
         }
       }
     }
-    
+
     throw new Error('No image found in clipboard');
   } catch (error) {
     console.error('Clipboard access error:', error);
