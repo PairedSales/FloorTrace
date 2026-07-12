@@ -55,21 +55,90 @@ export const warmupOcrEngines = () => {
 /** Opt-in warm-up for the PaddleOCR rescue pass (main-thread heavy). */
 export const warmupNeuralOcr = () => ensurePaddle();
 
-/** Grayscale/RGBA image-data-like -> canvas (what tesseract.js consumes). */
-const imageDataLikeToCanvas = (imageDataLike) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = imageDataLike.width;
-  canvas.height = imageDataLike.height;
-  const ctx = canvas.getContext('2d');
-  ctx.putImageData(
-    new ImageData(imageDataLike.data, imageDataLike.width, imageDataLike.height),
-    0, 0
+// Grayscale image-data-like -> PNG Blob. tesseract.js accepts canvases but
+// serialises them internally with canvas.toBlob(), which costs up to ~1s per
+// call on some machines — a per-read tax that starves the whole ROI phase.
+// Hand-rolled PNG with stored (uncompressed) deflate blocks is a plain byte
+// copy; a targeted read drops to ~20ms.
+let crcTable = null;
+const crc32 = (bytes, start, end) => {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = start; i < end; i += 1) crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const pngChunk = (type, body) => {
+  const c = new Uint8Array(12 + body.length);
+  const dv = new DataView(c.buffer);
+  dv.setUint32(0, body.length);
+  for (let i = 0; i < 4; i += 1) c[4 + i] = type.charCodeAt(i);
+  c.set(body, 8);
+  dv.setUint32(8 + body.length, crc32(c, 4, 8 + body.length));
+  return c;
+};
+
+const imageDataLikeToPngBlob = (imageDataLike) => {
+  const { width, height, data } = imageDataLike;
+  // Scanlines: filter byte 0 + one gray byte per pixel (all pipeline inputs
+  // are grayscale rendered into RGBA, so the red channel is the value).
+  const raw = new Uint8Array((width + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const src = y * width * 4;
+    const dst = y * (width + 1);
+    for (let x = 0; x < width; x += 1) raw[dst + 1 + x] = data[src + x * 4];
+  }
+
+  // zlib stream: header + stored deflate blocks + adler32
+  const maxBlock = 65535;
+  const nBlocks = Math.max(1, Math.ceil(raw.length / maxBlock));
+  const idat = new Uint8Array(2 + raw.length + nBlocks * 5 + 4);
+  let p = 0;
+  idat[p++] = 0x78;
+  idat[p++] = 0x01;
+  for (let off = 0; off < raw.length; off += maxBlock) {
+    const len = Math.min(maxBlock, raw.length - off);
+    idat[p++] = off + len >= raw.length ? 1 : 0;
+    idat[p++] = len & 0xff;
+    idat[p++] = len >>> 8;
+    idat[p++] = ~len & 0xff;
+    idat[p++] = (~len >>> 8) & 0xff;
+    idat.set(raw.subarray(off, off + len), p);
+    p += len;
+  }
+  let a = 1;
+  let b = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    a = (a + raw[i]) % 65521;
+    b = (b + a) % 65521;
+  }
+  idat[p++] = (b >>> 8) & 0xff;
+  idat[p++] = b & 0xff;
+  idat[p++] = (a >>> 8) & 0xff;
+  idat[p++] = a & 0xff;
+
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, width);
+  dv.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 0; // grayscale
+  const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  return new Blob(
+    [sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0))],
+    { type: 'image/png' }
   );
-  return canvas;
 };
 
 const browserEnv = () => ({
-  toOcrInput: imageDataLikeToCanvas,
+  toOcrInput: imageDataLikeToPngBlob,
   paddleReady: () => Boolean(paddleIfReady()),
   refineRois: async (tiles) => {
     const api = paddleIfReady();

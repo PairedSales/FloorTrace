@@ -149,12 +149,14 @@ export const parseSingleToken = (token) => {
     return null;
   }
 
-  // 1.2 ft / 12.75ft / 1.2' / bare 10.5 / 12.5" (inch mark = misread tick)
+  // 1.2 ft / 12.75ft / 1.2' / bare 10.5 / 12.5" (inch mark = misread tick).
+  // Values past 99 ft are misreads (ticks read as dots: "12'-7"" -> "127.7"),
+  // not rooms — reject rather than guess.
   m = t.match(RE_DECIMAL_FEET);
   if (m) {
     const value = parseFloat(m[1]);
     const explicitUnit = Boolean(m[2]);
-    if (isReasonableFeet(value)) {
+    if (isReasonableFeet(value) && value <= MAX_FALLBACK_FEET) {
       const quality = explicitUnit ? (m[2] === '"' ? 2 : 3) : 2;
       return { value, format: 'decimal', quality, explicitUnit, raw: value };
     }
@@ -273,15 +275,18 @@ export const parseSingleToken = (token) => {
     }
   }
 
-  // Tight hyphen pair: "10-5" / "10-2\"" as 10'5" (tick misread/omitted)
-  m = t.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*["']?$/);
+  // Tight hyphen pair: "10-5" / "10-2\"" as 10'5" (tick misread/omitted).
+  // With a trailing inch mark this is the standard architectural form less
+  // only its foot tick — grade it above the bare-digit reconstructions so a
+  // clean read outranks a garbled one of the same label.
+  m = t.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*(["'])?$/);
   if (m) {
     const feet = parseInt(m[1], 10);
     const inches = parseInt(m[2], 10);
     if (inches < 12) {
       const value = feet + inches / 12;
       if (isReasonableFeet(value)) {
-        return { value, format: 'inches', quality: 1, explicitUnit: false, raw: value };
+        return { value, format: 'inches', quality: m[3] ? 2 : 1, explicitUnit: false, raw: value };
       }
     }
   }
@@ -416,9 +421,12 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   // read the recoveries above could not fix ("59\" x90" -> 59 x 90); make it
   // lose to any plausible competing read of the same label.
   const oversize = [left, right].filter((t) => !t.explicitUnit && t.value > 35).length;
+  // Rooms beyond ~7:1 are rare; a garbled side ("1) x 12-10\"" -> 1 x 12.83)
+  // fakes extreme aspect far more often than a real room has it.
+  const extremeAspect = ratio > 7 ? 10 : 0;
   const penalty =
     (3 - quality) * 7 + strippedCount * 4 + weakStripped * 8 + oversize * 8 +
-    (separatorMissing ? 6 : 0);
+    extremeAspect + (separatorMissing ? 6 : 0);
 
   return {
     width: left.value,
@@ -447,10 +455,21 @@ export const parseDimensionLine = (line) => {
   // successful split. An 'x' is nearly unambiguous as a separator; a hyphen
   // may instead be a blurred foot tick ("10-5"), so hyphen splits are only
   // considered when no x split parses.
+  //
+  // A trailing "A-B\"" whose right side runs to the end of the line is the
+  // architectural feet-inches join itself (122'-8" with the tick eaten), not
+  // a pair separator — splitting it fabricates a pair out of one dimension.
+  const isFeetInchesJoin = (i) => {
+    const left = norm.slice(0, i).match(/(\d{1,3})\s*$/);
+    const right = norm.slice(i + 1).match(/^\s*(\d{1,2})\s*["']?\s*$/);
+    return Boolean(left && right && parseInt(right[1], 10) < 12);
+  };
+
   const trySplits = (separatorChar) => {
     let best = null;
     for (let i = 0; i < norm.length; i++) {
       if (norm[i] !== separatorChar) continue;
+      if (separatorChar === '-' && isFeetInchesJoin(i)) continue;
 
       const left = norm.slice(0, i).trim();
       const right = norm.slice(i + 1).trim();

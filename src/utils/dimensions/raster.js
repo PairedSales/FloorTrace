@@ -358,6 +358,105 @@ export const isolateCenterBand = (gray, { vertical = false } = {}) => {
   return { data: out, width, height };
 };
 
+/**
+ * Whiten thin flanking strokes at the along-axis extremes of a text crop.
+ * Labels inside dashed ceiling/coffered boxes drag box-edge dashes into the
+ * crop ("| 14'-3 x 18'-4 |"); those rails reliably derail single-line
+ * Tesseract. A rail is a narrow ink band separated from the central text
+ * mass by a gap far wider than any inter-word space.
+ */
+export const trimFlankRails = (gray, { vertical = false, marginLo = 0, marginHi = 0 } = {}) => {
+  const { data, width, height } = gray;
+  const t = otsu(gray);
+  const n = vertical ? height : width;
+  const counts = new Uint32Array(n);
+  const crossMin = new Int32Array(n).fill(1 << 30);
+  const crossMax = new Int32Array(n).fill(-1);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < t) {
+        const i = vertical ? y : x;
+        const c = vertical ? x : y;
+        counts[i]++;
+        if (c < crossMin[i]) crossMin[i] = c;
+        if (c > crossMax[i]) crossMax[i] = c;
+      }
+    }
+  }
+
+  // Contiguous ink bands along the text axis (1px blank tolerance)
+  const bands = [];
+  let start = -1;
+  let blanks = 0;
+  const pushBand = (s, e) => {
+    let lo = 1 << 30;
+    let hi = -1;
+    for (let i = s; i <= e; i++) {
+      if (crossMax[i] < 0) continue;
+      if (crossMin[i] < lo) lo = crossMin[i];
+      if (crossMax[i] > hi) hi = crossMax[i];
+    }
+    bands.push({ start: s, end: e, crossH: hi - lo + 1 });
+  };
+  for (let i = 0; i < n; i++) {
+    if (counts[i] > 0) {
+      if (start === -1) start = i;
+      blanks = 0;
+    } else if (start !== -1 && ++blanks > 1) {
+      pushBand(start, i - blanks);
+      start = -1;
+    }
+  }
+  if (start !== -1) pushBand(start, n - 1);
+  if (bands.length < 2) return gray;
+
+  // The widest band is a run of glyphs — its cross extent is the text
+  // height. (The overall ink extent would be inflated by the rails
+  // themselves, hiding them from the gap test.)
+  let textH = 0;
+  let bestW = 0;
+  for (const b of bands) {
+    const w = b.end - b.start + 1;
+    if (w > bestW) {
+      bestW = w;
+      textH = b.crossH;
+    }
+  }
+
+  // A rail is a narrow outermost band that (a) sits wholly inside the crop
+  // padding (outside the detected text bbox), or (b) is separated from the
+  // text by a gap wider than any inter-word space, or (c) spans well beyond
+  // the text height (dashed box edges cross the whole crop).
+  const railMaxW = Math.max(2, textH * 0.25);
+  const isRail = (band, inner) => {
+    if (band.end - band.start + 1 > railMaxW) return false;
+    if (marginLo > 0 && band.end < marginLo) return true;
+    if (marginHi > 0 && band.start > n - 1 - marginHi) return true;
+    const gap = band.end < inner.start ? inner.start - band.end : band.start - inner.end;
+    return gap >= textH * 0.9 || band.crossH >= textH * 1.2;
+  };
+
+  let lo = 0;
+  let hi = bands.length - 1;
+  while (lo < hi && isRail(bands[lo], bands[lo + 1])) lo++;
+  while (hi > lo && isRail(bands[hi], bands[hi - 1])) hi--;
+  if (lo === 0 && hi === bands.length - 1) return gray;
+
+  const out = new Uint8Array(data.length);
+  out.set(data);
+  const clear = (i) => {
+    if (vertical) {
+      out.fill(255, i * width, (i + 1) * width);
+    } else {
+      for (let y = 0; y < height; y++) out[y * width + i] = 255;
+    }
+  };
+  for (let i = 0; i < bands[lo].start; i++) clear(i);
+  for (let i = bands[hi].end + 1; i < n; i++) clear(i);
+  return { data: out, width, height };
+};
+
 /** Min/max contrast stretch with percentile clipping (per-ROI cleanup). */
 export const stretchGray = (gray, lowPct = 0.01, highPct = 0.99) => {
   const { data, width, height } = gray;

@@ -89,6 +89,60 @@ export const analyzeFloorplan = (imageData, options = {}) => {
 
   const wallThickness = estimateStrokeThickness(wallMask, width, height);
 
+  // Sheet-title underlines ("FIRST FLOOR"): an isolated thin line with a
+  // dense row of stripped glyph specks right above it is typography, not a
+  // wall. Left in, the bbox-based network merge annexes it and the seal
+  // closes the gap, ballooning the footprint over the title block.
+  const textLineMask = new Uint8Array(wallMask.length);
+  {
+    const { labels: wl, components: wcomps } = labelComponents(wallMask, width, height);
+    for (const comp of wcomps) {
+      const w = comp.bbox.maxX - comp.bbox.minX + 1;
+      const h = comp.bbox.maxY - comp.bbox.minY + 1;
+      if (h > wallThickness + 2 || w < minRun || w < 3 * h || w > 0.3 * width) continue;
+
+      const halo = Math.max(4, wallThickness);
+      const y0 = Math.max(0, comp.bbox.minY - halo);
+      const y1 = Math.min(height - 1, comp.bbox.maxY + halo);
+      const x0 = Math.max(0, comp.bbox.minX - halo);
+      const x1 = Math.min(width - 1, comp.bbox.maxX + halo);
+      let isolated = true;
+      for (let y = y0; y <= y1 && isolated; y += 1) {
+        const row = y * width;
+        for (let x = x0; x <= x1; x += 1) {
+          if (wallMask[row + x] && wl[row + x] !== comp.id) {
+            isolated = false;
+            break;
+          }
+        }
+      }
+      if (!isolated) continue;
+
+      // Stripped-speck (glyph) columns must cover most of the line's width
+      const bandTop = Math.max(0, comp.bbox.minY - Math.round(speckMax * 1.3));
+      let covered = 0;
+      for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+        for (let y = bandTop; y < comp.bbox.minY; y += 1) {
+          if (ink[y * width + x] && !cleaned[y * width + x]) {
+            covered += 1;
+            break;
+          }
+        }
+      }
+      if (covered < 0.5 * w) continue;
+
+      for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+        const row = y * width;
+        for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+          if (wl[row + x] === comp.id) {
+            wallMask[row + x] = 0;
+            textLineMask[row + x] = 1;
+          }
+        }
+      }
+    }
+  }
+
   // Boundary-only mask: rescue line-like ink components the two filters above
   // destroy — bay windows and screened-porch rails are thin, often oblique,
   // and drawn as disconnected segments, so the speck filter drops the short
@@ -102,17 +156,24 @@ export const analyzeFloorplan = (imageData, options = {}) => {
   {
     // Residual ink (ink minus walls) so a window band that touches the wall
     // network is judged on its own shape, not as part of one huge component.
+    // Stripped text lines stay out — the underline would come right back as
+    // a perfectly line-like component.
     const residual = new Uint8Array(ink.length);
-    for (let i = 0; i < ink.length; i += 1) residual[i] = ink[i] && !wallMask[i] ? 1 : 0;
+    for (let i = 0; i < ink.length; i += 1) {
+      residual[i] = ink[i] && !wallMask[i] && !textLineMask[i] ? 1 : 0;
+    }
     const inkLabeled = labelComponents(residual, width, height);
     for (const comp of inkLabeled.components) {
       const w = comp.bbox.maxX - comp.bbox.minX + 1;
       const h = comp.bbox.maxY - comp.bbox.minY + 1;
       const maxDim = Math.max(w, h);
-      // Sparse (bare lines) or non-solid bbox (hatched window bands, bay
-      // outlines with glazing); solid blocks are already in wallMask.
-      const lineLike = comp.size <= Math.max(5 * maxDim, 0.7 * w * h);
-      if (maxDim < lineMin || !lineLike) continue;
+      // Sparse (bare lines) or long non-solid bands (hatched window bands,
+      // bay outlines with glazing); solid blocks are already in wallMask.
+      // The band path needs real length — without it, bold title glyphs
+      // (small, ~half-filled boxes) sneak back in as "lines".
+      const sparse = comp.size <= 5 * maxDim;
+      const band = comp.size <= 0.7 * w * h && maxDim >= 3 * lineMin;
+      if (maxDim < lineMin || (!sparse && !band)) continue;
       for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
         const row = y * width;
         for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {

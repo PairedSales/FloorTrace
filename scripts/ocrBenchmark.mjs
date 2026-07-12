@@ -87,8 +87,23 @@ const run = async () => {
     console.log(`   engine warm-up: ${Date.now() - warmup}ms (one-time)`);
 
     const debug = process.env.OCR_DEBUG === '1';
+    const dumpTile = process.env.OCR_DUMP === '1'
+      ? (roi, variants) => {
+        console.log(`   dump roi (${roi.x},${roi.y},${roi.width},${roi.height}) p=${roi.priority}`);
+        variants.forEach((v, i) => {
+          const png = new PNG({ width: v.width, height: v.height });
+          for (let j = 0; j < v.data.length; j += 1) {
+            png.data[j * 4] = v.data[j];
+            png.data[j * 4 + 1] = v.data[j];
+            png.data[j * 4 + 2] = v.data[j];
+            png.data[j * 4 + 3] = 255;
+          }
+          fs.writeFileSync(`dbg_bench_${Math.round(roi.x)}_${Math.round(roi.y)}_v${i}.png`, PNG.sync.write(png));
+        });
+      }
+      : undefined;
     const t0 = Date.now();
-    const result = await detectDimensionsCore(imageData, { toOcrInput, budgetMs: 2600, debug });
+    const result = await detectDimensionsCore(imageData, { toOcrInput, budgetMs: 2600, debug, dumpTile });
     const wall = Date.now() - t0;
 
     if (debug && result.debug) {

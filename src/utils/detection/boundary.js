@@ -147,6 +147,7 @@ const openCavities = (footprint, width, height) => {
 const selectLabelledCavities = (regions, labels, components, footprint, minCavity, width, height) => {
   const targets = new Set();
   const garages = new Set();
+  const unresolved = [];
   for (const region of regions) {
     // Vote over a small sample grid: label bboxes are approximate and their
     // centre can land on a stroke or a stray glyph pixel.
@@ -168,7 +169,10 @@ const selectLabelledCavities = (regions, labels, components, footprint, minCavit
         bestVotes = count;
       }
     }
-    if (best < 0) continue;
+    if (best < 0) {
+      unresolved.push(region);
+      continue;
+    }
     const size = components[best].size;
     // Sanity: skip noise slivers and anything big enough to be the house
     // interior itself (a misplaced label must not gut the footprint).
@@ -176,7 +180,56 @@ const selectLabelledCavities = (regions, labels, components, footprint, minCavit
     targets.add(best);
     if (region.keyword && /garage/i.test(region.keyword)) garages.add(best);
   }
-  return { targets, garages };
+  return { targets, garages, unresolved };
+};
+
+// Fallback for labels whose cavity vote failed: screened pool cages and
+// similar enclosures are so dense with internal linework (pool outline, deck
+// edges, planters) that the seal's closing covers them entirely — there is
+// no open cavity for the label to sit in. Flood from the label instead,
+// crossing thin decoration ink freely but stopping at full-thickness walls
+// (bridged across their window/door gaps), and carve what the flood covers.
+const floodLabelledRegion = (region, footprint, barrier, width, height) => {
+  const mask = new Uint8Array(footprint.mask.length);
+  const queue = [];
+  for (let sy = 0; sy <= 4; sy += 1) {
+    for (let sx = 0; sx <= 4; sx += 1) {
+      const x = Math.round(region.x + (region.width * sx) / 4);
+      const y = Math.round(region.y + (region.height * sy) / 4);
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const i = y * width + x;
+      if (footprint.mask[i] && !barrier[i] && !mask[i]) {
+        mask[i] = 1;
+        queue.push(i);
+      }
+    }
+  }
+  let size = queue.length;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let head = 0; head < queue.length; head += 1) {
+    const i = queue[head];
+    const x = i % width;
+    const y = (i / width) | 0;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    const neighbours = [i - 1, i + 1, i - width, i + width];
+    if (x === 0) neighbours[0] = -1;
+    if (x === width - 1) neighbours[1] = -1;
+    for (const n of neighbours) {
+      if (n < 0 || n >= mask.length || mask[n]) continue;
+      if (!footprint.mask[n] || barrier[n]) continue;
+      mask[n] = 1;
+      queue.push(n);
+      size += 1;
+    }
+  }
+  if (maxX < 0) return null;
+  return { mask, size, bbox: { minX, minY, maxX, maxY } };
 };
 
 // Screened (grey-filled) pockets: condo plans shade terraces/balconies
@@ -256,7 +309,10 @@ const carveCavities = (footprint, width, height, labels, components, targets, ex
   // (bay windows) on the far side of the plan.
   const openR = Math.max(2, exteriorThickness + 2);
   const opened = openRect(mask, width, height, openR);
-  const zone = dilateRect(carvedZone, width, height, openR + 2);
+  // The zone must span the orphaned wall band itself plus any unflooded
+  // sliver between it and the carved region (planter strips inside a pool
+  // cage), or the band survives as a thin footprint excursion.
+  const zone = dilateRect(carvedZone, width, height, openR * 2 + 2);
   for (let i = 0; i < opened.length; i += 1) {
     if (!mask[i]) opened[i] = 0;
     else if (!zone[i]) opened[i] = mask[i];
@@ -319,6 +375,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     const carves = [];
 
     const cavities = openCavities(footprint, width, height);
+    let unresolvedLabels = options.excludeRegions ?? [];
     if (cavities.components.length) {
       let targets = new Set();
       const garageIds = new Set();
@@ -328,6 +385,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
           minCavity, width, height,
         );
         targets = picked.targets;
+        unresolvedLabels = picked.unresolved;
         for (const id of picked.garages) garageIds.add(id);
       }
       if (options.autoGarage !== false) {
@@ -350,6 +408,30 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         carves.push({
           labels: cavities.labels, components: cavities.components,
           targets, garages: garageIds.size,
+        });
+      }
+    }
+    if (unresolvedLabels.length) {
+      const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
+      const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
+      const barrier = bridgeRuns(
+        analysis.thickMask, width, height,
+        Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
+        Math.max(8, wallThickness * 2),
+      );
+      for (const region of unresolvedLabels) {
+        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
+        if (!flooded || flooded.size < minCavity ||
+            flooded.size > 0.45 * footprint.area) continue;
+        const lab = new Int8Array(flooded.mask.length).fill(-1);
+        for (let i = 0; i < lab.length; i += 1) {
+          if (flooded.mask[i]) lab[i] = 0;
+        }
+        carves.push({
+          labels: lab,
+          components: [{ id: 0, size: flooded.size, bbox: flooded.bbox }],
+          targets: new Set([0]),
+          garages: region.keyword && /garage/i.test(region.keyword) ? 1 : 0,
         });
       }
     }
@@ -444,10 +526,17 @@ const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetwor
   const intersects = (a, b) =>
     a.minX <= b.maxX + margin && b.minX <= a.maxX + margin &&
     a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
+  nets.sort((a, b) => b.size - a.size);
+  // Only substantial fragments merge: window gaps break a floor outline into
+  // sizeable wall runs, whereas a leftover glyph stroke from a sheet title
+  // is a speck whose bbox merely happens to sit inside the floor's bbox —
+  // merged in, the seal balloons the footprint over the title block.
+  const minMerge = Math.max(80, 0.002 * (nets[0]?.size ?? 0));
   for (let merged = true; merged;) {
     merged = false;
     for (let i = 0; i < nets.length && !merged; i += 1) {
       for (let j = i + 1; j < nets.length; j += 1) {
+        if (Math.min(nets[i].size, nets[j].size) < minMerge) continue;
         if (!intersects(nets[i].bbox, nets[j].bbox)) continue;
         const a = nets[i];
         const b = nets[j];

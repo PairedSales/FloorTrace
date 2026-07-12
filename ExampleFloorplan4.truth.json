@@ -1,0 +1,21 @@
+{
+  "boundary": {
+    "outerBbox": [94, 161, 812, 736],
+    "floors": [[94, 161, 812, 736]],
+    "excludeRegions": [[464, 179, 82, 9], [93, 444, 57, 8], [154, 575, 98, 11]]
+  },
+  "ocr": [
+    { "name": "BEDROOM 4", "w": 12.5833, "h": 14.4167 },
+    { "name": "GREAT ROOM (guest)", "w": 13.9167, "h": 13.5 },
+    { "name": "BEDROOM 3", "w": 12.5833, "h": 14.4167 },
+    { "name": "NOOK", "w": 14.8333, "h": 14.0 },
+    { "name": "LANAI", "w": 55.0, "h": 14.6667 },
+    { "name": "KITCHEN", "w": 17.75, "h": 18.8333 },
+    { "name": "GREAT ROOM (main)", "w": 20.4167, "h": 29.3333 },
+    { "name": "MASTER BEDROOM 1", "w": 15.8333, "h": 17.1667 },
+    { "name": "MASTER BEDROOM 2", "w": 14.8333, "h": 17.0 },
+    { "name": "DINING ROOM", "w": 14.25, "h": 18.3333 },
+    { "name": "STUDY", "w": 14.4167, "h": 12.8333 },
+    { "name": "3 CAR GARAGE", "w": 24.0833, "h": 33.3333 }
+  ]
+}
