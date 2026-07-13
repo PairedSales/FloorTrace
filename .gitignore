@@ -28,3 +28,10 @@ dist-ssr
 
 # Tesseract training data downloaded by Node benchmark runs
 eng.traineddata
+
+# Python bytecode caches (embed absolute source paths — keep out of git)
+__pycache__/
+*.pyc
+
+# Local scratch/debug scripts (may hardcode local paths)
+scripts/_*.mjs
