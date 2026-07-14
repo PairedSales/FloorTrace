@@ -362,6 +362,40 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
   );
 
+  // Shave wall-band filaments. An attached-but-unenclosed structure (a porch
+  // whose interior leaks to the outside, decorative pillar posts) leaves its
+  // wall band welded to the footprint as a zero-area excursion — the outer
+  // contour then appears to wrap a region that contributes nothing. A light
+  // opening removes bands about one exterior wall thick; bay windows and
+  // real wings are wider and survive. Guarded so a plan whose body would be
+  // reshaped (narrow-waisted footprints) keeps the untouched mask.
+  {
+    const shaveR = Math.max(2, Math.round(exteriorThickness * 0.75));
+    const shaved = openRect(footprint.mask, width, height, shaveR);
+    const kept = largestComponent(shaved, width, height);
+    if (kept && kept.component.size >= 0.85 * footprint.area &&
+        kept.component.size < footprint.area) {
+      footprint = {
+        ...footprint,
+        mask: componentMask(kept.labels, kept.component, width),
+        labels: kept.labels,
+        componentId: kept.component.id,
+        area: kept.component.size,
+        bbox: kept.component.bbox,
+        bboxArea: bboxAreaOf(kept.component.bbox),
+      };
+      const reOuter = polygonize(
+        footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
+      );
+      if (reOuter) {
+        outerResult = reOuter;
+        exteriorThickness = sampleExteriorThickness(
+          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+        );
+      }
+    }
+  }
+
   // Non-GLA regions are removed after the seal so the trace covers the living
   // area only: cavities voted in by OCR labels (garage/porch/patio/deck…) plus
   // cavities with strong geometric garage evidence, which fires even when OCR
@@ -605,8 +639,20 @@ const detectFloorNet = (net, width, height, wallThickness, options) => {
   }
   if (!measured.length) return null;
 
-  const maxEnclosed = measured.reduce((best, fp) => Math.max(best, fp.totalEnclosed), 0);
-  const pick = measured.find((fp) => fp.totalEnclosed >= 0.98 * maxEnclosed);
+  // Annexation-aware pick. "Near-max area" alone over-seals: porch/pillar
+  // structures attached to the house accrete area a few percent per rung all
+  // the way up the ladder, dragging the max to a radius that glues the whole
+  // page together. A sealed footprint only gains rounding slack from extra
+  // radius, so rungs still growing fast at the TOP of the ladder are
+  // annexation — trim them before the near-max pick.
+  let end = measured.length;
+  while (end > 1 &&
+         measured[end - 1].totalEnclosed > 1.03 * measured[end - 2].totalEnclosed) {
+    end -= 1;
+  }
+  const usable = measured.slice(0, end);
+  const maxEnclosed = usable.reduce((best, fp) => Math.max(best, fp.totalEnclosed), 0);
+  const pick = usable.find((fp) => fp.totalEnclosed >= 0.98 * maxEnclosed);
 
   // A never-sealing network (genuinely open side) still yields its walls plus
   // whatever they enclose; flag it so callers know the trace is best-effort.

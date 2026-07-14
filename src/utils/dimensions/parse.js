@@ -225,10 +225,14 @@ export const parseSingleToken = (token) => {
     if (digits.length <= 2) {
       const value = parseInt(digits, 10);
       if (isReasonableFeet(value)) {
+        // A leading zero ("08") is never how a room side is written — it is
+        // the tail of a truncated feet-inches read (10-8 -> "08"), so grade
+        // it below competing reconstructions of the same label.
+        const zeroLed = digits.length === 2 && digits[0] === '0';
         // With an orphan quote this is feet whose tick was misread
         return hadQuote
           ? { value, format: 'inches', quality: 1, explicitUnit: false, raw: value }
-          : { value, format: 'decimal', quality: 2, explicitUnit: false, raw: value };
+          : { value, format: 'decimal', quality: zeroLed ? 1 : 2, explicitUnit: false, raw: value };
       }
       return null;
     }
@@ -275,18 +279,23 @@ export const parseSingleToken = (token) => {
     }
   }
 
-  // Tight hyphen pair: "10-5" / "10-2\"" as 10'5" (tick misread/omitted).
-  // With a trailing inch mark this is the standard architectural form less
-  // only its foot tick — grade it above the bare-digit reconstructions so a
-  // clean read outranks a garbled one of the same label.
+  // Tight hyphen pair: "10-5" / "10-2\"" as 10'5" — the tickless
+  // architectural feet-inches form ("10-2" meaning 10' 2"). One hyphen pair
+  // alone could be a garbled read, so it grades low here; buildPair upgrades
+  // it when the partner side uses the same convention (see hyphenPair).
   m = t.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*(["'])?$/);
   if (m) {
     const feet = parseInt(m[1], 10);
     const inches = parseInt(m[2], 10);
-    if (inches < 12) {
+    // feet >= 2: a "1-5" side is almost always a dashed wall stroke read as
+    // a leading 1, not a one-foot room.
+    if (feet >= 2 && inches < 12) {
       const value = feet + inches / 12;
       if (isReasonableFeet(value)) {
-        return { value, format: 'inches', quality: m[3] ? 2 : 1, explicitUnit: false, raw: value };
+        return {
+          value, format: 'inches', quality: m[3] ? 2 : 1, explicitUnit: false,
+          raw: value, hyphenPair: true
+        };
       }
     }
   }
@@ -305,15 +314,33 @@ const parseTokenStripLeft = (token) => {
   const direct = parseSingleToken(token);
   if (direct) return { ...direct, stripped: false };
 
+  let best = null;
   for (let i = 1; i < token.length; i++) {
     // Only start at the beginning of a digit run
     if (!isDigit(token[i]) || isDigit(token[i - 1])) continue;
     const sub = token.slice(i).trim();
     if (!sub) continue;
     const parsed = parseSingleToken(sub);
-    if (parsed) return { ...parsed, stripped: true };
+    if (parsed) {
+      best = { ...parsed, stripped: true };
+      break;
+    }
   }
-  return null;
+  if (best && (best.hyphenPair || best.explicitUnit)) return best;
+
+  // A dashed box edge fused to the number reads as a spurious leading digit
+  // ("110-8" for "10-8"), which the run-start loop above can only recover as
+  // a bare trailing integer ("8"). Mid-run cuts are allowed only when what
+  // remains parses in an explicit form, so junk can't fabricate a value —
+  // and such an explicit form outranks the bare-integer fallback.
+  for (let i = 1; i < token.length; i++) {
+    if (!isDigit(token[i]) || !isDigit(token[i - 1])) continue;
+    const parsed = parseSingleToken(token.slice(i).trim());
+    if (parsed && (parsed.hyphenPair || parsed.explicitUnit)) {
+      return { ...parsed, stripped: true };
+    }
+  }
+  return best;
 };
 
 /** Parse `token`, stripping trailing junk from the right if needed. */
@@ -343,7 +370,7 @@ const parseTokenStripRight = (token) => {
 // ---------------------------------------------------------------------------
 
 /** Reconcile units across the pair (e.g. "3.5 x 2.8 m" — left side is meters too). */
-const buildPair = (lp, rp, textNorm, separatorMissing) => {
+const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
   let left = { ...lp };
   let right = { ...rp };
 
@@ -379,7 +406,9 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   // at an implausible aspect ratio is a collapsed feet-inches token, not a
   // 96-foot room.
   const recoverTicks = (tk, other) => {
-    if (tk.explicitUnit || other.format !== 'inches') return tk;
+    // A hyphen pair already has its feet/inches split — a "65-0" side is a
+    // digit misread, not a collapsed 6'5", so re-splitting it is nonsense.
+    if (tk.explicitUnit || tk.hyphenPair || other.format !== 'inches') return tk;
     if (!Number.isInteger(tk.raw) || tk.raw < 13 || tk.raw > 99) return tk;
     const asIs = Math.max(tk.value, other.value) / Math.min(tk.value, other.value);
     if (asIs <= 4) return tk;
@@ -400,6 +429,30 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   left = recoverTicks(left, right);
   right = recoverTicks(right, left);
 
+  // "13-2x17-2": both sides in the tickless architectural hyphen form is the
+  // page's labeling convention, not a coincidence — treat it as explicit.
+  // A lone hyphen side whose partner carries explicit feet-inches symbols is
+  // the same convention with one tick surviving OCR. Callers reading tiny
+  // text (< ~12px, where hyphens appear and vanish freely) pass
+  // hyphenExplicit: false to keep the fallback grading instead.
+  const trustHyphen = opts.hyphenExplicit !== false;
+  let hyphenUpgraded = false;
+  if (trustHyphen && left.hyphenPair && right.hyphenPair) {
+    left = { ...left, quality: 3 };
+    right = { ...right, quality: 3 };
+    hyphenUpgraded = true;
+  } else if (trustHyphen && left.hyphenPair && right.explicitUnit && right.format === 'inches') {
+    left = { ...left, quality: Math.max(left.quality, 2) };
+  } else if (trustHyphen && right.hyphenPair && left.explicitUnit && left.format === 'inches') {
+    right = { ...right, quality: Math.max(right.quality, 2) };
+  }
+  // One hyphen side against a bare unit-less integer usually means the crop
+  // clipped the partner ("8-5x6-6" read as "5x6-6") — flag it so the caller
+  // can re-read a wider crop.
+  const hyphenMixed =
+    Boolean(left.hyphenPair) !== Boolean(right.hyphenPair) &&
+    !left.explicitUnit && !right.explicitUnit;
+
   if (!isReasonableFeet(left.value) || !isReasonableFeet(right.value)) return null;
 
   // Rooms with a >25:1 aspect ratio are almost certainly misparses
@@ -419,8 +472,11 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
   ).length;
   // A unit-less side claiming a huge room is usually a collapsed feet-inches
   // read the recoveries above could not fix ("59\" x90" -> 59 x 90); make it
-  // lose to any plausible competing read of the same label.
-  const oversize = [left, right].filter((t) => !t.explicitUnit && t.value > 35).length;
+  // lose to any plausible competing read of the same label. A unit-less side
+  // under 2 ft is a stray wall stroke read as a digit — no room side is 1'.
+  const oversize = [left, right].filter(
+    (t) => !t.explicitUnit && (t.value > 35 || t.value < 2)
+  ).length;
   // Rooms beyond ~7:1 are rare; a garbled side ("1) x 12-10\"" -> 1 x 12.83)
   // fakes extreme aspect far more often than a real room has it.
   const extremeAspect = ratio > 7 ? 10 : 0;
@@ -435,6 +491,8 @@ const buildPair = (lp, rp, textNorm, separatorMissing) => {
     format,
     quality,
     penalty,
+    mixedPair: hyphenMixed,
+    hyphenUpgraded,
     score: left.quality + right.quality - strippedCount - (separatorMissing ? 1 : 0)
   };
 };
@@ -444,7 +502,7 @@ const RE_TWO_FEET_INCHES =
 const RE_TWO_UNIT_DECIMALS =
   /(\d{1,3}(?:\.\d+)?)\s*(ft|feet|m|meters)\s+(\d{1,3}(?:\.\d+)?)\s*(ft|feet|m|meters)\b/;
 
-export const parseDimensionLine = (line) => {
+export const parseDimensionLine = (line, opts = {}) => {
   const norm = normalizeOcrText(line);
   if (!norm || norm.length > 80) return null;
 
@@ -480,7 +538,7 @@ export const parseDimensionLine = (line) => {
       const rp = parseTokenStripRight(right);
       if (!rp) continue;
 
-      const pair = buildPair(lp, rp, norm, false);
+      const pair = buildPair(lp, rp, norm, false, opts);
       if (pair && (!best || pair.score > best.score)) best = pair;
     }
     return best;

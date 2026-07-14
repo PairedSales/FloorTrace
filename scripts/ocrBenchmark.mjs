@@ -129,6 +129,7 @@ const run = async () => {
 
     console.log(`   timings: ${JSON.stringify(result.timings)}  wall=${wall}ms`);
     console.log(`   detectedFormat: ${result.detectedFormat}`);
+    if (result.debug) console.log(`   glyphHeight: word=${result.debug.glyphHeightFull?.toFixed(1)} spatial=${result.debug.spatialGlyphHeight?.toFixed(1)}`);
     console.log(`   dimensions found: ${result.dimensions.length}`);
     for (const d of result.dimensions) {
       console.log(

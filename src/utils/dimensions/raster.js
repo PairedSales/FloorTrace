@@ -431,9 +431,18 @@ export const trimFlankRails = (gray, { vertical = false, marginLo = 0, marginHi 
   const railMaxW = Math.max(2, textH * 0.25);
   const isRail = (band, inner) => {
     if (band.end - band.start + 1 > railMaxW) return false;
+    const gap = band.end < inner.start ? inner.start - band.end : band.start - inner.end;
+    // A narrow band standing text-high RIGHT NEXT to the text is a digit
+    // ("1" leading "10-8x12-0" whose bbox started a glyph late) — never trim
+    // those, even inside the padding margins. Standing off from the text it
+    // is a dashed box edge, glyph-height or not. Below ~12px a one-digit and
+    // a dash stroke are indistinguishable — keep trimming there.
+    const glyphLike = textH >= 12 &&
+      band.crossH >= textH * 0.55 && band.crossH < textH * 1.2 &&
+      gap < textH * 0.9;
+    if (glyphLike) return false;
     if (marginLo > 0 && band.end < marginLo) return true;
     if (marginHi > 0 && band.start > n - 1 - marginHi) return true;
-    const gap = band.end < inner.start ? inner.start - band.end : band.start - inner.end;
     return gap >= textH * 0.9 || band.crossH >= textH * 1.2;
   };
 

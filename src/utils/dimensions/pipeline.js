@@ -97,6 +97,7 @@ const makeCandidate = (parsed, bbox, ocrConfidence, source) => {
     confidence,
     format: parsed.format,
     quality: parsed.quality,
+    mixedPair: Boolean(parsed.mixedPair),
     source
   };
 };
@@ -105,12 +106,18 @@ const digitsOf = (s) => ((s || '').match(/\d/g) || []).join('');
 
 const dedupeCandidates = (candidates) => {
   const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
+  // Same values from two bboxes that touch or nearly touch are one label
+  // read twice with different framing (a row box vs a name+row blob), not
+  // two identical rooms — real twins sit rooms apart.
+  const near = (a, b) =>
+    Math.abs(a.x + a.width / 2 - (b.x + b.width / 2)) < 0.6 * Math.max(a.width, b.width) &&
+    Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) < 1.2 * Math.max(a.height, b.height);
   const kept = [];
   for (const c of sorted) {
     const dup = kept.some((k) => {
       const ov = overlapRatio(k.bbox, c.bbox);
       if (ov > 0.6) return true;               // same text region, keep best read
-      return ov > 0.25 && valuesMatch(k, c);   // same values in the same spot
+      return (ov > 0.1 || near(k.bbox, c.bbox)) && valuesMatch(k, c);
     });
     if (!dup) kept.push(c);
   }
@@ -132,7 +139,7 @@ const digitCountOf = (text) => (text.match(/\d/g) || []).length;
  * Group digit-bearing words into horizontal bands and re-parse the joined
  * text. Catches labels Tesseract fragments across several "lines".
  */
-const bandWords = (words, scale) => {
+const bandWords = (words, scale, parseOpts) => {
   const digitWords = words.filter((w) =>
     w.bbox && /\d/.test(w.text || '') && (w.confidence || 0) >= 15
   );
@@ -179,7 +186,7 @@ const bandWords = (words, scale) => {
       .sort((a, b) => a.bbox.x0 - b.bbox.x0);
 
     const text = inBand.map((w) => w.text).join(' ');
-    const parsed = parseDimensionLine(text);
+    const parsed = parseDimensionLine(text, parseOpts);
     if (!parsed) continue;
 
     const conf = inBand.reduce((s, w) => s + (w.confidence || 0), 0) / inBand.length;
@@ -242,20 +249,27 @@ const prepareRoiVariants = (roiGray, roi) => {
     const zoomed = zoomTo(zoom);
     const binary = binarizeGray(zoomed);
     const sharp = unsharp(zoomed, 1.1);
-    return [
+    const variants = [
       addBorder(rotateGray90(binary, 1), MARGIN),
       addBorder(rotateGray90(binary, -1), MARGIN),
       addBorder(rotateGray90(sharp, 1), MARGIN),
       addBorder(rotateGray90(sharp, -1), MARGIN)
     ];
+    // A near-square "vertical" cluster is often two stacked horizontal rows
+    // ("wic" over "6x9"), not rotated text — try it unrotated too.
+    if (roi.height < roi.width * 2) variants.push(addBorder(binary, MARGIN));
+    return variants;
   }
   // Tiny glyphs have no single reliable zoom: each label resolves in a
   // narrow band somewhere between ~4x and ~8x, so failing ROIs walk a
   // ladder. Later rungs only run when the earlier ones failed to parse
-  // (the read loop exits early on success).
+  // (the read loop exits early on success). Even sufficiently-zoomed crops
+  // get a second rung: rungs past the first pair run in block mode, the only
+  // mode that survives a crop whose two text rows fused (wall strokes
+  // crossing the gap defeat row isolation).
   const variants = [];
   const seen = new Set();
-  for (const z of zoom >= 3 ? [zoom, zoom * 1.45, zoom * 2] : [zoom]) {
+  for (const z of zoom >= 3 ? [zoom, zoom * 1.45, zoom * 2] : [zoom, zoom * 1.6]) {
     const zc = Math.min(8, z);
     const key = Math.round(zc * 4);
     if (seen.has(key)) continue;
@@ -331,11 +345,30 @@ export const detectDimensionsCore = async (imageData, env) => {
       glyphCount: b.glyphCount, vertical: true
     }))
   ];
-  const glyphHeightFull = regions.glyphHeight / toFull;
+  let glyphHeightFull = regions.glyphHeight / toFull;
   timings.spatial = elapsed() - timings.preprocess;
 
   const { lines, words } = await pass1Promise;
   timings.pass1 = elapsed() - timings.preprocess - timings.spatial;
+
+  // The spatial glyph-height estimate is a median over ALL glyph-sized
+  // components — on plans dense with dashed walls/hatching the dashes drag it
+  // far below the real text height, mis-tuning every threshold derived from
+  // it. Confident digit-bearing pass-1 words are known DIMENSION text (room
+  // names often use a larger face); prefer their median height.
+  const wordHeights = words
+    .filter((w) => w.bbox && (w.confidence || 0) >= 55 &&
+      /\d/.test(w.text || '') && (w.text || '').trim().length >= 2)
+    .map((w) => (w.bbox.y1 - w.bbox.y0) / ocrScale)
+    .sort((a, b) => a - b);
+  if (wordHeights.length >= 4) {
+    glyphHeightFull = wordHeights[wordHeights.length >> 1];
+  }
+
+  // Below ~12px a hyphen glyph appears and vanishes freely, so the
+  // architectural hyphen form ("13-2x17-2") is only treated as explicit
+  // evidence when the dimension text is large enough to render it reliably.
+  const parseOpts = { hyphenExplicit: glyphHeightFull >= 12 };
 
   // ---- Exterior-feature labels ----------------------------------------------
   // Porch/patio/deck/balcony… name lines from the full-page pass. Their bboxes
@@ -377,7 +410,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     const conf = meanWordConfidence(line);
     const digits = digitCountOf(raw);
 
-    const parsed = parseDimensionLine(raw);
+    const parsed = parseDimensionLine(raw, parseOpts);
     if (parsed) {
       candidates.push(makeCandidate(parsed, bbox, conf, 'tess-full'));
     } else if (digits >= 2 && conf > 15 && bbox) {
@@ -394,7 +427,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     }
   }
 
-  for (const bandCandidate of bandWords(words, ocrScale)) {
+  for (const bandCandidate of bandWords(words, ocrScale, parseOpts)) {
     if (!candidates.some((c) => overlapRatio(c.bbox, bandCandidate.bbox) > 0.4)) {
       candidates.push(bandCandidate);
     }
@@ -409,7 +442,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   const pushRoi = (box, priority) => {
     const vertical = box.vertical ?? box.height > box.width * 1.6;
     if (!vertical && glyphHeightFull > 0 &&
-        box.height > Math.max(12, 1.8 * glyphHeightFull) &&
+        box.height > Math.max(12, 1.55 * glyphHeightFull) &&
         box.height <= 3.4 * glyphHeightFull) {
       const half = box.height / 2;
       rois.push({ ...box, vertical, height: half, priority });
@@ -419,6 +452,12 @@ export const detectDimensionsCore = async (imageData, env) => {
     rois.push({ ...box, vertical, priority });
   };
 
+  // A candidate bbox spanning several text rows came from a garbled
+  // multi-line pass-1 read; its parse is untrustworthy and it must not
+  // suppress the single-row label boxes it happens to cover.
+  const rowLike = (b) =>
+    glyphHeightFull <= 0 || Math.min(b.width, b.height) <= 3 * glyphHeightFull;
+
   // Verification re-reads: low-confidence accepted candidates get a zoomed
   // second opinion (their bbox is known-good; the values may not be).
   for (const c of candidates) {
@@ -427,7 +466,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   }
 
   for (const bbox of digitLineRois) {
-    if (candidates.some((c) => overlapRatio(c.bbox, bbox) > 0.4)) continue;
+    if (candidates.some((c) => rowLike(c.bbox) && overlapRatio(c.bbox, bbox) > 0.4)) continue;
     pushRoi(bbox, bbox.hasSep ? 7 : bbox.hasWord ? 4 : 6);
   }
 
@@ -437,14 +476,17 @@ export const detectDimensionsCore = async (imageData, env) => {
     // lines, hatching, and fixture marks — not labels.
     if (glyphHeightFull > 0 &&
         Math.min(box.width, box.height) < 0.6 * glyphHeightFull) continue;
-    if (!box.vertical && glyphHeightFull > 0 && box.width < 4 * glyphHeightFull) continue;
-    if (candidates.some((c) => overlapRatio(c.bbox, box) > 0.4)) continue;
+    if (!box.vertical && glyphHeightFull > 0 && box.width < 2.1 * glyphHeightFull) continue;
+    if (candidates.some((c) => rowLike(c.bbox) && overlapRatio(c.bbox, box) > 0.4)) continue;
+    // Cover-based: a single-row name box fully covering this box vetoes it,
+    // but a name box that merely sits INSIDE a taller box (room name with the
+    // dimension row clustered underneath) must not veto the dimension row.
     // Height guard: an alpha line whose bbox is 2+ text rows tall has likely
     // swallowed the dimension row under a room name — it must not veto it.
-    if (alphaBoxes.some((a) => overlapRatio(a, box) > 0.6 && a.height < box.height * 1.8)) continue;
+    if (alphaBoxes.some((a) => coverRatio(a, box) > 0.6 && a.height < box.height * 1.8)) continue;
     // Cover-based, not min-area: a small fragment ROI (one number of a split
     // dimension line) must not veto the full-line box that contains it.
-    if (rois.some((r) => coverRatio(r, box) > 0.65)) continue;
+    if (rois.some((r) => rowLike(r) && coverRatio(r, box) > 0.65)) continue;
 
     const long = Math.max(box.width, box.height);
     const short = Math.max(1, Math.min(box.width, box.height));
@@ -469,6 +511,25 @@ export const detectDimensionsCore = async (imageData, env) => {
       if (underName) priority += 3;
     }
     pushRoi(box, priority);
+  }
+
+  // Room names whose underside strip nothing covers: the dimension row is
+  // printed right below the name, but text jammed against walls/door arcs
+  // can defeat both the sparse pass and glyph clustering — read the strip
+  // under the name on the name's authority alone.
+  if (glyphHeightFull > 0) {
+    for (const a of alphaBoxes) {
+      if (a.height > 2.2 * glyphHeightFull) continue; // multi-row box, already handled
+      const strip = {
+        x: a.x - a.width * 0.15,
+        y: a.y + a.height,
+        width: a.width * 1.3,
+        height: 1.7 * glyphHeightFull
+      };
+      if (candidates.some((c) => overlapRatio(c.bbox, strip) > 0.3)) continue;
+      if (rois.some((r) => overlapRatio(r, strip) > 0.3)) continue;
+      pushRoi({ ...strip, underName: true }, 3);
+    }
   }
 
   // Repetition demotion: ≥4 near-identical boxes stacked at the same x (or y)
@@ -501,7 +562,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   // budget — label-dense plans need the reads more than they need speed.
   const effectiveBudget = Math.max(
     budget,
-    elapsed() + Math.min(4200, Math.max(900, 300 + 105 * rois.length))
+    elapsed() + Math.min(5200, Math.max(900, 300 + 120 * rois.length))
   );
 
   // ---- Phase 4: targeted ROI OCR --------------------------------------------
@@ -517,10 +578,15 @@ export const detectDimensionsCore = async (imageData, env) => {
     (roi.priority >= 6 || (roi.vertical && (roi.glyphCount || 0) >= 5));
 
   const parsedBoxes = [];
-  for (const roi of rois) {
+  for (let roiIndex = 0; roiIndex < rois.length; roiIndex++) {
+    const roi = rois[roiIndex];
     // A successful parse covers its whole neighbourhood — split twins and
     // overlapping duplicates of an already-read label are wasted reads.
-    if (parsedBoxes.some((b) => overlapRatio(b, roi) > 0.5)) continue;
+    // (Widened rescue re-reads deliberately overlap the parse they are
+    // double-checking, and a parse pulled out of a multi-row blob must not
+    // suppress the single-row boxes it happens to cover.)
+    if (!roi.widened &&
+        parsedBoxes.some((b) => rowLike(b) && overlapRatio(b, roi) > 0.5)) continue;
     if (elapsed() > effectiveBudget - reserve - 100) {
       // Out of OCR time — dimension-shaped leftovers still go to the
       // rescue collage (tile prep is cheap JS; only OCR is expensive).
@@ -547,8 +613,12 @@ export const detectDimensionsCore = async (imageData, env) => {
       if (elapsed() > effectiveBudget - reserve) break;
       // Early exits: a solid confident parse already in hand, or the
       // region is clearly not textual (reads with no digits at all — but a
-      // long ladder gets one block-mode try first; see below).
-      if (bestParsed && bestParsed.quality === 3 && bestConf >= 55) break;
+      // long ladder gets one block-mode try first; see below). A quality-3
+      // grade earned by the hyphen-pair convention has no explicit symbols
+      // backing it — one tiny-text misread ("55-0" as "6-5") produces the
+      // same shape, so it must clear a higher bar to stop the ladder.
+      if (bestParsed && bestParsed.quality === 3 &&
+          bestConf >= (bestParsed.hyphenUpgraded ? 78 : 55)) break;
       if (bestParsed && bestParsed.quality === 2 && bestConf >= 60) break;
       if (digitlessReads >= (variants.length > 2 ? 3 : 2)) break;
 
@@ -578,7 +648,7 @@ export const detectDimensionsCore = async (imageData, env) => {
       }
       let variantHadParse = false;
       for (const attempt of attempts) {
-        const parsed = attempt.text ? parseDimensionLine(attempt.text) : null;
+        const parsed = attempt.text ? parseDimensionLine(attempt.text, parseOpts) : null;
         if (!parsed) continue;
         allParses.push(parsed);
         // Parse quality outranks engine confidence: a clean explicit-symbol
@@ -610,6 +680,25 @@ export const detectDimensionsCore = async (imageData, env) => {
     if (bestParsed) {
       const agreeing = allParses.filter((p) => valuesMatch(p, bestParsed)).length - 1;
       if (agreeing > 0) bestConf = Math.min(90, bestConf + Math.min(12, agreeing * 6));
+    }
+
+    // A hyphen-form side paired with a bare integer usually means the crop
+    // clipped the label's leading digits ("8-5x6-6" read as "5x6-6") —
+    // queue one wider re-read so the lost prefix is back in frame.
+    const originalMixed = roi.priority === 8 &&
+      candidates.some((c) => c.mixedPair && overlapRatio(c.bbox, roi) > 0.6);
+    if (!roi.widened && !roi.vertical && glyphHeightFull > 0 &&
+        (bestParsed?.mixedPair || originalMixed)) {
+      const pad = 2.2 * glyphHeightFull;
+      // Insert right after this ROI: the rescue read must not starve behind
+      // low-priority queue leftovers when the time budget runs down.
+      rois.splice(roiIndex + 1, 0, {
+        ...roi,
+        x: Math.max(0, roi.x - pad),
+        width: roi.width + 2 * pad,
+        priority: roi.priority,
+        widened: true
+      });
     }
 
     if (roiDebug) {
@@ -664,12 +753,26 @@ export const detectDimensionsCore = async (imageData, env) => {
           // Disagreement: keep whichever read scores better once parse
           // penalties are applied — a garbled re-read ("59\" x90") must not
           // displace a plausible original just because the engine was surer.
+          // At equal parse quality the read with more digits wins outright:
+          // zoom artifacts fuse glyphs ("55-0" re-read as "6-5"), so OCR
+          // loses digits far more often than it invents them.
           const reRead = makeCandidate(
             bestParsed, roiBbox, Math.max(bestConf + 4, maxOriginal - 4), 'tess-verify'
           );
-          const winner = original && original.confidence > reRead.confidence
+          const digitEdge = original
+            ? digitsOf(original.text).length - digitsOf(bestParsed.text).length
+            : 0;
+          let winner = original && (original.quality === bestParsed.quality
+            ? digitEdge >= 0
+            : original.confidence > reRead.confidence)
             ? { ...original, source: 'tess-verify' }
             : reRead;
+          // A suspect clipped read (mixed hyphen/bare pair) that even the
+          // widened rescue re-read could not confirm is a wrong value more
+          // often than a right one — sink it below the acceptance floor.
+          if (roi.widened && winner.mixedPair) {
+            winner = { ...winner, confidence: Math.min(winner.confidence, MIN_CONFIDENCE - 5) };
+          }
           candidates.push(winner);
           // Neither read is trustworthy: this label is exactly what the
           // neural rescue pass is for.
@@ -685,16 +788,23 @@ export const detectDimensionsCore = async (imageData, env) => {
       // Verification re-read failed outright; when the original parse is weak
       // enough to be filtered later anyway, give the neural pass a shot.
       const original = candidates.find((c) => overlapRatio(c.bbox, roi) > 0.6);
+      // Even the widened rescue re-read saw nothing where a suspect clipped
+      // read (mixed hyphen/bare pair) claimed a value — sink the original.
+      if (roi.widened && original && original.mixedPair) {
+        original.confidence = Math.min(original.confidence, MIN_CONFIDENCE - 5);
+      }
       if ((!original || original.confidence < MIN_CONFIDENCE) && paddleAvailable &&
           maxDigitsSeen >= 2 && failedTiles.length < 10) {
         failedTiles.push({ gray: bestVariant, bbox: roi });
       }
     } else if (roi.priority >= 2) {
       // Only regions with number-ish evidence are worth the neural pass:
-      // Tesseract saw digits, or it's a glyph-dense vertical label whose
-      // rotated reads garbled entirely (the classic Paddle-rescue case).
+      // Tesseract saw digits, a strip under a room name (a dimension row
+      // lives there even when Tesseract reads none of it), or a glyph-dense
+      // vertical label whose rotated reads garbled entirely.
       const paddleWorthy =
-        maxDigitsSeen >= 2 || (roi.vertical && (roi.glyphCount || 0) >= 5);
+        maxDigitsSeen >= 2 || roi.underName ||
+        (roi.vertical && (roi.glyphCount || 0) >= 5);
       if (paddleWorthy) failedTiles.push({ gray: bestVariant, bbox: roi });
     }
   }
@@ -714,7 +824,7 @@ export const detectDimensionsCore = async (imageData, env) => {
       for (const { tileIndex, text } of refined || []) {
         const tile = failedTiles[tileIndex];
         if (!tile || !text) continue;
-        const parsed = parseDimensionLine(text);
+        const parsed = parseDimensionLine(text, parseOpts);
         if (!parsed) continue;
         const bbox = {
           x: tile.bbox.x, y: tile.bbox.y,
@@ -768,6 +878,8 @@ export const detectDimensionsCore = async (imageData, env) => {
     result.debug = {
       rois: roiDebug,
       roiQueue: roiQueueDebug,
+      glyphHeightFull,
+      spatialGlyphHeight: regions.glyphHeight / toFull,
       alphaBoxes: alphaBoxes.map((b) => ({
         x: Math.round(b.x), y: Math.round(b.y),
         width: Math.round(b.width), height: Math.round(b.height)
