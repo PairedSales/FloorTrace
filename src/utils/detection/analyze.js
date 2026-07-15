@@ -101,11 +101,15 @@ export const analyzeFloorplan = (imageData, options = {}) => {
       const h = comp.bbox.maxY - comp.bbox.minY + 1;
       if (h > wallThickness + 2 || w < minRun || w < 3 * h || w > 0.3 * width) continue;
 
+      // Along-axis margin stays out of the isolation scan: a room-name
+      // underline often runs nearly wall-to-wall, so the perpendicular walls
+      // flanking its ends must not veto removal; a parallel companion line
+      // above/below (window glazing band) still does.
       const halo = Math.max(4, wallThickness);
       const y0 = Math.max(0, comp.bbox.minY - halo);
       const y1 = Math.min(height - 1, comp.bbox.maxY + halo);
-      const x0 = Math.max(0, comp.bbox.minX - halo);
-      const x1 = Math.min(width - 1, comp.bbox.maxX + halo);
+      const x0 = comp.bbox.minX;
+      const x1 = comp.bbox.maxX;
       let isolated = true;
       for (let y = y0; y <= y1 && isolated; y += 1) {
         const row = y * width;

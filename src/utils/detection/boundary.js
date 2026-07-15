@@ -276,6 +276,39 @@ const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exter
     const w = comp.bbox.maxX - comp.bbox.minX + 1;
     const h = comp.bbox.maxY - comp.bbox.minY + 1;
     if (Math.min(w, h) < 3 * exteriorThickness) continue;
+    // Genuine non-GLA shading is one flat tint; colour-styled plans wash
+    // room interiors with gradients whose below-threshold tail forms a
+    // pocket spanning many gray levels. Carving those guts the footprint.
+    const ghist = new Uint32Array(256);
+    let n = 0;
+    for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+      const row = y * width;
+      for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+        if (labels[row + x] === comp.id) {
+          ghist[gray[row + x]] += 1;
+          n += 1;
+        }
+      }
+    }
+    let cum10 = 0;
+    let p10 = 0;
+    let p90 = 255;
+    for (let v = 0; v < 256; v += 1) {
+      cum10 += ghist[v];
+      if (cum10 >= n * 0.1) {
+        p10 = v;
+        break;
+      }
+    }
+    let cum90 = 0;
+    for (let v = 0; v < 256; v += 1) {
+      cum90 += ghist[v];
+      if (cum90 >= n * 0.9) {
+        p90 = v;
+        break;
+      }
+    }
+    if (p90 - p10 > 10) continue;
     targets.add(comp.id);
   }
   return targets.size ? { labels, components, targets } : null;

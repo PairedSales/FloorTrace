@@ -337,7 +337,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     ...regions.horizontal.map((b) => ({
       x: b.x / toFull, y: b.y / toFull,
       width: b.width / toFull, height: b.height / toFull,
-      glyphCount: b.glyphCount, vertical: false
+      glyphCount: b.glyphCount, vertical: false, rescued: b.rescued
     })),
     ...regions.vertical.map((b) => ({
       x: b.x / toFull, y: b.y / toFull,
@@ -367,8 +367,16 @@ export const detectDimensionsCore = async (imageData, env) => {
 
   // Below ~12px a hyphen glyph appears and vanishes freely, so the
   // architectural hyphen form ("13-2x17-2") is only treated as explicit
-  // evidence when the dimension text is large enough to render it reliably.
-  const parseOpts = { hyphenExplicit: glyphHeightFull >= 12 };
+  // evidence when the dimension text is large enough to render it reliably —
+  // or when the page itself proves the convention: several confident
+  // full-pair reads can't come from stroke noise, whereas a lone "6-5"
+  // misread on a tiny-text plan can.
+  const hyphenPairRe = /\d+\s*-\s*\d+\s*[x×]\s*\d+\s*-\s*\d+/i;
+  const hyphenEvidence = lines.filter((l) => {
+    const t = lineText(l);
+    return t && hyphenPairRe.test(t) && meanWordConfidence(l) >= 60;
+  }).length;
+  const parseOpts = { hyphenExplicit: glyphHeightFull >= 12 || hyphenEvidence >= 2 };
 
   // ---- Exterior-feature labels ----------------------------------------------
   // Porch/patio/deck/balcony… name lines from the full-page pass. Their bboxes
@@ -498,6 +506,20 @@ export const detectDimensionsCore = async (imageData, env) => {
     // Glyph-dense vertical candidates are high-value: the full-page pass
     // cannot read them at all, so the ROI pass is their only chance.
     if (box.vertical) priority += box.glyphCount >= 5 ? 1 : -1;
+    // Rescue-pass boxes (glyphs recovered from under underlines/wall
+    // fusions) are mostly split-stroke junk — they only get leftover budget
+    // so they can never starve a primary box of its read. Boxes hugging the
+    // page margin keep their score: that's where balcony/porch name labels
+    // sit, and reading those is the rescue pass's whole point.
+    if (box.rescued) {
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      const marginX = fullGray.width * 0.14;
+      const marginY = fullGray.height * 0.14;
+      const inMargin = cx < marginX || cx > fullGray.width - marginX ||
+        cy < marginY || cy > fullGray.height - marginY;
+      if (!inMargin) priority -= 3;
+    }
     // Floorplan labels put the dimension row directly under the room name:
     // a box hanging just below a recognized name line is very likely a
     // dimension line the full-page pass could not read.
@@ -578,6 +600,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     (roi.priority >= 6 || (roi.vertical && (roi.glyphCount || 0) >= 5));
 
   const parsedBoxes = [];
+  const roiExteriorLabels = [];
   for (let roiIndex = 0; roiIndex < rois.length; roiIndex++) {
     const roi = rois[roiIndex];
     // A successful parse covers its whole neighbourhood — split twins and
@@ -637,6 +660,21 @@ export const detectDimensionsCore = async (imageData, env) => {
         continue;
       }
       if (roiDebug) reads.push({ text: read.text, confidence: read.confidence });
+      // Exterior-feature names the sparse pass missed (text jammed against
+      // an underline or tinted background) surface here in the zoomed read.
+      const roiKeyword = matchExteriorFeature(read.text);
+      if (roiKeyword && read.confidence >= 50) {
+        roiExteriorLabels.push({
+          keyword: roiKeyword,
+          text: read.text,
+          bbox: {
+            x: Math.round(roi.x),
+            y: Math.round(roi.y),
+            width: Math.round(roi.width),
+            height: Math.round(roi.height)
+          }
+        });
+      }
       const digitsInRead = digitCountOf(read.text);
       if (digitsInRead === 0) digitlessReads++;
       maxDigitsSeen = Math.max(maxDigitsSeen, digitsInRead);
@@ -807,6 +845,10 @@ export const detectDimensionsCore = async (imageData, env) => {
         (roi.vertical && (roi.glyphCount || 0) >= 5);
       if (paddleWorthy) failedTiles.push({ gray: bestVariant, bbox: roi });
     }
+  }
+  for (const label of roiExteriorLabels) {
+    if (exteriorLabels.some((l) => overlapRatio(l.bbox, label.bbox) > 0.5)) continue;
+    exteriorLabels.push(label);
   }
   timings.roi = elapsed() - timings.preprocess - timings.spatial - timings.pass1;
 

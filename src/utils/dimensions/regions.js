@@ -12,9 +12,46 @@
 const MAX_GLYPH_SIZE = 64;
 const MIN_GLYPH_HEIGHT = 4;
 const MIN_GLYPH_PIXELS = 4;
+// Runs longer than any glyph are walls or text underlines. Glyphs that touch
+// an underline fuse into one oversized component and vanish from extraction;
+// removing structural runs first splits them back into readable glyphs.
+const STRUCT_RUN = 72;
+
+const stripStructuralRuns = (ink) => {
+  const { data, width, height } = ink;
+  const out = data.slice();
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    let runStart = -1;
+    for (let x = 0; x <= width; x += 1) {
+      const on = x < width && data[row + x];
+      if (on && runStart < 0) runStart = x;
+      if (!on && runStart >= 0) {
+        if (x - runStart >= STRUCT_RUN) {
+          for (let k = runStart; k < x; k += 1) out[row + k] = 0;
+        }
+        runStart = -1;
+      }
+    }
+  }
+  for (let x = 0; x < width; x += 1) {
+    let runStart = -1;
+    for (let y = 0; y <= height; y += 1) {
+      const on = y < height && data[y * width + x];
+      if (on && runStart < 0) runStart = y;
+      if (!on && runStart >= 0) {
+        if (y - runStart >= STRUCT_RUN) {
+          for (let k = runStart; k < y; k += 1) out[k * width + x] = 0;
+        }
+        runStart = -1;
+      }
+    }
+  }
+  return { ...ink, data: out };
+};
 
 /** 8-connected component labelling; returns glyph-sized component boxes. */
-const extractGlyphs = (ink) => {
+const extractGlyphs = (ink, { allowBlobs = false } = {}) => {
   const { data, width, height } = ink;
   const labels = new Int32Array(width * height);
   const stack = new Int32Array(width * height);
@@ -86,13 +123,20 @@ const extractGlyphs = (ink) => {
     const w = maxX - minX + 1;
     const h = maxY - minY + 1;
     if (h < MIN_GLYPH_HEIGHT && w < MIN_GLYPH_HEIGHT) continue;
-    if (w > MAX_GLYPH_SIZE || h > MAX_GLYPH_SIZE) continue;
+    let units = 1;
+    if (w > MAX_GLYPH_SIZE || h > MAX_GLYPH_SIZE) {
+      // Rescue mode may keep a one-axis-oversized component: a bold word
+      // whose letters fused into a single glyph-tall blob ("COVERED").
+      if (!allowBlobs) continue;
+      if (Math.min(w, h) > MAX_GLYPH_SIZE || Math.max(w, h) > MAX_GLYPH_SIZE * 2) continue;
+      units = Math.max(1, Math.min(12, Math.round(Math.max(w, h) / Math.max(1, Math.min(w, h) * 0.8))));
+    }
     // Structural fills (walls) are near-solid rectangles; glyphs are not
     if (count > w * h * 0.9 && w > 8 && h > 8) continue;
     if (minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1) continue;
 
     glyphs.push({
-      x: minX, y: minY, w, h,
+      x: minX, y: minY, w, h, units,
       cx: minX + w / 2, cy: minY + h / 2
     });
   }
@@ -160,10 +204,13 @@ const clusterGlyphs = (glyphs, axis, maxGap) => {
       if (g.x + g.w > maxX) maxX = g.x + g.w;
       if (g.y + g.h > maxY) maxY = g.y + g.h;
     }
+    // Rescued word blobs count as the several letters they contain, so a
+    // line made of one or two blobs still passes min-glyph-count filters.
+    const glyphCount = c.glyphs.reduce((s, g) => s + (g.units || 1), 0);
     return {
       x: minX, y: minY,
       width: maxX - minX, height: maxY - minY,
-      glyphCount: c.glyphs.length
+      glyphCount
     };
   });
 };
@@ -180,12 +227,29 @@ export const findTextRegions = (ink) => {
   const glyphHeight = median(glyphs.map((g) => g.h)) || 10;
   const maxGap = Math.max(6, glyphHeight * 2.5);
 
-  const horizontal = clusterGlyphs(glyphs, 'x', maxGap).filter((b) =>
+  const lineFilter = (b) =>
     b.glyphCount >= 3 &&
     b.height >= MIN_GLYPH_HEIGHT && b.height <= 72 &&
     b.width / Math.max(1, b.height) >= 1.4 &&
-    b.width <= ink.width * 0.5
-  );
+    b.width <= ink.width * 0.5;
+  const horizontal = clusterGlyphs(glyphs, 'x', maxGap).filter(lineFilter);
+
+  // Rescue pass: glyphs fused with an underline or wall stroke vanish from
+  // the primary pass (the merged component is oversized); bold words whose
+  // letters fused survive here as one-axis-oversized blobs. Rescued glyphs
+  // cluster only among themselves and may only ADD boxes where the primary
+  // pass found nothing — joining a primary cluster would smear junk
+  // fragments into an otherwise tight, readable line box.
+  const rescued = extractGlyphs(stripStructuralRuns(ink), { allowBlobs: true })
+    .filter((g) => !glyphs.some((p) =>
+      g.cx >= p.x && g.cx <= p.x + p.w && g.cy >= p.y && g.cy <= p.y + p.h));
+  const boxesTouch = (a, b) =>
+    a.x < b.x + b.width && b.x < a.x + a.width &&
+    a.y < b.y + b.height && b.y < a.y + a.height;
+  for (const box of clusterGlyphs(rescued, 'x', maxGap).filter(lineFilter)) {
+    if (horizontal.some((h) => boxesTouch(h, box))) continue;
+    horizontal.push({ ...box, rescued: true });
+  }
 
   // Glyphs already absorbed into a solid horizontal line shouldn't seed
   // vertical columns (every row of horizontal text is also a weak column).

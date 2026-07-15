@@ -1,0 +1,29 @@
+{
+  "boundary": {
+    "outerBbox": [1, 1, 840, 599],
+    "floors": [[1, 1, 840, 599]],
+    "outerPolygon": [[1, 1], [840, 1], [840, 478], [676, 478], [676, 599], [165, 599], [165, 478], [1, 478]],
+    "excludeRegions": [[52, 498, 95, 38], [703, 492, 95, 38]]
+  },
+  "rooms": [
+    { "name": "BEDROOM 1 (left)", "click": [95, 158], "labelBbox": [50, 150, 92, 14], "dims": [10.667, 13.333], "rect": [15, 16, 170, 206], "minIou": 0.75 },
+    { "name": "BEDROOM 2 (left)", "click": [264, 95], "labelBbox": [221, 105, 74, 13], "dims": [10.667, 10.0], "rect": [178, 15, 312, 160], "minIou": 0.5 },
+    { "name": "BEDROOM 1 (right)", "click": [576, 87], "labelBbox": [542, 97, 74, 14], "dims": [10.667, 10.0], "rect": [483, 14, 632, 159], "minIou": 0.75 },
+    { "name": "BEDROOM 2 (right)", "click": [739, 152], "labelBbox": [702, 162, 74, 12], "dims": [10.667, 13.333], "rect": [665, 15, 832, 205], "minIou": 0.6 },
+    { "name": "LIVING ROOM (left)", "click": [263, 383], "labelBbox": [226, 393, 74, 12], "dims": [11.0, 16.667], "rect": [180, 325, 360, 591], "minIou": 0.75 },
+    { "name": "KITCHEN (right, open-plan)", "click": [744, 262], "labelBbox": [712, 272, 65, 12], "dims": [10.5, 8.0] },
+    { "name": "DINING ROOM (right, open-plan)", "click": [744, 343], "labelBbox": [710, 353, 65, 11], "dims": [11.0, 9.0] }
+  ],
+  "ocr": [
+    { "name": "BEDROOM 2 (left)", "w": 10.6667, "h": 10.0 },
+    { "name": "BEDROOM 1 (left)", "w": 10.6667, "h": 13.3333 },
+    { "name": "KITCHEN (left)", "w": 10.5, "h": 8.0 },
+    { "name": "DINING ROOM (left)", "w": 11.0, "h": 9.0 },
+    { "name": "LIVING ROOM (left)", "w": 11.0, "h": 16.6667 },
+    { "name": "BEDROOM 1 (right)", "w": 10.6667, "h": 10.0 },
+    { "name": "BEDROOM 2 (right)", "w": 10.6667, "h": 13.3333 },
+    { "name": "KITCHEN (right)", "w": 10.5, "h": 8.0 },
+    { "name": "DINING ROOM (right)", "w": 11.0, "h": 9.0 },
+    { "name": "LIVING ROOM (right)", "w": 11.0, "h": 16.6667 }
+  ]
+}
