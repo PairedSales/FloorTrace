@@ -148,6 +148,7 @@ const selectLabelledCavities = (regions, labels, components, footprint, minCavit
   const targets = new Set();
   const garages = new Set();
   const unresolved = [];
+  const resolved = [];
   for (const region of regions) {
     // Vote over a small sample grid: label bboxes are approximate and their
     // centre can land on a stroke or a stray glyph pixel.
@@ -178,9 +179,10 @@ const selectLabelledCavities = (regions, labels, components, footprint, minCavit
     // interior itself (a misplaced label must not gut the footprint).
     if (size < minCavity || size > 0.45 * footprint.area) continue;
     targets.add(best);
+    resolved.push({ region, id: best });
     if (region.keyword && /garage/i.test(region.keyword)) garages.add(best);
   }
-  return { targets, garages, unresolved };
+  return { targets, garages, unresolved, resolved };
 };
 
 // Fallback for labels whose cavity vote failed: screened pool cages and
@@ -443,6 +445,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
 
     const cavities = openCavities(footprint, width, height);
     let unresolvedLabels = options.excludeRegions ?? [];
+    let resolvedLabels = [];
     if (cavities.components.length) {
       let targets = new Set();
       const garageIds = new Set();
@@ -453,6 +456,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         );
         targets = picked.targets;
         unresolvedLabels = picked.unresolved;
+        resolvedLabels = picked.resolved;
         for (const id of picked.garages) garageIds.add(id);
       }
       if (options.autoGarage !== false) {
@@ -478,7 +482,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         });
       }
     }
-    if (unresolvedLabels.length) {
+    if (unresolvedLabels.length || resolvedLabels.length) {
       const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
       const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
       const barrier = bridgeRuns(
@@ -486,10 +490,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
         Math.max(8, wallThickness * 2),
       );
-      for (const region of unresolvedLabels) {
-        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
-        if (!flooded || flooded.size < minCavity ||
-            flooded.size > 0.45 * footprint.area) continue;
+      const pushFloodCarve = (flooded, garages, countAs) => {
         const lab = new Int8Array(flooded.mask.length).fill(-1);
         for (let i = 0; i < lab.length; i += 1) {
           if (flooded.mask[i]) lab[i] = 0;
@@ -498,8 +499,33 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
           labels: lab,
           components: [{ id: 0, size: flooded.size, bbox: flooded.bbox }],
           targets: new Set([0]),
-          garages: region.keyword && /garage/i.test(region.keyword) ? 1 : 0,
+          garages,
+          countAs,
         });
+      };
+      // A door-swing arc drawn across a patio splits its slab into several
+      // open cavities, and the label votes only one in. Flood the label
+      // across thin ink too, and carve whatever the flood covers beyond the
+      // voted cavity (counted as part of the same label, not a new region).
+      for (const { region, id } of resolvedLabels) {
+        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
+        if (!flooded || flooded.size > 0.45 * footprint.area) continue;
+        let extra = 0;
+        for (let i = 0; i < flooded.mask.length; i += 1) {
+          if (flooded.mask[i] && cavities.labels[i] !== id) extra += 1;
+        }
+        if (extra < Math.max(minCavity / 2, 0.05 * flooded.size)) continue;
+        pushFloodCarve(flooded, 0, 0);
+      }
+      for (const region of unresolvedLabels) {
+        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
+        if (!flooded || flooded.size < minCavity ||
+            flooded.size > 0.45 * footprint.area) continue;
+        pushFloodCarve(
+          flooded,
+          region.keyword && /garage/i.test(region.keyword) ? 1 : 0,
+          1,
+        );
       }
     }
     if (options.autoShaded !== false) {
@@ -525,7 +551,7 @@ const buildFloor = (initialFootprint, analysis, epsilon, options) => {
       if (!carvedOuter) continue;
       footprint = carved;
       outerResult = carvedOuter;
-      excluded += carve.targets.size;
+      excluded += carve.countAs ?? carve.targets.size;
       excludedGarages += carve.garages;
       exteriorThickness = sampleExteriorThickness(
         outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,

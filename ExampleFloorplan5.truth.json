@@ -1,0 +1,27 @@
+{
+  "boundary": {
+    "outerBbox": [277, 54, 1050, 738],
+    "floors": [[277, 54, 1050, 738]],
+    "excludeRegions": [[725, 147, 64, 20], [884, 167, 129, 23], [608, 667, 158, 20]]
+  },
+  "ocr": [
+    { "name": "MSTR STE", "w": 13.1667, "h": 17.1667 },
+    { "name": "M BATH", "w": 13.1667, "h": 8.0 },
+    { "name": "WIC (left)", "w": 6.0, "h": 9.0 },
+    { "name": "WIC (mid)", "w": 6.0, "h": 6.0 },
+    { "name": "UTILITY", "w": 8.4167, "h": 6.5 },
+    { "name": "MEDIA/STUDY", "w": 10.25, "h": 12.0 },
+    { "name": "TWO CAR GARAGE", "w": 22.4167, "h": 22.0 },
+    { "name": "NOOK", "w": 10.5833, "h": 10.6667 },
+    { "name": "KITCHEN", "w": 12.0, "h": 11.3333 },
+    { "name": "FOYER", "w": 7.0, "h": 8.0 },
+    { "name": "FRONT PORCH", "w": 19.75, "h": 7.6667 },
+    { "name": "LANAI", "w": 15.75, "h": 11.1667 },
+    { "name": "FAMILY RM", "w": 18.0, "h": 17.75 },
+    { "name": "DINING", "w": 10.6667, "h": 12.0 },
+    { "name": "BBQ PORCH", "w": 13.5, "h": 16.75 },
+    { "name": "BED RM (right)", "w": 11.4167, "h": 12.0 },
+    { "name": "BED RM (bottom)", "w": 12.0, "h": 12.0 },
+    { "name": "WIC (right)", "w": 5.0, "h": 6.0 }
+  ]
+}

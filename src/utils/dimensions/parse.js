@@ -59,9 +59,12 @@ export const normalizeOcrText = (text) => {
   s = s.replace(/(\d)b(\d)/g, '$18$2');
   s = s.replace(/(\d)z(\d)/g, '$12$2');
 
-  // Comma / middle dot / semicolon between digits is a blurred foot tick
-  s = s.replace(/(\d)\s*[,·;]\s*(?=\d)/g, "$1' ");
-  s = s.replace(/(\d)\s*[,·;]+\s*$/g, "$1'");
+  // A "+" between values is a hyphen crossed by a dashed ceiling line
+  s = s.replace(/(['"\d])\s*\+\s*(?=\d)/g, '$1-');
+
+  // Comma / middle dot / semicolon / colon between digits is a blurred foot tick
+  s = s.replace(/(\d)\s*[,·;:]\s*(?=\d)/g, "$1' ");
+  s = s.replace(/(\d)\s*[,·;:]+\s*$/g, "$1'");
 
   // Pipe / bang / slash between digits: blurred foot tick
   s = s.replace(/(\d)\s*[|!/]\s*(?=\d)/g, "$1' ");
@@ -69,6 +72,13 @@ export const normalizeOcrText = (text) => {
 
   // Architectural hyphen between feet tick and inches: 12'-5" -> 12' 5"
   s = s.replace(/'\s*-\s*(?=\d)/g, "' ");
+
+  // A short run of pure punctuation between a closing inch mark and the next
+  // number is a garbled pair separator ("12'0\" :( 11' 5\"" — a dash-crossed
+  // x): drop it so the no-separator strategies can pair the two groups.
+  // Longer or letter-bearing junk stays — eating it fabricates pairs out of
+  // garbage reads.
+  s = s.replace(/(")\s*[^\w\s'".]{1,3}\s*(?=\d)/g, '$1 ');
 
   // Space between a digit and a unit keyword and vice versa
   s = s.replace(/(\d)(ft|feet|in|inch|inches|m|meters?)\b/g, '$1 $2');
@@ -125,7 +135,12 @@ export const parseSingleToken = (token) => {
     if (value > 99) {
       const v = value / 10;
       if (isReasonableFeet(v)) {
-        return { value: v, format: 'decimal', quality: 2, explicitUnit: true, raw: v };
+        // bareDigits kept: on an inches-format pair the partner context can
+        // reinterpret "118'" as 11'8" whose hyphen was eaten (see buildPair).
+        return {
+          value: v, format: 'decimal', quality: 2, explicitUnit: true, raw: v,
+          bareDigits: m[1]
+        };
       }
       return null;
     }
@@ -429,6 +444,24 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
   left = recoverTicks(left, right);
   right = recoverTicks(right, left);
 
+  // "118'" beside an explicit feet-inches partner is 11'8" with its hyphen
+  // eaten, not a 11.8' decimal — inches-format pages don't mix in decimals.
+  // The partner must carry a real inches component ("11-5\""), not be a bare
+  // feet-only side ("15'"): against those, the lost-decimal reading stands.
+  const recoverFeetOnly = (tk, other) => {
+    if (tk.format !== 'decimal' || !tk.bareDigits || tk.bareDigits.length !== 3) return tk;
+    if (other.format !== 'inches' || !(other.explicitUnit || other.hyphenPair)) return tk;
+    if (!hasFraction(other)) return tk;
+    const feet = parseInt(tk.bareDigits.slice(0, 2), 10);
+    const inches = parseInt(tk.bareDigits.slice(2), 10);
+    if (inches >= 12) return tk;
+    const v = feet + inches / 12;
+    if (!isReasonableFeet(v)) return tk;
+    return { ...tk, value: v, raw: v, format: 'inches', quality: Math.min(tk.quality, 2) };
+  };
+  left = recoverFeetOnly(left, right);
+  right = recoverFeetOnly(right, left);
+
   // "13-2x17-2": both sides in the tickless architectural hyphen form is the
   // page's labeling convention, not a coincidence — treat it as explicit.
   // A lone hyphen side whose partner carries explicit feet-inches symbols is
@@ -454,6 +487,10 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
     !left.explicitUnit && !right.explicitUnit;
 
   if (!isReasonableFeet(left.value) || !isReasonableFeet(right.value)) return null;
+
+  // No room side is under 2 ft; a unit-less side that small is a stray wall
+  // stroke or list bullet read as a digit — reject the pair outright.
+  if ([left, right].some((t) => !t.explicitUnit && t.value < 2)) return null;
 
   // Rooms with a >25:1 aspect ratio are almost certainly misparses
   const ratio = Math.max(left.value, right.value) / Math.min(left.value, right.value);

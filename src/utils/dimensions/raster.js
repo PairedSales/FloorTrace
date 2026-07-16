@@ -134,22 +134,22 @@ export const unsharp = (gray, amount = 1.2) => {
   return { data: out, width, height };
 };
 
-/** Otsu threshold value for a grayscale image. */
-export const otsu = (gray) => {
-  const { data } = gray;
-  const hist = new Uint32Array(256);
-  for (let i = 0; i < data.length; i++) hist[data[i]]++;
-
-  const total = data.length;
+/** Otsu threshold over histogram bins [lo, hi). */
+const otsuHist = (hist, lo, hi) => {
+  let total = 0;
   let sum = 0;
-  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  for (let i = lo; i < hi; i++) {
+    total += hist[i];
+    sum += i * hist[i];
+  }
+  if (total === 0) return lo;
 
   let sumB = 0;
   let wB = 0;
   let maxVar = 0;
-  let threshold = 127;
+  let threshold = (lo + hi) >> 1;
 
-  for (let t = 0; t < 256; t++) {
+  for (let t = lo; t < hi; t++) {
     wB += hist[t];
     if (wB === 0) continue;
     const wF = total - wB;
@@ -166,13 +166,60 @@ export const otsu = (gray) => {
   return threshold;
 };
 
+const histOf = (gray) => {
+  const hist = new Uint32Array(256);
+  const { data } = gray;
+  for (let i = 0; i < data.length; i++) hist[data[i]]++;
+  return hist;
+};
+
+/** Otsu threshold value for a grayscale image. */
+export const otsu = (gray) => otsuHist(histOf(gray), 0, 256);
+
+/**
+ * Fill-aware ink threshold. On colour-styled plans plain Otsu settles between
+ * the tinted room fills and the page white, classifying whole floors (and the
+ * text sitting on them) as one ink slab. When the dark class comes back
+ * implausibly large for line work, try splitting it again: the lower
+ * threshold is kept only when it separates two well-spaced modes (true
+ * strokes vs fills). A genuinely ink-dense B&W plan has a single dark mode,
+ * fails the separation test, and keeps plain Otsu.
+ */
+export const inkOtsu = (gray) => {
+  const hist = histOf(gray);
+  const total = gray.data.length;
+  const t1 = otsuHist(hist, 0, 256);
+  let darkCount = 0;
+  for (let v = 0; v < t1; v++) darkCount += hist[v];
+  if (darkCount <= 0.14 * total) return t1;
+
+  const t2 = otsuHist(hist, 0, t1);
+  let inkCount = 0;
+  let inkSum = 0;
+  let fillCount = 0;
+  let fillSum = 0;
+  for (let v = 0; v < t2; v++) {
+    inkCount += hist[v];
+    inkSum += v * hist[v];
+  }
+  for (let v = t2; v < t1; v++) {
+    fillCount += hist[v];
+    fillSum += v * hist[v];
+  }
+  // Fills must dominate the dark class. When most dark pixels survive the
+  // re-split, the "excess" was grey linework/hatching (strokes worth
+  // keeping), not tinted room fills — keep plain Otsu.
+  if (inkCount < 0.002 * total || inkCount > 0.4 * darkCount || fillCount === 0) return t1;
+  return fillSum / fillCount - inkSum / inkCount >= 35 ? t2 : t1;
+};
+
 /**
  * Binarize to an ink mask (1 = ink). Automatically inverts white-on-black
  * plans: ink should be the minority of pixels.
  */
 export const binarizeInk = (gray, threshold) => {
   const { data, width, height } = gray;
-  const t = threshold ?? otsu(gray);
+  const t = threshold ?? inkOtsu(gray);
   const mask = new Uint8Array(data.length);
   let dark = 0;
   for (let i = 0; i < data.length; i++) {
@@ -184,6 +231,245 @@ export const binarizeInk = (gray, threshold) => {
   if (dark > data.length / 2) {
     for (let i = 0; i < mask.length; i++) mask[i] ^= 1;
   }
+  return { data: mask, width, height };
+};
+
+/**
+ * Mask of dash/dot ruling lines (dashed tray-ceiling boxes, leader lines).
+ * Colour-styled plans draw dashed ceiling outlines straight through room
+ * labels, and the dash fragments fuse into the glyphs ("21'-3\"" reads
+ * "21437"). A ruling line is a long chain of thin colinear segments, or one
+ * long thin solid run — the hyphens and tick marks inside a dimension row
+ * never chain that far. Glyph strokes crossing a line stay unmarked: their
+ * cross-axis ink extent exceeds the line thickness, so they are not "thin".
+ */
+export const dashLineMask = (ink, {
+  maxThick = 4, minChain = 5, minSpan = 64, maxSeg = 48, maxGap = 24,
+  maxBridge = 320, minSolid = 90, minInk = 60
+} = {}) => {
+  const minDashLen = maxThick + 2;
+  const { data, width, height } = ink;
+  const mask = new Uint8Array(data.length);
+
+  // Per-pixel ink run extents along each axis (down/right pass counts the
+  // run so far; up/left pass extends it to the full run length).
+  const vExt = new Uint16Array(data.length);
+  const hExt = new Uint16Array(data.length);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    let run = 0;
+    for (let x = 0; x < width; x++) {
+      run = data[row + x] ? run + 1 : 0;
+      hExt[row + x] = run;
+    }
+    run = 0;
+    for (let x = width - 1; x >= 0; x--) {
+      run = data[row + x] ? run + 1 : 0;
+      if (run) hExt[row + x] += run - 1;
+    }
+  }
+  for (let x = 0; x < width; x++) {
+    let run = 0;
+    for (let y = 0; y < height; y++) {
+      const i = y * width + x;
+      run = data[i] ? run + 1 : 0;
+      vExt[i] = run;
+    }
+    run = 0;
+    for (let y = height - 1; y >= 0; y--) {
+      const i = y * width + x;
+      run = data[i] ? run + 1 : 0;
+      if (run) vExt[i] += run - 1;
+    }
+  }
+
+  // A ruling dash is an entire free-standing component that is thin along
+  // the line's cross axis. Glyph fragments (the apex of an "o", a digit cap)
+  // are locally thin too, but belong to the glyph's big component — only
+  // whole-component dashes may vote a ruling line into existence.
+  const compIds = new Int32Array(data.length).fill(-1);
+  const compThinH = []; // bbox height <= maxThick
+  const compThinV = []; // bbox width  <= maxThick
+  {
+    const queue = new Int32Array(data.length);
+    for (let start = 0; start < data.length; start++) {
+      if (!data[start] || compIds[start] !== -1) continue;
+      const id = compThinH.length;
+      let head = 0;
+      let tail = 0;
+      queue[tail++] = start;
+      compIds[start] = id;
+      let minX = width;
+      let minY = height;
+      let maxX = 0;
+      let maxY = 0;
+      while (head < tail) {
+        const idx = queue[head++];
+        const x = idx % width;
+        const y = (idx / width) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x + 1 < width && data[idx + 1] && compIds[idx + 1] === -1) { compIds[idx + 1] = id; queue[tail++] = idx + 1; }
+        if (x > 0 && data[idx - 1] && compIds[idx - 1] === -1) { compIds[idx - 1] = id; queue[tail++] = idx - 1; }
+        if (y + 1 < height && data[idx + width] && compIds[idx + width] === -1) { compIds[idx + width] = id; queue[tail++] = idx + width; }
+        if (y > 0 && data[idx - width] && compIds[idx - width] === -1) { compIds[idx - width] = id; queue[tail++] = idx - width; }
+      }
+      compThinH.push(maxY - minY + 1 <= maxThick);
+      compThinV.push(maxX - minX + 1 <= maxThick);
+    }
+  }
+
+  // Erase the line's own ink only: at each step, find thin ink within ±2 of
+  // the confirmed row/column and clear its contiguous thin cross-run. Text
+  // sitting a few px off the line keeps every pixel; anything whose
+  // cross-axis run exceeds the line thickness is a glyph stroke and stays.
+  // A thin run with tall ink close by on BOTH sides along the line is a
+  // hyphen between digits (the line crosses the label at hyphen height) —
+  // spare it, or "11'-8\"" loses its hyphen and reads "118\"".
+  const HYPHEN_REACH = 9;
+  const erase = (horizontal, pos, from, to) => {
+    const limit = horizontal ? height : width;
+    const along = horizontal ? width : height;
+    const at = (s, p) => (horizontal ? p * width + s : s * width + p);
+    const thinAt = (idx) => data[idx] &&
+      (horizontal ? vExt[idx] : hExt[idx]) <= maxThick;
+    const tallNear = (s, p, dir) => {
+      for (let k = 1; k <= HYPHEN_REACH; k++) {
+        const q = s + dir * k;
+        if (q < 0 || q >= along) return false;
+        for (let d = -1; d <= 1; d++) {
+          const pp = p + d;
+          if (pp < 0 || pp >= limit) continue;
+          const idx = at(q, pp);
+          if (data[idx] && (horizontal ? vExt[idx] : hExt[idx]) > maxThick) return true;
+        }
+      }
+      return false;
+    };
+    for (let s = from; s <= to; s++) {
+      for (let d = -2; d <= 2; d++) {
+        const p = pos + d;
+        if (p < 0 || p >= limit) continue;
+        if (!thinAt(at(s, p))) continue;
+        if (tallNear(s, p, -1) && tallNear(s, p, 1)) break;
+        for (let q = p; q >= 0 && thinAt(at(s, q)); q--) mask[at(s, q)] = 1;
+        for (let q = p + 1; q < limit && thinAt(at(s, q)); q++) mask[at(s, q)] = 1;
+        break;
+      }
+    }
+  };
+
+  // A fused-but-genuine line piece runs through whitespace: beyond its thin
+  // cross-run there is no ink for most of its length. Anti-aliasing halos
+  // hugging glyph caps form long thin runs too, but have the glyph bodies
+  // right next to them and fail this test.
+  const cleanRun = (horizontal, pos, from, to) => {
+    const limit = horizontal ? height : width;
+    const at = (s, p) => (horizontal ? p * width + s : s * width + p);
+    let attached = 0;
+    let n = 0;
+    for (let s = from; s <= to; s += 2) {
+      n++;
+      let lo = pos;
+      let hi = pos;
+      while (lo - 1 >= 0 && data[at(s, lo - 1)]) lo--;
+      while (hi + 1 < limit && data[at(s, hi + 1)]) hi++;
+      if ((lo - 2 >= 0 && data[at(s, lo - 2)]) ||
+          (hi + 2 < limit && data[at(s, hi + 2)])) attached++;
+    }
+    return attached <= 0.25 * n;
+  };
+
+  const sweep = (horizontal) => {
+    const outer = horizontal ? height : width;
+    const inner = horizontal ? width : height;
+    for (let o = 0; o < outer; o++) {
+      // Thin dash segments along this scan line.
+      const segs = [];
+      let start = -1;
+      for (let i = 0; i <= inner; i++) {
+        const idx = horizontal ? o * width + i : i * width + o;
+        const thin = i < inner && data[idx] &&
+          (horizontal ? vExt[idx] : hExt[idx]) <= maxThick;
+        if (thin && start < 0) start = i;
+        if (!thin && start >= 0) {
+          const seg = { from: start, to: i - 1 };
+          const mid = (seg.from + seg.to) >> 1;
+          const midIdx = horizontal ? o * width + mid : mid * width + o;
+          const comp = compIds[midIdx];
+          seg.iso = comp >= 0 && (horizontal ? compThinH[comp] : compThinV[comp]);
+          segs.push(seg);
+          start = -1;
+        }
+      }
+      // Long solid thin run: a leader/ruling line on its own. No glyph
+      // stroke is this long, so fusion with text does not disqualify it.
+      for (const s of segs) {
+        if (s.to - s.from + 1 >= minSolid &&
+            cleanRun(horizontal, o, s.from, s.to)) erase(horizontal, o, s.from, s.to);
+      }
+      // Chains of short colinear whole-component dashes. Dashes fused into
+      // glyphs can't vote, but they must not break the line either: a chain
+      // may bridge a fused stretch when the gap still shows thin-ink
+      // evidence at the line's row. The confirmed span is erased wholesale,
+      // so the fused nubs inside it get cleaned too.
+      const thinAt = (idx) => data[idx] &&
+        (horizontal ? vExt[idx] : hExt[idx]) <= maxThick;
+      const bridgeOk = (prevTo, nextFrom) => {
+        const gap = nextFrom - prevTo - 1;
+        if (gap <= maxGap) return true;
+        if (gap > maxBridge) return false;
+        let covered = 0;
+        for (let i = prevTo + 1; i < nextFrom; i++) {
+          for (let d = -2; d <= 2; d++) {
+            const p = o + d;
+            if (p < 0 || p >= (horizontal ? height : width)) continue;
+            if (thinAt(horizontal ? p * width + i : i * width + p)) {
+              covered++;
+              break;
+            }
+          }
+        }
+        return covered >= 0.12 * gap;
+      };
+      let chain = null;
+      const flush = () => {
+        // Enough dashes, or enough total line ink (two long solid pieces
+        // bridged across a label): both prove a ruling line. A label's own
+        // punctuation can't get there — quote ticks are below the length
+        // floor and a row has only two hyphens.
+        if (chain && chain.to - chain.from >= minSpan &&
+            (chain.count >= minChain || chain.ink >= minInk)) {
+          erase(horizontal, o, chain.from, chain.to);
+        }
+        chain = null;
+      };
+      for (const s of segs) {
+        // Members: free-standing dashes above punctuation size, or runs long
+        // enough to be self-evident line pieces even when fused into other
+        // ink.
+        const len = s.to - s.from + 1;
+        const member = s.iso
+          ? len >= minDashLen && len <= maxSeg
+          : len >= maxSeg && cleanRun(horizontal, o, s.from, s.to);
+        if (!member) continue;
+        if (chain && !bridgeOk(chain.to, s.from)) flush();
+        if (chain) {
+          chain.to = s.to;
+          chain.count++;
+          chain.ink += len;
+        } else {
+          chain = { from: s.from, to: s.to, count: 1, ink: len };
+        }
+      }
+      flush();
+    }
+  };
+
+  sweep(true);
+  sweep(false);
   return { data: mask, width, height };
 };
 
@@ -289,7 +575,7 @@ export const addBorder = (gray, margin) => {
 
 /** Otsu-binarize to a 0/255 grayscale image (kills anti-aliasing halos). */
 export const binarizeGray = (gray) => {
-  const t = otsu(gray);
+  const t = inkOtsu(gray);
   const out = new Uint8Array(gray.data.length);
   for (let i = 0; i < gray.data.length; i++) out[i] = gray.data[i] < t ? 0 : 255;
   return { data: out, width: gray.width, height: gray.height };
@@ -303,7 +589,7 @@ export const binarizeGray = (gray) => {
  */
 export const isolateCenterBand = (gray, { vertical = false } = {}) => {
   const { data, width, height } = gray;
-  const t = otsu(gray);
+  const t = inkOtsu(gray);
   const n = vertical ? width : height;
   const counts = new Uint32Array(n);
   for (let y = 0; y < height; y++) {
@@ -367,7 +653,7 @@ export const isolateCenterBand = (gray, { vertical = false } = {}) => {
  */
 export const trimFlankRails = (gray, { vertical = false, marginLo = 0, marginHi = 0 } = {}) => {
   const { data, width, height } = gray;
-  const t = otsu(gray);
+  const t = inkOtsu(gray);
   const n = vertical ? height : width;
   const counts = new Uint32Array(n);
   const crossMin = new Int32Array(n).fill(1 << 30);

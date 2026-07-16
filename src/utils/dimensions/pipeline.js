@@ -27,7 +27,7 @@ import { matchExteriorFeature } from './exteriorLabels.js';
 import {
   toGray, grayToImageDataLike, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray,
-  isolateCenterBand, trimFlankRails
+  isolateCenterBand, trimFlankRails, dashLineMask, otsu, inkOtsu
 } from './raster.js';
 import { findTextRegions } from './regions.js';
 import { recognizeSparse, recognizeLine, lineText } from './ocrTesseract.js';
@@ -111,13 +111,20 @@ const dedupeCandidates = (candidates) => {
   // two identical rooms — real twins sit rooms apart.
   const near = (a, b) =>
     Math.abs(a.x + a.width / 2 - (b.x + b.width / 2)) < 0.6 * Math.max(a.width, b.width) &&
-    Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) < 1.2 * Math.max(a.height, b.height);
+    Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) < 1.8 * Math.max(a.height, b.height);
+  // Nearly-touching reads agreeing on ONE side are also the same label —
+  // the other side got corrupted in one framing ("12-4" read "19-4" with a
+  // box edge fused in). Adjacent real rooms never stack labels this close.
+  const sideMatch = (a, b) =>
+    Math.abs(a.width - b.width) / Math.max(a.width, b.width, 1) <= 0.06 ||
+    Math.abs(a.height - b.height) / Math.max(a.height, b.height, 1) <= 0.06;
   const kept = [];
   for (const c of sorted) {
     const dup = kept.some((k) => {
       const ov = overlapRatio(k.bbox, c.bbox);
       if (ov > 0.6) return true;               // same text region, keep best read
-      return (ov > 0.1 || near(k.bbox, c.bbox)) && valuesMatch(k, c);
+      if ((ov > 0.1 || near(k.bbox, c.bbox)) && valuesMatch(k, c)) return true;
+      return near(k.bbox, c.bbox) && sideMatch(k, c);
     });
     if (!dup) kept.push(c);
   }
@@ -211,7 +218,7 @@ const bandWords = (words, scale, parseOpts) => {
  * Vertical ROIs get both 90° rotations of each. All tiles get a white
  * border — Tesseract misreads text that touches the image edge.
  */
-const prepareRoiVariants = (roiGray, roi) => {
+const prepareRoiVariants = (roiGray, roi, dashMask) => {
   // Cross-axis padding stays tight so the crop doesn't swallow a
   // neighbouring text row/column; along-axis padding is generous so
   // clipped leading/trailing glyphs are recovered.
@@ -226,6 +233,17 @@ const prepareRoiVariants = (roiGray, roi) => {
     roi.x - padX, roi.y - padY,
     roi.width + padX * 2, roi.height + padY * 2
   );
+  // Whiten dashed/ruled linework crossing the crop (tray-ceiling boxes,
+  // leader lines) — glyph strokes crossing a line are preserved by the mask.
+  if (dashMask) {
+    for (let yy = 0; yy < rawCrop.height; yy++) {
+      const srcRow = (rawCrop.offsetY + yy) * dashMask.width + rawCrop.offsetX;
+      const dstRow = yy * rawCrop.width;
+      for (let xx = 0; xx < rawCrop.width; xx++) {
+        if (dashMask.data[srcRow + xx]) rawCrop.data[dstRow + xx] = 255;
+      }
+    }
+  }
   const marginLo = (roi.vertical ? roi.y - rawCrop.offsetY : roi.x - rawCrop.offsetX) - 2;
   const marginHi = (roi.vertical
     ? rawCrop.offsetY + rawCrop.height - (roi.y + roi.height)
@@ -239,7 +257,30 @@ const prepareRoiVariants = (roiGray, roi) => {
     }
   );
 
-  const textHeight = roi.vertical ? roi.width : roi.height;
+  // Zoom from the measured ink band, not the ROI box: pass-1 line bboxes
+  // carry vertical slop, and an over-tall box halves the zoom Tesseract
+  // needs. Clamped to the box height so a mismeasure can't over-zoom.
+  let textHeight = roi.vertical ? roi.width : roi.height;
+  {
+    const { data, width: cw, height: ch } = crop;
+    let lo = -1;
+    let hi = -1;
+    for (let p = 0; p < (roi.vertical ? cw : ch); p++) {
+      let inkCount = 0;
+      const n = roi.vertical ? ch : cw;
+      for (let q = 0; q < n; q++) {
+        const v = roi.vertical ? data[q * cw + p] : data[p * cw + q];
+        if (v < 128) inkCount++;
+      }
+      if (inkCount >= 2) {
+        if (lo < 0) lo = p;
+        hi = p;
+      }
+    }
+    if (lo >= 0 && hi > lo) {
+      textHeight = Math.max(6, Math.min(textHeight, hi - lo + 1));
+    }
+  }
   const zoom = Math.max(1, Math.min(8, TARGET_GLYPH_PX / Math.max(6, textHeight)));
   const stretched = stretchGray(crop);
   const zoomTo = (z) => (z > 1.05 ? scaleGray(stretched, z) : stretched);
@@ -269,7 +310,7 @@ const prepareRoiVariants = (roiGray, roi) => {
   // crossing the gap defeat row isolation).
   const variants = [];
   const seen = new Set();
-  for (const z of zoom >= 3 ? [zoom, zoom * 1.45, zoom * 2] : [zoom, zoom * 1.6]) {
+  for (const z of zoom >= 3 ? [zoom, zoom * 1.45, zoom * 2] : [zoom, zoom * 1.6, zoom * 2.56]) {
     const zc = Math.min(8, z);
     const key = Math.round(zc * 4);
     if (seen.has(key)) continue;
@@ -320,7 +361,26 @@ export const detectDimensionsCore = async (imageData, env) => {
   // at NATIVE resolution — contrast-normalize first, then let the per-ROI
   // zoom do the only interpolation. Cropping the upscaled `enhanced` page
   // instead compounds two bilinear passes and fuses the glyphs into blobs.
-  const roiGray = ocrScale > 1 ? unsharp(clahe(fullGray), 1.1) : fullGray;
+  //
+  // Colour-styled plans are the exception: their room fills sit between the
+  // strokes and the page white (the fill-aware threshold splits far below
+  // plain Otsu), and CLAHE amplifies the fill texture (wood grain) to
+  // near-text darkness. Bake everything above the ink threshold to white
+  // instead — the render is digital, so CLAHE's lighting correction isn't
+  // needed.
+  const fullInkThr = inkOtsu(fullGray);
+  const fillHeavy = fullInkThr < otsu(fullGray) - 20;
+  let roiGray;
+  if (fillHeavy) {
+    const whitened = new Uint8Array(fullGray.data.length);
+    const cut = Math.min(255, fullInkThr + 12);
+    for (let i = 0; i < whitened.length; i++) {
+      whitened[i] = fullGray.data[i] >= cut ? 255 : fullGray.data[i];
+    }
+    roiGray = unsharp({ data: whitened, width: fullGray.width, height: fullGray.height }, 1.1);
+  } else {
+    roiGray = ocrScale > 1 ? unsharp(clahe(fullGray), 1.1) : fullGray;
+  }
   timings.preprocess = elapsed();
 
   // ---- Phase 2: full-page OCR (in worker) + Phase 3: spatial analysis ------
@@ -588,6 +648,20 @@ export const detectDimensionsCore = async (imageData, env) => {
   );
 
   // ---- Phase 4: targeted ROI OCR --------------------------------------------
+  // Dashed tray-ceiling boxes and leader lines drawn through label text
+  // derail the zoomed reads; build the page-level ruling mask once so every
+  // ROI crop can whiten them out.
+  const dashGlyph = Math.max(8, glyphHeightFull || 12);
+  const dashMask = dashLineMask(binarizeInk(roiGray), {
+    maxThick: Math.max(4, Math.round(dashGlyph * 0.22)),
+    minSpan: Math.round(3.5 * dashGlyph),
+    maxSeg: Math.round(3 * dashGlyph),
+    maxGap: Math.round(1.6 * dashGlyph),
+    maxBridge: Math.round(20 * dashGlyph),
+    minSolid: Math.round(5 * dashGlyph),
+    minInk: Math.round(3 * dashGlyph)
+  });
+
   // Only reserve rescue time when the neural engine is actually warm;
   // otherwise spend the whole budget on Tesseract.
   const paddleAvailable = Boolean(env.refineRois) && env.paddleReady?.() !== false;
@@ -614,12 +688,12 @@ export const detectDimensionsCore = async (imageData, env) => {
       // Out of OCR time — dimension-shaped leftovers still go to the
       // rescue collage (tile prep is cheap JS; only OCR is expensive).
       if (paddleAvailable && failedTiles.length < 10 && paddleWorthyShape(roi)) {
-        failedTiles.push({ gray: prepareRoiVariants(roiGray, roi)[0], bbox: roi });
+        failedTiles.push({ gray: prepareRoiVariants(roiGray, roi, dashMask)[0], bbox: roi });
       }
       continue;
     }
 
-    const variants = prepareRoiVariants(roiGray, roi);
+    const variants = prepareRoiVariants(roiGray, roi, dashMask);
     if (env.debug && env.dumpTile) env.dumpTile(roi, variants);
 
     let bestParsed = null;
@@ -691,9 +765,16 @@ export const detectDimensionsCore = async (imageData, env) => {
         allParses.push(parsed);
         // Parse quality outranks engine confidence: a clean explicit-symbol
         // parse from a mid-confidence read beats a confident read whose only
-        // parse is a corrupted-symbol reconstruction.
-        if (!bestParsed || parsed.quality > bestParsed.quality ||
-            (parsed.quality === bestParsed.quality && attempt.confidence > bestConf)) {
+        // parse is a corrupted-symbol reconstruction. At equal quality the
+        // per-side score breaks the tie — "11-5\" x 110\"" (one rich side)
+        // must beat "118\" x 110\"" (two reconstructions) even when the
+        // engine was surer of the latter.
+        const better = !bestParsed || parsed.quality > bestParsed.quality ||
+          (parsed.quality === bestParsed.quality &&
+            ((parsed.score ?? 0) > (bestParsed.score ?? 0) ||
+             ((parsed.score ?? 0) === (bestParsed.score ?? 0) &&
+              attempt.confidence > bestConf)));
+        if (better) {
           bestParsed = parsed;
           bestConf = attempt.confidence;
           bestVariant = variant;

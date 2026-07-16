@@ -11,18 +11,20 @@ export const toGrayscale = (rgba, pixelCount) => {
   return gray;
 };
 
-export const otsuThreshold = (gray) => {
-  const hist = new Uint32Array(256);
-  for (let i = 0; i < gray.length; i += 1) hist[gray[i]] += 1;
-  const total = gray.length;
+const otsuHist = (hist, lo, hi) => {
+  let total = 0;
   let sumAll = 0;
-  for (let t = 0; t < 256; t += 1) sumAll += t * hist[t];
+  for (let t = lo; t < hi; t += 1) {
+    total += hist[t];
+    sumAll += t * hist[t];
+  }
+  if (total === 0) return lo;
 
   let sumBg = 0;
   let weightBg = 0;
-  let best = 127;
+  let best = (lo + hi) >> 1;
   let bestVar = -1;
-  for (let t = 0; t < 256; t += 1) {
+  for (let t = lo; t < hi; t += 1) {
     weightBg += hist[t];
     if (weightBg === 0) continue;
     const weightFg = total - weightBg;
@@ -39,6 +41,49 @@ export const otsuThreshold = (gray) => {
   return best;
 };
 
+const histOf = (gray) => {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < gray.length; i += 1) hist[gray[i]] += 1;
+  return hist;
+};
+
+export const otsuThreshold = (gray) => otsuHist(histOf(gray), 0, 256);
+
+// Fill-aware ink threshold (mirrors dimensions/raster.js inkOtsu). On
+// colour-styled plans plain Otsu settles between the tinted room fills and
+// the page white, turning whole floors into one ink slab — walls, cavities
+// and text all disappear into it. When the dark class is implausibly large
+// for line work, split it again and keep the lower threshold only when it
+// separates two well-spaced modes (strokes vs fills); a genuinely ink-dense
+// B&W plan has a single dark mode and keeps plain Otsu.
+export const inkThreshold = (gray) => {
+  const hist = histOf(gray);
+  const total = gray.length;
+  const t1 = otsuHist(hist, 0, 256);
+  let darkCount = 0;
+  for (let v = 0; v < t1; v += 1) darkCount += hist[v];
+  if (darkCount <= 0.14 * total) return t1;
+
+  const t2 = otsuHist(hist, 0, t1);
+  let inkCount = 0;
+  let inkSum = 0;
+  let fillCount = 0;
+  let fillSum = 0;
+  for (let v = 0; v < t2; v += 1) {
+    inkCount += hist[v];
+    inkSum += v * hist[v];
+  }
+  for (let v = t2; v < t1; v += 1) {
+    fillCount += hist[v];
+    fillSum += v * hist[v];
+  }
+  // Fills must dominate the dark class. When most dark pixels survive the
+  // re-split, the "excess" was grey linework/hatching (strokes worth
+  // keeping), not tinted room fills — keep plain Otsu.
+  if (inkCount < 0.002 * total || inkCount > 0.4 * darkCount || fillCount === 0) return t1;
+  return fillSum / fillCount - inkSum / inkCount >= 35 ? t2 : t1;
+};
+
 // Binarize at full resolution, then OR-pool down to the working scale so
 // 1-pixel lines survive the downscale (nearest-neighbour would drop them).
 export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
@@ -47,7 +92,7 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
   const gray = toGrayscale(imageData.data, ow * oh);
   // Clamp Otsu away from extremes so faint paper texture or near-black scans
   // still split ink from paper sensibly.
-  const threshold = Math.min(Math.max(otsuThreshold(gray), 60), 220);
+  const threshold = Math.min(Math.max(inkThreshold(gray), 60), 220);
 
   const longest = Math.max(ow, oh);
   const width = longest > maxDimension ? Math.max(1, Math.round((ow * maxDimension) / longest)) : ow;
