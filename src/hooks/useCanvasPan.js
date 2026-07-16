@@ -37,7 +37,6 @@ export function useCanvasPan({
   manualEntryMode,
   eraserToolActive,
   cropToolActive,
-  roomOverlay,
   traceInteractionMode,
   viewportSyncTokenRef,
 }) {

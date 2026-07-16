@@ -8,9 +8,7 @@ export function useToolRouter({
   stageRef,
   contentLayerRef,
   scaleRef,
-  image,
-  imageObj,
-  
+
   // States & Tool Flags
   eraserToolActive,
   cropToolActive,
@@ -67,7 +65,6 @@ export function useToolRouter({
   onLineToolToggle,
   onDrawAreaToggle,
   onAngleToolToggle,
-  roomDimensions,
   roomOverlay,
   onCanvasClick,
 }) {
@@ -709,6 +706,8 @@ export function useToolRouter({
     customShapes,
     angleToolActive,
     onAngleToolToggle,
+    setSelectedCustomShapeIndex,
+    setSelectedMeasurementLineIndex,
   ]);
 
   useEffect(() => {

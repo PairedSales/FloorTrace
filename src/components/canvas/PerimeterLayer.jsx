@@ -297,7 +297,6 @@ const hexToRgba = (hex, opacity) => {
 const PerimeterLayer = ({
   perimeterTraces,
   activeTraceId,
-  localPerimeterVertices,
   scale,
   showSideLengths,
   feetPerPixel,

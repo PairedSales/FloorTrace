@@ -46,7 +46,6 @@ const Canvas = React.memo(forwardRef(({
   onAddCustomShape,
   onCustomShapesChange,
   perimeterVertices,
-  onAddPerimeterVertex,
   onClosePerimeter,
   onDeletePerimeterVertex,
   onLineToolToggle,
@@ -118,7 +117,6 @@ const Canvas = React.memo(forwardRef(({
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
-    roomOverlay,
     traceInteractionMode,
     draggingRoom: routerRef.current?.draggingRoom ?? false,
     draggingRoomCorner: routerRef.current?.draggingRoomCorner ?? null,
@@ -162,7 +160,6 @@ const Canvas = React.memo(forwardRef(({
   // ── 5. Measurement System ──────────────────────────────────────────────────
   const measurement = useMeasurementSystem({
     measurementLines,
-    currentMeasurementLine,
     onMeasurementLinesChange,
     setSelectedCustomShapeIndex: useCallback((val) => shapeRef.current?.setSelectedCustomShapeIndex(val), []),
   });
@@ -170,9 +167,6 @@ const Canvas = React.memo(forwardRef(({
   // ── 6. Shape Editor ────────────────────────────────────────────────────────
   const shape = useShapeEditor({
     customShapes,
-    currentCustomShape,
-    onAddCustomShape,
-    onCustomShapeUpdate,
     onCustomShapesChange,
     setSelectedMeasurementLineIndex: useCallback((val) => measurementRef.current?.setSelectedMeasurementLineIndex(val), []),
   });
@@ -184,14 +178,12 @@ const Canvas = React.memo(forwardRef(({
     currentMousePos: routerRef.current?.currentMousePos ?? null,
     autoSnapEnabled,
     findVertexSnapPoint: snapper.findVertexSnapPoint,
-    scaleRef: camera.scaleRef,
     traceInteractionMode,
     onPerimeterUpdate,
     onSaveUndoPoint,
     onCancelUndoSave,
     setPerimeterVertices: useCallback((v) => useAppStore.getState().setPerimeterVertices(v), []),
     onClosePerimeter,
-    onDeletePerimeterVertex,
   });
 
   // ── 8. Tool Router ─────────────────────────────────────────────────────────
@@ -199,8 +191,6 @@ const Canvas = React.memo(forwardRef(({
     stageRef,
     contentLayerRef,
     scaleRef: camera.scaleRef,
-    image,
-    imageObj: camera.imageObj,
     eraserToolActive,
     cropToolActive,
     lineToolActive,
@@ -254,7 +244,6 @@ const Canvas = React.memo(forwardRef(({
     onLineToolToggle,
     onDrawAreaToggle,
     onAngleToolToggle,
-    roomDimensions,
     roomOverlay,
     onCanvasClick,
   });
@@ -441,7 +430,6 @@ const Canvas = React.memo(forwardRef(({
             <PerimeterLayer
               perimeterTraces={perimeterTraces}
               activeTraceId={activeTraceId}
-              localPerimeterVertices={perimeter.localPerimeterVertices}
               scale={camera.scale}
               showSideLengths={showSideLengths}
               feetPerPixel={activeFeetPerPixel}

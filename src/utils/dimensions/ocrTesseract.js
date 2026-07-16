@@ -7,6 +7,7 @@
 let tesseractModulePromise = null;
 let workerPromise = null;
 let currentPreset = null;
+let createWorkerOptions;
 
 const loadTesseract = async () => {
   if (!tesseractModulePromise) {
@@ -15,12 +16,27 @@ const loadTesseract = async () => {
   return tesseractModulePromise;
 };
 
+/**
+ * Inject createWorker options (workerPath/corePath/langPath) before the first
+ * getWorker() call. The browser entry uses this to point tesseract.js at
+ * self-hosted assets instead of its jsdelivr defaults; Node harnesses skip it.
+ */
+export const configureTesseract = (options) => {
+  createWorkerOptions = options;
+};
+
 export const getWorker = async () => {
   if (!workerPromise) {
-    workerPromise = (async () => {
+    const pending = (async () => {
       const Tesseract = await loadTesseract();
-      return Tesseract.createWorker('eng', 1);
+      return Tesseract.createWorker('eng', 1, createWorkerOptions);
     })();
+    workerPromise = pending;
+    // Don't cache a failed boot — the next call should retry, not inherit
+    // a permanently rejected promise.
+    pending.catch(() => {
+      if (workerPromise === pending) workerPromise = null;
+    });
   }
   return workerPromise;
 };

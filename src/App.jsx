@@ -6,7 +6,6 @@ import LeftPanel from './components/LeftPanel';
 import ToolsPanel from './components/ToolsPanel';
 import HelpModal from './components/HelpModal';
 import OptionsOverlay from './components/OptionsOverlay';
-import { loadImageFromFile, loadImageFromClipboard } from './utils/imageLoader';
 import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
@@ -14,10 +13,11 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
-import { terminateOcrWorker, warmupOcrEngines } from './utils/DimensionsOCR';
+import { detectAllDimensions, terminateOcrWorker, warmupOcrEngines } from './utils/DimensionsOCR';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
+import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
@@ -103,8 +103,6 @@ function App() {
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
 
-  const resetOverlays = useAppStore((s) => s.resetOverlays);
-
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
@@ -133,6 +131,7 @@ function App() {
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave(notify);
+  const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr(notify);
 
   const {
     handleLineToolToggle,
@@ -304,7 +303,6 @@ function App() {
       setOcrFailed(false);
       
       try {
-        const { detectAllDimensions } = await import('./utils/DimensionsOCR');
         const result = await detectAllDimensions(imgSrc);
         
         // Handle new return format (object with dimensions and detectedFormat)
@@ -384,10 +382,13 @@ function App() {
         img.src = imgSrc;
       } finally {
         setIsProcessing(false);
-        terminateOcrWorker();
+        // Terminate to release the worker's WASM heap, then re-warm in the
+        // background so the next scan doesn't pay engine bootstrap inside
+        // its own time budget.
+        terminateOcrWorker().then(() => warmupOcrEngines());
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setPerimeterVertices, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -454,7 +455,7 @@ function App() {
       useAppStore.getState().applyDetectedTraces(polygons);
     }
     return polygons.length;
-  }, []);
+  }, [setPerimeterOverlay, setPerimeterVertices]);
 
   // Handle trace perimeter using the detection worker.
   const handleTracePerimeter = async () => {
@@ -599,19 +600,6 @@ function App() {
     setPerimeterOverlay({ vertices });
   }, [setPerimeterOverlay]);
 
-  // Handle adding perimeter vertex in manual mode
-  const handleAddPerimeterVertex = useCallback((vertex) => {
-    undoManager.save();
-    const currentVertices = useAppStore.getState().perimeterVertices || [];
-    const newVertices = [...currentVertices, vertex];
-    setPerimeterVertices(newVertices);
-
-    // Update the perimeter overlay in real-time
-    if (newVertices.length > 0) {
-      setPerimeterOverlay({ vertices: newVertices });
-    }
-  }, [setPerimeterVertices, setPerimeterOverlay]);
-
   // Handle closing the perimeter
   const handleClosePerimeter = useCallback(() => {
     const currentVertices = useAppStore.getState().perimeterVertices;
@@ -621,17 +609,6 @@ function App() {
       setPerimeterVertices(null); // Exit vertex placement mode
     }
   }, [setPerimeterOverlay, setPerimeterVertices]);
-
-  // Handle removing last perimeter vertex in manual mode (only used by right-click during vertex placement)
-  const handleRemovePerimeterVertex = useCallback(() => {
-    const currentVertices = useAppStore.getState().perimeterVertices;
-    if (currentVertices && currentVertices.length > 0) {
-      undoManager.save();
-      const newVertices = currentVertices.slice(0, -1);
-      setPerimeterVertices(newVertices);
-      setPerimeterOverlay({ vertices: newVertices });
-    }
-  }, [setPerimeterVertices, setPerimeterOverlay]);
 
   // Delete a specific perimeter vertex by index (right-click on vertex)
   const handleDeletePerimeterVertex = useCallback((index) => {
@@ -651,7 +628,7 @@ function App() {
   };
 
   // Auto-trace exterior boundary after room overlay is placed.
-  const autoTraceExterior = useCallback(async (overlayForScale, dims) => {
+  const autoTraceExterior = useCallback(async () => {
     setIsProcessing(true, 'Detecting exterior boundary…');
     const startImage = image;
     try {
@@ -737,7 +714,7 @@ function App() {
 
     // Automatically detect exterior boundary after room overlay is placed.
     // autoTraceExterior manages its own isProcessing state.
-    autoTraceExterior(nextOverlay, dims);
+    autoTraceExterior();
   }, [setRoomDimensions, setIsProcessing, image, setRoomOverlay, updateScale, setPerimeterVertices, setMode, setDetectedDimensions, setManualEntryMode, autoTraceExterior]);
 
   // Handle canvas click for manual overlay placement
@@ -796,11 +773,11 @@ function App() {
 
       // Automatically detect exterior boundary after manual overlay placement.
       // autoTraceExterior manages its own isProcessing state.
-      autoTraceExterior(nextOverlay, roomDimensions);
+      autoTraceExterior();
     };
 
     placeOverlay();
-  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
+  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior, notify]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -937,10 +914,8 @@ function App() {
             onAddCustomShape={handleAddCustomShape}
             onCustomShapesChange={handleCustomShapesChange}
             perimeterVertices={perimeterVertices}
-            onAddPerimeterVertex={handleAddPerimeterVertex}
             onClosePerimeter={handleClosePerimeter}
             autoSnapEnabled={autoSnapEnabled}
-            onRemovePerimeterVertex={handleRemovePerimeterVertex}
             onDeletePerimeterVertex={handleDeletePerimeterVertex}
             onSaveUndoPoint={handleSaveUndoPoint}
             onCancelUndoSave={handleCancelUndoSave}
@@ -982,6 +957,8 @@ function App() {
             perimeterOverlay={perimeterOverlay}
             saveOnExit={saveOnExit}
             onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+            enhancedOcr={enhancedOcr}
+            onEnhancedOcrChange={handleEnhancedOcrChange}
           />
         )}
 

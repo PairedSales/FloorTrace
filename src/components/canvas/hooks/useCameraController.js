@@ -17,7 +17,6 @@ export function useCameraController({
   manualEntryMode,
   eraserToolActive,
   cropToolActive,
-  roomOverlay,
   traceInteractionMode,
   draggingRoom = false,
   draggingRoomCorner = null,
@@ -101,7 +100,6 @@ export function useCameraController({
     manualEntryMode,
     eraserToolActive,
     cropToolActive,
-    roomOverlay,
     traceInteractionMode,
     viewportSyncTokenRef,
   });

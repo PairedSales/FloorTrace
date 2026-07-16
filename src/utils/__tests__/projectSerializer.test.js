@@ -197,14 +197,16 @@ describe('projectSerializer', () => {
         // missing metadata and activeFloorId
         floors: [],
       };
-      expect(() => validateProjectSchema(invalidProject)).toThrow();
+      // Assert on the message: a TypeError here means the ZodError field
+      // mapping broke (Zod v4 renamed .errors to .issues)
+      expect(() => validateProjectSchema(invalidProject)).toThrow(/Project validation failed/);
     });
 
     it('throws on mismatching file type literal', () => {
       const storeState = createMockStoreState();
       const project = serializeSketch(storeState);
       project.fileType = 'wrong_filetype';
-      expect(() => validateProjectSchema(project)).toThrow();
+      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
 
     it('throws on invalid coordinate type in perimeterTraces', () => {
@@ -212,7 +214,7 @@ describe('projectSerializer', () => {
       const project = serializeSketch(storeState);
       // Change vertex x to a string (invalid)
       project.floors[0].state.perimeterTraces[0].vertices[0].x = 'invalid-string';
-      expect(() => validateProjectSchema(project)).toThrow();
+      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
 
     it('throws on missing required fields inside customShapes', () => {
@@ -222,7 +224,7 @@ describe('projectSerializer', () => {
         closed: true,
         // missing vertices
       }];
-      expect(() => validateProjectSchema(project)).toThrow();
+      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
   });
 

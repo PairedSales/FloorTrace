@@ -86,12 +86,12 @@ export function createFloorSlice(set, get) {
      * Deterministically shifts selection to neighboring trace if active trace is deleted.
      */
     deletePerimeterTrace: (traceId) => {
-      undoManager.save();
       const state = get();
 
       const currentTraces = state.perimeterTraces || [];
       const traceIndex = currentTraces.findIndex((t) => t.id === traceId);
       if (traceIndex === -1) return;
+      undoManager.save();
 
       const remainingTraces = currentTraces.filter((t) => t.id !== traceId);
       let nextActiveId = state.activeTraceId;

@@ -101,7 +101,7 @@ export function useAutosave(notify) {
     };
 
     restoreAutosavedDraft();
-  }, [setHasRestoredState, setUseInteriorWalls]);
+  }, [setHasRestoredState, setUseInteriorWalls, notify]);
 
   // Persist wall mode preference independently so it survives when no image
   // draft is present.

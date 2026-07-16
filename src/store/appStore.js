@@ -75,19 +75,20 @@ const WORKING_STATE_DEFAULTS = {
  * to prevent undo stack bloat.
  */
 const EXCLUDED_SNAPSHOT_FIELDS = [
-  'isProcessing',
-  'processingMessage',
-  'zoomScale',
-  'stageX',
-  'stageY',
-  'canvasRotation',
-  'viewportSyncToken',
-  'isDirty',
-  'projectId',
-  'traceInteractionMode',
-  'activeTraceId',
-  'angleToolActive',
-  'angleToolState',
+  'isProcessing',        // transient spinner
+  'processingMessage',   // transient spinner text
+  'zoomScale',           // camera — undo shouldn't jump the viewport
+  'stageX',              // camera
+  'stageY',              // camera
+  'canvasRotation',      // camera
+  'viewportSyncToken',   // camera sync signal
+  'isDirty',             // project tracking, not document content
+  'projectId',           // project tracking
+  'traceInteractionMode', // transient input mode (drawing/idle)
+  'angleToolActive',     // transient tool toggle
+  // activeTraceId and angleToolState ARE snapshotted: undoing "Add Floor"
+  // must restore the previous selection, and protractor edits must be
+  // undoable (AngleOverlay syncs itself back from the store).
 ];
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)
@@ -316,6 +317,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     const patch = {};
     for (const k of SNAPSHOT_FIELDS) {
       patch[k] = snapshot[k] ?? WORKING_STATE_DEFAULTS[k];
+    }
+    // Older snapshots predate activeTraceId being captured — never leave the
+    // selection dangling on a trace that no longer exists.
+    const traces = patch.perimeterTraces || [];
+    if (!traces.some((t) => t.id === patch.activeTraceId)) {
+      patch.activeTraceId = traces[0]?.id ?? null;
     }
     set(patch);
   },

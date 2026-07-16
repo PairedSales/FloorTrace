@@ -54,13 +54,10 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
 
           notify('Project loaded.', { type: 'success' });
         } else {
-          // Clear existing image before loading new one to ensure state change
-          setImage(null);
-          // Clear overlays as well
+          // Load and validate first — a failed load must leave the current project intact
+          const { dataUrl, mimeType } = await loadImageFromFile(file);
           resetOverlays();
           undoManager.clear();
-
-          const { dataUrl, mimeType } = await loadImageFromFile(file);
           setImage(dataUrl);
           setImageMimeType(mimeType);
           handleManualMode(dataUrl, true); // Automatically enter manual mode

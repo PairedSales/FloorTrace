@@ -22,7 +22,32 @@ import { dataUrlToImage } from './imageLoader.js';
 import { detectDimensionsCore } from './dimensions/pipeline.js';
 import { ensurePaddle, paddleIfReady, paddleRecognizeTiles } from './dimensions/ocrPaddle.js';
 import { loadOpenCv } from './dimensions/opencvBridge.js';
-import { getWorker } from './dimensions/ocrTesseract.js';
+import { configureTesseract, getWorker } from './dimensions/ocrTesseract.js';
+import tesseractWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
+import tesseractCoreSimdUrl from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
+import tesseractCoreUrl from 'tesseract.js-core/tesseract-core-lstm.wasm.js?url';
+
+// Self-host every tesseract.js runtime asset (worker script, core WASM,
+// eng traineddata) so first-scan latency doesn't depend on jsdelivr and OCR
+// works offline. Worker + core come out of node_modules via Vite asset URLs
+// (so they track the installed tesseract.js version); the traineddata lives
+// in public/tesseract/. URLs must be absolute because the worker script runs
+// from a blob: URL, which relative importScripts/fetch can't resolve against.
+// The worker normally picks the SIMD core itself, but only when handed a
+// directory — a single file forces the choice, so probe SIMD support here
+// (same probe wasm-feature-detect uses).
+if (typeof window !== 'undefined') {
+  const hasSimd = WebAssembly.validate(Uint8Array.from([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3,
+    2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11
+  ]));
+  const abs = (url) => new URL(url, window.location.href).href;
+  configureTesseract({
+    workerPath: abs(tesseractWorkerUrl),
+    corePath: abs(hasSimd ? tesseractCoreSimdUrl : tesseractCoreUrl),
+    langPath: abs(`${import.meta.env.BASE_URL}tesseract`).replace(/\/$/, '')
+  });
+}
 
 export {
   normalizeOcrText,
@@ -33,9 +58,14 @@ export {
 export { terminateOcrWorker } from './dimensions/ocrTesseract.js';
 
 /**
- * Pre-warm the OCR engines (Tesseract worker, OpenCV WASM). Call at app
- * startup so the first real detection doesn't pay multi-second engine
- * bootstrap inside its time budget. Safe to call repeatedly; never throws.
+ * Pre-warm the Tesseract worker. Call at app startup so the first real
+ * detection doesn't pay multi-second engine bootstrap inside its time
+ * budget. Safe to call repeatedly; never throws.
+ *
+ * OpenCV is deliberately NOT warmed here: its ~15.5 MB (3.9 MB gzip) chunk
+ * would be downloaded by every visitor at mount for two optional filters
+ * that have pure-JS fallbacks. detectAllDimensions kicks off loadOpenCv()
+ * itself, so only users who actually scan pay for it.
  *
  * PaddleOCR is deliberately never auto-initialised: its WebGL shader
  * compilation blocks the main thread for ~10s, which is unacceptable both
@@ -45,8 +75,7 @@ export { terminateOcrWorker } from './dimensions/ocrTesseract.js';
  */
 export const warmupOcrEngines = () => {
   try {
-    getWorker();
-    loadOpenCv();
+    getWorker().catch(() => {});
   } catch {
     // warm-up is best-effort
   }

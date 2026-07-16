@@ -225,7 +225,7 @@ const scoreRoom = (result, room, ppf) => {
 
 const collectTargets = (args) => {
   if (args.length === 0) {
-    return [{ file: path.join(ROOT, 'ExampleFloorplan.png'), truth: EXAMPLE_TRUTH }];
+    return [{ file: path.join(ROOT, 'fixtures', 'ExampleFloorplan.png'), truth: EXAMPLE_TRUTH }];
   }
   const files = [];
   for (const arg of args) {

@@ -216,7 +216,7 @@ export function validateProjectSchema(project) {
     projectSchema.parse(project);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      const details = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('\n');
+      const details = err.issues.map(e => `${e.path.join('.')}: ${e.message}`).join('\n');
       throw new Error(`Project validation failed:\n${details}`);
     }
     throw err;
@@ -408,7 +408,7 @@ export function importProject(projectJsonText) {
   let rawProject;
   try {
     rawProject = JSON.parse(projectJsonText);
-  } catch (err) {
+  } catch {
     throw new Error('Failed to parse project file. The file is not valid JSON.');
   }
   

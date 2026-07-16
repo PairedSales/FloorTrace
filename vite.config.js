@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: '/FloorTrace/',
+  // Honor an externally assigned port (e.g. parallel dev sessions); Vite
+  // ignores the PORT env var by default.
+  server: globalThis.process?.env?.PORT
+    ? { port: Number(globalThis.process.env.PORT) }
+    : undefined,
   build: {
     rollupOptions: {
       output: {

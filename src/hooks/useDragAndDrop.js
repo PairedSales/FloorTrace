@@ -13,14 +13,11 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
     if (!(await checkUnsavedChanges())) return;
 
     try {
-      // Clear existing image before loading new one to ensure state change
-      setImage(null);
-      // Clear overlays as well
-      resetOverlays();
-      undoManager.clear();
-
+      // Load and validate first — a failed paste must leave the current project intact
       const { dataUrl, mimeType } = await loadImageFromClipboard();
       if (dataUrl) {
+        resetOverlays();
+        undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
         handleManualMode(dataUrl, true); // Automatically enter manual mode
@@ -64,9 +61,10 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
 
         notify('Project loaded.', { type: 'success' });
       } else {
+        // Load and validate first — a failed load must leave the current project intact
+        const { dataUrl, mimeType } = await loadImageFromFile(file);
         resetOverlays();
         undoManager.clear();
-        const { dataUrl, mimeType } = await loadImageFromFile(file);
         setImage(dataUrl);
         setImageMimeType(mimeType);
         handleManualMode(dataUrl, true);

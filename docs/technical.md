@@ -45,7 +45,7 @@ Both come from the same analysis + footprint pass. `options.excludeRegions` take
 
 ## Benchmarking
 
-`node scripts/detectionBenchmark.mjs [image.png|folder ...]` mirrors `ocrBenchmark.mjs`: PNGs load via pngjs, a `<image>.truth.json` sidecar supplies ground truth (wall-face rects, boundary bbox/polygon/areas, per-floor outer bboxes, optional `pixelsPerFoot` and per-room `minIou`), and the script reports per-check HIT/MISS and timings. With no arguments it runs ExampleFloorplan.png against measured built-in truth.
+`node scripts/detectionBenchmark.mjs [image.png|folder ...]` mirrors `ocrBenchmark.mjs`: PNGs load via pngjs, a `<image>.truth.json` sidecar supplies ground truth (wall-face rects, boundary bbox/polygon/areas, per-floor outer bboxes, optional `pixelsPerFoot` and per-room `minIou`), and the script reports per-check HIT/MISS and timings. With no arguments it runs fixtures/ExampleFloorplan.png against measured built-in truth.
 
 ## Performance
 

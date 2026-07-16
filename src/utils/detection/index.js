@@ -29,6 +29,9 @@ const runWorkerRequest = (type, payload, timeoutMs = 30_000) => new Promise((res
   nextRequestId += 1;
   const timer = setTimeout(() => {
     pending.delete(id);
+    // The worker is single-threaded and still crunching the runaway job —
+    // kill it so the next request respawns a fresh worker instead of queueing.
+    terminateDetectionWorker();
     reject(new Error('Detection timed out'));
   }, timeoutMs);
   pending.set(id, {

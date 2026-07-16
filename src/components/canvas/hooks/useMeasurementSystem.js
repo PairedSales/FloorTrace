@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from 'react';
 
 export function useMeasurementSystem({
   measurementLines,
-  currentMeasurementLine,
   onMeasurementLinesChange,
   setSelectedCustomShapeIndex,
 }) {

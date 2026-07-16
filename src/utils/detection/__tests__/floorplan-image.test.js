@@ -33,7 +33,7 @@ const bboxOf = (overlay) => [overlay.x1, overlay.y1, overlay.x2, overlay.y2];
 let image;
 
 beforeAll(() => {
-  image = loadPng(path.join(ROOT, 'ExampleFloorplan.png'));
+  image = loadPng(path.join(ROOT, 'fixtures', 'ExampleFloorplan.png'));
 });
 
 describe('multi-floor boundary tracing on ExampleFloorplan.png', () => {

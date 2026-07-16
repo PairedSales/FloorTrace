@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this is
 
@@ -58,9 +58,7 @@ Both pipelines take a raw image and run expensive per-pixel work off the main th
 
   This pipeline core (`detectDimensionsCore` in `pipeline.js`) is deliberately environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`) so the identical code path runs in the browser (`DimensionsOCR.js`'s `browserEnv()`) and in the Node benchmark harness (`scripts/ocrBenchmark.mjs`, which stubs `toOcrInput` with a PNG encoder and skips the PaddleOCR step). When changing pipeline behavior, prefer running the benchmark script over `fixtures/ExampleFloorplan.png` to check detection rate/accuracy/timings before/after.
 
-  PaddleOCR model weights are downloaded into `public/models/ocr-det` and `public/models/ocr-rec` (not committed as source, fetched via the commands recorded in `.claude/settings.local.json`).
-
-  Tesseract's runtime assets are self-hosted (no jsdelivr at runtime): the worker script and core WASM come straight from `node_modules` via Vite `?url` imports — see the `configureTesseract` block in `DimensionsOCR.js`, which also does the SIMD probe — so they track the installed tesseract.js version automatically. The language data lives at `public/tesseract/eng.traineddata.gz`; regenerate it by gzipping the `eng.traineddata` that a Node benchmark run caches in the repo root.
+  PaddleOCR model weights are downloaded into `public/models/ocr-det` and `public/models/ocr-rec` (not committed as source, fetched via the commands recorded in `.Codex/settings.local.json`).
 
 ### Build
 
@@ -71,3 +69,5 @@ Both pipelines take a raw image and run expensive per-pixel work off the main th
 - No comment blocks/docstrings beyond a short "why" line — several files already model this well (`pipeline.js`, `appStore.js`); match that density, not the verbosity of one-off code you're editing near.
 - `eslint.config.js` treats unused vars as an error except names matching `^[A-Z_]`.
 - Prefer adding new cross-cutting interaction logic as a hook in `src/hooks/` rather than growing `App.jsx`.
+
+## Imported Claude Cowork project instructions

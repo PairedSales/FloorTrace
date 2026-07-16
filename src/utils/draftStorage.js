@@ -79,7 +79,7 @@ export async function getDraft(key) {
             try {
               const parsed = JSON.parse(localVal);
               resolve(parsed);
-            } catch (e) {
+            } catch {
               resolve(null);
             }
           } else {
@@ -95,7 +95,7 @@ export async function getDraft(key) {
     if (localVal) {
       try {
         return JSON.parse(localVal);
-      } catch (e) {
+      } catch {
         return null;
       }
     }

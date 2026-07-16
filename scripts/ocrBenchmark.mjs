@@ -70,7 +70,7 @@ const run = async () => {
   };
   const targets = args.length > 0
     ? args.map((a) => ({ file: path.resolve(a), truth: truthFor(path.resolve(a)) }))
-    : [{ file: path.join(ROOT, 'ExampleFloorplan.png'), truth: EXAMPLE_GROUND_TRUTH }];
+    : [{ file: path.join(ROOT, 'fixtures', 'ExampleFloorplan.png'), truth: EXAMPLE_GROUND_TRUTH }];
 
   for (const { file, truth } of targets) {
     console.log(`\n=== ${path.basename(file)} ===`);

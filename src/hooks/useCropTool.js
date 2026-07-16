@@ -88,7 +88,7 @@ export function useCropTool({
     // Accept the selection as a parameter so callers can pass the latest value
     // directly — avoids stale-closure issues with the cropSelection state.
     const currentSel = sel ?? cropSelection;
-    const imageMimeType = useAppStore((s) => s.imageMimeType);
+    const imageMimeType = useAppStore.getState().imageMimeType;
 
     if (!isCroppingRef.current || !cropStartRef.current || !imageObj || !onImageUpdate) {
       resetCropState();

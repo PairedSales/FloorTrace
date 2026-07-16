@@ -25,6 +25,17 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, erase
   // ── keydown ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Don't hijack shortcuts while typing — text fields need native Ctrl+V/Z/A etc.
+      // Ctrl+S still saves the project (harmless mid-edit, blocks the browser dialog).
+      const isEditable = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+      if (isEditable) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          onSaveProject(e.shiftKey);
+        }
+        return;
+      }
+
       // Eraser brush size shortcuts (no modifier keys required)
       if (!e.ctrlKey && !e.metaKey) {
         if (e.key === '[' && eraserToolActive) {
@@ -38,27 +49,21 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, erase
           return;
         }
         if (e.key.toLowerCase() === 'o') {
-          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
-            e.preventDefault();
-            const s = useAppStore.getState();
-            s.setShowPanelOptions(!s.showPanelOptions);
-            return;
-          }
+          e.preventDefault();
+          const s = useAppStore.getState();
+          s.setShowPanelOptions(!s.showPanelOptions);
+          return;
         }
         if (e.key.toLowerCase() === 'l') {
-          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
-            e.preventDefault();
-            const s = useAppStore.getState();
-            s.setShowSideLengths(!s.showSideLengths);
-            return;
-          }
+          e.preventDefault();
+          const s = useAppStore.getState();
+          s.setShowSideLengths(!s.showSideLengths);
+          return;
         }
         if (e.key.toLowerCase() === 'r') {
-          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
-            e.preventDefault();
-            onRotateCanvas?.('clockwise');
-            return;
-          }
+          e.preventDefault();
+          onRotateCanvas?.('clockwise');
+          return;
         }
       }
 

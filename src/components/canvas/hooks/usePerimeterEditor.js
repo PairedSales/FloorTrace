@@ -9,14 +9,12 @@ export function usePerimeterEditor({
   currentMousePos,
   autoSnapEnabled,
   findVertexSnapPoint,
-  scaleRef,
   traceInteractionMode,
   onPerimeterUpdate,
   onSaveUndoPoint,
   onCancelUndoSave,
   setPerimeterVertices,
   onClosePerimeter,
-  onDeletePerimeterVertex,
 }) {
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggedVertexCoords, setDraggedVertexCoords] = useState(null);
@@ -109,10 +107,11 @@ export function usePerimeterEditor({
 
   const handleClosePerimeterShape = useCallback(() => {
     if (perimeterVertices && perimeterVertices.length > 2) {
-      onSaveUndoPoint?.();
+      // App's onClosePerimeter owns the undo save — saving here too pushed
+      // two identical snapshots, making the first Ctrl+Z a no-op.
       onClosePerimeter?.();
     }
-  }, [perimeterVertices, onClosePerimeter, onSaveUndoPoint]);
+  }, [perimeterVertices, onClosePerimeter]);
 
   const handleInsertPerimeterVertex = useCallback((clickPoint) => {
     if (!perimeterOverlay) return;
