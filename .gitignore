@@ -35,3 +35,6 @@ __pycache__/
 
 # Local scratch/debug scripts (may hardcode local paths)
 scripts/_*.mjs
+
+# Real-world appraisal order artifacts (never commit)
+cmp-vendors.*

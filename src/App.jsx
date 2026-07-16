@@ -384,7 +384,9 @@ function App() {
         img.src = imgSrc;
       } finally {
         setIsProcessing(false);
-        terminateOcrWorker();
+        // Free scan-time worker memory, then re-warm during idle time so the
+        // next scan doesn't pay Tesseract cold-start inside its time budget.
+        terminateOcrWorker().then(() => warmupOcrEngines());
       }
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit, notify]);
@@ -473,7 +475,6 @@ function App() {
 
       if (!traced) {
         notify('Unable to trace perimeter from this image.', { type: 'warning', duration: 2500 });
-        setIsProcessing(false);
         return;
       }
 
@@ -482,7 +483,6 @@ function App() {
 
       if (!floorCount) {
         notify('No valid perimeter detected.', { type: 'warning', duration: 2500 });
-        setIsProcessing(false);
         return;
       }
 
@@ -491,11 +491,13 @@ function App() {
         ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
         : `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
       notify(message, { type: 'success', duration: 2200 });
-      setIsProcessing(false);
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Perimeter detection failed:', error);
         notify('Perimeter detection failed. Try another image region.', { type: 'error' });
+      }
+    } finally {
+      if (useAppStore.getState().image === startImage) {
         setIsProcessing(false);
       }
     }
@@ -710,9 +712,7 @@ function App() {
         labelDims: { width: dimension.width, height: dimension.height },
       });
 
-      if (useAppStore.getState().image !== startImage) return;
-
-      if (roomResult?.overlay) {
+      if (useAppStore.getState().image === startImage && roomResult?.overlay) {
         nextOverlay = {
           ...roomResult.overlay,
           polygon: roomResult.polygon,
@@ -722,6 +722,10 @@ function App() {
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Room enclosure detection failed:', error);
+      }
+    } finally {
+      if (useAppStore.getState().image === startImage) {
+        setIsProcessing(false);
       }
     }
 
@@ -771,9 +775,7 @@ function App() {
           labelDims: { width, height },
         });
 
-        if (useAppStore.getState().image !== startImage) return;
-
-        if (roomResult?.overlay) {
+        if (useAppStore.getState().image === startImage && roomResult?.overlay) {
           nextOverlay = {
             ...roomResult.overlay,
             polygon: roomResult.polygon,
@@ -783,6 +785,10 @@ function App() {
       } catch (error) {
         if (useAppStore.getState().image === startImage) {
           console.error('Manual room detection fallback failed:', error);
+        }
+      } finally {
+        if (useAppStore.getState().image === startImage) {
+          setIsProcessing(false);
         }
       }
 

@@ -13,7 +13,6 @@
   "dependencies": {
     "@paddlejs-models/ocr": "^1.2.4",
     "@techstark/opencv-js": "^5.0.0-release.1",
-    "html-to-image": "^1.11.13",
     "konva": "^10.0.2",
     "lucide-react": "^0.545.0",
     "react": "^19.1.1",
