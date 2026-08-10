@@ -120,7 +120,11 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
           s.pos = edgeFromHit(side, pos);
           s.hit = { pos, ...c };
           s.done = true;
-        } else if (isThin(c) && pos > s.lastThin + band * 2 + 2 && s.thinHits.length < 4) {
+        // Spacing test must be direction-agnostic: left/top grow toward
+        // decreasing coordinates, so a `pos > lastThin + gap` test let those
+        // sides record at most one thin candidate while right/bottom recorded
+        // four, halving the search space asymmetrically.
+        } else if (isThin(c) && Math.abs(pos - s.lastThin) > band * 2 + 2 && s.thinHits.length < 4) {
           s.thinHits.push({ pos, ...c });
           s.lastThin = pos;
           s.pos = pos;
@@ -355,9 +359,39 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
   }
   confidence = Math.max(0.05, Math.min(0.98, confidence));
 
+  // Is this side on the outside of the building? Walking outward from the wall
+  // face past the wall band leaves the footprint for an exterior wall and
+  // stays inside it for a partition. The test was already being performed at
+  // every growth step by `insideFootprint`; only the answer was never kept —
+  // and it is the interior/exterior wall distinction the boundary stage has
+  // no other way to make.
+  const exteriorSide = (side, edge) => {
+    if (!footprint) return null;
+    const depth = Math.max(6, wallThickness * 4);
+    for (let d = 1; d <= depth; d += 1) {
+      const pos = edge + side.dir * d;
+      if (pos < 0 || pos > limitFor(side)) return true;
+      const probe = side.axis === 'x'
+        ? { x: pos, y: (finalRect.top + finalRect.bottom) >> 1 }
+        : { x: (finalRect.left + finalRect.right) >> 1, y: pos };
+      if (!footprint[probe.y * width + probe.x]) return true;
+    }
+    return false;
+  };
+  for (const side of SIDES) {
+    chosen[side.key] = { ...chosen[side.key], exterior: exteriorSide(side, chosen[side.key].edge) };
+  }
+
+  // The scale this one room implies. A per-room px/ft is what makes a robust
+  // multi-room calibration (and any cross-check between rooms) possible.
+  const pixelsPerFoot = labelDims?.width > 0 && labelDims?.height > 0
+    ? { x: w / labelDims.width, y: h / labelDims.height }
+    : null;
+
   return {
     rect: finalRect,
     confidence,
+    pixelsPerFoot,
     sides: {
       left: chosen.left, right: chosen.right, top: chosen.top, bottom: chosen.bottom,
     },

@@ -1,0 +1,262 @@
+// Candidate scoring: turn "which footprint?" from a threshold decision into a
+// comparison against evidence. Every candidate is measured on four axes and
+// the winner carries its own confidence and warnings, so a wrong answer is
+// visible instead of silently green.
+//
+//  seal        does the region actually close, and does it fill its own
+//              wall network rather than one sealed wing of it
+//  support     is the outline drawn as wall, or fabricated across blank paper
+//  economy     how much closing/bridging had to be invented to get here
+//  constraint  do the rooms and labels the rest of the app already found
+//              actually lie inside it
+
+import { traceComponentBoundary, simplifyRing, fitRing, polygonArea } from './polygon.js';
+import { contourSupport } from './wallEvidence.js';
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+export const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
+  const ring = traceComponentBoundary(entry.labels, width, height, entry.componentId);
+  if (ring.length < 3) return null;
+  const simplified = simplifyRing(ring, epsilon);
+  if (simplified.length < 3) return null;
+  const fitted = fitRing(simplified, fitOptions);
+  if (!fitted.polygon || fitted.polygon.length < 3) return null;
+  return { polygon: fitted.polygon, ring, skew: fitted.skew };
+};
+
+// Fraction of a rectangle's area covered by the footprint mask.
+const rectCoverage = (mask, width, height, rect) => {
+  const x0 = Math.max(0, Math.round(rect.left));
+  const x1 = Math.min(width - 1, Math.round(rect.right));
+  const y0 = Math.max(0, Math.round(rect.top));
+  const y1 = Math.min(height - 1, Math.round(rect.bottom));
+  if (x1 < x0 || y1 < y0) return 0;
+  let inside = 0;
+  let total = 0;
+  const stepX = Math.max(1, Math.round((x1 - x0) / 24));
+  const stepY = Math.max(1, Math.round((y1 - y0) / 24));
+  for (let y = y0; y <= y1; y += stepY) {
+    const row = y * width;
+    for (let x = x0; x <= x1; x += stepX) {
+      total += 1;
+      if (mask[row + x]) inside += 1;
+    }
+  }
+  return total ? inside / total : 0;
+};
+
+const pointInside = (mask, width, height, point) => {
+  const x = Math.round(point.x);
+  const y = Math.round(point.y);
+  if (x < 0 || y < 0 || x >= width || y >= height) return false;
+  return Boolean(mask[y * width + x]);
+};
+
+/**
+ * Constraints supplied by the rest of the app, all in working-scale px and all
+ * optional. Rooms and interior labels are known-inside evidence: geometry that
+ * excludes them is provably wrong, and nothing else in the pipeline was ever
+ * allowed to know that.
+ */
+export const scoreConstraints = (entry, analysis, constraints) => {
+  const { width, height } = analysis;
+  const rooms = constraints?.rooms ?? [];
+  const points = constraints?.interiorPoints ?? [];
+  if (!rooms.length && !points.length) return null;
+
+  let roomHits = 0;
+  const roomMisses = [];
+  for (const room of rooms) {
+    const cover = rectCoverage(entry.mask, width, height, room.rect ?? room);
+    if (cover >= 0.9) roomHits += 1;
+    else roomMisses.push({ name: room.name, cover });
+  }
+  let pointHits = 0;
+  const pointMisses = [];
+  for (const point of points) {
+    if (pointInside(entry.mask, width, height, point)) pointHits += 1;
+    else pointMisses.push(point);
+  }
+
+  const total = rooms.length + points.length;
+  const hits = roomHits + pointHits;
+  return {
+    fit: total ? hits / total : 1,
+    rooms: rooms.length,
+    roomHits,
+    roomMisses,
+    points: points.length,
+    pointHits,
+    pointMisses,
+  };
+};
+
+// Weighted fraction of the network's wall ink the footprint encloses. Leaving
+// drawn wall outside means part of the building was lost. Measured against
+// every enclosed component, not just the largest: two outlines drawn close
+// enough to share a wall network seal into two components of one footprint.
+const inkCoverage = (measured, coverage) => {
+  if (!coverage?.total) return 1;
+  let inside = 0;
+  for (let k = 0; k < coverage.index.length; k += 1) {
+    if (measured.labels[coverage.index[k]] >= 0) inside += coverage.weight[k];
+  }
+  return inside / coverage.total;
+};
+
+export const scoreCandidate = (candidate, ctx) => {
+  const {
+    analysis, evidence, epsilon, fitOptions, wallBboxArea, maxRadius, constraints, coverage: cov,
+  } = ctx;
+  const { width, height, wallThickness } = analysis;
+
+  const shape = polygonizeFootprint(candidate.entry, width, height, epsilon, fitOptions);
+  if (!shape) return null;
+
+  const tol = Math.max(2, Math.round(Math.max(2, wallThickness) * 0.9));
+  const support = contourSupport(shape.polygon, evidence, tol);
+  const coverage = inkCoverage(candidate.measured, cov);
+
+  // Economy: closing radius and welded span are both fabrication. Prefer the
+  // least-invented hypothesis that still holds together.
+  const radiusCost = clamp01(candidate.radius / Math.max(2, maxRadius));
+  const spanCost = clamp01(candidate.bridgedSpan / Math.max(40, 0.35 * Math.sqrt(wallBboxArea)));
+  const economy = 1 - clamp01(0.6 * radiusCost + 0.4 * spanCost);
+
+  // Annexation: a footprint whose bbox reaches beyond its own wall network
+  // grabbed something that is not this floor.
+  const spill = Math.max(0, candidate.entry.bboxArea / Math.max(1, wallBboxArea) - 1.02);
+  const annex = clamp01(spill / 0.3);
+
+  const constraintScore = constraints ? scoreConstraints(candidate.entry, analysis, constraints) : null;
+
+  // Incompleteness: this closing radius enclosed less than the same evidence
+  // eventually could. A footprint that stops at an interior wall while the
+  // real outline needs a wider closing looks perfectly sealed and perfectly
+  // supported — it is simply missing rooms, and only the ladder can say so.
+  const completeness = candidate.completeness ?? 1;
+  const incomplete = clamp01((0.97 - completeness) / 0.2);
+
+  const terms = [
+    { w: 0.34, v: candidate.seal.seal },
+    { w: 0.30, v: support.mean },
+    { w: 0.26, v: coverage },
+    { w: 0.10, v: economy },
+  ];
+  if (constraintScore) terms.push({ w: 0.22, v: constraintScore.fit });
+  const weight = terms.reduce((sum, t) => sum + t.w, 0);
+  const score = terms.reduce((sum, t) => sum + t.w * t.v, 0) / weight
+    - 0.3 * annex - 0.3 * incomplete;
+
+  return {
+    ...candidate,
+    shape,
+    support,
+    coverage,
+    completeness,
+    economy,
+    annex,
+    constraintScore,
+    score,
+    areaPx: polygonArea(shape.polygon),
+  };
+};
+
+const WARNING_TEXT = {
+  unsealed: 'the outline never closed — part of the building may be missing',
+  'weak-wall-support': 'much of the outline is not drawn as a wall',
+  'bridged-opening': 'a wide opening was bridged to close the outline',
+  'heavy-closing': 'a large closing radius was needed; corners may be rounded',
+  annexation: 'the outline reaches beyond the wall network it came from',
+  'wall-left-outside': 'some drawn wall falls outside the traced outline',
+  'thin-structure-excluded': 'an attached area bounded only by hairlines was left out of the living area',
+  'incomplete-enclosure': 'a wider closing enclosed more of this outline',
+  'floors-rejected': 'some closed outlines were judged not to be buildings',
+  'no-boundary': 'no wall outline could be traced',
+  'floor-empty': 'a floor produced no usable polygon',
+  'self-intersecting': 'the traced outline crosses itself',
+  'covers-page': 'the outline covers almost the whole page',
+  'tiny-floor': 'a traced outline is very small',
+  'inner-not-nested': 'the interior outline is not inside the exterior one',
+  'inner-over-inset': 'the interior outline is inset unusually far',
+  'no-inner': 'no interior envelope could be derived; interior mode shows the exterior outline',
+  'floors-overlap': 'two traced floors cover the same area',
+  'room-outside': 'a detected room falls outside the traced outline',
+  'label-outside': 'a labelled area falls outside the traced outline',
+  'no-alternative': 'only one usable hypothesis was found',
+};
+
+export const warning = (code, detail, severity = 'warn') => ({
+  code,
+  severity,
+  detail,
+  message: WARNING_TEXT[code] ?? code,
+});
+
+/**
+ * Confidence for the winning candidate. Deliberately pessimistic: unsupported
+ * outline, a bridged opening or a missing room each pull it down, because the
+ * cost of a silent wrong answer here is a wrong square-footage figure.
+ */
+export const candidateConfidence = (scored, ctx) => {
+  const warnings = [];
+  const { support, seal, constraintScore } = scored;
+  const perimeter = Math.max(1, support.total);
+
+  let confidence = seal.seal * (0.3 + 0.7 * support.mean);
+
+  if (seal.seal < 0.55) {
+    warnings.push(warning('unsealed', { cover: seal.cover, solidity: seal.solidity }, 'error'));
+    confidence *= 0.35;
+  }
+  if (support.mean < 0.6) {
+    warnings.push(warning('weak-wall-support', { support: Number(support.mean.toFixed(3)) }));
+    confidence *= 0.75;
+  }
+  if (support.longestGap > Math.max(24, 0.08 * perimeter)) {
+    const px = Math.round(support.longestGap / ctx.scale);
+    warnings.push(warning('bridged-opening', { px }));
+    confidence *= 1 - Math.min(0.35, support.longestGap / (0.5 * perimeter));
+  }
+  if (scored.radius >= 0.6 * ctx.maxRadius) {
+    warnings.push(warning('heavy-closing', { radius: scored.radius }));
+    confidence *= 0.85;
+  }
+  if (scored.annex > 0.15) {
+    warnings.push(warning('annexation', { spill: Number(scored.annex.toFixed(2)) }));
+    confidence *= 1 - 0.4 * scored.annex;
+  }
+  if (scored.completeness < 0.9) {
+    warnings.push(warning('incomplete-enclosure', { completeness: Number(scored.completeness.toFixed(2)) }));
+    confidence *= 0.7;
+  }
+  if (scored.coverage < 0.9) {
+    warnings.push(warning('wall-left-outside', { coverage: Number(scored.coverage.toFixed(2)) }));
+    confidence *= 0.6 + 0.4 * scored.coverage;
+  }
+  if (constraintScore) {
+    for (const miss of constraintScore.roomMisses) {
+      warnings.push(warning('room-outside', { name: miss.name, cover: Number(miss.cover.toFixed(2)) }, 'error'));
+    }
+    if (constraintScore.pointMisses.length) {
+      warnings.push(warning('label-outside', { count: constraintScore.pointMisses.length }, 'error'));
+    }
+    confidence *= 0.55 + 0.45 * constraintScore.fit;
+  }
+
+  return { confidence: Math.max(0.05, Math.min(0.98, confidence)), warnings };
+};
+
+// Best candidate, with the runners-up kept for diagnostics. Ties break toward
+// the cheaper hypothesis: less closing, then less bridging.
+export const pickCandidate = (scored) => {
+  const usable = scored.filter(Boolean);
+  if (!usable.length) return null;
+  const ranked = [...usable].sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 0.015) return b.score - a.score;
+    if (a.radius !== b.radius) return a.radius - b.radius;
+    return a.bridgedSpan - b.bridgedSpan;
+  });
+  return { best: ranked[0], ranked };
+};

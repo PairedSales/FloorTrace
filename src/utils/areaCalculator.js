@@ -1,27 +1,36 @@
-// Calculate area of a polygon using the shoelace formula
+// Signed shoelace: area, centroid and winding all derive from this one
+// primitive. Taking the absolute value per-lobe hides self-intersection, where
+// the lobes cancel and the area silently under-reports.
+export const signedArea = (vertices) => {
+  if (!vertices || vertices.length < 3) return 0;
+  let sum = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    sum += vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
+  }
+  return sum / 2;
+};
+
+// Calculate area of a polygon using the shoelace formula.
 // feetPerPixel: real-world feet represented by one image pixel { x, y }
-export const calculateArea = (vertices, feetPerPixel) => {
+// holes: enclosed voids (courtyards, light wells) subtracted from the outline
+export const calculateArea = (vertices, feetPerPixel, holes = null) => {
   if (!vertices || vertices.length < 3) {
     return 0;
   }
-  
-  // Calculate area in pixels using shoelace formula
-  let area = 0;
-  const n = vertices.length;
-  
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    area += vertices[i].x * vertices[j].y;
-    area -= vertices[j].x * vertices[i].y;
+
+  let area = Math.abs(signedArea(vertices));
+  for (const hole of holes ?? []) {
+    if (hole?.length >= 3) area -= Math.abs(signedArea(hole));
   }
-  
-  area = Math.abs(area) / 2;
-  
+  area = Math.max(0, area);
+
   // Convert from pixels to square feet using non-uniform X and Y scale factors
   const scaleX = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.x ?? 1.0);
   const scaleY = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.y ?? 1.0);
   const areaInSquareFeet = area * scaleX * scaleY;
-  
+
   return areaInSquareFeet;
 };
 
@@ -46,53 +55,6 @@ export const calculatePerimeter = (vertices, feetPerPixel) => {
   }
   
   return perimeter;
-};
-
-// Calculate bounding box of vertices
-export const getBoundingBox = (vertices) => {
-  if (!vertices || vertices.length === 0) {
-    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-  }
-  
-  let minX = vertices[0].x;
-  let minY = vertices[0].y;
-  let maxX = vertices[0].x;
-  let maxY = vertices[0].y;
-  
-  for (const vertex of vertices) {
-    minX = Math.min(minX, vertex.x);
-    minY = Math.min(minY, vertex.y);
-    maxX = Math.max(maxX, vertex.x);
-    maxY = Math.max(maxY, vertex.y);
-  }
-  
-  return { minX, minY, maxX, maxY };
-};
-
-// Check if a point is inside a polygon
-export const isPointInPolygon = (point, vertices) => {
-  if (!vertices || vertices.length < 3) {
-    return false;
-  }
-  
-  let inside = false;
-  const n = vertices.length;
-  
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = vertices[i].x;
-    const yi = vertices[i].y;
-    const xj = vertices[j].x;
-    const yj = vertices[j].y;
-    
-    const intersect = ((yi > point.y) !== (yj > point.y)) &&
-                     (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
-    
-    if (intersect) {
-      inside = !inside;
-    }
-  }
-  
-  return inside;
 };
 
 // Get centroid of polygon

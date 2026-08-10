@@ -1,593 +1,67 @@
-// Exterior/interior boundary tracing: adaptively close the wall mask until
-// the footprint seals (flood-fill from the border no longer leaks inside),
-// then polygonize the footprint contour and derive the interior envelope by
-// eroding the footprint by the sampled exterior wall thickness.
+// Exterior boundary detection.
+//
+// The stage is a hypothesise-and-score search, the same shape as room
+// detection and OCR: partition the page into wall networks, generate several
+// candidate footprints per network under different connectivity and evidence
+// policies (candidates.js), score each against wall evidence and any
+// constraints the rest of the app has already established (scoring.js), and
+// return the winner together with its confidence and the reasons it might be
+// wrong. Producing one polygon from one sealing heuristic gave a wrong answer
+// no second-best and no way to be recognised as wrong.
 
+import { bridgeRuns, dilateRect, labelComponents, openRect } from './raster.js';
+import { polygonArea, polygonBounds, pointInPolygon } from './polygon.js';
+import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
-  bridgeRuns,
-  closeRect,
-  dilateRect,
-  erodeRect,
-  openRect,
-  floodOutside,
-  labelComponents,
-} from './raster.js';
-import {
-  traceComponentBoundary,
-  simplifyRing,
-  rectilinearFit,
-  polygonArea,
-  polygonBounds,
-} from './polygon.js';
-import { findGarageCavities } from './garage.js';
-
-const largestComponent = (mask, width, height) => {
-  const { labels, components } = labelComponents(mask, width, height);
-  if (!components.length) return null;
-  let best = components[0];
-  for (const comp of components) {
-    if (comp.size > best.size) best = comp;
-  }
-  return { labels, component: best };
-};
+  generateCandidates, footprintEntry, sealMetrics, measureFootprint,
+} from './candidates.js';
+import { scoreCandidate, pickCandidate, candidateConfidence, warning } from './scoring.js';
+import { buildFloor } from './footprint.js';
 
 const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
-const componentMask = (labels, component, width) => {
-  const mask = new Uint8Array(labels.length);
-  const { minX, minY, maxX, maxY } = component.bbox;
-  for (let y = minY; y <= maxY; y += 1) {
-    const row = y * width;
-    for (let x = minX; x <= maxX; x += 1) {
-      if (labels[row + x] === component.id) mask[row + x] = 1;
-    }
-  }
-  return mask;
+const inkCount = (mask) => {
+  let n = 0;
+  for (let i = 0; i < mask.length; i += 1) n += mask[i];
+  return n;
 };
 
-const measureFootprint = (wallMask, width, height, radius) => {
-  const closed = radius > 0 ? closeRect(wallMask, width, height, radius) : wallMask;
-  const outside = floodOutside(closed, width, height);
-  const footprint = new Uint8Array(closed.length);
-  for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
-  const { labels, components } = labelComponents(footprint, width, height);
-  if (!components.length) return null;
-  let largest = components[0];
-  let totalEnclosed = 0;
-  for (const comp of components) {
-    totalEnclosed += comp.size;
-    if (comp.size > largest.size) largest = comp;
-  }
-  return { labels, closed, components, largest, totalEnclosed, radius };
-};
+// Does this group of strokes enclose its own bounding box on its own? A
+// complete floor outline does; a piece of an outline left behind by a long
+// window span encloses at best a corner of the region it belongs to. Two
+// groups that each close by themselves are two drawings, however well their
+// walls line up on the page — which is what stops floor plans stacked on a
+// sheet and sharing a left-wall coordinate from being welded into one
+// building, and what the old "merge whenever the bounding boxes overlap" rule
+// could not express at all.
+const INDEPENDENT_SEAL = 0.75;
 
-// One footprint component -> the shape buildFloor consumes.
-const footprintEntry = (measured, component, width) => ({
-  mask: componentMask(measured.labels, component, width),
-  labels: measured.labels,
-  closed: measured.closed,
-  componentId: component.id,
-  area: component.size,
-  bbox: component.bbox,
-  bboxArea: bboxAreaOf(component.bbox),
-  radius: measured.radius,
-});
-
-// Sealed = the footprint is a filled building region, not a leaked sliver:
-// it must cover most of the wall network's bounding box and be reasonably
-// solid within its own bbox.
-const isSealed = (fp, wallBboxArea) =>
-  fp && fp.bboxArea >= 0.55 * wallBboxArea && fp.area >= 0.4 * fp.bboxArea;
-
-// March inward from footprint boundary pixels and measure the depth of the
-// initial wall band. Gaps up to `gapTol` (double-line wall cavities) count as
-// wall; a longer free run ends the band.
-const sampleExteriorThickness = (boundary, wallMask, footprint, width, height, strokeThickness) => {
-  const gapTol = Math.max(4, strokeThickness * 2);
-  const maxDepth = Math.max(12, strokeThickness * 6) + gapTol;
-  const samples = [];
-  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-
-  for (let i = 0; i < boundary.length; i += 4) {
-    const p = boundary[i];
-    let dir = null;
-    for (const d of dirs) {
-      const nx = p.x + d[0] * 3;
-      const ny = p.y + d[1] * 3;
-      const bx = p.x - d[0] * 2;
-      const by = p.y - d[1] * 2;
-      const inwardOk = nx >= 0 && ny >= 0 && nx < width && ny < height && footprint[ny * width + nx];
-      const outwardOk = bx < 0 || by < 0 || bx >= width || by >= height || !footprint[by * width + bx];
-      if (inwardOk && outwardOk) {
-        dir = d;
-        break;
-      }
-    }
-    if (!dir) continue;
-
-    let lastWall = -1;
-    let freeRun = 0;
-    let sawWall = false;
-    for (let step = 0; step <= maxDepth; step += 1) {
-      const x = p.x + dir[0] * step;
-      const y = p.y + dir[1] * step;
-      if (x < 0 || y < 0 || x >= width || y >= height) break;
-      if (wallMask[y * width + x]) {
-        lastWall = step;
-        freeRun = 0;
-        sawWall = true;
-      } else {
-        freeRun += 1;
-        if (sawWall && freeRun > gapTol) break;
-        // Boundary pixels sitting on a bridged gap never see wall up close.
-        if (!sawWall && step > 3) break;
-      }
-    }
-    if (sawWall && lastWall >= 0) samples.push(lastWall + 1);
-  }
-
-  if (samples.length < 8) return Math.max(2, strokeThickness);
-  samples.sort((a, b) => a - b);
-  return samples[(samples.length / 2) | 0];
-};
-
-// Enclosed open cavities of the footprint: footprint minus the closed wall
-// mask, so doorways bridged by the seal keep house rooms separate.
-const openCavities = (footprint, width, height) => {
-  const open = new Uint8Array(footprint.mask.length);
-  for (let i = 0; i < open.length; i += 1) {
-    open[i] = footprint.mask[i] && !footprint.closed[i] ? 1 : 0;
-  }
-  return labelComponents(open, width, height);
-};
-
-// OCR-labelled non-GLA features (garage/porch/patio/deck…): each label bbox
-// votes for the enclosed cavity it sits in, and that cavity becomes a carve
-// target. Garage-keyword labels are tracked separately for reporting.
-const selectLabelledCavities = (regions, labels, components, footprint, minCavity, width, height) => {
-  const targets = new Set();
-  const garages = new Set();
-  const unresolved = [];
-  const resolved = [];
-  for (const region of regions) {
-    // Vote over a small sample grid: label bboxes are approximate and their
-    // centre can land on a stroke or a stray glyph pixel.
-    const votes = new Map();
-    for (let sy = 0; sy <= 4; sy += 1) {
-      for (let sx = 0; sx <= 4; sx += 1) {
-        const x = Math.round(region.x + (region.width * sx) / 4);
-        const y = Math.round(region.y + (region.height * sy) / 4);
-        if (x < 0 || y < 0 || x >= width || y >= height) continue;
-        const id = labels[y * width + x];
-        if (id >= 0) votes.set(id, (votes.get(id) ?? 0) + 1);
-      }
-    }
-    let best = -1;
-    let bestVotes = 0;
-    for (const [id, count] of votes) {
-      if (count > bestVotes) {
-        best = id;
-        bestVotes = count;
-      }
-    }
-    if (best < 0) {
-      unresolved.push(region);
-      continue;
-    }
-    const size = components[best].size;
-    // Sanity: skip noise slivers and anything big enough to be the house
-    // interior itself (a misplaced label must not gut the footprint).
-    if (size < minCavity || size > 0.45 * footprint.area) continue;
-    targets.add(best);
-    resolved.push({ region, id: best });
-    if (region.keyword && /garage/i.test(region.keyword)) garages.add(best);
-  }
-  return { targets, garages, unresolved, resolved };
-};
-
-// Fallback for labels whose cavity vote failed: screened pool cages and
-// similar enclosures are so dense with internal linework (pool outline, deck
-// edges, planters) that the seal's closing covers them entirely — there is
-// no open cavity for the label to sit in. Flood from the label instead,
-// crossing thin decoration ink freely but stopping at full-thickness walls
-// (bridged across their window/door gaps), and carve what the flood covers.
-const floodLabelledRegion = (region, footprint, barrier, width, height) => {
-  const mask = new Uint8Array(footprint.mask.length);
-  const queue = [];
-  for (let sy = 0; sy <= 4; sy += 1) {
-    for (let sx = 0; sx <= 4; sx += 1) {
-      const x = Math.round(region.x + (region.width * sx) / 4);
-      const y = Math.round(region.y + (region.height * sy) / 4);
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      const i = y * width + x;
-      if (footprint.mask[i] && !barrier[i] && !mask[i]) {
-        mask[i] = 1;
-        queue.push(i);
-      }
-    }
-  }
-  let size = queue.length;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-  for (let head = 0; head < queue.length; head += 1) {
-    const i = queue[head];
-    const x = i % width;
-    const y = (i / width) | 0;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-    const neighbours = [i - 1, i + 1, i - width, i + width];
-    if (x === 0) neighbours[0] = -1;
-    if (x === width - 1) neighbours[1] = -1;
-    for (const n of neighbours) {
-      if (n < 0 || n >= mask.length || mask[n]) continue;
-      if (!footprint.mask[n] || barrier[n]) continue;
-      mask[n] = 1;
-      queue.push(n);
-      size += 1;
-    }
-  }
-  if (maxX < 0) return null;
-  return { mask, size, bbox: { minX, minY, maxX, maxY } };
-};
-
-// Screened (grey-filled) pockets: condo plans shade terraces/balconies
-// instead of labelling them. Works on the footprint's grayscale directly —
-// a narrow terrace is swallowed whole by a large seal closing, so it never
-// shows up as an open cavity. Ink pixels are excluded so a carve can't eat
-// the shared house wall; anti-aliasing halos around interior linework only
-// form specks that the size floor drops. Hatched tile floors survive because
-// most of their pixels sit at page-white between the hatch lines.
-const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exteriorThickness) => {
-  if (!gray || !ink) return null;
-  const hist = new Uint32Array(256);
-  let count = 0;
-  for (let i = 0; i < footprint.mask.length; i += 1) {
-    if (footprint.mask[i] && !ink[i]) {
-      hist[gray[i]] += 1;
-      count += 1;
-    }
-  }
-  if (!count) return null;
-  let cum = 0;
-  let pageMedian = 255;
-  for (let v = 0; v < 256; v += 1) {
-    cum += hist[v];
-    if (cum >= count / 2) {
-      pageMedian = v;
-      break;
-    }
-  }
-
-  const thr = pageMedian - 12;
-  const shaded = new Uint8Array(footprint.mask.length);
-  for (let i = 0; i < shaded.length; i += 1) {
-    shaded[i] = footprint.mask[i] && !ink[i] && gray[i] < thr ? 1 : 0;
-  }
-  const { labels, components } = labelComponents(shaded, width, height);
-  const targets = new Set();
-  for (const comp of components) {
-    if (comp.size < minCavity || comp.size > 0.45 * footprint.area) continue;
-    // Uniform shading fills its bbox; halo rings around linework do not.
-    if (comp.size < 0.35 * bboxAreaOf(comp.bbox)) continue;
-    // A room-sized feature is wide both ways; thin dark strips are window
-    // glazing bands, not terraces.
-    const w = comp.bbox.maxX - comp.bbox.minX + 1;
-    const h = comp.bbox.maxY - comp.bbox.minY + 1;
-    if (Math.min(w, h) < 3 * exteriorThickness) continue;
-    // Genuine non-GLA shading is one flat tint; colour-styled plans wash
-    // room interiors with gradients whose below-threshold tail forms a
-    // pocket spanning many gray levels. Carving those guts the footprint.
-    const ghist = new Uint32Array(256);
-    let n = 0;
-    for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
-      const row = y * width;
-      for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
-        if (labels[row + x] === comp.id) {
-          ghist[gray[row + x]] += 1;
-          n += 1;
-        }
-      }
-    }
-    let cum10 = 0;
-    let p10 = 0;
-    let p90 = 255;
-    for (let v = 0; v < 256; v += 1) {
-      cum10 += ghist[v];
-      if (cum10 >= n * 0.1) {
-        p10 = v;
-        break;
-      }
-    }
-    let cum90 = 0;
-    for (let v = 0; v < 256; v += 1) {
-      cum90 += ghist[v];
-      if (cum90 >= n * 0.9) {
-        p90 = v;
-        break;
-      }
-    }
-    if (p90 - p10 > 10) continue;
-    targets.add(comp.id);
-  }
-  return targets.size ? { labels, components, targets } : null;
-};
-
-// Carve the target cavities out of the sealed footprint: each cavity is
-// cleared and a rect opening then drops its orphaned railing/outline ring —
-// the shared house wall survives as part of the solid footprint body and
-// becomes the new boundary, i.e. the trace lands on the exterior wall face.
-const carveCavities = (footprint, width, height, labels, components, targets, exteriorThickness) => {
-  if (!targets.size) return null;
-
-  const mask = footprint.mask.slice();
-  const carvedZone = new Uint8Array(mask.length);
-  for (const id of targets) {
-    const { minX, minY, maxX, maxY } = components[id].bbox;
-    for (let y = minY; y <= maxY; y += 1) {
-      const row = y * width;
-      for (let x = minX; x <= maxX; x += 1) {
-        if (labels[row + x] === id) {
-          mask[row + x] = 0;
-          carvedZone[row + x] = 1;
-        }
-      }
-    }
-  }
-
-  // Clip the opening back to the carved mask so its dilation cannot refill
-  // the cavity we just removed, and apply it only near the carved regions —
-  // a global opening would also shave every narrow footprint protrusion
-  // (bay windows) on the far side of the plan.
-  const openR = Math.max(2, exteriorThickness + 2);
-  const opened = openRect(mask, width, height, openR);
-  // The zone must span the orphaned wall band itself plus any unflooded
-  // sliver between it and the carved region (planter strips inside a pool
-  // cage), or the band survives as a thin footprint excursion.
-  const zone = dilateRect(carvedZone, width, height, openR * 2 + 2);
-  for (let i = 0; i < opened.length; i += 1) {
-    if (!mask[i]) opened[i] = 0;
-    else if (!zone[i]) opened[i] = mask[i];
-  }
-  const labeled = largestComponent(opened, width, height);
-  if (!labeled || labeled.component.size < 0.35 * footprint.area) return null;
-
-  const { component, labels: newLabels } = labeled;
-  const newMask = new Uint8Array(opened.length);
-  const { minX, minY, maxX, maxY } = component.bbox;
-  for (let y = minY; y <= maxY; y += 1) {
-    const row = y * width;
-    for (let x = minX; x <= maxX; x += 1) {
-      if (newLabels[row + x] === component.id) newMask[row + x] = 1;
-    }
-  }
-  return {
-    ...footprint,
-    mask: newMask,
-    labels: newLabels,
-    componentId: component.id,
-    area: component.size,
-    bbox: component.bbox,
-    bboxArea: (maxX - minX + 1) * (maxY - minY + 1),
-  };
-};
-
-const polygonize = (labels, width, height, componentId, epsilon, fitOptions) => {
-  const ring = traceComponentBoundary(labels, width, height, componentId);
-  if (ring.length < 3) return null;
-  const simplified = simplifyRing(ring, epsilon);
-  if (simplified.length < 3) return null;
-  return { polygon: rectilinearFit(simplified, fitOptions), ring };
-};
-
-// One sealed footprint component -> floor entry: outer contour, per-floor
-// exterior thickness, OCR exclusion carving, and eroded inner envelope.
-const buildFloor = (initialFootprint, analysis, epsilon, options) => {
-  const { wallMask, width, height, wallThickness } = analysis;
-  let footprint = initialFootprint;
-  let outerResult = polygonize(
-    footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
+const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
+  const compW = bbox.maxX - bbox.minX + 1;
+  const compH = bbox.maxY - bbox.minY + 1;
+  const bridged = bridgeRuns(
+    mask, width, height,
+    Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3)),
+    Math.max(8, wallThickness * 2),
   );
-  if (!outerResult) return null;
-
-  let exteriorThickness = sampleExteriorThickness(
-    outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-  );
-
-  // Shave wall-band filaments. An attached-but-unenclosed structure (a porch
-  // whose interior leaks to the outside, decorative pillar posts) leaves its
-  // wall band welded to the footprint as a zero-area excursion — the outer
-  // contour then appears to wrap a region that contributes nothing. A light
-  // opening removes bands about one exterior wall thick; bay windows and
-  // real wings are wider and survive. Guarded so a plan whose body would be
-  // reshaped (narrow-waisted footprints) keeps the untouched mask.
-  {
-    const shaveR = Math.max(2, Math.round(exteriorThickness * 0.75));
-    const shaved = openRect(footprint.mask, width, height, shaveR);
-    const kept = largestComponent(shaved, width, height);
-    if (kept && kept.component.size >= 0.85 * footprint.area &&
-        kept.component.size < footprint.area) {
-      footprint = {
-        ...footprint,
-        mask: componentMask(kept.labels, kept.component, width),
-        labels: kept.labels,
-        componentId: kept.component.id,
-        area: kept.component.size,
-        bbox: kept.component.bbox,
-        bboxArea: bboxAreaOf(kept.component.bbox),
-      };
-      const reOuter = polygonize(
-        footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
-      );
-      if (reOuter) {
-        outerResult = reOuter;
-        exteriorThickness = sampleExteriorThickness(
-          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-        );
-      }
-    }
-  }
-
-  // Non-GLA regions are removed after the seal so the trace covers the living
-  // area only: cavities voted in by OCR labels (garage/porch/patio/deck…) plus
-  // cavities with strong geometric garage evidence, which fires even when OCR
-  // read nothing. Labels sitting in a different floor's cavity get no votes
-  // here, so passing all regions to every floor is safe.
-  let excluded = 0;
-  let excludedGarages = 0;
-  if (options.excludeRegions?.length || options.autoGarage !== false ||
-      options.autoShaded !== false) {
-    const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
-    const carves = [];
-
-    const cavities = openCavities(footprint, width, height);
-    let unresolvedLabels = options.excludeRegions ?? [];
-    let resolvedLabels = [];
-    if (cavities.components.length) {
-      let targets = new Set();
-      const garageIds = new Set();
-      if (options.excludeRegions?.length) {
-        const picked = selectLabelledCavities(
-          options.excludeRegions, cavities.labels, cavities.components, footprint,
-          minCavity, width, height,
-        );
-        targets = picked.targets;
-        unresolvedLabels = picked.unresolved;
-        resolvedLabels = picked.resolved;
-        for (const id of picked.garages) garageIds.add(id);
-      }
-      if (options.autoGarage !== false) {
-        const garages = findGarageCavities({
-          labels: cavities.labels,
-          components: cavities.components,
-          footprint,
-          wallMask,
-          width,
-          height,
-          exteriorThickness,
-          minCavity,
-        });
-        for (const id of garages) {
-          targets.add(id);
-          garageIds.add(id);
-        }
-      }
-      if (targets.size) {
-        carves.push({
-          labels: cavities.labels, components: cavities.components,
-          targets, garages: garageIds.size,
-        });
-      }
-    }
-    if (unresolvedLabels.length || resolvedLabels.length) {
-      const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
-      const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
-      const barrier = bridgeRuns(
-        analysis.thickMask, width, height,
-        Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
-        Math.max(8, wallThickness * 2),
-      );
-      const pushFloodCarve = (flooded, garages, countAs) => {
-        const lab = new Int8Array(flooded.mask.length).fill(-1);
-        for (let i = 0; i < lab.length; i += 1) {
-          if (flooded.mask[i]) lab[i] = 0;
-        }
-        carves.push({
-          labels: lab,
-          components: [{ id: 0, size: flooded.size, bbox: flooded.bbox }],
-          targets: new Set([0]),
-          garages,
-          countAs,
-        });
-      };
-      // A door-swing arc drawn across a patio splits its slab into several
-      // open cavities, and the label votes only one in. Flood the label
-      // across thin ink too, and carve whatever the flood covers beyond the
-      // voted cavity (counted as part of the same label, not a new region).
-      for (const { region, id } of resolvedLabels) {
-        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
-        if (!flooded || flooded.size > 0.45 * footprint.area) continue;
-        let extra = 0;
-        for (let i = 0; i < flooded.mask.length; i += 1) {
-          if (flooded.mask[i] && cavities.labels[i] !== id) extra += 1;
-        }
-        if (extra < Math.max(minCavity / 2, 0.05 * flooded.size)) continue;
-        pushFloodCarve(flooded, 0, 0);
-      }
-      for (const region of unresolvedLabels) {
-        const flooded = floodLabelledRegion(region, footprint, barrier, width, height);
-        if (!flooded || flooded.size < minCavity ||
-            flooded.size > 0.45 * footprint.area) continue;
-        pushFloodCarve(
-          flooded,
-          region.keyword && /garage/i.test(region.keyword) ? 1 : 0,
-          1,
-        );
-      }
-    }
-    if (options.autoShaded !== false) {
-      const pockets = findShadedPockets(
-        analysis.gray, analysis.ink, footprint, width, height, minCavity, exteriorThickness,
-      );
-      if (pockets) {
-        carves.push({
-          labels: pockets.labels, components: pockets.components,
-          targets: pockets.targets, garages: 0,
-        });
-      }
-    }
-
-    for (const carve of carves) {
-      const carved = carveCavities(
-        footprint, width, height, carve.labels, carve.components, carve.targets, exteriorThickness,
-      );
-      if (!carved) continue;
-      const carvedOuter = polygonize(
-        carved.labels, width, height, carved.componentId, epsilon, options.fit,
-      );
-      if (!carvedOuter) continue;
-      footprint = carved;
-      outerResult = carvedOuter;
-      excluded += carve.countAs ?? carve.targets.size;
-      excludedGarages += carve.garages;
-      exteriorThickness = sampleExteriorThickness(
-        outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-      );
-    }
-  }
-
-  let innerPolygon = null;
-  const eroded = erodeRect(footprint.mask, width, height, exteriorThickness);
-  const innerComp = largestComponent(eroded, width, height);
-  if (innerComp && innerComp.component.size > 0.2 * footprint.area) {
-    const innerResult = polygonize(
-      innerComp.labels, width, height, innerComp.component.id, epsilon, options.fit,
-    );
-    if (innerResult && polygonArea(innerResult.polygon) > 0) {
-      innerPolygon = innerResult.polygon;
-    }
-  }
-
-  return {
-    outerPolygon: outerResult.polygon,
-    innerPolygon,
-    footprintMask: footprint.mask,
-    footprintArea: footprint.area,
-    footprintBbox: footprint.bbox,
-    exteriorThickness,
-    excluded,
-    excludedGarages,
-  };
+  const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness));
+  if (!fp) return false;
+  const entry = footprintEntry(fp, fp.largest, width);
+  return sealMetrics(entry, bboxAreaOf(bbox)).seal >= INDEPENDENT_SEAL;
 };
+
+const contains = (outer, inner, margin) =>
+  outer.minX - margin <= inner.minX && outer.maxX + margin >= inner.maxX
+  && outer.minY - margin <= inner.minY && outer.maxY + margin >= inner.maxY;
+
+const overlaps = (a, b, margin) =>
+  a.minX <= b.maxX + margin && b.minX <= a.maxX + margin
+  && a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
 
 // Partition the wall mask into disconnected wall networks (one per floor
 // outline drawn on the page): dilate to associate nearby strokes, label, and
-// project the original wall pixels onto the groups. Networks much smaller
-// than the largest are legends or stray fragments, not floors.
-const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetworks) => {
+// project the original wall pixels onto the groups.
+export const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetworks) => {
   const groupR = Math.max(6, wallThickness * 2);
   const grouped = dilateRect(wallMask, width, height, groupR);
   const { labels } = labelComponents(grouped, width, height);
@@ -610,35 +84,61 @@ const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetwor
     if (y > s.bbox.maxY) s.bbox.maxY = y;
   }
 
-  // Long window runs erase whole wall spans, so one floor outline can land
-  // here as several components whose bboxes overlap (distinct floors drawn on
-  // a page do not overlap). Merge those before size-filtering so a fragmented
-  // outline neither spawns phantom floors nor loses its small pieces.
   const nets = [...stats.values()].map((n) => ({ ...n, ids: new Set([n.id]) }));
-  const margin = groupR;
-  const intersects = (a, b) =>
-    a.minX <= b.maxX + margin && b.minX <= a.maxX + margin &&
-    a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
+  if (!nets.length) return [];
   nets.sort((a, b) => b.size - a.size);
-  // Only substantial fragments merge: window gaps break a floor outline into
-  // sizeable wall runs, whereas a leftover glyph stroke from a sheet title
-  // is a speck whose bbox merely happens to sit inside the floor's bbox —
-  // merged in, the seal balloons the footprint over the title block.
-  const minMerge = Math.max(80, 0.002 * (nets[0]?.size ?? 0));
+
+  const maskFor = (net) => {
+    const mask = new Uint8Array(wallMask.length);
+    for (let y = net.bbox.minY; y <= net.bbox.maxY; y += 1) {
+      const row = y * width;
+      for (let x = net.bbox.minX; x <= net.bbox.maxX; x += 1) {
+        if (wallMask[row + x] && net.ids.has(labels[row + x])) mask[row + x] = 1;
+      }
+    }
+    return mask;
+  };
+
+  // Rejoin fragments of one outline. Long window spans can break a floor
+  // outline into pieces whose extents interleave — each piece covers part of
+  // the same region, so their boxes *partially* overlap. Something drawn
+  // *inside* another outline (a legend, a title block, a detail, a second
+  // floor plan in an L-shaped plan's notch) is contained rather than
+  // interleaved, and two outlines that each enclose their own extent are two
+  // drawings whatever their boxes do. Merging on bare bbox overlap could not
+  // tell those three cases apart.
+  const minMerge = Math.max(80, 0.002 * nets[0].size);
+  const biggestBbox = bboxAreaOf(nets[0].bbox);
+  const cache = new Map();
+  const independentOf = (net) => {
+    if (!cache.has(net)) {
+      cache.set(net, bboxAreaOf(net.bbox) >= 0.15 * biggestBbox
+        && netSelfSeals(maskFor(net), width, height, net.bbox, wallThickness));
+    }
+    return cache.get(net);
+  };
+
   for (let merged = true; merged;) {
     merged = false;
     for (let i = 0; i < nets.length && !merged; i += 1) {
       for (let j = i + 1; j < nets.length; j += 1) {
-        if (Math.min(nets[i].size, nets[j].size) < minMerge) continue;
-        if (!intersects(nets[i].bbox, nets[j].bbox)) continue;
         const a = nets[i];
         const b = nets[j];
+        if (Math.min(a.size, b.size) < minMerge) continue;
+        if (!overlaps(a.bbox, b.bbox, groupR)) continue;
+        const aIndependent = independentOf(a);
+        const bIndependent = independentOf(b);
+        if (aIndependent && bIndependent) continue;
+        if (contains(a.bbox, b.bbox, groupR) && bIndependent) continue;
+        if (contains(b.bbox, a.bbox, groupR) && aIndependent) continue;
         a.size += b.size;
         for (const id of b.ids) a.ids.add(id);
         a.bbox.minX = Math.min(a.bbox.minX, b.bbox.minX);
         a.bbox.minY = Math.min(a.bbox.minY, b.bbox.minY);
         a.bbox.maxX = Math.max(a.bbox.maxX, b.bbox.maxX);
         a.bbox.maxY = Math.max(a.bbox.maxY, b.bbox.maxY);
+        cache.delete(a);
+        cache.delete(b);
         nets.splice(j, 1);
         merged = true;
         break;
@@ -647,167 +147,334 @@ const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetwor
   }
 
   nets.sort((a, b) => b.size - a.size);
-  if (!nets.length) return [];
-  const minSize = Math.max(200, 0.15 * nets[0].size);
+  const minSize = Math.max(200, 0.1 * nets[0].size);
   return nets
-    .filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= 0.01 * width * height)
+    .filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= 0.008 * width * height)
     .slice(0, maxNetworks)
-    .map((n) => {
-      const mask = new Uint8Array(wallMask.length);
-      for (let y = n.bbox.minY; y <= n.bbox.maxY; y += 1) {
-        const row = y * width;
-        for (let x = n.bbox.minX; x <= n.bbox.maxX; x += 1) {
-          if (wallMask[row + x] && n.ids.has(labels[row + x])) mask[row + x] = 1;
-        }
-      }
-      return { mask, bbox: n.bbox, wallSize: n.size };
-    });
+    .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }));
 };
 
-// Seal one isolated wall network. Window spans (including ticks/dashes inside
-// them) are bridged colinearly across the whole network, then an escalating
-// closing ladder handles what bridging cannot (window gaps wrapping corners).
-// Leaks shrink the enclosed area, so the truly sealed footprint is the ladder
-// entry with (near-)maximal enclosed area at the smallest radius — a greedy
-// "first radius that looks sealed" accepts partial footprints when one wing
-// of the floor seals before the rest.
-const detectFloorNet = (net, width, height, wallThickness, options) => {
-  const wallBboxArea = bboxAreaOf(net.bbox);
-  const compW = net.bbox.maxX - net.bbox.minX + 1;
-  const compH = net.bbox.maxY - net.bbox.minY + 1;
-  const maxGap = Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3));
-  const minFlank = Math.max(8, wallThickness * 2);
-  const bridged = bridgeRuns(net.mask, width, height, maxGap, minFlank);
+// Everything a network's footprint components need to become floors.
+const detectFloorNet = (net, analysis, options, constraints) => {
+  const { width, height, wallThickness } = analysis;
+  const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
+  const fitOptions = {
+    ...options.fit,
+    mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
+  };
+  const generated = generateCandidates(net, analysis, options);
+  if (!generated.candidates.length) return null;
 
-  const longest = Math.max(width, height);
-  const maxRadius = options.maxCloseRadius ?? Math.max(32, Math.round(longest * 0.045));
-  const radii = [];
-  for (let r = 2; r < maxRadius; r = Math.round(r * 1.45) + 1) radii.push(r);
-  radii.push(maxRadius);
+  // Constraints are page-wide but a network is one drawing: on a multi-floor
+  // sheet every other floor's rooms and labels would otherwise read as
+  // "outside this outline" and bury a good trace in errors.
+  const inNet = (x, y) => x >= net.bbox.minX - wallThickness * 4
+    && x <= net.bbox.maxX + wallThickness * 4
+    && y >= net.bbox.minY - wallThickness * 4
+    && y <= net.bbox.maxY + wallThickness * 4;
+  const localConstraints = constraints ? {
+    rooms: (constraints.rooms ?? []).filter((r) => inNet(
+      (r.rect.left + r.rect.right) / 2, (r.rect.top + r.rect.bottom) / 2,
+    )),
+    interiorPoints: (constraints.interiorPoints ?? []).filter((p) => inNet(p.x, p.y)),
+  } : null;
+  const scopedConstraints = localConstraints
+    && (localConstraints.rooms.length || localConstraints.interiorPoints.length)
+    ? localConstraints
+    : null;
 
-  const tried = [];
-  const measured = [];
-  for (const r of radii) {
-    const fp = measureFootprint(bridged, width, height, r);
-    tried.push({ radius: r, area: fp?.totalEnclosed ?? 0 });
-    if (!fp) continue;
-    // Sanity: a footprint spanning far beyond the network means the closing
-    // annexed something that is not this floor.
-    if (bboxAreaOf(fp.largest.bbox) > 1.35 * wallBboxArea) break;
-    measured.push(fp);
+  const evidence = createEvidence(analysis, net.mask);
+  const ctx = {
+    analysis,
+    evidence,
+    epsilon,
+    fitOptions,
+    wallBboxArea: generated.wallBboxArea,
+    maxRadius: generated.maxRadius,
+    coverage: generated.coverage,
+    constraints: scopedConstraints,
+    scale: 1,
+  };
+  const scored = [];
+  const scoreNew = () => {
+    while (scored.length < generated.candidates.length) {
+      scored.push(scoreCandidate(generated.candidates[scored.length], ctx));
+    }
+  };
+  scoreNew();
+
+  // Escalate to the hypotheses that make claims the drawing does not directly
+  // support: "only the thick strokes are walls", and "this wall spans an
+  // opening no closing radius could". Spanning is only worth inferring when
+  // nothing enclosed the network at all.
+  const bestOf = (key) => scored.reduce(
+    (best, c) => (c ? Math.max(best, key(c)) : best), 0,
+  );
+  if (generated.rescue.hasStructural) {
+    generated.rescue.structural();
+    scoreNew();
   }
-  if (!measured.length) return null;
-
-  // Annexation-aware pick. "Near-max area" alone over-seals: porch/pillar
-  // structures attached to the house accrete area a few percent per rung all
-  // the way up the ladder, dragging the max to a radius that glues the whole
-  // page together. A sealed footprint only gains rounding slack from extra
-  // radius, so rungs still growing fast at the TOP of the ladder are
-  // annexation — trim them before the near-max pick.
-  let end = measured.length;
-  while (end > 1 &&
-         measured[end - 1].totalEnclosed > 1.03 * measured[end - 2].totalEnclosed) {
-    end -= 1;
+  if (bestOf((c) => c.seal.seal) < generated.sealedThreshold) {
+    generated.rescue.span();
+    scoreNew();
   }
-  const usable = measured.slice(0, end);
-  const maxEnclosed = usable.reduce((best, fp) => Math.max(best, fp.totalEnclosed), 0);
-  const pick = usable.find((fp) => fp.totalEnclosed >= 0.98 * maxEnclosed);
 
-  // A never-sealing network (genuinely open side) still yields its walls plus
-  // whatever they enclose; flag it so callers know the trace is best-effort.
-  const largestFp = footprintEntry(pick, pick.largest, width);
-  const usedFallback = !isSealed(largestFp, wallBboxArea);
+  const picked = pickCandidate(scored);
+  if (!picked) return null;
+
+  const { best, ranked } = picked;
+  const { confidence, warnings } = candidateConfidence(best, ctx);
+  if (ranked.length === 1) warnings.push(warning('no-alternative', null, 'info'));
+
+  // The "only thick strokes" hypothesis won, so a region bounded entirely by
+  // hairlines — an open porch, a screened lanai, a garage closed by its door
+  // — was left outside the outline. That is the right answer for living area
+  // and the wrong thing to leave unsaid, so it is reported as an exclusion
+  // rather than silently dropped.
+  let thinStructure = null;
+  if (best.variant === 'structural') {
+    const widest = ranked.find((c) => c.variant === 'all');
+    if (widest && widest.entry.area > 1.02 * best.entry.area) {
+      const mask = new Uint8Array(widest.entry.mask.length);
+      let size = 0;
+      let minX = width;
+      let minY = height;
+      let maxX = -1;
+      let maxY = -1;
+      for (let i = 0; i < mask.length; i += 1) {
+        if (!widest.entry.mask[i] || best.entry.mask[i]) continue;
+        mask[i] = 1;
+        size += 1;
+        const x = i % width;
+        const y = (i / width) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      if (size >= 0.02 * best.entry.area) {
+        thinStructure = { mask, size, bbox: { minX, minY, maxX, maxY } };
+      }
+    }
+  }
 
   // Floors drawn touching (joined by a stray line) share one network but seal
   // into separate footprint components — keep every component of comparable
   // size, not just the largest.
-  const minCompSize = Math.max(0.25 * pick.largest.size, 0.01 * width * height);
-  const floorComps = pick.components
+  const minCompSize = Math.max(0.25 * best.entry.area, 0.01 * width * height);
+  const floorComps = best.measured.components
     .filter((c) => c.size >= minCompSize)
     .sort((a, b) => b.size - a.size)
-    .map((c) => (c === pick.largest ? largestFp : footprintEntry(pick, c, width)));
+    .map((c) => (c.id === best.entry.componentId
+      ? best.entry
+      : footprintEntry(best.measured, c, width)));
 
-  return { floorComps, usedFallback, tried, wallBbox: net.bbox, wallBboxArea };
+  return {
+    floorComps,
+    best,
+    constraints: scopedConstraints,
+    thinStructure,
+    confidence,
+    warnings,
+    epsilon,
+    fitOptions,
+    evidence,
+    alternatives: ranked.slice(1, 4).map((c) => ({
+      variant: c.variant,
+      policy: c.policy,
+      radius: c.radius,
+      score: Number(c.score.toFixed(3)),
+      areaPx: Math.round(c.areaPx),
+      support: Number(c.support.mean.toFixed(3)),
+      seal: Number(c.seal.seal.toFixed(3)),
+      coverage: Number(c.coverage.toFixed(3)),
+    })),
+    search: generated.search,
+  };
+};
+
+// Is this outline a building, or a legend, a title block or a detail drawing
+// that happens to be a closed box? Judged on the same evidence as everything
+// else rather than on bbox size alone.
+const floorPlausibility = (floor, net, analysis, evidence, constraints) => {
+  const { width, height, wallThickness } = analysis;
+  const thickRadius = Math.max(1, Math.round(wallThickness * 0.3));
+  const structural = thickRadius >= 2
+    ? inkCount(openRect(net.mask, width, height, thickRadius)) / Math.max(1, net.wallSize)
+    : 1;
+  const support = contourSupport(
+    floor.outerPolygon, evidence, Math.max(2, Math.round(Math.max(2, wallThickness) * 0.9)),
+  );
+  let holdsConstraint = null;
+  if (constraints?.interiorPoints?.length) {
+    holdsConstraint = constraints.interiorPoints.some((p) => {
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      return x >= 0 && y >= 0 && x < width && y < height && floor.footprintMask[y * width + x];
+    });
+  }
+  return { structural, support: support.mean, holdsConstraint };
 };
 
 export const traceBoundary = (analysis, options = {}) => {
   const { width, height, wallThickness } = analysis;
-  const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
   const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
+  const constraints = options.constraints ?? null;
+  const warnings = [];
 
-  // Multi-floor pages: split the wall mask into disconnected networks first,
-  // then run the full seal search on each network in isolation. Bridging and
-  // large closing radii are safe per network — there is no neighbouring floor
-  // left in the mask to merge into.
   const nets = partitionWallNetworks(
-    analysis.boundaryMask ?? analysis.wallMask, width, height, wallThickness, maxFloors,
+    options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
   );
+  if (!nets.length) return null;
+
   const floors = [];
   const searches = [];
+  const alternatives = [];
+  let worstConfidence = 1;
 
   for (const net of nets) {
     if (floors.length >= maxFloors) break;
-    // A network sitting inside an already-traced footprint is interior
-    // detail (stair block, island), not another floor.
+    // A network sitting inside an already-traced outline is interior detail
+    // (stair block, island, courtyard ring), not another floor. Tested against
+    // the outline rather than the carved footprint mask, or a courtyard that
+    // has just been carved into a hole reads as "not inside" and comes back as
+    // a phantom floor.
     const cx = (net.bbox.minX + net.bbox.maxX) >> 1;
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
-    if (floors.some((f) => f.footprintMask[cy * width + cx])) continue;
+    if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    const detected = detectFloorNet(net, width, height, wallThickness, options);
+    const detected = detectFloorNet(net, analysis, options, constraints);
     if (!detected) continue;
-    searches.push(detected.tried);
+    searches.push(detected.search);
+    alternatives.push(detected.alternatives);
 
     for (const footprint of detected.floorComps) {
       if (floors.length >= maxFloors) break;
-      const floor = buildFloor(footprint, { ...analysis, wallMask: net.mask }, epsilon, options);
-      if (floor) {
-        floor.sealRadius = footprint.radius;
-        floor.usedFallback = detected.usedFallback;
-        floors.push(floor);
+      const floor = buildFloor(
+        footprint, { ...analysis, wallMask: net.mask }, detected.epsilon, options,
+      );
+      if (!floor) continue;
+      floor.sealRadius = footprint.radius;
+      floor.confidence = detected.confidence;
+      floor.warnings = detected.warnings;
+      floor.candidate = {
+        variant: detected.best.variant,
+        policy: detected.best.policy,
+        radius: detected.best.radius,
+        score: Number(detected.best.score.toFixed(3)),
+        support: Number(detected.best.support.mean.toFixed(3)),
+        seal: Number(detected.best.seal.seal.toFixed(3)),
+      };
+      floor.usedFallback = detected.best.seal.seal < 0.55;
+  floor.plausibility = floorPlausibility(
+        floor, net, analysis, detected.evidence, detected.constraints,
+      );
+      floor.net = net;
+      // The excluded region sits against this floor's outline rather than
+      // inside it, so the adjacency test carries a wall's worth of slack.
+      const thin = detected.thinStructure;
+      if (thin && overlaps(thin.bbox, floor.footprintBbox, wallThickness * 2)) {
+        floor.excludedRegions = [...floor.excludedRegions, {
+          sources: ['thin-structure'], keyword: null, size: thin.size, bbox: thin.bbox,
+          confidence: 0.5,
+        }];
+        floor.excluded += 1;
+        floor.warnings = [...floor.warnings,
+          warning('thin-structure-excluded', { size: thin.size }, 'warn')];
       }
+      floors.push(floor);
     }
   }
   if (!floors.length) return null;
 
-  // Post-filter tiny outlines that slipped past the wall-size guard.
-  const biggestBboxArea = floors.reduce(
-    (best, f) => Math.max(best, bboxAreaOf(f.footprintBbox)), 0,
-  );
-  const kept = floors.filter((f) => bboxAreaOf(f.footprintBbox) >= 0.12 * biggestBboxArea);
+  // Reject outlines that are not buildings. A hairline-drawn box a fraction of
+  // the primary floor's size, with no room or label inside it, is a legend.
+  const biggestBboxArea = floors.reduce((best, f) => Math.max(best, bboxAreaOf(f.footprintBbox)), 0);
+  const biggestArea = floors.reduce((best, f) => Math.max(best, f.footprintArea), 0);
+  const kept = [];
+  let rejectedFloors = 0;
+  for (const floor of floors) {
+    const relBbox = bboxAreaOf(floor.footprintBbox) / biggestBboxArea;
+    const relArea = floor.footprintArea / biggestArea;
+    const { structural, holdsConstraint } = floor.plausibility;
+    const primary = relArea >= 0.999;
+    const suspicious = !primary
+      && relBbox < 0.55
+      && structural < 0.35
+      && holdsConstraint !== true;
+    if (relBbox < 0.12 || suspicious) {
+      rejectedFloors += 1;
+      continue;
+    }
+    kept.push(floor);
+  }
+  if (!kept.length) kept.push(floors[0]);
+  if (rejectedFloors) {
+    warnings.push(warning('floors-rejected', { count: rejectedFloors }, 'info'));
+  }
 
-  // Reading order (rows top-to-bottom, left-to-right within a row) so floor
-  // numbering matches how the page reads; the largest floor stays the primary
-  // for the single-boundary top-level fields.
-  kept.sort((a, b) => {
-    const ab = a.footprintBbox;
-    const bb = b.footprintBbox;
-    const overlap = Math.min(ab.maxY, bb.maxY) - Math.max(ab.minY, bb.minY);
-    const minH = Math.min(ab.maxY - ab.minY, bb.maxY - bb.minY);
-    return overlap > 0.3 * minH ? ab.minX - bb.minX : ab.minY - bb.minY;
-  });
-  const primary = kept.reduce(
+  // Reading order (rows top-to-bottom, left-to-right within a row). Row
+  // grouping first, then a strict comparator inside each row, so the ordering
+  // is a valid total order and floor numbering is stable between runs.
+  const rows = [];
+  for (const floor of [...kept].sort((a, b) => a.footprintBbox.minY - b.footprintBbox.minY)) {
+    const bb = floor.footprintBbox;
+    const row = rows.find((r) => {
+      const overlap = Math.min(r.maxY, bb.maxY) - Math.max(r.minY, bb.minY);
+      return overlap > 0.3 * Math.min(r.maxY - r.minY, bb.maxY - bb.minY);
+    });
+    if (row) {
+      row.floors.push(floor);
+      row.minY = Math.min(row.minY, bb.minY);
+      row.maxY = Math.max(row.maxY, bb.maxY);
+    } else {
+      rows.push({ minY: bb.minY, maxY: bb.maxY, floors: [floor] });
+    }
+  }
+  const ordered = [];
+  for (const row of rows) {
+    row.floors.sort((a, b) => a.footprintBbox.minX - b.footprintBbox.minX);
+    ordered.push(...row.floors);
+  }
+
+  const primary = ordered.reduce(
     (best, f) => (bboxAreaOf(f.footprintBbox) > bboxAreaOf(best.footprintBbox) ? f : best),
   );
+  for (const floor of ordered) {
+    worstConfidence = Math.min(worstConfidence, floor.confidence);
+    for (const w of floor.warnings) {
+      if (!warnings.some((existing) => existing.code === w.code && existing.detail?.px === w.detail?.px)) {
+        warnings.push(w);
+      }
+    }
+    delete floor.net;
+  }
 
   return {
-    floors: kept,
+    floors: ordered,
     outerPolygon: primary.outerPolygon,
     innerPolygon: primary.innerPolygon,
+    holes: primary.holes,
+    innerHoles: primary.innerHoles,
     footprintMask: primary.footprintMask,
     footprintArea: primary.footprintArea,
     footprintBbox: primary.footprintBbox,
     sealRadius: primary.sealRadius,
     exteriorThickness: primary.exteriorThickness,
-    usedFallback: primary.usedFallback,
-    excluded: kept.reduce((sum, f) => sum + f.excluded, 0),
-    excludedGarages: kept.reduce((sum, f) => sum + f.excludedGarages, 0),
+    usedFallback: ordered.some((f) => f.usedFallback),
+    confidence: worstConfidence,
+    warnings,
+    excluded: ordered.reduce((sum, f) => sum + f.excluded, 0),
+    excludedGarages: ordered.reduce((sum, f) => sum + f.excludedGarages, 0),
     debug: {
-      tried: searches[0],
       sealSearches: searches,
+      alternatives,
+      candidate: primary.candidate,
       wallBbox: nets[0].bbox,
       wallBboxArea: bboxAreaOf(nets[0].bbox),
+      networks: nets.length,
     },
   };
 };
 
-export { polygonArea, polygonBounds };
+export { polygonArea, polygonBounds, sealMetrics };

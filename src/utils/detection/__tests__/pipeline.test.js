@@ -123,8 +123,12 @@ describe('traceFloorplanBoundaryCore', () => {
     expect(b.maxX).toBeGreaterThanOrEqual(358);
   });
 
-  it('returns null for a blank image', () => {
-    expect(traceFloorplanBoundaryCore(createImage(300, 200))).toBeNull();
+  it('reports failure with a reason rather than silently returning nothing', () => {
+    const traced = traceFloorplanBoundaryCore(createImage(300, 200));
+    expect(traced.outer).toBeNull();
+    expect(traced.floors).toEqual([]);
+    expect(traced.quality.confidence).toBe(0);
+    expect(traced.quality.warnings.map((w) => w.code)).toContain('no-boundary');
   });
 });
 

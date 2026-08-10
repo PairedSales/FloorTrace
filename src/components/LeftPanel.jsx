@@ -3,6 +3,7 @@ import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea } from '../utils/areaCalculator';
+import { qualitySummary } from '../utils/boundaryQuality';
 import InchesInput from './InchesInput';
 import { toast } from 'sonner';
 
@@ -278,9 +279,10 @@ const LeftPanel = ({
                 perimeterTraces.map((trace) => {
                   const isActive = trace.id === activeTraceId;
                   const traceArea = trace.vertices && trace.vertices.length >= 3
-                    ? calculateArea(trace.vertices, feetPerPixel)
+                    ? calculateArea(trace.vertices, feetPerPixel, trace.holes)
                     : 0;
                   const { value: tAreaText, suffix: tAreaSuffix } = formatArea(traceArea, unit);
+                  const quality = trace.quality ? qualitySummary(trace.quality) : null;
 
                   return (
                     <div
@@ -353,11 +355,26 @@ const LeftPanel = ({
                         <span>
                           {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
                           {trace.closed ? ' (Closed)' : ' (Drawing)'}
+                          {trace.holes?.length ? ` −${trace.holes.length} void` : ''}
                         </span>
                         <span>
                           {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}
                         </span>
                       </div>
+
+                      {/* Detection quality — a low-confidence outline stays
+                          marked as one after it is on the canvas. */}
+                      {quality && quality.level !== 'good' && (
+                        <div
+                          className={`pl-3.5 text-[9px] leading-tight ${
+                            quality.level === 'fair' ? 'text-amber-400' : 'text-red-400'
+                          }`}
+                          title={quality.warnings.map((w) => w.message).join('; ')}
+                        >
+                          {quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}
+                          {quality.reason ? ` · ${quality.reason}` : ''}
+                        </div>
+                      )}
                     </div>
                   );
                 })

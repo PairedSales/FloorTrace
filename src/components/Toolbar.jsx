@@ -22,8 +22,7 @@ const Toolbar = ({
   onRestart,
   showPanelOptions,
   onOptionsToggle,
-  hasAutoDetection,
-  onManualMode,
+  onDrawExterior,
   perimeterOverlay,
   onFindRoomSize,
   onHelpOpen,
@@ -115,14 +114,15 @@ const Toolbar = ({
           </button>
         )}
 
-        {perimeterOverlay && hasAutoDetection && (
+        {image && (
           <button
-            onClick={onManualMode}
+            onClick={onDrawExterior}
+            disabled={isProcessing}
             className="toolbar-btn"
-            title="Switch to manual outline mode"
+            title="Draw the exterior outline by hand"
           >
             <LayoutList className="w-3.5 h-3.5" />
-            <span>Manual Trace</span>
+            <span>Draw Exterior</span>
           </button>
         )}
 

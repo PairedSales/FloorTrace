@@ -20,7 +20,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
-        handleManualMode(dataUrl, true); // Automatically enter manual mode
+        await handleManualMode(dataUrl, true); // Automatically enter manual mode
       }
     } catch (error) {
       console.error('Error pasting image:', error);
@@ -67,7 +67,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
-        handleManualMode(dataUrl, true);
+        await handleManualMode(dataUrl, true);
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);

@@ -15,10 +15,14 @@ npm run preview     # preview production build
 npm run lint        # eslint .
 npm test            # vitest run (all tests)
 npx vitest run <path/to/file.test.js>   # run a single test file
-node scripts/ocrBenchmark.mjs [image.png ...]   # OCR accuracy/timing benchmark (Node, Tesseract path only)
+npm run bench:detection    # detection accuracy against fixtures/ (runs in CI)
+npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path only)
+npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 ```
 
 Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test harness — UI changes need to be manually verified with `npm run dev`. Benchmark/test fixture floorplans (`ExampleFloorplanN.*` + `.truth.json` sidecars) live under `fixtures/`.
+
+**Always run `npm run bench:detection` before and after a detection change.** It scores polygon shape and square feet, not just bounding boxes — a tracer that returns each building's bounding rectangle passes a box check while discarding every notch and wing. `npm run probe:exterior` prints the same scenarios `exterior-failures.test.js` asserts (wide openings, U-notches, dimension strings, courtyards, legends, garage doors, nested plans, mixed wall thickness) with IoU/area/confidence, which is the fastest way to see what a change did.
 
 ## Architecture
 
@@ -28,6 +32,8 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 
 - `SNAPSHOT_FIELDS` (working state minus transient UI/camera fields) is what `undoManager` snapshots on `undoManager.save()`. Callers call `undoManager.save()` themselves *before* mutating state for an undoable action — it is not automatic.
 - `AUTOSAVE_FIELDS` is the similar-but-not-identical subset persisted to localStorage (`draftStorage.js`) on change.
+- `PERSISTENT_FLOOR_FIELDS` (the `.floorplan` projection, re-exported by `projectSerializer.js`) is derived from the same declaration. Do not hand-maintain it: the hand-listed version is how `exteriorLabels` came to be autosaved but not exported, so reopening a project silently degraded every later trace.
+- `rooms[]` accumulates every room the detector has placed (rect, per-side wall faces, implied px/ft). It is the boundary stage's containment evidence and the sample set for a robust multi-room scale — a single `roomOverlay` could be neither. Perimeter traces additionally carry `holes` (enclosed voids, subtracted from area) and `quality` (detection confidence + warnings).
 - `src/store/undoManager.js` interns image data URLs into a hash-keyed pool (`hashDataUrl`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step.
 - `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectPerimeterOverlay` / `selectCombinedArea` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library.
 
@@ -37,16 +43,30 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 
 ### Two independent, worker-backed CV pipelines
 
-Both pipelines take a raw image and run expensive per-pixel work off the main thread; both were rebuilt from scratch (see `docs/status.md`, `tasks/tasks.md`) with an emphasis on real inner/outer wall geometry rather than fixed-size placeholders.
+Both pipelines take a raw image and run expensive per-pixel work off the main thread, with an emphasis on real inner/outer wall geometry rather than fixed-size placeholders.
 
-**1. Wall/boundary detection** (`src/utils/detection/`) — runs in `src/workers/detectionWorker.js`, invoked via `src/utils/detection/index.js` (`detectRoomFromClick`, `traceFloorplanBoundary`). Pure-JS cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.js`) take a plain `{width, height, data}` object and run identically in the worker and in `scripts/detectionBenchmark.mjs` (Node, pngjs — run it before/after changing detection behavior; ground truth via `<image>.truth.json` sidecars). Stages:
+**1. Wall/boundary detection** (`src/utils/detection/`) — runs in `src/workers/detectionWorker.js`, invoked via `src/utils/detection/index.js` (`detectRoomFromClick`, `traceFloorplanBoundary`). Pure-JS cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.js`) take a plain `{width, height, data}` object and run identically in the worker and in `scripts/detectionBenchmark.mjs` (Node, pngjs; ground truth via `<image>.truth.json` sidecars).
+
+The exterior stage is a **hypothesise-and-score search**, the same shape as room detection and OCR — not a single sealing heuristic. Stages:
+
   - `raster.js` — Otsu binarize + OR-pool downscale, run-based morphology, components, flood fill, SATs
-  - `analyze.js` — text/speck strip, structural stroke extraction (kills door arcs/curves), wall-thickness estimate
-  - `boundary.js` — partitions the wall mask into disconnected wall networks first (one per floor outline, up to 5), then per network: bridge colinear gaps, seal-radius search (escalating closing, picking the radius whose enclosed area is near the ladder max rather than the first radius that merely passes a solidity check), footprint contour, inner envelope via sampled exterior wall depth. Multi-floor pages return a `floors[]` array (see below); sealing per isolated network — not on the shared mask — is what keeps neighboring floors from bridging into each other
-  - `room.js` — rectangle growth from the label with wall-coverage stops (door gaps don't leak), thin-line candidates + label-aspect arbitration (closets/counters), open-plan virtual sides
-  - `polygon.js` — Moore trace → RDP → rectilinear line fit
-  - Produces both `inner` and `outer` boundary candidates from one footprint pass; `useInteriorWalls` (UI toggle) just selects which candidate is active (`getBoundaryForMode` in `detection/index.js`). See `docs/architecture.md` / `docs/technical.md` for the geometry contract (`polygon`, `overlay`, `confidence` for rooms; `inner`/`outer`/`debug` for boundaries). Room callers pass `options.labelBbox`/`options.labelDims` through from the OCR result.
-  - Reference material (papers, annotated examples) for this pipeline lives in `Reference Data for Wall Detection System/`.
+  - `analyze.js` — text/speck strip, structural stroke extraction (kills door arcs/curves), wall-thickness estimate. Produces `wallMask` (strict; rooms use this), `boundaryMask` (wallMask + rescued line-like residual ink; the tracer uses this) and `thickMask` (strokes thick enough to be structural)
+  - `wallEvidence.js` — linework vectorised into axis-aligned **wall segments** (`faceLo`/`faceHi`/`lo`/`hi`/`thick`), plus graded per-point evidence: structural ink = 1, any wall stroke = 0.45, raw ink = 0.2, nothing = 0. `contourSupport` answers "is this outline actually drawn as wall?"
+  - `candidates.js` — per wall network, footprints from two evidence variants (`all`, `structural`) × three connectivity policies (`weld` = colinear welding that refuses notch mouths, `raw`, `span` = wall lines painted across their full extent). `span` is a rescue that only runs when nothing enclosed the network. Every closing-ladder rung is a candidate, with a `completeness` measure relative to the largest enclosure the same evidence reached before it started annexing
+  - `scoring.js` — scores each candidate on seal (does it close, and fill its own wall network), support (is the outline drawn as wall), coverage (does it enclose the wall that *was* drawn), economy (how much closing/bridging was invented), and any constraints the app supplies; emits a confidence and a `warnings[]` list
+  - `boundary.js` — orchestrator: partition into wall networks (fragments of one outline rejoin only when their extents interleave and neither encloses itself), generate → score → pick per network, build floors, reject outlines that are not buildings, order them, and aggregate quality
+  - `footprint.js` — per floor: outer contour, filament shave, non-GLA carve, enclosed voids as **holes**, and an interior envelope inset **per edge** by the wall measured behind that edge
+  - `nonGla.js` — garage/porch/patio arbitration. Four detectors (OCR label votes, label floods, geometric garage evidence, shaded pockets) emit *candidate regions*; overlapping candidates merge into one region carrying both sources; one pass removes them under a cumulative bound, so the result cannot depend on detector order
+  - `validate.js` — post-hoc checks on the mapped result (self-intersection, floors overlapping, inner nesting, labelled regions outside the footprint) plus `scaleIsotropy` / `robustScale` for calibration
+  - `polygon.js` — Moore trace (Jacob's criterion) → RDP → de-skewed rectilinear fit; signed shoelace, ring-set area, point-in-polygon
+  - `room.js` — rectangle growth from the label with wall-coverage stops (door gaps don't leak), thin-line candidates + label-aspect arbitration (closets/counters), open-plan virtual sides. Returns per-side wall faces (`{edge, cov, thick, kind, exterior}`) and the px/ft the room implies
+  - `cache.js` — memoises analysis and boundary per `(cacheKey, maxDimension)`. The worker passes the image hash, so N room clicks cost one trace instead of 2N
+
+  **Quality is a first-class output.** `traceFloorplanBoundaryCore` returns `quality: {confidence, warnings[], usedFallback, …}`; the worker forwards a whitelist of debug fields (it must never blanket-null them again); traces carry their quality into the store; `App.jsx` reports a doubtful trace as doubtful and offers **Draw Exterior**. `src/utils/boundaryQuality.js` decides the wording.
+
+  Constraints flow the other way too: `options.constraints` carries `rooms[]` (known-inside rectangles) and `interiorPoints` (parsed dimension labels) from the store, and geometry that excludes them is scored down.
+
+  Reference material (papers, annotated examples) for this pipeline lives in `Reference Data for Wall Detection System/`.
 
 **2. Dimension OCR** (`src/utils/dimensions/`, entry point `src/utils/DimensionsOCR.js`) — a multi-pass hybrid pipeline documented in detail at the top of `src/utils/dimensions/pipeline.js`:
   1. Preprocess (grayscale, CLAHE via OpenCV or JS fallback, denoise, unsharp)
@@ -71,3 +91,4 @@ Both pipelines take a raw image and run expensive per-pixel work off the main th
 - No comment blocks/docstrings beyond a short "why" line — several files already model this well (`pipeline.js`, `appStore.js`); match that density, not the verbosity of one-off code you're editing near.
 - `eslint.config.js` treats unused vars as an error except names matching `^[A-Z_]`.
 - Prefer adding new cross-cutting interaction logic as a hook in `src/hooks/` rather than growing `App.jsx`.
+- Detection results carry their own quality. Never drop a `warnings[]`/`confidence` on the way to the UI, and never report a trace as a plain success without consulting it — the failure mode this codebase is most prone to is a wrong answer that looks green.

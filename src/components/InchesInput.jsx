@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { decimalToFeetInches } from '../utils/unitConverter';
 
 const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
   const [feet, setFeet] = useState('');
@@ -12,9 +13,10 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
 
   useEffect(() => {
     if (value) {
-      const totalInches = parseFloat(value) * 12;
-      const f = Math.floor(totalInches / 12);
-      const i = Math.round(totalInches % 12);
+      // Shared formatter: the inline version omitted the 12-inch carry, so
+      // 11.99 ft displayed as 11' 12" — a value this component's own
+      // validation refuses as input.
+      const { feet: f, inches: i } = decimalToFeetInches(parseFloat(value));
       setFeet(f.toString());
       setInches(i.toString());
     } else {

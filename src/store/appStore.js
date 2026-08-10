@@ -9,7 +9,9 @@ import { calculateArea } from '../utils/areaCalculator';
  * that previously existed across applySnapshot, resetOverlays, and autosave.
  */
 const DEFAULT_TRACE_ID = 'trace-default';
-const WORKING_STATE_DEFAULTS = {
+// A function, not a literal: handing out the same nested objects on every
+// reset and undo fallback aliased one project's calibration into the next.
+const workingStateDefaults = () => ({
   image: null,
   imageMimeType: 'image/png',
   roomOverlay: null,
@@ -39,6 +41,10 @@ const WORKING_STATE_DEFAULTS = {
   processingMessage: '',
   detectedDimensions: [],
   exteriorLabels: [],
+  // Every room the detector has placed this session, in original image px.
+  // Rooms are known-inside evidence for the boundary stage and the sample set
+  // for a robust multi-room scale; a single `roomOverlay` could hold neither.
+  rooms: [],
   showSideLengths: true,
   useInteriorWalls: false,
   autoSnapEnabled: true,
@@ -67,7 +73,9 @@ const WORKING_STATE_DEFAULTS = {
   // Project tracking states
   isDirty: false,
   projectId: null,
-};
+});
+
+const WORKING_STATE_DEFAULTS = workingStateDefaults();
 
 /**
  * The subset of field names that are persisted in undo/redo snapshots.
@@ -113,6 +121,25 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
 ];
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_AUTOSAVE_FIELDS.includes(k)
+);
+
+/**
+ * Fields written into a saved `.floorplan`. Derived from the same declaration
+ * as the other two projections — hand-maintaining this list is how
+ * `exteriorLabels` came to be autosaved but not exported, so reopening a
+ * project silently degraded every later trace to geometry-only.
+ */
+const EXCLUDED_PERSISTENT_FIELDS = [
+  'isProcessing', 'processingMessage', 'traceInteractionMode',
+  'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
+  'cropToolActive', 'eraserBrushSize',
+  'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
+  'canvasRotation',   // written to globalSettings
+  'viewportSyncToken',
+  'isDirty', 'projectId', // written to metadata
+];
+export const PERSISTENT_FLOOR_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
+  (k) => !EXCLUDED_PERSISTENT_FIELDS.includes(k)
 );
 
 // ──── helpers ────────────────────────────────────────────────────────────────
@@ -164,6 +191,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         id: newId,
         name: '1st Floor',
         vertices: v?.vertices || [],
+        holes: v?.holes ?? [],
+        quality: v?.quality ?? null,
         closed: true,
         visible: true,
         locked: false,
@@ -182,6 +211,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         return {
           ...t,
           vertices: v?.vertices || [],
+          holes: v?.holes ?? (v ? [] : t.holes ?? []),
+          // Editing a trace by hand makes it the user's geometry, so an
+          // auto-detection's confidence no longer describes it.
+          quality: v && 'quality' in v ? v.quality : null,
           closed: true,
         };
       }
@@ -237,6 +270,23 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
   setDetectedDimensions: (v) => set({ detectedDimensions: v }),
   setExteriorLabels: (v) => set({ exteriorLabels: v }),
+  setRooms: (v) => set({ rooms: v }),
+  /**
+   * Record a detected room. Rooms accumulate: they are the boundary stage's
+   * containment evidence and the sample set a robust scale is fitted to, and
+   * both need more than the one room the overlay can hold. A repeat detection
+   * of the same label replaces the earlier one.
+   */
+  addRoom: (room) => set((state) => {
+    if (!room?.rect) return {};
+    const key = room.labelId ?? null;
+    const rest = key
+      ? state.rooms.filter((r) => r.labelId !== key)
+      : state.rooms.filter((r) => !(
+        Math.abs(r.rect.left - room.rect.left) < 4 && Math.abs(r.rect.top - room.rect.top) < 4
+      ));
+    return { rooms: [...rest, room] };
+  }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
   setAutoSnapEnabled: (v) => set({ autoSnapEnabled: v }),
@@ -271,7 +321,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setIsDirty: (v) => set({ isDirty: v }),
   setProjectId: (v) => set({ projectId: v }),
   loadProject: (projectState) => set({
-    ...WORKING_STATE_DEFAULTS,
+    ...workingStateDefaults(),
     ...projectState,
     traceInteractionMode: 'idle',
     perimeterVertices: null,
@@ -315,8 +365,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   /** Apply a snapshot produced by createSnapshot (used by undo/redo). */
   applySnapshot: (snapshot) => {
     const patch = {};
+    const defaults = workingStateDefaults();
     for (const k of SNAPSHOT_FIELDS) {
-      patch[k] = snapshot[k] ?? WORKING_STATE_DEFAULTS[k];
+      patch[k] = snapshot[k] ?? defaults[k];
     }
     // Older snapshots predate activeTraceId being captured — never leave the
     // selection dangling on a trace that no longer exists.
@@ -331,15 +382,19 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   /** Reset all working state except `image` to defaults. */
   resetOverlays: () => {
-    const defaults = { ...WORKING_STATE_DEFAULTS };
+    const defaults = workingStateDefaults();
     delete defaults.image; // preserve current image
     set(defaults);
   },
 
-  /** Full restart: clear image and all working state, reset to single floor. */
+  /**
+   * Full restart: clear image and all working state, reset to a single floor.
+   * The trace reset runs last — applied first, the working-state spread put
+   * the stale default trace straight back.
+   */
   restart: () => {
+    set(workingStateDefaults());
     get().resetPerimeterTraces();
-    set({ ...WORKING_STATE_DEFAULTS });
   },
 
   // ── bulk restore (used by autosave restore) ────────────────────────────────
@@ -412,10 +467,10 @@ export const selectCombinedArea = (state) => {
 
   const areaValue = traces
     .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
-    .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel), 0);
+    .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel, t.holes), 0);
 
   lastFeetPerPixel = { ...feetPerPixel };
-  lastTraces = traces;
+  lastTraces = traces.slice();
   lastCombinedArea = areaValue;
   return areaValue;
 };

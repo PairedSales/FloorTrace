@@ -1,3 +1,7 @@
+> **Historical.** This review predates the exterior-detection redesign; many of
+> its findings have since been fixed. Treat it as a record of what was true
+> when it was written, not as a live task list.
+
 # FloorTrace — Engineering Review
 
 **Date:** 2026-07-16

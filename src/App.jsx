@@ -14,6 +14,8 @@ import {
   terminateDetectionWorker,
 } from './utils/detection';
 import { detectAllDimensions, terminateOcrWorker, warmupOcrEngines } from './utils/DimensionsOCR';
+import { scaleIsotropy, robustScale } from './utils/detection/validate';
+import { qualitySummary } from './utils/boundaryQuality';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
@@ -27,6 +29,28 @@ import { useDragAndDrop } from './hooks/useDragAndDrop';
 // be reported distinctly from porch/patio carves).
 const nonGlaExcludeRegions = () =>
   useAppStore.getState().exteriorLabels.map((l) => ({ ...l.bbox, keyword: l.keyword }));
+
+// What the rest of the app already knows about this building, handed to the
+// tracer as constraints. Rooms are inside by construction; a parsed dimension
+// label is inside by definition — geometry that excludes either is provably
+// wrong, and the detector had no way to be told so.
+const boundaryConstraints = () => {
+  const state = useAppStore.getState();
+  const nonGla = state.exteriorLabels.map((l) => l.bbox);
+  const overlapsNonGla = (bbox) => nonGla.some((n) =>
+    bbox.x < n.x + n.width && n.x < bbox.x + bbox.width
+    && bbox.y < n.y + n.height && n.y < bbox.y + bbox.height);
+  return {
+    rooms: state.rooms.map((r) => ({ name: r.name ?? null, rect: r.rect })),
+    interiorPoints: state.detectedDimensions
+      .filter((d) => d.bbox && !overlapsNonGla(d.bbox))
+      .map((d) => ({
+        x: d.bbox.x + d.bbox.width / 2,
+        y: d.bbox.y + d.bbox.height / 2,
+        name: d.text ?? null,
+      })),
+  };
+};
 
 const excludedAreasNote = (traced) => {
   const garages = traced.excludedGarages ?? 0;
@@ -266,6 +290,22 @@ function App() {
     notify('Project reset.', { type: 'success' });
   };
 
+  // OCR found nothing usable: drop a placeholder overlay in the middle of the
+  // image for the user to size by hand.
+  const placeCentredOverlay = useCallback((imgSrc) => {
+    const img = new Image();
+    img.onload = () => {
+      const centerX = img.width / 2;
+      const centerY = img.height / 2;
+      setRoomOverlay({
+        x1: centerX - 100, y1: centerY - 100, x2: centerX + 100, y2: centerY + 100,
+      });
+      setPerimeterVertices([]);
+      setMode('normal');
+    };
+    img.src = imgSrc;
+  }, [setRoomOverlay, setPerimeterVertices, setMode]);
+
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
     if (!forceEnter && mode === 'manual') {
@@ -304,82 +344,40 @@ function App() {
       
       try {
         const result = await detectAllDimensions(imgSrc);
-        
-        // Handle new return format (object with dimensions and detectedFormat)
+
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
 
         // Garage/porch/patio/deck/balcony labels: kept for perimeter tracing
         // so non-GLA features get carved out of the footprint.
         setExteriorLabels(result.exteriorLabels || []);
-        
-        console.log('Manual Mode - Result:', { dimensions: dimensions.length, detectedFormat, currentUnit: unit });
-        
-        console.log('Manual Mode - Dimensions received:', dimensions.length);
         setDetectedDimensions(dimensions);
-        
+
         if (dimensions.length === 0) {
-          // OCR failed - automatically create 200x200 room overlay at center
           setOcrFailed(true);
           notify('No dimensions found — enter room size manually.', { type: 'warning' });
-
-          // Get image dimensions to center the overlay
-          const img = new Image();
-          img.onload = () => {
-            const centerX = img.width / 2;
-            const centerY = img.height / 2;
-
-            // Create 200x200 room overlay at center
-            const newRoomOverlay = {
-              x1: centerX - 100,
-              y1: centerY - 100,
-              x2: centerX + 100,
-              y2: centerY + 100
-            };
-
-            setRoomOverlay(newRoomOverlay);
-            setPerimeterVertices([]);
-            setMode('normal');
-          };
-          img.src = imgSrc;
+          placeCentredOverlay(imgSrc);
         } else {
-          // OCR succeeded - clear the failed flag
           setOcrFailed(false);
           const count = dimensions.length;
           notify(`Detected ${count} dimension${count === 1 ? '' : 's'}. Select one to place the room.`, { type: 'success' });
-          // Auto-switch unit based on detected format
-          if (detectedFormat && unit !== detectedFormat) {
-            console.log(`Manual Mode - Auto-switching unit from ${unit} to ${detectedFormat}`);
-            setUnit(detectedFormat);
-            const label = detectedFormat === 'inches' ? 'feet-inches' : 'decimal feet';
+          // Auto-switch unit based on detected format. The parser's vocabulary
+          // is {inches, decimal, meters} and the UI's is {inches, decimal,
+          // metric}; without the mapping a metric plan set a unit no formatter
+          // recognised.
+          const uiUnit = detectedFormat === 'meters' ? 'metric' : detectedFormat;
+          if (uiUnit && unit !== uiUnit) {
+            setUnit(uiUnit);
+            const label = uiUnit === 'inches' ? 'feet-inches'
+              : uiUnit === 'metric' ? 'meters' : 'decimal feet';
             notify(`Switched to ${label} mode based on detected dimensions.`, { type: 'info' });
           }
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
-        // OCR failed - automatically create 200x200 room overlay at center
         setOcrFailed(true);
         notify('Could not scan dimensions — enter room size manually.', { type: 'error' });
-
-        // Get image dimensions to center the overlay
-        const img = new Image();
-        img.onload = () => {
-          const centerX = img.width / 2;
-          const centerY = img.height / 2;
-
-          // Create 200x200 room overlay at center
-          const newRoomOverlay = {
-            x1: centerX - 100,
-            y1: centerY - 100,
-            x2: centerX + 100,
-            y2: centerY + 100
-          };
-
-          setRoomOverlay(newRoomOverlay);
-          setPerimeterVertices([]);
-          setMode('normal');
-        };
-        img.src = imgSrc;
+        placeCentredOverlay(imgSrc);
       } finally {
         setIsProcessing(false);
         // Terminate to release the worker's WASM heap, then re-warm in the
@@ -388,7 +386,7 @@ function App() {
         terminateOcrWorker().then(() => warmupOcrEngines());
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setPerimeterVertices, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -436,71 +434,115 @@ function App() {
     handleDrop,
   } = useDragAndDrop(notify, handleManualMode, checkUnsavedChanges);
 
+  // Switch to manual outline drawing: clear the auto-detected perimeter and
+  // let the user draw the exterior themselves. This is the fallback whenever
+  // the tracer is unsure, so it is offered from the failure toast as well as
+  // from the toolbar.
+  const handleDrawExterior = useCallback(() => {
+    undoManager.save();
+    setPerimeterOverlay(null);
+    setPerimeterVertices([]); // activate manual vertex placement
+    notify('Click to place the exterior outline. Esc/Enter to finish.', { type: 'info' });
+  }, [setPerimeterOverlay, setPerimeterVertices, notify]);
+
   // Apply detected boundaries to perimeter traces. Returns the number of
   // floors applied (0 = nothing usable). A single floor updates the active
   // trace as before; multiple floors replace the trace list with one trace
-  // per floor, each independently editable afterwards.
+  // per floor, each independently editable afterwards. Each trace carries the
+  // detector's confidence and reasons, so a doubtful outline stays marked as
+  // doubtful after it is on the canvas.
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
     const floors = getFloorBoundariesForMode(boundaryResult, interiorMode);
     if (!floors.length) return 0;
 
-    const polygons = floors.map((boundary) =>
-      boundary.polygon.map((point) => ({ x: point.x, y: point.y }))
-    );
+    const shaped = floors.map((boundary) => ({
+      vertices: boundary.polygon.map((point) => ({ x: point.x, y: point.y })),
+      holes: boundary.holes.map((hole) => hole.map((point) => ({ x: point.x, y: point.y }))),
+      quality: {
+        source: 'auto',
+        confidence: boundary.confidence,
+        warnings: boundary.warnings,
+      },
+    }));
 
-    if (polygons.length === 1) {
+    if (shaped.length === 1) {
       setPerimeterVertices(null);
-      setPerimeterOverlay({ vertices: polygons[0] });
+      setPerimeterOverlay(shaped[0]);
     } else {
-      useAppStore.getState().applyDetectedTraces(polygons);
+      useAppStore.getState().applyDetectedTraces(shaped);
     }
-    return polygons.length;
+    return shaped.length;
   }, [setPerimeterOverlay, setPerimeterVertices]);
 
-  // Handle trace perimeter using the detection worker.
-  const handleTracePerimeter = async () => {
-    if (!image) return;
+  // Report the trace honestly. A low-confidence outline is applied but
+  // announced as one to check, with the reason and a one-click way to draw it
+  // by hand instead — the previous behaviour fired an unconditional green
+  // "Perimeter detected" even for a footprint covering 6% of the building.
+  const reportTrace = useCallback((traced, floorCount) => {
+    const quality = qualitySummary(traced?.quality);
+    const mode = useInteriorWalls ? 'inner' : 'outer';
+    const excludedNote = excludedAreasNote(traced ?? {});
+    const drawAction = { label: 'Draw exterior', onClick: handleDrawExterior };
 
-    undoManager.save();
-    setIsProcessing(true, 'Tracing exterior walls…');
+    if (!floorCount) {
+      toast.error(quality.reason
+        ? `No usable perimeter — ${quality.reason}.`
+        : 'No usable perimeter detected.', { duration: 8000, action: drawAction });
+      return;
+    }
+
+    const what = floorCount > 1
+      ? `Detected ${floorCount} floors (${mode} wall mode)`
+      : `Perimeter detected (${mode} wall mode)`;
+
+    if (quality.level === 'good') {
+      notify(`${what}.${excludedNote}`, { type: 'success', duration: 2500 });
+      return;
+    }
+    const confidenceNote = quality.percent === null ? '' : ` (${quality.percent}% confidence)`;
+    const reason = quality.reason ? ` — ${quality.reason}` : '';
+    const emit = quality.level === 'fair' ? toast.warning : toast.error;
+    emit(`${what}${confidenceNote}: check it${reason}.`, {
+      duration: 10000,
+      action: drawAction,
+    });
+  }, [useInteriorWalls, handleDrawExterior, notify]);
+
+  const runTrace = useCallback(async (message) => {
+    if (!image) return;
+    setIsProcessing(true, message);
     const startImage = image;
     try {
       const traced = await traceFloorplanBoundary(image, {
-        preprocess: { maxDimension: 1400 },
         excludeRegions: nonGlaExcludeRegions(),
+        constraints: boundaryConstraints(),
       });
 
       if (useAppStore.getState().image !== startImage) return;
-
-      if (!traced) {
-        notify('Unable to trace perimeter from this image.', { type: 'warning', duration: 2500 });
-        return;
-      }
-
       setTracedBoundaries(traced);
-      const floorCount = applyTracedBoundary(traced, useInteriorWalls);
-
-      if (!floorCount) {
-        notify('No valid perimeter detected.', { type: 'warning', duration: 2500 });
-        return;
-      }
-
-      const excludedNote = excludedAreasNote(traced);
-      const message = floorCount > 1
-        ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
-        : `Perimeter detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
-      notify(message, { type: 'success', duration: 2200 });
+      const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+      reportTrace(traced, floorCount);
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Perimeter detection failed:', error);
-        notify('Perimeter detection failed. Try another image region.', { type: 'error' });
+        toast.error('Perimeter detection failed.', {
+          duration: 8000,
+          action: { label: 'Draw exterior', onClick: handleDrawExterior },
+        });
       }
     } finally {
       if (useAppStore.getState().image === startImage) {
         setIsProcessing(false);
       }
     }
-  };
+  }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
+    reportTrace, handleDrawExterior]);
+
+  const handleTracePerimeter = useCallback(async () => {
+    if (!image) return;
+    undoManager.save();
+    await runTrace('Tracing exterior walls…');
+  }, [image, runTrace]);
 
   const handleInteriorWallToggle = (value) => {
     undoManager.save();
@@ -522,11 +564,15 @@ function App() {
     notify(`Canvas rotated ${direction === 'clockwise' ? 'clockwise' : 'counterclockwise'}`);
   }, [notify]);
 
-  // Handle image update from eraser or crop tool (saves undo point before changing)
+  // Handle image update from eraser or crop tool (saves undo point before
+  // changing). The cached detection result describes the *previous* image, so
+  // it is dropped — kept, toggling inner/outer after a crop re-applied
+  // pre-crop geometry.
   const handleImageUpdate = useCallback((newImageDataUrl) => {
     undoManager.save();
     setImage(newImageDataUrl);
-  }, [setImage]);
+    setTracedBoundaries(null);
+  }, [setImage, setTracedBoundaries]);
 
   const handleAddMeasurementLine = useCallback((line) => {
     // Clear the in-progress line before saving the snapshot so that undo restores
@@ -554,36 +600,67 @@ function App() {
 
 
 
-  // Update scale based on room dimensions and overlay
-  const updateScale = useCallback((dimensions, overlay) => {
+  // Update scale based on room dimensions and overlay.
+  //
+  // Two scalars come out of one room and the area is their product, so an
+  // error in either is silently reinterpreted as "the drawing has non-square
+  // pixels" - a room measured wrong one way and wrong the other way still
+  // lands inside the plausible range. Comparing them is the cheapest
+  // correctness check the app has, and every room the detector has placed is
+  // a second opinion on the same number.
+  const updateScale = useCallback((dimensions, overlay, options = {}) => {
     if (!dimensions.width || !dimensions.height || !overlay) return;
-    
+
     const dimWidth = parseFloat(dimensions.width);
     const dimHeight = parseFloat(dimensions.height);
     const overlayWidth = Math.abs(overlay.x2 - overlay.x1);
     const overlayHeight = Math.abs(overlay.y2 - overlay.y1);
-    
+
     if (overlayWidth === 0 || overlayHeight === 0) return;
     if (isNaN(dimWidth) || isNaN(dimHeight) || dimWidth <= 0 || dimHeight <= 0) return;
-    
+
     // Scale X is based on horizontal width:
-    const scaleX = dimWidth / overlayWidth;
+    let scaleX = dimWidth / overlayWidth;
     // Scale Y is based on vertical height:
-    const scaleY = dimHeight / overlayHeight;
-    
+    let scaleY = dimHeight / overlayHeight;
+
+    if (!scaleIsotropy(scaleX, scaleY).ok && options.announce !== false) {
+      // Pool every room measured so far. One bad rectangle cannot move the
+      // median, so the project keeps a usable scale instead of adopting the
+      // outlier.
+      const samples = useAppStore.getState().rooms
+        .flatMap((r) => (r.feetPerPixel ? [r.feetPerPixel.x, r.feetPerPixel.y] : []));
+      const robust = samples.length >= 4 ? robustScale(samples) : null;
+      if (robust) {
+        scaleX = robust.value;
+        scaleY = robust.value;
+        notify(
+          'This room\u2019s width and height disagree about the scale; using the '
+          + 'median of the rooms measured so far.',
+          { type: 'warning', duration: 6000 },
+        );
+      } else {
+        notify(
+          'This room\u2019s width and height disagree about the scale \u2014 check '
+          + 'the room outline and its label.',
+          { type: 'warning', duration: 6000 },
+        );
+      }
+    }
+
     // Only apply if the scale has actually changed
     const currentCalibration = useAppStore.getState().calibration;
     const currentScale = currentCalibration.feetPerPixel;
-    
+
     const hasChanged = !currentCalibration.calibrated ||
       typeof currentScale !== 'object' ||
       Math.abs((currentScale?.x ?? 0) - scaleX) > 1e-9 ||
       Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9;
-      
+
     if (hasChanged) {
       applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration');
     }
-  }, [applyRoomCalibration]);
+  }, [applyRoomCalibration, notify]);
 
   // Update room overlay position
   const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
@@ -620,83 +697,41 @@ function App() {
     );
   }, [updatePerimeterVertices]);
 
-  // Switch to manual outline drawing: clear the auto-detected perimeter and let the user draw fresh
-  const handleManualOutlineMode = () => {
-    undoManager.save();
-    setPerimeterOverlay(null);
-    setPerimeterVertices([]); // activate manual vertex placement
-  };
+  // Auto-trace exterior boundary after a room overlay is placed.
+  const autoTraceExterior = useCallback(
+    () => runTrace('Detecting exterior boundary…'),
+    [runTrace],
+  );
 
-  // Auto-trace exterior boundary after room overlay is placed.
-  const autoTraceExterior = useCallback(async () => {
-    setIsProcessing(true, 'Detecting exterior boundary…');
+  /**
+   * Place a room: run the detector, record the result as reusable evidence,
+   * calibrate from it, then trace the exterior. The two entry points (clicking
+   * a detected dimension pill and clicking the canvas in manual mode) differ
+   * only in whether a label bounding box is known.
+   */
+  const placeRoom = useCallback(async ({ point, dims, labelBbox, labelId }) => {
+    let overlay = {
+      x1: point.x - 100,
+      y1: point.y - 100,
+      x2: point.x + 100,
+      y2: point.y + 100,
+    };
+    let detected = null;
+
+    setIsProcessing(true, 'Finding room\\u2026');
     const startImage = image;
     try {
-      const traced = await traceFloorplanBoundary(image, {
-        preprocess: { maxDimension: 1400 },
-        excludeRegions: nonGlaExcludeRegions(),
-      });
-      if (useAppStore.getState().image !== startImage) return;
-      if (!traced) return;
-      setTracedBoundaries(traced);
-
-      const floorCount = applyTracedBoundary(traced, useInteriorWalls);
-      if (!floorCount) return;
-
-      const excludedNote = excludedAreasNote(traced);
-      const message = floorCount > 1
-        ? `Detected ${floorCount} floors (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`
-        : `Perimeter auto-detected (${useInteriorWalls ? 'inner' : 'outer'} wall mode).${excludedNote}`;
-      notify(message, { type: 'success', duration: 2500 });
-    } catch (error) {
-      if (useAppStore.getState().image === startImage) {
-        console.error('Auto exterior tracing failed:', error);
-      }
-      // Non-fatal — user can still trace manually
-    } finally {
-      if (useAppStore.getState().image === startImage) {
-        setIsProcessing(false);
-      }
-    }
-  }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing, notify]);
-
-  // Handle dimension selection in manual mode
-  const handleDimensionSelect = useCallback(async (dimension) => {
-    undoManager.save();
-    const dims = {
-      width: dimension.width.toString(),
-      height: dimension.height.toString(),
-    };
-    setRoomDimensions(dims);
-
-    const centerX = dimension.bbox.x + dimension.bbox.width / 2;
-    const centerY = dimension.bbox.y + dimension.bbox.height / 2;
-    let nextOverlay = {
-      x1: centerX - 100,
-      y1: centerY - 100,
-      x2: centerX + 100,
-      y2: centerY + 100,
-    };
-
-    setIsProcessing(true, 'Finding room…');
-    const startImage = image;
-    try {
-      const roomResult = await detectRoomFromClick(image, { x: centerX, y: centerY }, {
-        preprocess: { maxDimension: 1300 },
-        labelBbox: dimension.bbox,
-        labelDims: { width: dimension.width, height: dimension.height },
-      });
-
-      if (useAppStore.getState().image === startImage && roomResult?.overlay) {
-        nextOverlay = {
-          ...roomResult.overlay,
-          polygon: roomResult.polygon,
-          confidence: roomResult.confidence,
+      detected = await detectRoomFromClick(image, point, { labelBbox, labelDims: dims });
+      if (useAppStore.getState().image === startImage && detected?.overlay) {
+        overlay = {
+          ...detected.overlay,
+          polygon: detected.polygon,
+          confidence: detected.confidence,
         };
       }
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
-        console.error('Room enclosure detection failed:', error);
+        console.error('Room detection failed:', error);
       }
     } finally {
       if (useAppStore.getState().image === startImage) {
@@ -706,24 +741,63 @@ function App() {
 
     if (useAppStore.getState().image !== startImage) return;
 
-    setRoomOverlay(nextOverlay);
-    updateScale(dims, nextOverlay);
+    if (!detected) {
+      // A failed room detection used to fall through to a hardcoded 200x200
+      // box and calibrate the whole project from it, without a word.
+      notify(
+        'Could not find the room outline \\u2014 drag the overlay to match the room, '
+        + 'then check the area.',
+        { type: 'warning', duration: 6000 },
+      );
+    } else {
+      useAppStore.getState().addRoom({
+        labelId: labelId ?? null,
+        name: null,
+        rect: detected.rect,
+        confidence: detected.confidence,
+        sides: detected.sides,
+        feetPerPixel: detected.pixelsPerFoot
+          ? { x: 1 / detected.pixelsPerFoot.x, y: 1 / detected.pixelsPerFoot.y }
+          : null,
+      });
+    }
+
+    const dimStrings = { width: String(dims.width), height: String(dims.height) };
+    setRoomDimensions(dimStrings);
+    setRoomOverlay(overlay);
+    updateScale(dimStrings, overlay);
 
     setPerimeterVertices(null);
-    setMode('normal');
-    setDetectedDimensions([]);
     setManualEntryMode(false);
+    setMode('normal');
 
-    // Automatically detect exterior boundary after room overlay is placed.
-    // autoTraceExterior manages its own isProcessing state.
-    autoTraceExterior();
-  }, [setRoomDimensions, setIsProcessing, image, setRoomOverlay, updateScale, setPerimeterVertices, setMode, setDetectedDimensions, setManualEntryMode, autoTraceExterior]);
+    // Trace the exterior with the label set still in hand: it used to be
+    // cleared one statement earlier, so the tracer ran blind to every room
+    // size the OCR pass had just found.
+    await autoTraceExterior();
+    setDetectedDimensions([]);
+  }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
+    setPerimeterVertices, setManualEntryMode, setMode, setDetectedDimensions,
+    autoTraceExterior, notify]);
+
+  // Handle dimension selection in manual mode
+  const handleDimensionSelect = useCallback((dimension) => {
+    undoManager.save();
+    placeRoom({
+      point: {
+        x: dimension.bbox.x + dimension.bbox.width / 2,
+        y: dimension.bbox.y + dimension.bbox.height / 2,
+      },
+      dims: { width: dimension.width, height: dimension.height },
+      labelBbox: dimension.bbox,
+      labelId: `${dimension.text ?? ''}@${Math.round(dimension.bbox.x)},${Math.round(dimension.bbox.y)}`,
+    });
+  }, [placeRoom]);
 
   // Handle canvas click for manual overlay placement
   const handleCanvasClick = useCallback((clickPoint) => {
     if (!manualEntryMode || !roomDimensions.width || !roomDimensions.height) return;
-    
-    // Validate dimensions
+
     const width = parseFloat(roomDimensions.width);
     const height = parseFloat(roomDimensions.height);
     if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
@@ -732,56 +806,8 @@ function App() {
     }
 
     undoManager.save();
-    
-    const fallbackOverlay = {
-      x1: clickPoint.x - 100,
-      y1: clickPoint.y - 100,
-      x2: clickPoint.x + 100,
-      y2: clickPoint.y + 100
-    };
-
-    const startImage = image;
-    const placeOverlay = async () => {
-      let nextOverlay = fallbackOverlay;
-      setIsProcessing(true, 'Finding room…');
-      try {
-        const roomResult = await detectRoomFromClick(image, clickPoint, {
-          preprocess: { maxDimension: 1300 },
-          labelDims: { width, height },
-        });
-
-        if (useAppStore.getState().image === startImage && roomResult?.overlay) {
-          nextOverlay = {
-            ...roomResult.overlay,
-            polygon: roomResult.polygon,
-            confidence: roomResult.confidence,
-          };
-        }
-      } catch (error) {
-        if (useAppStore.getState().image === startImage) {
-          console.error('Manual room detection fallback failed:', error);
-        }
-      } finally {
-        if (useAppStore.getState().image === startImage) {
-          setIsProcessing(false);
-        }
-      }
-
-      if (useAppStore.getState().image !== startImage) return;
-
-      setRoomOverlay(nextOverlay);
-      updateScale(roomDimensions, nextOverlay);
-      setPerimeterVertices(null);
-      setManualEntryMode(false);
-      setMode('normal');
-
-      // Automatically detect exterior boundary after manual overlay placement.
-      // autoTraceExterior manages its own isProcessing state.
-      autoTraceExterior();
-    };
-
-    placeOverlay();
-  }, [manualEntryMode, roomDimensions, image, setIsProcessing, setRoomOverlay, updateScale, setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior, notify]);
+    placeRoom({ point: clickPoint, dims: { width, height } });
+  }, [manualEntryMode, roomDimensions, placeRoom, notify]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -872,8 +898,7 @@ function App() {
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
         onOptionsToggle={handleOptionsToggle}
-        hasAutoDetection={!!tracedBoundaries}
-        onManualMode={handleManualOutlineMode}
+        onDrawExterior={handleDrawExterior}
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}

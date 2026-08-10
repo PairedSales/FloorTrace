@@ -2,7 +2,7 @@
 // Uint8Array(width * height) with 1 = ink. Pure JS so the identical code runs
 // in the browser worker and the Node benchmark harness.
 
-export const toGrayscale = (rgba, pixelCount) => {
+const toGrayscale = (rgba, pixelCount) => {
   const gray = new Uint8ClampedArray(pixelCount);
   for (let i = 0, j = 0; j < pixelCount; i += 4, j += 1) {
     // ITU-R BT.601 luma, integer approximation
@@ -47,8 +47,6 @@ const histOf = (gray) => {
   return hist;
 };
 
-export const otsuThreshold = (gray) => otsuHist(histOf(gray), 0, 256);
-
 // Fill-aware ink threshold (mirrors dimensions/raster.js inkOtsu). On
 // colour-styled plans plain Otsu settles between the tinted room fills and
 // the page white, turning whole floors into one ink slab — walls, cavities
@@ -56,7 +54,7 @@ export const otsuThreshold = (gray) => otsuHist(histOf(gray), 0, 256);
 // for line work, split it again and keep the lower threshold only when it
 // separates two well-spaced modes (strokes vs fills); a genuinely ink-dense
 // B&W plan has a single dark mode and keeps plain Otsu.
-export const inkThreshold = (gray) => {
+const inkThreshold = (gray) => {
   const hist = histOf(gray);
   const total = gray.length;
   const t1 = otsuHist(hist, 0, 256);
@@ -172,7 +170,7 @@ export const dilateCols = (mask, width, height, r) => {
 };
 
 // 1D erosion (border counts as background, matching OpenCV's default).
-export const erodeRows = (mask, width, height, r) => {
+const erodeRows = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
   for (let y = 0; y < height; y += 1) {
@@ -194,7 +192,7 @@ export const erodeRows = (mask, width, height, r) => {
   return out;
 };
 
-export const erodeCols = (mask, width, height, r) => {
+const erodeCols = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
   for (let x = 0; x < width; x += 1) {
