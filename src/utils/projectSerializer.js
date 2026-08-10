@@ -1,30 +1,11 @@
 import { z } from 'zod';
 import { hashDataUrl } from './hash';
+import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
-// List of floor state fields that should be persisted (excludes transient/ephemeral states)
-export const PERSISTENT_FLOOR_FIELDS = [
-  'image',
-  'roomOverlay',
-  'perimeterTraces',
-  'activeTraceId',
-  'roomDimensions',
-  'calibration',
-  'mode',
-  'detectedDimensions',
-  'showSideLengths',
-  'useInteriorWalls',
-  'autoSnapEnabled',
-  'manualEntryMode',
-  'ocrFailed',
-  'unit',
-  'measurementLines',
-  'customShapes',
-  'tracedBoundaries',
-  'zoomScale',
-  'stageX',
-  'stageY',
-  'angleToolState'
-];
+// Floor state fields written to a project file. Derived from the store's one
+// declaration of working state rather than hand-listed here — the hand-listed
+// version silently dropped fields the app had come to depend on.
+export { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // ── Zod Schema Definition ───────────────────────────────────────────────────
 
@@ -69,15 +50,41 @@ const roomOverlaySchema = z.object({
   confidence: z.number().nullable().optional(),
 }).nullable().optional();
 
+const traceQualitySchema = z.object({
+  source: z.string().optional(),
+  confidence: z.number().nullable().optional(),
+  warnings: z.array(z.object({
+    code: z.string(),
+    severity: z.string().optional(),
+    message: z.string().optional(),
+    detail: z.any().optional(),
+  })).optional(),
+}).nullable().optional();
+
 const perimeterTraceSchema = z.object({
   id: z.string(),
   name: z.string(),
   vertices: z.array(vertexSchema),
+  // Enclosed voids (courtyards, light wells) subtracted from the trace's area.
+  holes: z.array(z.array(vertexSchema)).optional(),
+  // How much the detector trusted this outline, and why not more.
+  quality: traceQualitySchema,
   closed: z.boolean(),
   visible: z.boolean(),
   locked: z.boolean(),
   color: z.string(),
-});
+}).catchall(z.any());
+
+const roomSchema = z.object({
+  labelId: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
+  rect: z.object({
+    left: z.number(), right: z.number(), top: z.number(), bottom: z.number(),
+  }),
+  confidence: z.number().optional(),
+  sides: z.any().optional(),
+  feetPerPixel: z.object({ x: z.number(), y: z.number() }).nullable().optional(),
+}).catchall(z.any());
 
 const measurementLineSchema = z.object({
   start: vertexSchema,
@@ -128,6 +135,9 @@ const floorStateSchema = z.object({
   calibration: calibrationSchema,
   mode: z.string().optional(),
   detectedDimensions: z.array(detectedDimensionSchema).optional(),
+  exteriorLabels: z.array(z.any()).optional(),
+  rooms: z.array(roomSchema).optional(),
+  imageMimeType: z.string().optional(),
   showSideLengths: z.boolean().optional(),
   useInteriorWalls: z.boolean().optional(),
   autoSnapEnabled: z.boolean().optional(),
@@ -274,9 +284,9 @@ export function serializeSketch(storeState, historyState = null) {
     fileType: 'floorplan',
     version: 1,
     metadata: {
-      projectId: storeState.projectId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      projectName: storeState.projectName || 'Untitled Project',
-      createdAt: storeState.createdAt || new Date().toISOString(),
+      projectId: storeState.projectId || `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      projectName: 'Untitled Project',
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
     globalSettings: {
@@ -365,7 +375,9 @@ export function deserializeSketch(project) {
 // ── Export & Import Orchestration ───────────────────────────────────────────
 
 export async function exportProject(storeState, historyState, isSaveAs = false) {
-  const project = serializeSketch(storeState, historyState);
+  // Sanitize on the way out as well as the way in: a NaN produced in-session
+  // otherwise yields a file that fails this module's own importer.
+  const project = sanitizeData(serializeSketch(storeState, historyState));
   const jsonString = JSON.stringify(project, null, 2);
 
   const timestamp = new Date().toISOString().split('T')[0];

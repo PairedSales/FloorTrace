@@ -6,7 +6,6 @@ import { Line, Circle } from 'react-konva';
  * and instructions when the user is placing perimeter vertices.
  */
 const PerimeterPlacementLayer = ({
-  roomOverlay,
   traceInteractionMode,
   perimeterVertices,
   currentMousePos,
@@ -17,7 +16,12 @@ const PerimeterPlacementLayer = ({
   isPreviewInvalid = false,
 }) => {
 
-  if (!roomOverlay || traceInteractionMode !== 'drawing' || !perimeterVertices || perimeterVertices.length >= 3 || lineToolActive || drawAreaActive || manualEntryMode) {
+  // Placement stays visible for the whole outline: hiding it past the third
+  // vertex made a hand-drawn exterior disappear exactly when it stopped being
+  // a triangle. It also no longer requires a room overlay — drawing the
+  // exterior by hand is a valid first move when auto-detection is not trusted.
+  if (traceInteractionMode !== 'drawing' || !perimeterVertices || !perimeterVertices.length
+    || lineToolActive || drawAreaActive || manualEntryMode) {
     return null;
   }
 

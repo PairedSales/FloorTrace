@@ -8,7 +8,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench:detection": "node scripts/detectionBenchmark.mjs",
+    "bench:ocr": "node scripts/ocrBenchmark.mjs",
+    "probe:exterior": "node scripts/syntheticProbe.mjs"
   },
   "dependencies": {
     "@paddlejs-models/ocr": "^1.2.4",

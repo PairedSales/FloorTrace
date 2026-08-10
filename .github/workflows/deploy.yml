@@ -37,6 +37,12 @@ jobs:
       - name: Test
         run: npm test
 
+      # Detection accuracy against the fixture plans. It already sets a
+      # non-zero exit code on a failed check; not running it meant a redesign
+      # could be told "all green" while discarding every notch and wing.
+      - name: Detection benchmark
+        run: npm run bench:detection
+
       - name: Build
         run: npm run build
 

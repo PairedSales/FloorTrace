@@ -2,7 +2,12 @@
 // analyzed once: long axis-aligned strokes are extracted as wall segments
 // (collinear pieces merged across door gaps), so per-frame snapping during
 // drag/resize is a cheap lookup instead of a pixel scan.
-import { binarizeToWorkingScale, keepLongRuns, labelComponents } from './detection/raster';
+import { binarizeToWorkingScale } from './detection/raster';
+// One wall-segment extractor for the whole app. The snap engine and the
+// boundary stage were running two copies of the same vectorisation.
+import { extractWallSegments } from './detection/wallEvidence';
+
+export { extractWallSegments };
 
 const WORKING_MAX_DIMENSION = 1400;
 const EDGE_OVERLAP_FRAC = 0.35;
@@ -14,78 +19,6 @@ const loadImageElement = (src) => new Promise((resolve, reject) => {
   img.onerror = reject;
   img.src = src;
 });
-
-// Merge collinear segments separated by door-sized gaps so a room edge
-// dragged across a doorway still sees one continuous wall line.
-const mergeCollinear = (segments, bridgeGap) => {
-  const sorted = [...segments].sort((a, b) => a.center - b.center || a.lo - b.lo);
-  const merged = [];
-  for (const seg of sorted) {
-    const host = merged.find((m) =>
-      Math.abs(m.center - seg.center) <= Math.max(3, (m.thick + seg.thick) / 2) &&
-      seg.lo - m.hi <= bridgeGap &&
-      m.lo - seg.hi <= bridgeGap
-    );
-    if (host) {
-      const weight = host.weight + seg.weight;
-      host.center = (host.center * host.weight + seg.center * seg.weight) / weight;
-      host.faceLo = Math.min(host.faceLo, seg.faceLo);
-      host.faceHi = Math.max(host.faceHi, seg.faceHi);
-      host.lo = Math.min(host.lo, seg.lo);
-      host.hi = Math.max(host.hi, seg.hi);
-      host.thick = Math.max(host.thick, seg.thick);
-      host.weight = weight;
-    } else {
-      merged.push({ ...seg });
-    }
-  }
-  return merged.sort((a, b) => a.center - b.center);
-};
-
-const segmentsForDirection = (ink, width, height, direction, opts) => {
-  const strokes = keepLongRuns(ink, width, height, opts.minRun, direction);
-  const { components } = labelComponents(strokes, width, height);
-  const raw = [];
-  for (const comp of components) {
-    const { minX, minY, maxX, maxY } = comp.bbox;
-    const len = direction === 'v' ? maxY - minY + 1 : maxX - minX + 1;
-    const thick = direction === 'v' ? maxX - minX + 1 : maxY - minY + 1;
-    // Wider than a wall line = filled region; shorter than 1.5x its own
-    // thickness = blob, not a line.
-    if (thick > opts.maxThickness) continue;
-    if (len < Math.max(opts.minRun, thick * 1.5)) continue;
-    raw.push({
-      center: direction === 'v' ? (minX + maxX) / 2 : (minY + maxY) / 2,
-      faceLo: direction === 'v' ? minX : minY,
-      faceHi: direction === 'v' ? maxX : maxY,
-      lo: direction === 'v' ? minY : minX,
-      hi: direction === 'v' ? maxY : maxX,
-      thick,
-      weight: comp.size,
-    });
-  }
-  return mergeCollinear(raw, opts.bridgeGap);
-};
-
-/**
- * @param {Uint8Array} ink binary mask, 1 = ink
- * @returns {{ vertical: Array, horizontal: Array }} segments as
- *   { faceLo, faceHi, lo, hi } — faceLo/faceHi are the wall's two faces
- *   (first/last ink pixel across its thickness; x for vertical, y for
- *   horizontal), [lo, hi] its extent along the wall.
- */
-export const extractWallSegments = (ink, width, height, options = {}) => {
-  const maxDim = Math.max(width, height);
-  const opts = {
-    minRun: options.minRun ?? Math.max(16, Math.round(maxDim * 0.02)),
-    maxThickness: options.maxThickness ?? Math.max(8, Math.round(maxDim * 0.017)),
-    bridgeGap: options.bridgeGap ?? Math.round(maxDim * 0.08),
-  };
-  return {
-    vertical: segmentsForDirection(ink, width, height, 'v', opts),
-    horizontal: segmentsForDirection(ink, width, height, 'h', opts),
-  };
-};
 
 // Best segment within tolerance of pos whose extent sufficiently overlaps the
 // edge span [spanA, spanB]. Snaps to the requested wall face — 'lo' is the

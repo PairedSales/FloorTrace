@@ -5,14 +5,17 @@
 //
 // detectRoomFromClickCore: shared analysis -> boundary (for the footprint
 // clamp) -> coverage-based rectangle growth from the label position.
-// traceFloorplanBoundaryCore: shared analysis -> adaptive seal-radius closing
-// -> outer contour + wall-thickness-inset inner envelope.
+// traceFloorplanBoundaryCore: shared analysis -> candidate footprints ->
+// scoring against wall evidence and constraints -> best boundary, its interior
+// envelope, and the quality channel describing how much to trust it.
 
 import { analyzeFloorplan } from './analyze.js';
 import { traceBoundary } from './boundary.js';
 import { growRoomRect } from './room.js';
 import { buildSat } from './raster.js';
-import { polygonBounds, mapPolygonToOriginal } from './polygon.js';
+import { polygonBounds, mapPolygonToOriginal, ringSetArea } from './polygon.js';
+import { validateBoundaryResult } from './validate.js';
+import { getCachedAnalysis } from './cache.js';
 
 const toOverlay = (bounds) => ({
   x1: bounds.minX,
@@ -29,12 +32,43 @@ const boundaryEntry = (polygon, scaleX, scaleY) => {
   return { polygon: mapped, overlay: toOverlay(bounds) };
 };
 
+const mapRings = (rings, scaleX, scaleY) =>
+  (rings ?? [])
+    .map((ring) => mapPolygonToOriginal(ring, scaleX, scaleY))
+    .filter((ring) => ring.length >= 3);
+
+// Constraints arrive in original image px; the detector works at the analysis
+// scale. Rooms are rectangles known to be inside the building; interior points
+// are label positions the OCR pass located and parsed.
+const scaleConstraints = (constraints, analysis) => {
+  if (!constraints) return null;
+  const sx = analysis.scaleX;
+  const sy = analysis.scaleY;
+  const rooms = (constraints.rooms ?? [])
+    .filter((r) => r && r.rect)
+    .map((r) => ({
+      name: r.name ?? null,
+      rect: {
+        left: r.rect.left * sx,
+        right: r.rect.right * sx,
+        top: r.rect.top * sy,
+        bottom: r.rect.bottom * sy,
+      },
+    }));
+  const interiorPoints = (constraints.interiorPoints ?? [])
+    .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x * sx, y: p.y * sy, name: p.name ?? null }));
+  if (!rooms.length && !interiorPoints.length) return null;
+  return { rooms, interiorPoints };
+};
+
 export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const t0 = Date.now();
-  const analysis = analyzeFloorplan(imageData, {
-    maxDimension: options.preprocess?.maxDimension ?? 1400,
-    ...options.analyze,
-  });
+  const maxDimension = options.preprocess?.maxDimension ?? 1400;
+  const analysis = getCachedAnalysis(
+    options.cacheKey, maxDimension, options.analyze,
+    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+  );
   // Non-GLA label bboxes (original image px) -> working scale.
   const excludeRegions = (options.excludeRegions ?? []).map((r) => ({
     x: r.x * analysis.scaleX,
@@ -43,38 +77,89 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     height: r.height * analysis.scaleY,
     keyword: r.keyword,
   }));
-  const boundary = traceBoundary(analysis, { ...options.boundary, excludeRegions });
-  if (!boundary) return null;
+  const constraints = scaleConstraints(options.constraints, analysis);
+  const boundary = traceBoundary(analysis, { ...options.boundary, excludeRegions, constraints });
+  if (!boundary) {
+    return {
+      outer: null,
+      inner: null,
+      floors: [],
+      excludedRegions: 0,
+      excludedGarages: 0,
+      quality: {
+        confidence: 0,
+        warnings: [{ code: 'no-boundary', severity: 'error', message: 'no wall outline could be traced' }],
+        source: 'auto',
+      },
+      debug: { elapsedMs: Date.now() - t0 },
+    };
+  }
 
-  const outer = boundaryEntry(boundary.outerPolygon, analysis.scaleX, analysis.scaleY);
-  const inner = boundaryEntry(boundary.innerPolygon, analysis.scaleX, analysis.scaleY);
+  const { scaleX, scaleY } = analysis;
+  const outer = boundaryEntry(boundary.outerPolygon, scaleX, scaleY);
+  const inner = boundaryEntry(boundary.innerPolygon, scaleX, scaleY);
   if (!outer && !inner) return null;
 
   // One entry per disconnected floor outline, in page reading order. The
   // top-level outer/inner stay the largest floor for single-boundary callers.
   const floors = (boundary.floors ?? [])
     .map((floor) => ({
-      outer: boundaryEntry(floor.outerPolygon, analysis.scaleX, analysis.scaleY),
-      inner: boundaryEntry(floor.innerPolygon, analysis.scaleX, analysis.scaleY),
+      outer: boundaryEntry(floor.outerPolygon, scaleX, scaleY),
+      inner: boundaryEntry(floor.innerPolygon, scaleX, scaleY),
+      holes: mapRings(floor.holes, scaleX, scaleY),
+      innerHoles: mapRings(floor.innerHoles, scaleX, scaleY),
+      confidence: floor.confidence,
+      warnings: floor.warnings,
+      excluded: floor.excluded,
+      excludedGarages: floor.excludedGarages,
+      candidate: floor.candidate,
     }))
     .filter((floor) => floor.outer || floor.inner);
+
+  const validation = validateBoundaryResult(
+    { floors },
+    {
+      imageWidth: imageData.width,
+      imageHeight: imageData.height,
+      labels: options.constraints?.interiorPoints ?? [],
+      // A label inside a deliberately excluded region (a garage, a porch) is
+      // outside the outline on purpose, not evidence of a bad trace.
+      exemptRegions: options.excludeRegions ?? [],
+    },
+  );
+
+  const warnings = [...(boundary.warnings ?? []), ...validation.warnings];
+  const confidence = Math.max(0, Math.min(0.98, boundary.confidence * validation.factor));
 
   return {
     outer,
     inner,
     floors,
-    // Top-level (not debug): the worker strips debug before posting back.
+    holes: mapRings(boundary.holes, scaleX, scaleY),
+    innerHoles: mapRings(boundary.innerHoles, scaleX, scaleY),
+    // Top-level (not debug): the worker only forwards a whitelist of fields.
     excludedRegions: boundary.excluded,
     excludedGarages: boundary.excludedGarages,
+    quality: {
+      confidence,
+      warnings,
+      usedFallback: boundary.usedFallback,
+      source: 'auto',
+      floorCount: floors.length,
+      candidate: boundary.debug.candidate,
+      areaPx: outer ? ringSetArea(outer.polygon, mapRings(boundary.holes, scaleX, scaleY)) : 0,
+    },
     debug: {
       floorCount: floors.length,
       workingSize: { width: analysis.width, height: analysis.height },
-      scale: { x: analysis.scaleX, y: analysis.scaleY },
+      scale: { x: scaleX, y: scaleY },
       wallThickness: analysis.wallThickness,
       exteriorThickness: boundary.exteriorThickness,
       sealRadius: boundary.sealRadius,
       usedFallback: boundary.usedFallback,
-      sealSearch: boundary.debug.tried,
+      sealSearches: boundary.debug.sealSearches,
+      alternatives: boundary.debug.alternatives,
+      networks: boundary.debug.networks,
       elapsedMs: Date.now() - t0,
     },
   };
@@ -83,10 +168,14 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
 export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
   if (!clickPoint) return null;
   const t0 = Date.now();
-  const analysis = analyzeFloorplan(imageData, {
-    maxDimension: options.preprocess?.maxDimension ?? 1300,
-    ...options.analyze,
-  });
+  // One working scale for both stages: run at two, and the footprint the room
+  // detector is clamped by is a measurably different building from the
+  // perimeter the user sees.
+  const maxDimension = options.preprocess?.maxDimension ?? 1400;
+  const analysis = getCachedAnalysis(
+    options.cacheKey, maxDimension, options.analyze,
+    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+  );
 
   const workPoint = {
     x: clickPoint.x * analysis.scaleX,
@@ -98,7 +187,10 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // On multi-floor pages, clamp to the floor under the click so rooms outside
   // the largest footprint aren't rejected. Garage carving is off here:
   // clicking a garage label must still detect the garage room.
-  const boundary = traceBoundary(analysis, { ...options.boundary, autoGarage: false });
+  const boundary = getCachedAnalysis(
+    options.cacheKey ? `${options.cacheKey}::roomclamp` : null, maxDimension, options.analyze,
+    () => traceBoundary(analysis, { ...options.boundary, autoGarage: false }),
+  );
   let footprintInfo = null;
   if (boundary) {
     const px = Math.min(analysis.width - 1, Math.max(0, Math.round(workPoint.x)));
@@ -135,10 +227,37 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   ], analysis.scaleX, analysis.scaleY);
   const bounds = polygonBounds(polygon);
 
+  // Per-side wall faces in original px. These are direct measurements of the
+  // interior face of one wall over a known span — the same surface the
+  // boundary stage otherwise has to approximate — and used to be discarded.
+  const sides = {};
+  for (const key of ['left', 'right', 'top', 'bottom']) {
+    const side = room.sides[key];
+    if (!side) continue;
+    const horizontal = key === 'left' || key === 'right';
+    sides[key] = {
+      edge: side.edge / (horizontal ? analysis.scaleX : analysis.scaleY),
+      cov: side.cov,
+      thick: side.thick,
+      kind: side.kind,
+      exterior: side.exterior ?? null,
+    };
+  }
+
   return {
     polygon,
     overlay: toOverlay(bounds),
     confidence: room.confidence,
+    rect: {
+      left: bounds.minX, right: bounds.maxX, top: bounds.minY, bottom: bounds.maxY,
+    },
+    sides,
+    pixelsPerFoot: room.pixelsPerFoot
+      ? {
+        x: room.pixelsPerFoot.x / analysis.scaleX,
+        y: room.pixelsPerFoot.y / analysis.scaleY,
+      }
+      : null,
     debug: {
       workingSize: { width: analysis.width, height: analysis.height },
       scale: { x: analysis.scaleX, y: analysis.scaleY },
@@ -150,6 +269,9 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   };
 };
 
+// The interior envelope can fail to be produced; falling back to the exterior
+// polygon keeps something on screen, and the `no-inner` warning raised during
+// validation is what tells the user the interior figure is not really interior.
 export const boundaryByMode = (result, wallMode = 'inner') => {
   if (!result) return null;
   if (wallMode === 'outer') return result.outer ?? result.inner;

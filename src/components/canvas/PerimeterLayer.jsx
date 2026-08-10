@@ -400,8 +400,32 @@ const PerimeterLayer = ({
     [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
+  // Enclosed voids (courtyards, light wells) are drawn as dashed inner rings
+  // and are already subtracted from the trace's area.
+  const holeRings = (perimeterTraces || []).flatMap((trace) =>
+    (trace.visible ? (trace.holes ?? []) : []).map((hole, i) => ({
+      key: `hole-${trace.id}-${i}`,
+      points: hole.flatMap((v) => [v.x, v.y]),
+      color: trace.color || '#BD93F9',
+    })));
+
   return (
     <>
+      {/* 0. Render enclosed voids */}
+      {holeRings.map((ring) => (
+        <Line
+          key={ring.key}
+          points={ring.points}
+          stroke={ring.color}
+          strokeWidth={1.5 / scale}
+          dash={[6 / scale, 4 / scale]}
+          closed={true}
+          fill="rgba(40, 42, 54, 0.55)"
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      ))}
+
       {/* 1. Render all visible inactive traces first */}
       {(perimeterTraces || []).map((trace) => {
         if (!trace.visible || trace.id === activeTraceId) return null;
@@ -505,7 +529,7 @@ const PerimeterLayer = ({
         if (!vertices || vertices.length < 3) return null;
 
         const centroid = getCentroid(vertices);
-        const traceArea = calculateArea(vertices, feetPerPixel);
+        const traceArea = calculateArea(vertices, feetPerPixel, trace.holes);
         const { value: areaText, suffix: areaSuffix } = formatArea(traceArea, unit);
 
         const labelText = `${trace.name}: ${areaText} ${areaSuffix}`;

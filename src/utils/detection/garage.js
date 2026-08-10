@@ -81,14 +81,34 @@ const analyzeSide = (ctx, side) => {
   return { len, doorFrac: doorTotal / len, bestRun, walledFrac: walled / len };
 };
 
-export const measureCavitySides = (cavity, ctx) =>
+const measureCavitySides = (cavity, ctx) =>
   SIDES.map((side) => analyzeSide({ ...ctx, id: cavity.id, bbox: cavity.bbox }, side));
 
 // Cavity component ids that carry strong geometric garage evidence. Inputs are
 // in working-scale px: `labels`/`components` from the open-cavity labelling,
 // the floor's footprint entry, and the floor's own wall network mask.
+// A garage bay is an empty slab. A bath alcove, a stair hall or a utility
+// room behind a thin exterior wall satisfies every other test here — a
+// door-like side and real walls elsewhere — and is full of fixture linework.
+const MAX_INTERIOR_INK = 0.04;
+
+const interiorInkFraction = (labels, id, bbox, ink, width) => {
+  if (!ink) return 0;
+  let total = 0;
+  let inked = 0;
+  for (let y = bbox.minY; y <= bbox.maxY; y += 1) {
+    const row = y * width;
+    for (let x = bbox.minX; x <= bbox.maxX; x += 1) {
+      if (labels[row + x] !== id) continue;
+      total += 1;
+      if (ink[row + x]) inked += 1;
+    }
+  }
+  return total ? inked / total : 0;
+};
+
 export const findGarageCavities = ({
-  labels, components, footprint, wallMask, width, height, exteriorThickness, minCavity,
+  labels, components, footprint, wallMask, ink, width, height, exteriorThickness, minCavity,
 }) => {
   const ext = exteriorThickness;
   const found = [];
@@ -99,6 +119,7 @@ export const findGarageCavities = ({
     const h = comp.bbox.maxY - comp.bbox.minY + 1;
     if (comp.size < 0.7 * w * h) continue;
     if (Math.max(w, h) > 4 * Math.min(w, h)) continue;
+    if (interiorInkFraction(labels, comp.id, comp.bbox, ink, width) > MAX_INTERIOR_INK) continue;
 
     const sides = measureCavitySides(comp, {
       labels, footprintMask: footprint.mask, wallMask, width, height, ext,

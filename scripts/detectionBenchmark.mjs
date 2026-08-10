@@ -5,6 +5,14 @@
  * ground truth and reports per-image pass/fail and timings.
  *
  * Usage:  node scripts/detectionBenchmark.mjs [image.png|folder ...]
+ *         node scripts/detectionBenchmark.mjs --json      (machine-readable)
+ *
+ * A bounding box cannot see shape: a tracer that discards the outline and
+ * returns each building's bounding rectangle used to pass most of these
+ * checks, and a footprint 92% too small scored a 99.2% box IoU against the
+ * same truth. Boundary truth is therefore scored on polygon IoU where an
+ * `outerPolygon`/`innerPolygon` is authored, with the box kept as a reported
+ * smoke check, and on square feet where the plan states its own scale.
  *
  * Ground truth: a "<image>.truth.json" sidecar next to each PNG:
  * {
@@ -12,10 +20,15 @@
  *   "boundary": {                               // any subset of these
  *     "outerBbox": [x1, y1, x2, y2],            // px, original image space
  *     "outerPolygon": [[x, y], ...],            // px; scored by mask IoU
+ *     "innerPolygon": [[x, y], ...],            // px; interior wall faces
+ *     "minOuterIou": 0.95,                      // optional override
+ *     "minInnerIou": 0.9,                       // optional override
  *     "outerAreaSqFt": 1234,
  *     "innerAreaSqFt": 1100,
+ *     "minConfidence": 0.7,                     // optional; quality gate
  *     "floors": [[x1, y1, x2, y2], ...],        // per-floor outer bboxes in
  *                                               // reading order (multi-floor)
+ *     "floorPolygons": [[[x, y], ...], ...],    // per-floor outlines
  *     "excludeRegions": [[x, y, w, h], ...]     // porch/patio label bboxes,
  *   },                                          // as OCR would supply them
  *   "rooms": [
@@ -32,207 +45,127 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PNG } from 'pngjs';
 import {
   detectRoomFromClickCore,
   traceFloorplanBoundaryCore,
 } from '../src/utils/detection/pipeline.js';
-import { polygonArea } from '../src/utils/detection/polygon.js';
+import { polygonArea, ringSetArea } from '../src/utils/detection/polygon.js';
+import { loadPng, bboxOf, bboxIou, polygonIou, pct } from './lib/benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * Ground truth for ExampleFloorplan.png (px in the 987x956 original): a
- * two-floor sheet — FLOOR 2 on top, FLOOR 1 with an attached garage below.
- * Wall-face positions were measured from the image. The garage (non-GLA) is
- * excluded geometrically, so FLOOR 1 traces to the house's right wall and
- * FLOOR 2 becomes the largest floor / top-level boundary. KITCHEN is
- * open-plan toward the dining area (no physical wall on that side) so it is
- * unscored; the app flags such labels with reduced confidence instead.
- */
-const EXAMPLE_TRUTH = {
-  pixelsPerFoot: 16.0,
-  boundary: {
-    outerBbox: [29, 15, 620, 415],
-    floors: [
-      [29, 15, 620, 415],
-      [29, 491, 620, 878],
-    ],
-  },
-  rooms: [
-    { name: 'BEDROOM (top-left)', click: [205, 105], dims: [7.75, 10.33], rect: [149, 25, 269, 188] },
-    { name: 'PRIMARY BEDROOM', click: [512, 128], dims: [12.58, 13.25], rect: [417, 25, 611, 231] },
-    { name: 'BEDROOM (bottom-right)', click: [512, 322], dims: [12.58, 10.83], rect: [417, 233, 611, 406] },
-    { name: 'UTILITY', click: [513, 585], dims: [10.0, 9.25], rect: [456, 500, 611, 643] },
-    { name: 'GARAGE', click: [778, 672], dims: [20.58, 9.5], rect: [620, 596, 943, 743] },
-    { name: 'FAMILY ROOM', click: [495, 753], dims: [14.83, 14.08], rect: [380, 650, 611, 868] },
-    { name: 'KITCHEN (open-plan)', click: [250, 573], dims: [10.08, 10.33] },
-  ],
-};
-
-const loadPng = (filePath) => {
-  const png = PNG.sync.read(fs.readFileSync(filePath));
-  return { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
-};
-
-const bboxOf = (overlay) => [overlay.x1, overlay.y1, overlay.x2, overlay.y2];
-
-const bboxIou = (a, b) => {
-  const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
-  const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-  const inter = ix * iy;
-  const areaA = (a[2] - a[0]) * (a[3] - a[1]);
-  const areaB = (b[2] - b[0]) * (b[3] - b[1]);
-  return inter / (areaA + areaB - inter);
-};
-
-// Even-odd scanline rasterization onto a coarse grid for polygon IoU.
-const rasterize = (polygon, bounds, gridW, gridH) => {
-  const mask = new Uint8Array(gridW * gridH);
-  const sx = gridW / (bounds[2] - bounds[0]);
-  const sy = gridH / (bounds[3] - bounds[1]);
-  const pts = polygon.map((p) => ({
-    x: ((Array.isArray(p) ? p[0] : p.x) - bounds[0]) * sx,
-    y: ((Array.isArray(p) ? p[1] : p.y) - bounds[1]) * sy,
-  }));
-  for (let gy = 0; gy < gridH; gy += 1) {
-    const y = gy + 0.5;
-    const xs = [];
-    for (let i = 0; i < pts.length; i += 1) {
-      const a = pts[i];
-      const b = pts[(i + 1) % pts.length];
-      if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
-        xs.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x));
-      }
-    }
-    xs.sort((p, q) => p - q);
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      const from = Math.max(0, Math.ceil(xs[k] - 0.5));
-      const to = Math.min(gridW - 1, Math.floor(xs[k + 1] - 0.5));
-      for (let x = from; x <= to; x += 1) mask[gy * gridW + x] = 1;
-    }
-  }
-  return mask;
-};
-
-const polygonIou = (polyA, polyB) => {
-  const all = [...polyA, ...polyB].map((p) => (Array.isArray(p) ? { x: p[0], y: p[1] } : p));
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const p of all) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-  const bounds = [minX, minY, maxX, maxY];
-  const gridW = 512;
-  const gridH = Math.max(32, Math.round(512 * (maxY - minY) / Math.max(1, maxX - minX)));
-  const a = rasterize(polyA, bounds, gridW, gridH);
-  const b = rasterize(polyB, bounds, gridW, gridH);
-  let inter = 0;
-  let union = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] && b[i]) inter += 1;
-    if (a[i] || b[i]) union += 1;
-  }
-  return union > 0 ? inter / union : 0;
-};
-
-const pct = (x) => `${(x * 100).toFixed(1)}%`;
+const DEFAULT_OUTER_IOU = 0.95;
+const DEFAULT_INNER_IOU = 0.9;
 
 const scoreBoundary = (result, truth, ppf) => {
   const lines = [];
-  let pass = true;
+  const checks = [];
+  const check = (ok, label) => {
+    checks.push(ok);
+    lines.push(`   ${ok ? 'HIT ' : 'MISS'}  ${label}`);
+  };
   if (!result?.outer) {
-    return { pass: false, lines: ['   BOUNDARY MISS: no outer polygon'] };
+    return { checks: [false], lines: ['   BOUNDARY MISS: no outer polygon'] };
   }
-  const outerAreaPx = polygonArea(result.outer.polygon);
-  lines.push(`   outer: ${result.outer.polygon.length} vertices, bbox=[${bboxOf(result.outer.overlay).map((v) => v.toFixed(0)).join(', ')}]`);
+  const holes = result.floors?.[0]?.holes ?? [];
+  const outerAreaPx = ringSetArea(result.outer.polygon, result.holes ?? []);
+  lines.push(`   outer: ${result.outer.polygon.length} vertices, bbox=[${bboxOf(result.outer.overlay).map((v) => v.toFixed(0)).join(', ')}]${holes.length ? `, ${holes.length} void(s)` : ''}`);
+  const quality = result.quality;
+  if (quality) {
+    lines.push(`   quality: ${(quality.confidence * 100).toFixed(0)}%${quality.warnings.length ? ` [${quality.warnings.map((w) => w.code).join(', ')}]` : ''}`);
+  }
   if (ppf) lines.push(`   outer area: ${(outerAreaPx / (ppf * ppf)).toFixed(1)} sq ft`);
 
   if (truth?.outerBbox) {
     const iou = bboxIou(bboxOf(result.outer.overlay), truth.outerBbox);
-    const ok = iou >= 0.9;
-    pass = pass && ok;
-    lines.push(`   ${ok ? 'HIT ' : 'MISS'}  outer bbox IoU=${pct(iou)}`);
-  }
-  if (truth?.floors) {
-    const floors = result.floors ?? [];
-    const countOk = floors.length === truth.floors.length;
-    pass = pass && countOk;
-    lines.push(`   ${countOk ? 'HIT ' : 'MISS'}  floor count ${floors.length} vs ${truth.floors.length}`);
-    for (let i = 0; i < truth.floors.length; i += 1) {
-      const outer = floors[i]?.outer;
-      if (!outer) {
-        pass = false;
-        lines.push(`   MISS  floor ${i}: no outer polygon`);
-        continue;
-      }
-      const iou = bboxIou(bboxOf(outer.overlay), truth.floors[i]);
-      const ok = iou >= 0.9;
-      pass = pass && ok;
-      lines.push(`   ${ok ? 'HIT ' : 'MISS'}  floor ${i} bbox IoU=${pct(iou)}`);
-    }
+    // Reported, not scored: it cannot see shape, and everything below can.
+    lines.push(`   ....  outer bbox IoU=${pct(iou)}`);
+    if (!truth.outerPolygon) check(iou >= 0.9, `outer bbox IoU=${pct(iou)} (no polygon truth)`);
   }
   if (truth?.outerPolygon) {
     const iou = polygonIou(result.outer.polygon, truth.outerPolygon);
-    const ok = iou >= 0.9;
-    pass = pass && ok;
-    lines.push(`   ${ok ? 'HIT ' : 'MISS'}  outer polygon IoU=${pct(iou)}`);
+    check(iou >= (truth.minOuterIou ?? DEFAULT_OUTER_IOU), `outer polygon IoU=${pct(iou)}`);
+  }
+  if (truth?.innerPolygon) {
+    if (!result.inner) check(false, 'inner: not produced');
+    else {
+      const iou = polygonIou(result.inner.polygon, truth.innerPolygon);
+      check(iou >= (truth.minInnerIou ?? DEFAULT_INNER_IOU), `inner polygon IoU=${pct(iou)}`);
+    }
+  }
+  if (truth?.floors) {
+    const floors = result.floors ?? [];
+    check(floors.length === truth.floors.length,
+      `floor count ${floors.length} vs ${truth.floors.length}`);
+    for (let i = 0; i < truth.floors.length; i += 1) {
+      const outer = floors[i]?.outer;
+      if (!outer) {
+        check(false, `floor ${i}: no outer polygon`);
+        continue;
+      }
+      // A null entry falls back to the box: some outlines on a sheet are too
+      // intricate to author by hand, and a box check is better than none.
+      const poly = truth.floorPolygons?.[i];
+      if (poly) {
+        const iou = polygonIou(outer.polygon, poly);
+        check(iou >= (truth.minOuterIou ?? DEFAULT_OUTER_IOU), `floor ${i} polygon IoU=${pct(iou)}`);
+      } else {
+        const iou = bboxIou(bboxOf(outer.overlay), truth.floors[i]);
+        check(iou >= 0.9, `floor ${i} bbox IoU=${pct(iou)}`);
+      }
+    }
   }
   if (truth?.outerAreaSqFt && ppf) {
     const area = outerAreaPx / (ppf * ppf);
     const err = Math.abs(area - truth.outerAreaSqFt) / truth.outerAreaSqFt;
-    const ok = err <= 0.05;
-    pass = pass && ok;
-    lines.push(`   ${ok ? 'HIT ' : 'MISS'}  outer area ${area.toFixed(1)} vs ${truth.outerAreaSqFt} sq ft (err ${pct(err)})`);
+    check(err <= (truth.areaTolerance ?? 0.05),
+      `outer area ${area.toFixed(1)} vs ${truth.outerAreaSqFt} sq ft (err ${pct(err)})`);
   }
   if (truth?.innerAreaSqFt && ppf) {
-    if (!result.inner) {
-      pass = false;
-      lines.push('   MISS  inner: not produced');
-    } else {
-      const area = polygonArea(result.inner.polygon) / (ppf * ppf);
+    if (!result.inner) check(false, 'inner: not produced');
+    else {
+      const area = ringSetArea(result.inner.polygon, result.innerHoles ?? []) / (ppf * ppf);
       const err = Math.abs(area - truth.innerAreaSqFt) / truth.innerAreaSqFt;
-      const ok = err <= 0.05;
-      pass = pass && ok;
-      lines.push(`   ${ok ? 'HIT ' : 'MISS'}  inner area ${area.toFixed(1)} vs ${truth.innerAreaSqFt} sq ft (err ${pct(err)})`);
+      check(err <= (truth.areaTolerance ?? 0.05),
+        `inner area ${area.toFixed(1)} vs ${truth.innerAreaSqFt} sq ft (err ${pct(err)})`);
     }
   }
-  return { pass, lines };
+  if (truth?.minConfidence !== undefined) {
+    const confidence = result.quality?.confidence ?? 0;
+    check(confidence >= truth.minConfidence,
+      `confidence ${(confidence * 100).toFixed(0)}% >= ${(truth.minConfidence * 100).toFixed(0)}%`);
+  }
+  return { checks, lines };
 };
 
 const scoreRoom = (result, room, ppf) => {
-  if (!result) return { pass: false, line: `   MISS  ${room.name}: no result` };
+  if (!result) return { pass: false, scored: true, line: `   MISS  ${room.name}: no result` };
   const det = bboxOf(result.overlay);
   const detStr = `bbox=[${det.map((v) => v.toFixed(0)).join(', ')}] conf=${result.confidence.toFixed(2)}`;
   if (room.rect) {
     const iou = bboxIou(det, room.rect);
     const ok = iou >= (room.minIou ?? 0.75);
-    return { pass: ok, line: `   ${ok ? 'HIT ' : 'MISS'}  ${room.name}: IoU=${pct(iou)} ${detStr}` };
+    return { pass: ok, scored: true, line: `   ${ok ? 'HIT ' : 'MISS'}  ${room.name}: IoU=${pct(iou)} ${detStr}` };
   }
   if (room.areaSqFt && ppf) {
     const area = (det[2] - det[0]) * (det[3] - det[1]) / (ppf * ppf);
     const err = Math.abs(area - room.areaSqFt) / room.areaSqFt;
     const ok = err <= 0.1;
-    return { pass: ok, line: `   ${ok ? 'HIT ' : 'MISS'}  ${room.name}: area ${area.toFixed(1)} vs ${room.areaSqFt} (err ${pct(err)}) ${detStr}` };
+    return { pass: ok, scored: true, line: `   ${ok ? 'HIT ' : 'MISS'}  ${room.name}: area ${area.toFixed(1)} vs ${room.areaSqFt} (err ${pct(err)}) ${detStr}` };
   }
-  return { pass: true, line: `   ----  ${room.name}: ${detStr} (no truth to score)` };
+  // Unscored rooms are reported, never counted: an auto-passing check is
+  // indistinguishable from a real one in the total.
+  return { pass: true, scored: false, line: `   ----  ${room.name}: ${detStr} (no truth to score)` };
 };
 
 const collectTargets = (args) => {
-  if (args.length === 0) {
-    return [{ file: path.join(ROOT, 'fixtures', 'ExampleFloorplan.png'), truth: EXAMPLE_TRUTH }];
-  }
   const files = [];
-  for (const arg of args) {
+  const targets = args.length ? args : [path.join(ROOT, 'fixtures')];
+  for (const arg of targets) {
     const resolved = path.resolve(arg);
     const stat = fs.statSync(resolved);
     if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(resolved)) {
+      for (const entry of fs.readdirSync(resolved).sort()) {
         if (/\.png$/i.test(entry)) files.push(path.join(resolved, entry));
       }
     } else {
@@ -249,14 +182,18 @@ const collectTargets = (args) => {
 };
 
 const run = () => {
-  const targets = collectTargets(process.argv.slice(2));
+  const args = process.argv.slice(2).filter((a) => a !== '--json');
+  const asJson = process.argv.includes('--json');
+  const targets = collectTargets(args);
   let totalPass = 0;
   let totalChecks = 0;
+  const report = [];
 
   for (const { file, truth } of targets) {
-    console.log(`\n=== ${path.basename(file)} ===`);
+    const out = [];
+    out.push(`\n=== ${path.basename(file)} ===`);
     const imageData = loadPng(file);
-    console.log(`   ${imageData.width}x${imageData.height}px`);
+    out.push(`   ${imageData.width}x${imageData.height}px`);
     const ppf = truth?.pixelsPerFoot;
 
     const boundaryOpts = truth?.boundary?.excludeRegions
@@ -269,14 +206,18 @@ const run = () => {
     const t0 = Date.now();
     const boundary = traceFloorplanBoundaryCore(imageData, boundaryOpts);
     const boundaryMs = Date.now() - t0;
-    console.log(`   boundary: ${boundaryMs}ms  ${boundary ? `sealRadius=${boundary.debug.sealRadius} wallThickness=${boundary.debug.wallThickness} extThickness=${boundary.debug.exteriorThickness} excluded=${boundary.excludedRegions}${boundary.debug.usedFallback ? ' (fallback)' : ''}` : 'FAILED'}`);
+    out.push(`   boundary: ${boundaryMs}ms  ${boundary?.outer ? `sealRadius=${boundary.debug.sealRadius} wallThickness=${boundary.debug.wallThickness} extThickness=${boundary.debug.exteriorThickness} excluded=${boundary.excludedRegions}${boundary.debug.usedFallback ? ' (fallback)' : ''}` : 'FAILED'}`);
     const bScore = scoreBoundary(boundary, truth?.boundary, ppf);
-    for (const line of bScore.lines) console.log(line);
+    out.push(...bScore.lines);
+    if (truth?.boundary?.note) out.push(`   note: ${truth.boundary.note}`);
     if (truth?.boundary) {
-      totalChecks += 1;
-      if (bScore.pass) totalPass += 1;
+      for (const ok of bScore.checks) {
+        totalChecks += 1;
+        if (ok) totalPass += 1;
+      }
     }
 
+    const roomResults = [];
     for (const room of truth?.rooms ?? []) {
       const opts = {
         labelBbox: room.labelBbox
@@ -288,13 +229,31 @@ const run = () => {
       const result = detectRoomFromClickCore(imageData, { x: room.click[0], y: room.click[1] }, opts);
       const ms = Date.now() - t1;
       const score = scoreRoom(result, room, ppf);
-      console.log(`${score.line}  (${ms}ms)`);
-      totalChecks += 1;
-      if (score.pass) totalPass += 1;
+      out.push(`${score.line}  (${ms}ms)`);
+      roomResults.push({ name: room.name, pass: score.pass, scored: score.scored });
+      if (score.scored) {
+        totalChecks += 1;
+        if (score.pass) totalPass += 1;
+      }
     }
+
+    report.push({
+      file: path.basename(file),
+      boundaryMs,
+      confidence: boundary?.quality?.confidence ?? 0,
+      warnings: (boundary?.quality?.warnings ?? []).map((w) => w.code),
+      boundaryChecks: bScore.checks,
+      rooms: roomResults,
+      outerAreaPx: boundary?.outer ? polygonArea(boundary.outer.polygon) : 0,
+    });
+    if (!asJson) for (const line of out) console.log(line);
   }
 
-  console.log(`\n=== TOTAL: ${totalPass}/${totalChecks} checks passed ===`);
+  if (asJson) {
+    console.log(JSON.stringify({ totalPass, totalChecks, report }, null, 2));
+  } else {
+    console.log(`\n=== TOTAL: ${totalPass}/${totalChecks} checks passed ===`);
+  }
   if (totalChecks > 0 && totalPass < totalChecks) process.exitCode = 1;
 };
 

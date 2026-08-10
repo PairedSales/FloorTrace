@@ -6,6 +6,10 @@ const NEIGHBORS8 = [
   [-1, 0], [-1, -1], [0, -1], [1, -1],
 ];
 
+// Moore-neighbour contour trace with Jacob's stopping criterion: the walk ends
+// only when the start pixel is re-entered travelling the same way. Stopping on
+// position alone truncates the ring whenever a 1px isthmus makes the walk pass
+// through the start pixel mid-loop, silently dropping part of the outline.
 export const traceComponentBoundary = (labels, width, height, componentId) => {
   let startX = -1;
   let startY = -1;
@@ -30,10 +34,15 @@ export const traceComponentBoundary = (labels, width, height, componentId) => {
   }
   if (!hasNeighbor) return [{ x: startX, y: startY }];
 
+  // The walk state is (pixel, backtrack direction); one full circuit ends when
+  // that state repeats, which is Jacob's criterion.
   const boundary = [{ x: startX, y: startY }];
   let cx = startX;
   let cy = startY;
   let prevDir = 6;
+  let firstX = -1;
+  let firstY = -1;
+  let firstDir = -1;
   const maxIter = width * height * 2;
 
   for (let iter = 0; iter < maxIter; iter += 1) {
@@ -52,10 +61,23 @@ export const traceComponentBoundary = (labels, width, height, componentId) => {
       }
     }
     if (!found) break;
-    if (cx === startX && cy === startY) break;
+    if (firstDir < 0) {
+      firstX = cx;
+      firstY = cy;
+      firstDir = prevDir;
+    } else if (cx === firstX && cy === firstY && prevDir === firstDir) {
+      break;
+    }
     boundary.push({ x: cx, y: cy });
   }
 
+  // The circuit closes back onto the start pixel; drop the duplicate so the
+  // ring has no zero-length edge.
+  while (boundary.length > 1) {
+    const last = boundary[boundary.length - 1];
+    if (last.x === startX && last.y === startY) boundary.pop();
+    else break;
+  }
   return boundary;
 };
 
@@ -91,7 +113,7 @@ const rdpCollect = (points, lo, hi, epsSq, keep) => {
   }
 };
 
-export const simplifyRdp = (points, epsilon = 2) => {
+const simplifyRdp = (points, epsilon = 2) => {
   if (!points || points.length < 3) return points ? points.slice() : [];
   const epsSq = epsilon * epsilon;
   const keep = [0];
@@ -268,14 +290,128 @@ export const rectilinearFit = (ring, options = {}) => {
   return cleaned.length >= 3 ? cleaned : ring.slice();
 };
 
-export const polygonArea = (polygon) => {
+// Signed shoelace. Everything that needs an area, a centroid or a winding
+// derives from this one primitive; taking the absolute value too early hides
+// self-intersection (lobes cancel and the area silently under-reports).
+export const polygonSignedArea = (polygon) => {
+  if (!polygon || polygon.length < 3) return 0;
   let sum = 0;
   for (let i = 0; i < polygon.length; i += 1) {
     const a = polygon[i];
     const b = polygon[(i + 1) % polygon.length];
     sum += a.x * b.y - b.x * a.y;
   }
-  return Math.abs(sum) / 2;
+  return sum / 2;
+};
+
+export const polygonArea = (polygon) => Math.abs(polygonSignedArea(polygon));
+
+// Outer ring minus its holes, never below zero.
+export const ringSetArea = (outer, holes = []) => {
+  const gross = polygonArea(outer);
+  let voids = 0;
+  for (const hole of holes ?? []) voids += polygonArea(hole);
+  return Math.max(0, gross - voids);
+};
+
+export const polygonPerimeter = (polygon) => {
+  if (!polygon || polygon.length < 2) return 0;
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    sum += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return sum;
+};
+
+// Ray-cast containment (even-odd), holes subtracted.
+export const pointInPolygon = (point, polygon, holes = []) => {
+  const inRing = (ring) => {
+    if (!ring || ring.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const a = ring[i];
+      const b = ring[j];
+      if ((a.y > point.y) !== (b.y > point.y)
+        && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+  if (!inRing(polygon)) return false;
+  for (const hole of holes ?? []) if (inRing(hole)) return false;
+  return true;
+};
+
+// Dominant edge orientation of a ring, folded into (-45°, 45°]. Scans and
+// phone photos routinely sit 1-8° off axis; fitting such a ring directly to
+// the image axes flattens the shape while leaving the area almost unchanged,
+// so no area- or bbox-based check can catch it.
+export const ringSkewAngle = (ring) => {
+  if (!ring || ring.length < 8) return 0;
+  const BINS = 180; // 0.5-degree resolution over 90 degrees
+  const hist = new Float64Array(BINS);
+  const quarter = Math.PI / 2;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) continue;
+    let angle = Math.atan2(dy, dx) % quarter;
+    if (angle < 0) angle += quarter;
+    const bin = Math.min(BINS - 1, Math.floor((angle / quarter) * BINS));
+    hist[bin] += len;
+  }
+  // Smooth so a chamfer or a bay does not out-vote the dominant wall run.
+  let best = 0;
+  let bestMass = -1;
+  for (let i = 0; i < BINS; i += 1) {
+    const mass = hist[(i + BINS - 1) % BINS] + hist[i] * 2 + hist[(i + 1) % BINS];
+    if (mass > bestMass) {
+      bestMass = mass;
+      best = i;
+    }
+  }
+  let angle = ((best + 0.5) / BINS) * quarter;
+  if (angle > quarter / 2) angle -= quarter;
+  return angle;
+};
+
+const rotatePoints = (points, angle, cx, cy) => {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return points.map((p) => ({
+    x: cx + (p.x - cx) * cos - (p.y - cy) * sin,
+    y: cy + (p.x - cx) * sin + (p.y - cy) * cos,
+  }));
+};
+
+// Rectilinear fit with de-skew: estimate the ring's dominant orientation, fit
+// in that frame, and rotate back. A skewed plan then keeps its true corners
+// instead of being squashed onto the image axes.
+export const fitRing = (ring, options = {}) => {
+  const maxSkewDeg = options.maxSkewDeg ?? 20;
+  const minSkewDeg = options.minSkewDeg ?? 0.75;
+  const skew = options.skewAngle ?? ringSkewAngle(ring);
+  const skewDeg = Math.abs(skew * 180 / Math.PI);
+  if (skewDeg < minSkewDeg || skewDeg > maxSkewDeg) {
+    return { polygon: rectilinearFit(ring, options), skew: 0 };
+  }
+  let cx = 0;
+  let cy = 0;
+  for (const p of ring) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= ring.length;
+  cy /= ring.length;
+  const straight = rotatePoints(ring, -skew, cx, cy);
+  const fitted = rectilinearFit(straight, options);
+  return { polygon: rotatePoints(fitted, skew, cx, cy), skew };
 };
 
 export const polygonBounds = (polygon) => {

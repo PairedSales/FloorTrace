@@ -1,5 +1,4 @@
 import * as undoManager from './undoManager';
-import { calculateArea } from '../utils/areaCalculator';
 
 /**
  * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
@@ -148,31 +147,34 @@ export function createFloorSlice(set, get) {
      * interior/exterior wall toggle — preserves user renames. Callers are
      * responsible for the undo snapshot.
      */
-    applyDetectedTraces: (floorPolygons) => {
-      if (!floorPolygons?.length) return;
+    applyDetectedTraces: (floors) => {
+      if (!floors?.length) return;
       const state = get();
       const current = state.perimeterTraces || [];
+      const normalized = floors.map((floor) => (Array.isArray(floor)
+        ? { vertices: floor, holes: [], quality: null }
+        : { vertices: floor.vertices, holes: floor.holes ?? [], quality: floor.quality ?? null }));
 
       let traces;
-      if (current.length === floorPolygons.length) {
+      if (current.length === normalized.length) {
         traces = current.map((t, i) => ({
           ...t,
-          vertices: floorPolygons[i],
+          ...normalized[i],
           closed: true,
           visible: true,
         }));
       } else {
         const stamp = Date.now();
-        traces = floorPolygons.map((vertices, i) => ({
+        traces = normalized.map((floor, i) => ({
           id: `trace-${stamp}-${i}`,
           name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
-          vertices,
+          ...floor,
           closed: true,
           visible: true,
           locked: false,
           color: TRACE_COLORS[i % TRACE_COLORS.length],
         }));
-        nextTraceNumber = floorPolygons.length + 1;
+        nextTraceNumber = normalized.length + 1;
       }
 
       const activeStillExists = traces.some((t) => t.id === state.activeTraceId);
@@ -183,16 +185,6 @@ export function createFloorSlice(set, get) {
         perimeterVertices: null,
         isDirty: true,
       });
-    },
-
-    /**
-     * Get area for a specific trace.
-     */
-    getPerimeterTraceArea: (traceId) => {
-      const state = get();
-      const trace = (state.perimeterTraces || []).find((t) => t.id === traceId);
-      const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
-      return trace ? calculateArea(trace.vertices, feetPerPixel) : 0;
     },
 
     /**

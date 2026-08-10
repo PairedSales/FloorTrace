@@ -1,0 +1,28 @@
+{
+  "_comment": "Two-floor sheet: FLOOR 2 on top, FLOOR 1 with an attached garage below. Wall faces measured from the image with scripts/tmp profiling (row/column ink runs); px/ft derived from the PRIMARY BEDROOM's 12'7\" x 13'3\" interior (196px / 12.583ft, 207px / 13.25ft). The garage is non-GLA and excluded geometrically, so FLOOR 1 stops at the house's right wall and FLOOR 2 becomes the largest floor. KITCHEN is open-plan toward the dining area (no physical wall on that side) so it is unscored; the app flags such labels with reduced confidence instead.",
+  "pixelsPerFoot": 15.6,
+  "boundary": {
+    "outerBbox": [29, 15, 620, 415],
+    "outerPolygon": [[30, 16], [619, 16], [619, 414], [30, 414]],
+    "innerPolygon": [[38, 25], [611, 25], [611, 406], [38, 406]],
+    "outerAreaSqFt": 967.4,
+    "innerAreaSqFt": 901.0,
+    "floors": [
+      [29, 15, 620, 415],
+      [29, 491, 620, 878]
+    ],
+    "floorPolygons": [
+      [[30, 16], [619, 16], [619, 414], [30, 414]],
+      [[30, 492], [619, 492], [619, 877], [30, 877]]
+    ]
+  },
+  "rooms": [
+    { "name": "BEDROOM (top-left)", "click": [205, 105], "dims": [7.75, 10.33], "rect": [149, 25, 269, 188] },
+    { "name": "PRIMARY BEDROOM", "click": [512, 128], "dims": [12.58, 13.25], "rect": [417, 25, 611, 231] },
+    { "name": "BEDROOM (bottom-right)", "click": [512, 322], "dims": [12.58, 10.83], "rect": [417, 233, 611, 406] },
+    { "name": "UTILITY", "click": [513, 585], "dims": [10.0, 9.25], "rect": [456, 500, 611, 643] },
+    { "name": "GARAGE", "click": [778, 672], "dims": [20.58, 9.5], "rect": [620, 596, 943, 743] },
+    { "name": "FAMILY ROOM", "click": [495, 753], "dims": [14.83, 14.08], "rect": [380, 650, 611, 868] },
+    { "name": "KITCHEN (open-plan)", "click": [250, 573], "dims": [10.08, 10.33] }
+  ]
+}

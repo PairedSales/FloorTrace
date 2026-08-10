@@ -64,20 +64,26 @@ export const traceFloorplanBoundary = async (image, options = {}) => {
   });
 };
 
-export const getBoundaryForMode = (tracedBoundary, useInteriorWalls) => {
-  const mode = useInteriorWalls ? 'inner' : 'outer';
-  return boundaryByMode(tracedBoundary, mode);
-};
-
-// Per-floor boundaries in page reading order; falls back to the single
-// top-level boundary for results predating the floors array (old autosaves).
+// Per-floor boundaries in page reading order, each with its enclosed voids and
+// the quality the detector attached to it. Falls back to the single top-level
+// boundary for results predating the floors array (old autosaves).
 export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
   if (!tracedBoundary) return [];
   const mode = useInteriorWalls ? 'inner' : 'outer';
   const floors = tracedBoundary.floors?.length ? tracedBoundary.floors : [tracedBoundary];
   return floors
-    .map((floor) => boundaryByMode(floor, mode))
-    .filter((boundary) => boundary?.polygon?.length);
+    .map((floor) => {
+      const boundary = boundaryByMode(floor, mode);
+      if (!boundary?.polygon?.length) return null;
+      return {
+        polygon: boundary.polygon,
+        overlay: boundary.overlay,
+        holes: (useInteriorWalls ? floor.innerHoles : floor.holes) ?? [],
+        confidence: floor.confidence ?? tracedBoundary.quality?.confidence ?? null,
+        warnings: floor.warnings ?? [],
+      };
+    })
+    .filter(Boolean);
 };
 
 export const terminateDetectionWorker = () => {

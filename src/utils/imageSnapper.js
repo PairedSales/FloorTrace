@@ -69,15 +69,13 @@ const cornerScoreFromQuadrants = (fracs) => {
 
 /**
  * @param {string} imageSrc
- * @returns {Promise<{ findCornerSnap: Function, findVerticalWall: Function, findHorizontalWall: Function }>}
+ * @returns {Promise<{ findCornerSnap: Function }>}
  */
 export const createImageSnapAnalyzer = async (imageSrc) => {
   if (!imageSrc) {
     const noop = () => null;
     return {
       findCornerSnap: noop,
-      findVerticalWall: noop,
-      findHorizontalWall: noop,
     };
   }
 
@@ -174,94 +172,7 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     return null;
   };
 
-  const findVerticalWall = (targetX, y1, y2, options = {}) => {
-    const scaledTargetX = targetX * factor;
-    const scaledY1 = y1 * factor;
-    const scaledY2 = y2 * factor;
-
-    const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
-    const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
-
-    const yLo = clamp(Math.round(Math.min(scaledY1, scaledY2)), 0, height - 1);
-    const yHi = clamp(Math.round(Math.max(scaledY1, scaledY2)), 0, height - 1);
-    const span = Math.max(1, yHi - yLo + 1);
-
-    const xCenter = Math.round(scaledTargetX);
-    let bestX = null;
-    let bestDist = Number.POSITIVE_INFINITY;
-    let bestDensity = -1;
-
-    for (let dx = -halfStrip; dx <= halfStrip; dx += 1) {
-      const x = xCenter + dx;
-      if (x < 0 || x >= width) continue;
-
-      let dark = 0;
-      for (let y = yLo; y <= yHi; y += 1) {
-        if (isDark[y * width + x]) dark += 1;
-      }
-      const density = dark / span;
-      if (density < minRatio) continue;
-
-      const dist = Math.abs(x - scaledTargetX);
-      if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
-        bestDist = dist;
-        bestDensity = density;
-        bestX = x;
-      }
-    }
-
-    if (bestX !== null) {
-      return bestX / factor;
-    }
-    return null;
-  };
-
-  const findHorizontalWall = (targetY, x1, x2, options = {}) => {
-    const scaledTargetY = targetY * factor;
-    const scaledX1 = x1 * factor;
-    const scaledX2 = x2 * factor;
-
-    const halfStrip = options.searchRadius ?? WALL_STRIP_HALF;
-    const minRatio = options.minDarkRatio ?? WALL_DARK_RATIO;
-
-    const xLo = clamp(Math.round(Math.min(scaledX1, scaledX2)), 0, width - 1);
-    const xHi = clamp(Math.round(Math.max(scaledX1, scaledX2)), 0, width - 1);
-    const span = Math.max(1, xHi - xLo + 1);
-
-    const yCenter = Math.round(scaledTargetY);
-    let bestY = null;
-    let bestDist = Number.POSITIVE_INFINITY;
-    let bestDensity = -1;
-
-    for (let dy = -halfStrip; dy <= halfStrip; dy += 1) {
-      const y = yCenter + dy;
-      if (y < 0 || y >= height) continue;
-
-      const row = y * width;
-      let dark = 0;
-      for (let x = xLo; x <= xHi; x += 1) {
-        if (isDark[row + x]) dark += 1;
-      }
-      const density = dark / span;
-      if (density < minRatio) continue;
-
-      const dist = Math.abs(y - scaledTargetY);
-      if (dist < bestDist || (dist === bestDist && density > bestDensity)) {
-        bestDist = dist;
-        bestDensity = density;
-        bestY = y;
-      }
-    }
-
-    if (bestY !== null) {
-      return bestY / factor;
-    }
-    return null;
-  };
-
   return {
     findCornerSnap,
-    findVerticalWall,
-    findHorizontalWall,
   };
 };
