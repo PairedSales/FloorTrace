@@ -6,10 +6,15 @@
  *                        selective denoise, unsharp mask.
  *   2. Pass 1 OCR      — Tesseract sparse-text on the full preprocessed page
  *                        (runs in its worker while spatial analysis runs here).
+ *                        One call, deliberately: reading the page as parallel
+ *                        strips is faster and measurably less accurate, because
+ *                        Tesseract re-estimates resolution and layout per image.
  *   3. Spatial analysis— glyph clustering finds horizontal AND vertical text
  *                        line candidates the full-page pass misses.
  *   4. ROI refinement  — targeted single-line Tesseract on zoomed crops,
- *                        rotating vertical candidates 90° both ways.
+ *                        rotating vertical candidates 90° both ways. ROIs are
+ *                        read concurrently across the worker pool; each ROI's
+ *                        own variant ladder stays sequential.
  *   5. Neural rescue   — optional PaddleOCR collage pass over ROIs Tesseract
  *                        could not parse (browser only, skipped when the
  *                        model is not warmed up or the time budget is spent).
@@ -30,15 +35,29 @@ import {
   isolateCenterBand, trimFlankRails, dashLineMask, otsu, inkOtsu
 } from './raster.js';
 import { findTextRegions } from './regions.js';
-import { recognizeSparse, recognizeLine, lineText } from './ocrTesseract.js';
+import {
+  recognizeSparse, recognizeLine, lineText, ocrConcurrency, prewarmOcrPool
+} from './ocrTesseract.js';
 import { loadOpenCv, openCvIfReady, enhanceGrayWithCv, estimateSpeckle } from './opencvBridge.js';
 
 const DEFAULT_BUDGET_MS = 2600;
 const MAX_OCR_DIM = 2600;      // full-page OCR working size cap
 const UPSCALE_BELOW = 1800;    // upscale small scans: tiny glyphs kill OCR
+const UPSCALE_TO = 2000;       // …to about this many px on the long edge
+// OCR cost is per-pixel, so the enlargement is capped. Lowering it is a real
+// speed win (1.7x saves ~25% of a scan) but measurably trades false positives:
+// fewer pass-1 seeds means more of the queue is speculative.
+const UPSCALE_MAX = 2.2;
 const ANALYSIS_DIM = 1400;     // spatial-analysis working size cap
 const TARGET_GLYPH_PX = 36;    // ROI zoom target text height for Tesseract
+// Raising this no longer buys anything: with phase 4 concurrent the queue is
+// read to the cap well inside the budget, and ROIs 41-60 are measurably junk
+// (same 62/82 on the fixtures, ~3 s slower).
 const MAX_ROIS = 40;
+// An ROI below this priority is a guess (a spatial cluster nothing corroborates)
+// rather than evidence (a pass-1 digit line, or a candidate awaiting verification).
+const SPECULATIVE_PRIORITY = 7;
+const SPECULATIVE_LADDER = 2;  // zoom rungs a guess earns before the queue moves on
 const MIN_CONFIDENCE = 40;
 const PADDLE_RESERVE_MS = 1100; // time to leave for the neural rescue pass
 
@@ -105,7 +124,13 @@ const makeCandidate = (parsed, bbox, ocrConfidence, source) => {
 const digitsOf = (s) => ((s || '').match(/\d/g) || []).join('');
 
 const dedupeCandidates = (candidates) => {
-  const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
+  // Position breaks confidence ties so the survivor of a duplicate pair does
+  // not depend on which concurrent ROI read happened to finish first.
+  const sorted = [...candidates].sort((a, b) =>
+    b.confidence - a.confidence ||
+    (a.bbox?.y ?? 0) - (b.bbox?.y ?? 0) ||
+    (a.bbox?.x ?? 0) - (b.bbox?.x ?? 0) ||
+    (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
   // Same values from two bboxes that touch or nearly touch are one label
   // read twice with different framing (a row box vs a name+row blob), not
   // two identical rooms — real twins sit rooms apart.
@@ -218,7 +243,7 @@ const bandWords = (words, scale, parseOpts) => {
  * Vertical ROIs get both 90° rotations of each. All tiles get a white
  * border — Tesseract misreads text that touches the image edge.
  */
-const prepareRoiVariants = (roiGray, roi, dashMask) => {
+const prepareRoiVariants = (roiGray, roi, dashMask, maxVariants = Infinity) => {
   // Cross-axis padding stays tight so the crop doesn't swallow a
   // neighbouring text row/column; along-axis padding is generous so
   // clipped leading/trailing glyphs are recovered.
@@ -299,7 +324,7 @@ const prepareRoiVariants = (roiGray, roi, dashMask) => {
     // A near-square "vertical" cluster is often two stacked horizontal rows
     // ("wic" over "6x9"), not rotated text — try it unrotated too.
     if (roi.height < roi.width * 2) variants.push(addBorder(binary, MARGIN));
-    return variants;
+    return variants.slice(0, maxVariants);
   }
   // Tiny glyphs have no single reliable zoom: each label resolves in a
   // narrow band somewhere between ~4x and ~8x, so failing ROIs walk a
@@ -311,6 +336,7 @@ const prepareRoiVariants = (roiGray, roi, dashMask) => {
   const variants = [];
   const seen = new Set();
   for (const z of zoom >= 3 ? [zoom, zoom * 1.45, zoom * 2] : [zoom, zoom * 1.6, zoom * 2.56]) {
+    if (variants.length >= maxVariants) break;
     const zc = Math.min(8, z);
     const key = Math.round(zc * 4);
     if (seen.has(key)) continue;
@@ -341,12 +367,17 @@ export const detectDimensionsCore = async (imageData, env) => {
   const maxDim = Math.max(fullGray.width, fullGray.height);
   let ocrScale = 1;
   if (maxDim > MAX_OCR_DIM) ocrScale = MAX_OCR_DIM / maxDim;
-  else if (maxDim < UPSCALE_BELOW) ocrScale = Math.min(2.2, 2000 / maxDim);
+  else if (maxDim < UPSCALE_BELOW) ocrScale = Math.min(UPSCALE_MAX, UPSCALE_TO / maxDim);
   const baseGray = ocrScale === 1 ? fullGray : scaleGray(fullGray, ocrScale);
 
   const baseInk = binarizeInk(baseGray);
   const speckle = estimateSpeckle(baseInk);
 
+  // CLAHE runs on the UPSCALED page, which looks wasteful (4x the pixels for
+  // the same lighting correction) but is not: measured on the fixtures,
+  // normalising at native resolution and enlarging afterwards costs six
+  // detections. Bilinear zoom is what creates the local contrast gradients
+  // this pass exists to flatten, so it has to come second.
   const cv = openCvIfReady();
   let enhanced = cv ? enhanceGrayWithCv(cv, baseGray, { denoise: speckle > 0.12 }) : null;
   if (!enhanced) enhanced = clahe(baseGray);
@@ -384,6 +415,9 @@ export const detectDimensionsCore = async (imageData, env) => {
   timings.preprocess = elapsed();
 
   // ---- Phase 2: full-page OCR (in worker) + Phase 3: spatial analysis ------
+  // Phase 4 is the concurrent one; boot its worker pool now so the boots run
+  // under the sparse pass rather than under the reads they're meant to speed up.
+  prewarmOcrPool();
   const pass1Promise = recognizeSparse(env.toOcrInput(grayToImageDataLike(pass1Input)));
 
   const analysisScale = Math.min(1, ANALYSIS_DIM / Math.max(enhanced.width, enhanced.height));
@@ -675,25 +709,35 @@ export const detectDimensionsCore = async (imageData, env) => {
 
   const parsedBoxes = [];
   const roiExteriorLabels = [];
-  for (let roiIndex = 0; roiIndex < rois.length; roiIndex++) {
-    const roi = rois[roiIndex];
+  // Widened rescue re-reads jump the main queue: they must not starve behind
+  // low-priority leftovers when the time budget runs down.
+  const followUps = [];
+  let cursor = 0;
+  const nextRoi = () => followUps.shift() ?? (cursor < rois.length ? rois[cursor++] : null);
+
+  const readRoi = async (roi) => {
     // A successful parse covers its whole neighbourhood — split twins and
     // overlapping duplicates of an already-read label are wasted reads.
     // (Widened rescue re-reads deliberately overlap the parse they are
     // double-checking, and a parse pulled out of a multi-row blob must not
-    // suppress the single-row boxes it happens to cover.)
+    // suppress the single-row boxes it happens to cover.) With reads running
+    // concurrently this is advisory: a twin already in flight isn't recorded yet.
     if (!roi.widened &&
-        parsedBoxes.some((b) => rowLike(b) && overlapRatio(b, roi) > 0.5)) continue;
+        parsedBoxes.some((b) => rowLike(b) && overlapRatio(b, roi) > 0.5)) return;
     if (elapsed() > effectiveBudget - reserve - 100) {
       // Out of OCR time — dimension-shaped leftovers still go to the
       // rescue collage (tile prep is cheap JS; only OCR is expensive).
       if (paddleAvailable && failedTiles.length < 10 && paddleWorthyShape(roi)) {
         failedTiles.push({ gray: prepareRoiVariants(roiGray, roi, dashMask)[0], bbox: roi });
       }
-      continue;
+      return;
     }
 
-    const variants = prepareRoiVariants(roiGray, roi, dashMask);
+    // The speculative tier was 57% of all OCR calls for 7% of the parses, and
+    // on dense plans it spent the budget the queue tail never got to. One zoom
+    // rung each; the evidence tier keeps the full ladder.
+    const variants = prepareRoiVariants(roiGray, roi, dashMask,
+      roi.priority >= SPECULATIVE_PRIORITY ? Infinity : SPECULATIVE_LADDER);
     if (env.debug && env.dumpTile) env.dumpTile(roi, variants);
 
     let bestParsed = null;
@@ -809,9 +853,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     if (!roi.widened && !roi.vertical && glyphHeightFull > 0 &&
         (bestParsed?.mixedPair || originalMixed)) {
       const pad = 2.2 * glyphHeightFull;
-      // Insert right after this ROI: the rescue read must not starve behind
-      // low-priority queue leftovers when the time budget runs down.
-      rois.splice(roiIndex + 1, 0, {
+      followUps.push({
         ...roi,
         x: Math.max(0, roi.x - pad),
         width: roi.width + 2 * pad,
@@ -926,7 +968,17 @@ export const detectDimensionsCore = async (imageData, env) => {
         (roi.vertical && (roi.glyphCount || 0) >= 5);
       if (paddleWorthy) failedTiles.push({ gray: bestVariant, bbox: roi });
     }
-  }
+  };
+
+  // Reads go out concurrently across ROIs; each ROI's own variant ladder stays
+  // sequential because its early exit is what bounds the work. Everything
+  // readRoi does after its last await is synchronous, so the shared candidate
+  // bookkeeping still runs to completion without interleaving.
+  const lanes = Math.max(1, Math.min(ocrConcurrency(), rois.length));
+  await Promise.all(Array.from({ length: lanes }, async () => {
+    for (let roi = nextRoi(); roi; roi = nextRoi()) await readRoi(roi);
+  }));
+
   for (const label of roiExteriorLabels) {
     if (exteriorLabels.some((l) => overlapRatio(l.bbox, label.bbox) > 0.5)) continue;
     exteriorLabels.push(label);

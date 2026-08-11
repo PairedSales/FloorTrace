@@ -37,5 +37,9 @@ __pycache__/
 # Local scratch/debug scripts (may hardcode local paths)
 scripts/_*.mjs
 
+# Perf-probe copies of pipeline sources (instrumented forks, not sources)
+.ocrperf/
+.perfprobe/
+
 # Real-world appraisal order artifacts (never commit)
 cmp-vendors.*

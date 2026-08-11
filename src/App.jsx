@@ -13,7 +13,12 @@ import {
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
-import { detectAllDimensions, terminateOcrWorker, warmupOcrEngines } from './utils/DimensionsOCR';
+import {
+  detectAllDimensions,
+  terminateOcrWorker,
+  warmupOcrEngines,
+  releaseOcrWorkersWhenIdle
+} from './utils/DimensionsOCR';
 import { scaleIsotropy, robustScale } from './utils/detection/validate';
 import { qualitySummary } from './utils/boundaryQuality';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
@@ -380,10 +385,11 @@ function App() {
         placeCentredOverlay(imgSrc);
       } finally {
         setIsProcessing(false);
-        // Terminate to release the worker's WASM heap, then re-warm in the
-        // background so the next scan doesn't pay engine bootstrap inside
-        // its own time budget.
-        terminateOcrWorker().then(() => warmupOcrEngines());
+        // Keep the warm worker pool around for a re-scan or a second image,
+        // then release its WASM heaps once the user has clearly moved on.
+        // Tearing down immediately made every scan after the first pay engine
+        // bootstrap inside its own time budget.
+        releaseOcrWorkersWhenIdle(60000);
       }
     }
   }, [image, mode, roomOverlay, perimeterOverlay, unit, notify, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);

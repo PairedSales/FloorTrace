@@ -6,7 +6,10 @@
  *     dimensions: [{ width, height, text, bbox, confidence, format }]
  *     exteriorLabels: [{ keyword, text, bbox }] — garage/porch/patio/deck/
  *       balcony name labels, fed to the boundary tracer as footprint exclusions
- *   terminateOcrWorker()
+ *   terminateOcrWorker() / releaseOcrWorkersWhenIdle(ms)
+ *
+ * Repeat scans of the same image are served from a one-entry cache — "Find
+ * room size" and re-entering manual mode both re-scan what is already known.
  *
  * Parsing primitives (normalizeOcrText, parseSingleToken, parseDimensionLine,
  * inferDominantFormat) are re-exported for the unit-test suite.
@@ -22,7 +25,7 @@ import { dataUrlToImage } from './imageLoader.js';
 import { detectDimensionsCore } from './dimensions/pipeline.js';
 import { ensurePaddle, paddleIfReady, paddleRecognizeTiles } from './dimensions/ocrPaddle.js';
 import { loadOpenCv } from './dimensions/opencvBridge.js';
-import { configureTesseract, getWorker } from './dimensions/ocrTesseract.js';
+import { configureTesseract, warmOcrEngine } from './dimensions/ocrTesseract.js';
 import tesseractWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
 import tesseractCoreSimdUrl from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 import tesseractCoreUrl from 'tesseract.js-core/tesseract-core-lstm.wasm.js?url';
@@ -55,12 +58,17 @@ export {
   parseDimensionLine,
   inferDominantFormat
 } from './dimensions/parse.js';
-export { terminateOcrWorker } from './dimensions/ocrTesseract.js';
+export {
+  terminateOcrWorker,
+  releaseOcrWorkersWhenIdle
+} from './dimensions/ocrTesseract.js';
 
 /**
- * Pre-warm the Tesseract worker. Call at app startup so the first real
+ * Pre-warm one Tesseract worker. Call at app startup so the first real
  * detection doesn't pay multi-second engine bootstrap inside its time
- * budget. Safe to call repeatedly; never throws.
+ * budget. Safe to call repeatedly; never throws. Only one worker: the rest
+ * of the pool boots during the scan itself, so a visitor who never scans
+ * doesn't hold four WASM heaps.
  *
  * OpenCV is deliberately NOT warmed here: its ~15.5 MB (3.9 MB gzip) chunk
  * would be downloaded by every visitor at mount for two optional filters
@@ -75,7 +83,7 @@ export { terminateOcrWorker } from './dimensions/ocrTesseract.js';
  */
 export const warmupOcrEngines = () => {
   try {
-    getWorker().catch(() => {});
+    warmOcrEngine();
   } catch {
     // warm-up is best-effort
   }
@@ -176,16 +184,29 @@ const browserEnv = () => ({
   }
 });
 
+// Last scan, keyed by the image itself. "Find room size" and re-entering
+// manual mode both re-scan the same image; a full scan is seconds of OCR.
+// Identity is the data URL, not a hash — the caller passes the same string
+// reference back, so === is O(1) here and cannot alias two distinct images.
+let lastScan = null;
+
+const cloneScan = (result) => ({
+  dimensions: result.dimensions.map((d) => ({ ...d, bbox: { ...d.bbox } })),
+  exteriorLabels: result.exteriorLabels.map((l) => ({ ...l, bbox: { ...l.bbox } })),
+  detectedFormat: result.detectedFormat
+});
+
 /**
  * Detect all room dimensions in a floorplan image.
  * @param {string} imageDataUrl base64 data URL (PNG/JPG)
  * @returns {Promise<{dimensions: Array, exteriorLabels: Array, detectedFormat: string|null}>}
  */
 export const detectAllDimensions = async (imageDataUrl) => {
+  if (lastScan && lastScan.url === imageDataUrl) return cloneScan(lastScan.result);
   try {
     // Warm engines in the background / in parallel with image decode.
     // Tesseract's worker is the one this run will actually wait on.
-    getWorker();
+    warmOcrEngine();
     loadOpenCv();
 
     const img = await dataUrlToImage(imageDataUrl);
@@ -204,7 +225,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
         'exterior:', exteriorLabels.map((l) => l.keyword));
     }
 
-    return { dimensions, exteriorLabels, detectedFormat };
+    const result = { dimensions, exteriorLabels, detectedFormat };
+    lastScan = { url: imageDataUrl, result };
+    return cloneScan(result);
   } catch (error) {
     console.error('DimensionsOCR error:', error);
     return { dimensions: [], exteriorLabels: [], detectedFormat: null };

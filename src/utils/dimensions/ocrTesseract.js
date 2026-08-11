@@ -1,13 +1,36 @@
 /**
- * Tesseract.js engine wrapper — lazy module load, cached worker, and the two
+ * Tesseract.js engine wrapper — lazy module load, a small worker pool, and the
  * parameter presets the pipeline uses (sparse full-page pass and targeted
  * single-line ROI pass).
+ *
+ * The pool exists because a scan is ~90% Tesseract inference spread over 80-100
+ * independent ROI reads; one worker serialized every one of them. Reads are
+ * bit-identical at any pool size — same tiles, same params, same engine — so
+ * the only thing concurrency changes is which order results come back in.
  */
 
 let tesseractModulePromise = null;
-let workerPromise = null;
-let currentPreset = null;
 let createWorkerOptions;
+
+// { worker, ready, preset, busy, gen }. `busy` is true from the moment a slot
+// is created until its worker has booted, so an unbooted slot is never handed out.
+let entries = [];
+let waiters = [];
+// Bumped by terminate(): boots and releases that land afterwards belong to a
+// dead generation and tear themselves down instead of resurrecting the pool.
+let generation = 0;
+let idleTimer = null;
+let idleDelay = 0;
+
+const MAX_POOL = 4; // each worker holds the 5.2 MB traineddata plus a WASM heap
+
+const poolSize = (() => {
+  const cores = globalThis.navigator?.hardwareConcurrency || 4;
+  return Math.max(1, Math.min(MAX_POOL, Math.floor(cores / 2)));
+})();
+
+/** How many ROI reads the caller may keep in flight. */
+export const ocrConcurrency = () => poolSize;
 
 const loadTesseract = async () => {
   if (!tesseractModulePromise) {
@@ -18,34 +41,105 @@ const loadTesseract = async () => {
 
 /**
  * Inject createWorker options (workerPath/corePath/langPath) before the first
- * getWorker() call. The browser entry uses this to point tesseract.js at
+ * worker boots. The browser entry uses this to point tesseract.js at
  * self-hosted assets instead of its jsdelivr defaults; Node harnesses skip it.
  */
 export const configureTesseract = (options) => {
   createWorkerOptions = options;
 };
 
-export const getWorker = async () => {
-  if (!workerPromise) {
-    const pending = (async () => {
-      const Tesseract = await loadTesseract();
-      return Tesseract.createWorker('eng', 1, createWorkerOptions);
-    })();
-    workerPromise = pending;
-    // Don't cache a failed boot — the next call should retry, not inherit
-    // a permanently rejected promise.
-    pending.catch(() => {
-      if (workerPromise === pending) workerPromise = null;
-    });
+const cancelIdleRelease = () => {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
   }
-  return workerPromise;
 };
 
-const applyPreset = async (worker, preset) => {
-  if (currentPreset === preset) return;
+const scheduleIdleRelease = () => {
+  if (!idleDelay || idleTimer || !entries.length) return;
+  if (entries.some((e) => e.busy)) return;
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    terminateOcrWorker();
+  }, idleDelay);
+  idleTimer.unref?.(); // Node: an armed release must not hold the process open
+};
+
+const failWaiters = (error) => {
+  const pending = waiters;
+  waiters = [];
+  for (const w of pending) w.reject(error);
+};
+
+/** Hand the slot to a waiter (preferring one that wants its current preset) or park it. */
+const release = (entry) => {
+  if (entry.gen !== generation) {
+    entry.worker?.terminate().catch(() => {});
+    return;
+  }
+  let i = waiters.findIndex((w) => w.preset === entry.preset);
+  if (i < 0 && waiters.length) i = 0;
+  if (i >= 0) {
+    waiters.splice(i, 1)[0].resolve(entry);
+    return;
+  }
+  entry.busy = false;
+  scheduleIdleRelease();
+};
+
+const bootEntry = () => {
+  const entry = { worker: null, ready: null, preset: null, busy: true, gen: generation };
+  entries.push(entry);
+  entry.ready = (async () => {
+    const Tesseract = await loadTesseract();
+    return Tesseract.createWorker('eng', 1, createWorkerOptions);
+  })();
+  entry.ready.then(
+    (worker) => {
+      if (entry.gen !== generation) {
+        worker.terminate().catch(() => {});
+        return;
+      }
+      entry.worker = worker;
+      release(entry);
+    },
+    (error) => {
+      const i = entries.indexOf(entry);
+      if (i >= 0) entries.splice(i, 1);
+      // Nothing left that could ever service them — don't let callers hang.
+      if (!entries.length) failWaiters(error);
+    }
+  );
+  return entry;
+};
+
+/**
+ * Bring the pool up to full size. Call it as early as the caller knows a ROI
+ * phase is coming: the extra boots then overlap the full-page pass instead of
+ * eating the first second of the phase they exist to speed up.
+ */
+export const prewarmOcrPool = () => {
+  cancelIdleRelease();
+  while (entries.length < poolSize) bootEntry();
+};
+
+const acquire = (preset) => {
+  cancelIdleRelease();
+  if (!entries.length) bootEntry();
+  const free = entries.find((e) => !e.busy && e.preset === preset) ||
+    entries.find((e) => !e.busy);
+  if (free) {
+    free.busy = true;
+    return Promise.resolve(free);
+  }
+  return new Promise((resolve, reject) => waiters.push({ preset, resolve, reject }));
+};
+
+const applyPreset = async (entry, preset) => {
+  if (entry.preset === preset) return;
   const Tesseract = await loadTesseract();
   if (preset === 'sparse') {
-    await worker.setParameters({
+    await entry.worker.setParameters({
       tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
       preserve_interword_spaces: '1',
       user_defined_dpi: '0'
@@ -54,22 +148,36 @@ const applyPreset = async (worker, preset) => {
     // No char whitelist: the LSTM engine largely ignores it and it measurably
     // degraded reads in testing; the parser repairs stray letters instead.
     // Fixed DPI stops Tesseract mis-estimating resolution on small strips.
-    await worker.setParameters({
+    await entry.worker.setParameters({
       tessedit_pageseg_mode:
         preset === 'block' ? Tesseract.PSM.SINGLE_BLOCK : Tesseract.PSM.SINGLE_LINE,
       preserve_interword_spaces: '1',
       user_defined_dpi: '300'
     });
   }
-  currentPreset = preset;
+  entry.preset = preset;
+};
+
+/**
+ * Boot one worker so the first real scan doesn't pay engine bootstrap inside
+ * its time budget. Never rejects; resolves false if the engine failed to come up.
+ */
+export const warmOcrEngine = () => {
+  cancelIdleRelease();
+  const entry = entries[0] || bootEntry();
+  return entry.ready.then(() => true, () => false);
 };
 
 /** Full-page sparse-text OCR. Returns flat lists of lines and words. */
 export const recognizeSparse = async (input) => {
-  const worker = await getWorker();
-  await applyPreset(worker, 'sparse');
-  const result = await worker.recognize(input, {}, { blocks: true });
-  return collectLinesAndWords(result);
+  const entry = await acquire('sparse');
+  try {
+    await applyPreset(entry, 'sparse');
+    const result = await entry.worker.recognize(input, {}, { blocks: true });
+    return collectLinesAndWords(result);
+  } finally {
+    release(entry);
+  }
 };
 
 /**
@@ -78,9 +186,16 @@ export const recognizeSparse = async (input) => {
  * sliver of a neighbouring text row inside the crop).
  */
 export const recognizeLine = async (input, { mode = 'line' } = {}) => {
-  const worker = await getWorker();
-  await applyPreset(worker, mode === 'block' ? 'block' : 'line');
-  const result = await worker.recognize(input, {}, { blocks: true });
+  const preset = mode === 'block' ? 'block' : 'line';
+  prewarmOcrPool();
+  const entry = await acquire(preset);
+  let result;
+  try {
+    await applyPreset(entry, preset);
+    result = await entry.worker.recognize(input, {}, { blocks: true });
+  } finally {
+    release(entry);
+  }
   const { lines, words } = collectLinesAndWords(result);
 
   const lineReads = lines.map((l) => ({
@@ -116,16 +231,29 @@ export const collectLinesAndWords = (result) => {
   return { lines, words };
 };
 
+/**
+ * Arm a delayed teardown: the pool's WASM heaps are released after `ms` of no
+ * OCR activity. Any read cancels it. Cheaper than tearing down after every
+ * scan — a re-scan or a second image within the window reuses a warm pool.
+ */
+export const releaseOcrWorkersWhenIdle = (ms = 60000) => {
+  idleDelay = ms;
+  cancelIdleRelease();
+  scheduleIdleRelease();
+};
+
 export const terminateOcrWorker = async () => {
-  if (workerPromise) {
-    const pending = workerPromise;
-    workerPromise = null;
-    currentPreset = null;
+  cancelIdleRelease();
+  generation += 1;
+  const dead = entries;
+  entries = [];
+  failWaiters(new Error('OCR workers terminated'));
+  await Promise.all(dead.map(async (entry) => {
     try {
-      const worker = await pending;
+      const worker = entry.worker ?? await entry.ready;
       await worker.terminate();
     } catch {
       // worker never came up; nothing to terminate
     }
-  }
+  }));
 };
