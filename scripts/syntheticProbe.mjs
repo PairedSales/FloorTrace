@@ -8,6 +8,7 @@ import { polygonArea } from '../src/utils/detection/polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
   garageHouse, nestedFloorsPlan, mixedThicknessHouse,
+  createImage, outerFaceRect, strokeAround,
   polygonIou, bboxIou, bboxOf, areaError,
 } from '../src/utils/detection/__tests__/synthetic.js';
 
@@ -83,6 +84,52 @@ const scenarios = {
     (traced?.floors ?? []).forEach((f, i) => {
       if (f.outer) report(`  nested floor ${i}`, { outer: f.outer, quality: traced.quality }, floors[i]);
     });
+  },
+  // Draw mode: the same scenarios traced from a sloppy brush stroke instead of
+  // from the page. The stroke is offset outward and wobbled, so a high IoU
+  // here means the outline snapped to the wall rather than following the hand.
+  draw: () => {
+    const cases = [
+      ['slider 300px', ...Object.values(sliderHouse(300)).slice(0, 2)],
+      ['U-plan notch', ...Object.values(uPlanHouse()).slice(0, 2)],
+    ];
+    const { img: legendImg, truth: legendTruth } = legendPlan();
+    cases.push(['legend in notch', legendImg, legendTruth]);
+
+    for (const [name, img, truth] of cases) {
+      for (const jitter of [0, 6, 12]) {
+        report(
+          `${name} (jitter ${jitter}px)`,
+          traceFloorplanBoundaryCore(img, {
+            brush: { strokes: [strokeAround(truth, { offset: 10, jitter, step: 8 })], radius: 22 },
+          }),
+          truth,
+        );
+      }
+    }
+
+    // Brush width must not change the answer.
+    const { img, truth } = sliderHouse(0);
+    for (const [offset, radius] of [[10, 14], [20, 24], [50, 55], [70, 75]]) {
+      report(
+        `stroke off=${offset} r=${radius}`,
+        traceFloorplanBoundaryCore(img, {
+          brush: { strokes: [strokeAround(truth, { offset, jitter: 4, step: 8 })], radius },
+        }),
+        truth,
+      );
+    }
+
+    // Nothing drawn under the stroke: the outline must still come back, marked.
+    const blank = createImage(800, 600);
+    const blankTruth = outerFaceRect(150, 120, 650, 480, 8);
+    report(
+      'blank paper (freehand)',
+      traceFloorplanBoundaryCore(blank, {
+        brush: { strokes: [strokeAround(blankTruth, { jitter: 3, step: 8 })], radius: 20 },
+      }),
+      blankTruth,
+    );
   },
   mixed: () => {
     const { img, outerTruth, innerTruth } = mixedThicknessHouse();

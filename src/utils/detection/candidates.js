@@ -282,6 +282,17 @@ export const generateCandidates = (net, analysis, options = {}) => {
   // Rescues the caller can request after scoring the base hypotheses.
   const rescue = {
     hasStructural: Boolean(structuralMask),
+    hasCorridor: Boolean(net.ribbon),
+    /**
+     * Draw mode only: the user's stroke standing in for wall. This is the one
+     * hypothesis that can close a loop the drawing never closed, so it exists
+     * to guarantee an answer — but it still has to win on score, and every
+     * pixel of it that crosses blank paper costs support.
+     */
+    corridor: () => {
+      if (!net.ribbon) return;
+      climb('all', 'corridor', orMasks(net.ribbon.slice(), net.mask), 0, radii);
+    },
     /** Only the strokes thick enough to be structural. */
     structural: () => {
       if (!structuralMask) return;

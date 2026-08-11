@@ -12,6 +12,7 @@
 
 import { traceComponentBoundary, simplifyRing, fitRing, polygonArea } from './polygon.js';
 import { contourSupport } from './wallEvidence.js';
+import { regionFit } from './brush.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
@@ -138,13 +139,27 @@ export const scoreCandidate = (candidate, ctx) => {
   const completeness = candidate.completeness ?? 1;
   const incomplete = clamp01((0.97 - completeness) / 0.2);
 
+  // Draw mode: how well this footprint matches the region the user's stroke
+  // encloses. The strongest constraint available, because it is the one piece
+  // of evidence that came from someone who can see the drawing.
+  const brushFit = ctx.brush
+    ? regionFit(
+      candidate.entry.mask, ctx.brush.region.mask, ctx.brush.band,
+      width, height, ctx.brush.bbox,
+    )
+    : null;
+
   const terms = [
     { w: 0.34, v: candidate.seal.seal },
     { w: 0.30, v: support.mean },
     { w: 0.26, v: coverage },
     { w: 0.10, v: economy },
   ];
-  if (constraintScore) terms.push({ w: 0.22, v: constraintScore.fit });
+  // OCR labels lose most of their pull in draw mode: a user who paints around
+  // the garage wants it out, and scoring every such candidate down for
+  // "excluding a labelled area" rewards annexing exactly what they excluded.
+  if (constraintScore) terms.push({ w: ctx.brush ? 0.08 : 0.22, v: constraintScore.fit });
+  if (brushFit !== null) terms.push({ w: 0.25, v: brushFit });
   const weight = terms.reduce((sum, t) => sum + t.w, 0);
   const score = terms.reduce((sum, t) => sum + t.w * t.v, 0) / weight
     - 0.3 * annex - 0.3 * incomplete;
@@ -158,6 +173,7 @@ export const scoreCandidate = (candidate, ctx) => {
     economy,
     annex,
     constraintScore,
+    brushFit,
     score,
     areaPx: polygonArea(shape.polygon),
   };
@@ -185,6 +201,8 @@ const WARNING_TEXT = {
   'room-outside': 'a detected room falls outside the traced outline',
   'label-outside': 'a labelled area falls outside the traced outline',
   'no-alternative': 'only one usable hypothesis was found',
+  'brush-mismatch': 'the traced outline does not match the area you outlined',
+  'drawn-freehand': 'no wall was found under part of the outline, so your stroke was used instead',
 };
 
 export const warning = (code, detail, severity = 'warn') => ({
@@ -201,7 +219,7 @@ export const warning = (code, detail, severity = 'warn') => ({
  */
 export const candidateConfidence = (scored, ctx) => {
   const warnings = [];
-  const { support, seal, constraintScore } = scored;
+  const { support, seal, constraintScore, brushFit } = scored;
   const perimeter = Math.max(1, support.total);
 
   let confidence = seal.seal * (0.3 + 0.7 * support.mean);
@@ -210,7 +228,10 @@ export const candidateConfidence = (scored, ctx) => {
     warnings.push(warning('unsealed', { cover: seal.cover, solidity: seal.solidity }, 'error'));
     confidence *= 0.35;
   }
-  if (support.mean < 0.6) {
+  // In draw mode a stretch of outline supported only by the user's stroke is a
+  // legitimate answer, not a defect — the ribbon already grades it below
+  // structural ink, so the bar for calling it *weak* drops accordingly.
+  if (support.mean < (ctx.brush ? 0.4 : 0.6)) {
     warnings.push(warning('weak-wall-support', { support: Number(support.mean.toFixed(3)) }));
     confidence *= 0.75;
   }
@@ -235,14 +256,27 @@ export const candidateConfidence = (scored, ctx) => {
     warnings.push(warning('wall-left-outside', { coverage: Number(scored.coverage.toFixed(2)) }));
     confidence *= 0.6 + 0.4 * scored.coverage;
   }
+  if (brushFit !== null && brushFit < 0.75) {
+    warnings.push(warning('brush-mismatch', { fit: Number(brushFit.toFixed(2)) },
+      brushFit < 0.5 ? 'error' : 'warn'));
+    confidence *= 0.4 + 0.6 * brushFit;
+  }
   if (constraintScore) {
+    // A room or label outside a *drawn* outline is usually a deliberate
+    // exclusion — the user painted around the garage. Still reported, because
+    // it is also how a mis-drawn outline shows itself, but it no longer
+    // condemns geometry the user chose. (validate.js softens its own
+    // late-stage copy of this check on the same grounds.)
+    const severity = ctx.brush ? 'warn' : 'error';
     for (const miss of constraintScore.roomMisses) {
-      warnings.push(warning('room-outside', { name: miss.name, cover: Number(miss.cover.toFixed(2)) }, 'error'));
+      warnings.push(warning('room-outside', { name: miss.name, cover: Number(miss.cover.toFixed(2)) }, severity));
     }
     if (constraintScore.pointMisses.length) {
-      warnings.push(warning('label-outside', { count: constraintScore.pointMisses.length }, 'error'));
+      warnings.push(warning('label-outside', { count: constraintScore.pointMisses.length }, severity));
     }
-    confidence *= 0.55 + 0.45 * constraintScore.fit;
+    confidence *= ctx.brush
+      ? 0.85 + 0.15 * constraintScore.fit
+      : 0.55 + 0.45 * constraintScore.fit;
   }
 
   return { confidence: Math.max(0.05, Math.min(0.98, confidence)), warnings };

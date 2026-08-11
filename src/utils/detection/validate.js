@@ -131,12 +131,19 @@ export const validateBoundaryResult = (result, context = {}) => {
       floor.outer?.polygon
       && pointInPolygon(label, floor.outer.polygon, floor.holes ?? [])));
     if (outside.length) {
+      // A label outside a *drawn* outline is usually a deliberate exclusion —
+      // the user painted around the garage. Still said out loud, because it is
+      // also how a mis-drawn outline shows itself, but it no longer condemns
+      // the trace the way it does when the detector chose the boundary alone.
+      const drawn = Boolean(context.userDrawn);
       warnings.push(warning('label-outside', {
         count: outside.length,
         of: labels.length,
         names: outside.slice(0, 4).map((l) => l.name ?? null).filter(Boolean),
-      }, 'error'));
-      factor *= Math.max(0.35, 1 - outside.length / labels.length);
+      }, drawn ? 'warn' : 'error'));
+      factor *= drawn
+        ? Math.max(0.85, 1 - 0.3 * (outside.length / labels.length))
+        : Math.max(0.35, 1 - outside.length / labels.length);
     }
   }
 

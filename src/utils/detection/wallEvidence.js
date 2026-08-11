@@ -141,7 +141,13 @@ const nearby = (mask, width, height, x, y, tol) => {
   return false;
 };
 
-export const createEvidence = (analysis, netMask) => {
+/**
+ * @param {Uint8Array} [assertedMask] draw mode's stroke ribbon: the user said a
+ *   wall runs here. Rated as wall rather than as nothing, because an edge
+ *   following a deliberate stroke over blank paper is not the same failure as
+ *   one fabricated across blank paper by a closing radius.
+ */
+export const createEvidence = (analysis, netMask, assertedMask = null) => {
   const { width, height, thickMask, ink } = analysis;
   const wall = netMask ?? analysis.wallMask;
   return {
@@ -150,6 +156,9 @@ export const createEvidence = (analysis, netMask) => {
     levelAt: (x, y, tol) => {
       if (thickMask && nearby(thickMask, width, height, x, y, tol)) return LEVEL_THICK;
       if (nearby(wall, width, height, x, y, tol)) return LEVEL_WALL;
+      // Ahead of raw ink: a deliberate stroke outranks whatever stray mark
+      // happens to sit near the same pixel.
+      if (assertedMask && nearby(assertedMask, width, height, x, y, tol)) return LEVEL_WALL;
       if (ink && nearby(ink, width, height, x, y, tol)) return LEVEL_INK;
       return 0;
     },

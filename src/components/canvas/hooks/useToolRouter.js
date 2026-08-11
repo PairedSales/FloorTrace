@@ -15,6 +15,7 @@ export function useToolRouter({
   lineToolActive,
   drawAreaActive,
   angleToolActive,
+  drawModeActive,
   manualEntryMode,
   traceInteractionMode,
   autoSnapEnabled,
@@ -52,9 +53,12 @@ export function useToolRouter({
   onAddMeasurementLine,
   onMeasurementLineUpdate,
 
-  // Sub-system: Eraser & Crop Hooks (directly instantiated in Canvas)
+  // Sub-system: Eraser, Crop & Draw Hooks (directly instantiated in Canvas)
   eraser,
   crop,
+  drawTool,
+  onFinishDrawMode,
+  onDrawModeToggle,
 
   // Callbacks from Zustand/App
   onRoomOverlayUpdate,
@@ -135,6 +139,13 @@ export function useToolRouter({
     const stage = e.target.getStage();
     if (!stage) return;
 
+    if (drawModeActive) {
+      e.cancelBubble = true;
+      e.evt.preventDefault();
+      drawTool.handleDrawMouseDown(stage);
+      return;
+    }
+
     if (eraserToolActive) {
       e.cancelBubble = true;
       e.evt.preventDefault();
@@ -148,7 +159,7 @@ export function useToolRouter({
       crop.handleCropMouseDown(stage);
       return;
     }
-  }, [eraserToolActive, cropToolActive, eraser, crop]);
+  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop]);
 
   // Stage Mouse Move
   const handleStageMouseMove = useCallback((e) => {
@@ -181,12 +192,18 @@ export function useToolRouter({
     const mousePoint = getCanvasCoords(stage);
     if (!mousePoint) return;
 
-    const needsMousePos = eraserToolActive || 
-      (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) || 
+    const needsMousePos = eraserToolActive || drawModeActive ||
+      (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) ||
       (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0);
 
     if (needsMousePos && !draggingVertex && !draggingRoom && !draggingRoomCorner) {
       setCurrentMousePos(mousePoint);
+    }
+
+    // Draw mode brush painting
+    if (drawModeActive && drawTool.isDrawingRef.current) {
+      drawTool.handleDrawMouseMove(stage, e.evt.shiftKey);
+      return;
     }
 
     // Eraser brush dragging
@@ -284,6 +301,8 @@ export function useToolRouter({
   }, [
     eraserToolActive,
     cropToolActive,
+    drawModeActive,
+    drawTool,
     eraser,
     crop,
     draggingRoom,
@@ -325,6 +344,12 @@ export function useToolRouter({
           rightClickPannedRef.current = false;
         }, 100);
       }
+      return;
+    }
+
+    // Draw mode mouse up
+    if (drawTool.isDrawingRef.current) {
+      drawTool.handleDrawMouseUp();
       return;
     }
 
@@ -387,7 +412,7 @@ export function useToolRouter({
     } else {
       dragStartPosRef.current = null;
     }
-  }, [eraser, crop, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
+  }, [drawTool, eraser, crop, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
 
   // Window mouseUp listener (handles commits when mouse is released outside canvas bounds)
   useEffect(() => {
@@ -412,6 +437,9 @@ export function useToolRouter({
           }, 100);
         }
       }
+      if (drawTool.isDrawingRef.current) {
+        drawTool.handleDrawMouseUp();
+      }
       if (eraser.isErasingRef.current) {
         eraser.handleEraserMouseUp();
       }
@@ -421,7 +449,7 @@ export function useToolRouter({
     };
     window.addEventListener('mouseup', handleWindowMouseUp);
     return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [eraser, crop, scaleRef, stageRef, viewportSyncTokenRef]);
+  }, [drawTool, eraser, crop, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Stage Clicks
   const handleStageClick = useCallback((e) => {
@@ -429,7 +457,7 @@ export function useToolRouter({
       return;
     }
 
-    if (isDraggingRef.current || eraserToolActive || cropToolActive) {
+    if (isDraggingRef.current || eraserToolActive || cropToolActive || drawModeActive) {
       return;
     }
 
@@ -574,6 +602,7 @@ export function useToolRouter({
     getCanvasCoords,
     eraserToolActive,
     cropToolActive,
+    drawModeActive,
     setLocalMeasurementLine,
   ]);
 
@@ -603,7 +632,8 @@ export function useToolRouter({
       return;
     }
 
-    if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive) return;
+    if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive
+      || drawModeActive) return;
     
     const targetType = e.target.getType();
     if (targetType === 'Circle') return;
@@ -618,6 +648,7 @@ export function useToolRouter({
   }, [
     lineToolActive,
     drawAreaActive,
+    drawModeActive,
     perimeterOverlay,
     manualEntryMode,
     handleInsertPerimeterVertex,
@@ -655,6 +686,12 @@ export function useToolRouter({
     }
 
     if (e.key === 'Escape') {
+      // First Escape drops the stroke in progress, second leaves draw mode —
+      // so a mis-started stroke does not cost the strokes already painted.
+      if (drawModeActive) {
+        if (!drawTool.cancelDraw()) onDrawModeToggle?.();
+        return;
+      }
       if (eraserToolActive) {
         eraser.cancelErase();
       } else if (cropToolActive) {
@@ -672,6 +709,10 @@ export function useToolRouter({
     }
 
     if (e.key === 'Enter') {
+      if (drawModeActive) {
+        onFinishDrawMode?.();
+        return;
+      }
       if (perimeterVertices && perimeterVertices.length > 2) {
         if (hasSelfIntersection(perimeterVertices, true)) {
           toast.error('Cannot close perimeter: would cause self-intersection.');
@@ -706,6 +747,10 @@ export function useToolRouter({
     customShapes,
     angleToolActive,
     onAngleToolToggle,
+    drawModeActive,
+    drawTool,
+    onDrawModeToggle,
+    onFinishDrawMode,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
   ]);

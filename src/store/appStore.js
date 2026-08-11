@@ -64,6 +64,12 @@ const workingStateDefaults = () => ({
   eraserToolActive: false,
   eraserBrushSize: 60,
   cropToolActive: false,
+  // Draw mode: rough brush strokes over the exterior walls, which the tracer
+  // then reads as a corridor constraint. Scratch input, not document content —
+  // undoable and restored with a draft, but never written to a .floorplan.
+  drawModeActive: false,
+  drawBrushSize: 48,
+  drawStrokes: [],
   // Viewport transforms (stage scale/zoom, position, rotation)
   zoomScale: null,      // null means needs fitToWindow
   stageX: 0,
@@ -94,6 +100,9 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'projectId',           // project tracking
   'traceInteractionMode', // transient input mode (drawing/idle)
   'angleToolActive',     // transient tool toggle
+  'drawModeActive',      // transient tool toggle
+  // drawStrokes IS snapshotted: each brush stroke must be undoable, which is
+  // the only correction available while painting.
   // activeTraceId and angleToolState ARE snapshotted: undoing "Add Floor"
   // must restore the previous selection, and protractor edits must be
   // undoable (AngleOverlay syncs itself back from the store).
@@ -118,6 +127,7 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
   'processingMessage',
   'isDirty',
   'traceInteractionMode',
+  'drawModeActive',
 ];
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_AUTOSAVE_FIELDS.includes(k)
@@ -133,6 +143,7 @@ const EXCLUDED_PERSISTENT_FIELDS = [
   'isProcessing', 'processingMessage', 'traceInteractionMode',
   'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
   'cropToolActive', 'eraserBrushSize',
+  'drawModeActive', 'drawBrushSize', 'drawStrokes',
   'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
   'canvasRotation',   // written to globalSettings
   'viewportSyncToken',
@@ -314,6 +325,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
+  setDrawModeActive: (v) => set({ drawModeActive: v }),
+  setDrawBrushSize: (v) => set({ drawBrushSize: v }),
+  setDrawStrokes: (v) => set({ drawStrokes: v }),
+  addDrawStroke: (stroke) => set((state) => (
+    stroke?.points?.length ? { drawStrokes: [...state.drawStrokes, stroke] } : {}
+  )),
   setZoomScale: (v) => set({ zoomScale: v }),
   setStagePosition: (pos) => set({ stageX: pos.x, stageY: pos.y }),
   setViewportTransform: (scale, pos, token) => set({ zoomScale: scale, stageX: pos.x, stageY: pos.y, viewportSyncToken: token }),

@@ -7,6 +7,9 @@ const mod = isMac ? '⌘' : 'Ctrl';
 const shortcuts = [
   { keys: 'O', description: 'Toggle options menu' },
   { keys: 'L', description: 'Toggle show lengths' },
+  { keys: '[ / ]', description: 'Resize the active brush' },
+  { keys: 'Enter', description: 'Finish drawing the exterior' },
+  { keys: 'Esc', description: 'Cancel the current stroke or tool' },
   { keys: 'Right-click', description: 'Delete a vertex' },
   { keys: `${mod} + O`, description: 'Open image' },
   { keys: `${mod} + V`, description: 'Paste image from clipboard' },
@@ -21,6 +24,7 @@ const shortcuts = [
 const tips = [
   'Click on a room to auto-detect its boundary.',
   'Use "Find Perimeter" to auto-detect exterior walls.',
+  'If that fails, "Draw Exterior" lets you paint roughly over the walls — FloorTrace snaps the outline to them.',
   'Drag overlay vertices to adjust detected boundaries.',
   'Use the Measure tool to draw measurement lines.',
   'Use the Draw tool to create custom area polygons.',
