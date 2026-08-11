@@ -4,10 +4,11 @@ import {
   ScanSearch,
   Maximize,
   SlidersHorizontal,
-  LayoutList,
   ScanText,
   CircleHelp,
   Layers,
+  Brush,
+  Check,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
 
@@ -23,6 +24,8 @@ const Toolbar = ({
   showPanelOptions,
   onOptionsToggle,
   onDrawExterior,
+  drawModeActive,
+  onFinishDrawMode,
   perimeterOverlay,
   onFindRoomSize,
   onHelpOpen,
@@ -114,17 +117,29 @@ const Toolbar = ({
           </button>
         )}
 
-        {image && (
+        {/* Draw mode doubles as its own commit: while painting, the same slot
+            becomes the way to finish, so the gesture that started the outline
+            is where the user looks to end it. */}
+        {image && (drawModeActive ? (
+          <button
+            onClick={onFinishDrawMode}
+            className="toolbar-btn text-accent hover:text-accent hover:bg-accent/10"
+            title="Trace the exterior from your outline (Enter)"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Done Drawing</span>
+          </button>
+        ) : (
           <button
             onClick={onDrawExterior}
             disabled={isProcessing}
             className="toolbar-btn"
-            title="Draw the exterior outline by hand"
+            title="Paint roughly over the exterior walls and let FloorTrace read them"
           >
-            <LayoutList className="w-3.5 h-3.5" />
+            <Brush className="w-3.5 h-3.5" />
             <span>Draw Exterior</span>
           </button>
-        )}
+        ))}
 
         {image && (
           <button

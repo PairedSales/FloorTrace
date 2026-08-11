@@ -18,6 +18,7 @@ import useAppStore from '../store/appStore';
  * @param {*}               opts.draggingVertex
  * @param {boolean}         opts.manualEntryMode
  * @param {boolean}         opts.eraserToolActive
+ * @param {boolean}         opts.drawModeActive
  * @param {boolean}         opts.cropToolActive
  * @param {object|null}     opts.roomOverlay
  * @param {string}          opts.traceInteractionMode
@@ -36,6 +37,7 @@ export function useCanvasPan({
   draggingAngle,
   manualEntryMode,
   eraserToolActive,
+  drawModeActive,
   cropToolActive,
   traceInteractionMode,
   viewportSyncTokenRef,
@@ -89,7 +91,7 @@ export function useCanvasPan({
    */
   const canPanCanvas = useMemo(() => {
     if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
-    if (manualEntryMode || eraserToolActive || cropToolActive) return false;
+    if (manualEntryMode || eraserToolActive || drawModeActive || cropToolActive) return false;
     if (traceInteractionMode === 'drawing') return false; // vertex placement mode
     return !isZoomingRef.current;
   }, [
@@ -99,6 +101,7 @@ export function useCanvasPan({
     draggingAngle,
     manualEntryMode,
     eraserToolActive,
+    drawModeActive,
     cropToolActive,
     traceInteractionMode,
     isZoomingRef,

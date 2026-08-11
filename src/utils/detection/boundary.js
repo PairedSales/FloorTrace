@@ -17,6 +17,7 @@ import {
 } from './candidates.js';
 import { scoreCandidate, pickCandidate, candidateConfidence, warning } from './scoring.js';
 import { buildFloor } from './footprint.js';
+import { brushNetworks, strokeRegion } from './brush.js';
 
 const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
@@ -183,7 +184,7 @@ const detectFloorNet = (net, analysis, options, constraints) => {
     ? localConstraints
     : null;
 
-  const evidence = createEvidence(analysis, net.mask);
+  const evidence = createEvidence(analysis, net.mask, net.ribbon);
   const ctx = {
     analysis,
     evidence,
@@ -193,6 +194,7 @@ const detectFloorNet = (net, analysis, options, constraints) => {
     maxRadius: generated.maxRadius,
     coverage: generated.coverage,
     constraints: scopedConstraints,
+    brush: net.brush ?? null,
     scale: 1,
   };
   const scored = [];
@@ -216,6 +218,15 @@ const detectFloorNet = (net, analysis, options, constraints) => {
   }
   if (bestOf((c) => c.seal.seal) < generated.sealedThreshold) {
     generated.rescue.span();
+    scoreNew();
+  }
+  // Draw mode's guarantee. Asked for when the drawn linework alone neither
+  // closed nor landed where the user outlined — the two ways an ink-only
+  // hypothesis can fail someone who has already told us where the wall is.
+  if (generated.rescue.hasCorridor
+    && (bestOf((c) => c.seal.seal) < generated.sealedThreshold
+      || bestOf((c) => c.brushFit ?? 0) < 0.9)) {
+    generated.rescue.corridor();
     scoreNew();
   }
 
@@ -293,6 +304,42 @@ const detectFloorNet = (net, analysis, options, constraints) => {
   };
 };
 
+// Draw mode's floor of last resort: the stroke itself. Reached when no
+// hypothesis built from ink produced a usable candidate — a plan whose walls
+// are unreadable, or a stroke over blank paper. The user gets the outline they
+// drew, said plainly to be that and nothing more.
+const freehandFloorNet = (net, analysis, options) => {
+  const { width, height, wallThickness } = analysis;
+  // Closed at three-quarters of the brush radius: enough to seal where the
+  // user lifted the mouse mid-outline, not enough to round the corners of a
+  // stroke they meant.
+  const measured = measureFootprint(
+    net.ribbon, width, height, Math.max(4, Math.round((net.radius ?? 8) * 0.75)),
+  );
+  if (!measured?.largest) return null;
+  const entry = footprintEntry(measured, measured.largest, width);
+  const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
+  return {
+    floorComps: [entry],
+    best: {
+      variant: 'all', policy: 'freehand', radius: measured.radius, score: 0,
+      support: { mean: 0 }, seal: { seal: 1 },
+    },
+    constraints: null,
+    thinStructure: null,
+    confidence: 0.45,
+    warnings: [warning('drawn-freehand', null, 'warn')],
+    epsilon,
+    fitOptions: {
+      ...options.fit,
+      mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
+    },
+    evidence: createEvidence(analysis, net.mask, net.ribbon),
+    alternatives: [],
+    search: { variant: 'all', policy: 'freehand', tried: [] },
+  };
+};
+
 // Is this outline a building, or a legend, a title block or a detail drawing
 // that happens to be a closed box? Judged on the same evidence as everything
 // else rather than on bbox size alone.
@@ -320,17 +367,43 @@ export const traceBoundary = (analysis, options = {}) => {
   const { width, height, wallThickness } = analysis;
   const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
   const constraints = options.constraints ?? null;
+  const brush = options.brush ?? null;
   const warnings = [];
 
-  const nets = partitionWallNetworks(
-    options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
-  );
+  // In draw mode the brush declares the partition: one painted loop is one
+  // building, whatever the ink under it does. That is the whole point — the
+  // page-scope merge and reject rules below are exactly what fails on the
+  // plans a user reaches for this tool on.
+  const nets = brush
+    ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
+    : partitionWallNetworks(
+      options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
+    );
   if (!nets.length) return null;
+
+  if (brush) {
+    for (const net of nets) {
+      const sealRadius = Math.max(4, Math.round(brush.radius * 0.75));
+      net.brush = {
+        region: strokeRegion(net.corridor, width, height, sealRadius),
+        band: net.corridor,
+        // Sampled over the painted band, which always contains the ink.
+        bbox: net.corridorBbox ?? net.bbox,
+      };
+    }
+  }
 
   const floors = [];
   const searches = [];
   const alternatives = [];
   let worstConfidence = 1;
+
+  // The geometric non-GLA detectors guess at intent from shape. In draw mode
+  // the user already expressed intent by where they painted, so only the
+  // explicit OCR label exclusions still apply.
+  const floorOptions = brush
+    ? { ...options, autoGarage: false, autoShaded: false }
+    : options;
 
   for (const net of nets) {
     if (floors.length >= maxFloors) break;
@@ -343,7 +416,8 @@ export const traceBoundary = (analysis, options = {}) => {
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
     if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    const detected = detectFloorNet(net, analysis, options, constraints);
+    const detected = detectFloorNet(net, analysis, options, constraints)
+      ?? (brush ? freehandFloorNet(net, analysis, options) : null);
     if (!detected) continue;
     searches.push(detected.search);
     alternatives.push(detected.alternatives);
@@ -351,7 +425,7 @@ export const traceBoundary = (analysis, options = {}) => {
     for (const footprint of detected.floorComps) {
       if (floors.length >= maxFloors) break;
       const floor = buildFloor(
-        footprint, { ...analysis, wallMask: net.mask }, detected.epsilon, options,
+        footprint, { ...analysis, wallMask: net.mask }, detected.epsilon, floorOptions,
       );
       if (!floor) continue;
       floor.sealRadius = footprint.radius;
@@ -389,6 +463,9 @@ export const traceBoundary = (analysis, options = {}) => {
 
   // Reject outlines that are not buildings. A hairline-drawn box a fraction of
   // the primary floor's size, with no room or label inside it, is a legend.
+  // Not in draw mode: the user painting a loop around something *is* the
+  // answer to "is this a building", and this pass is one of the things that
+  // silently discards a correct outline.
   const biggestBboxArea = floors.reduce((best, f) => Math.max(best, bboxAreaOf(f.footprintBbox)), 0);
   const biggestArea = floors.reduce((best, f) => Math.max(best, f.footprintArea), 0);
   const kept = [];
@@ -398,11 +475,12 @@ export const traceBoundary = (analysis, options = {}) => {
     const relArea = floor.footprintArea / biggestArea;
     const { structural, holdsConstraint } = floor.plausibility;
     const primary = relArea >= 0.999;
-    const suspicious = !primary
+    const suspicious = !brush
+      && !primary
       && relBbox < 0.55
       && structural < 0.35
       && holdsConstraint !== true;
-    if (relBbox < 0.12 || suspicious) {
+    if ((!brush && relBbox < 0.12) || suspicious) {
       rejectedFloors += 1;
       continue;
     }

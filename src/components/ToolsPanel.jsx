@@ -1,4 +1,4 @@
-import { Ruler, Pentagon, Eraser, Crop, RotateCw, Compass } from 'lucide-react';
+import { Ruler, Pentagon, Eraser, Crop, RotateCw, Compass, Spline } from 'lucide-react';
 
 const ToolsPanel = ({
   lineToolActive,
@@ -11,6 +11,8 @@ const ToolsPanel = ({
   onCropToolToggle,
   angleToolActive,
   onAngleToolToggle,
+  onOutlineByVertex,
+  outlineByVertexActive,
   onRotateCanvas,
   measurementLines,
   customShapes,
@@ -83,6 +85,22 @@ const ToolsPanel = ({
               </button>
             </>
           )}
+
+          {/* Precise corner-by-corner outlining. The brush is the primary way
+              to draw an exterior now, but placing exact vertices is still the
+              right tool on a clean plan. */}
+          <button
+            onClick={onOutlineByVertex}
+            className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+              outlineByVertexActive
+                ? 'bg-accent/15 text-accent border border-accent/30'
+                : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+            }`}
+            title="Place the exterior outline vertex by vertex"
+          >
+            <Spline className="w-4 h-4" />
+            Outline
+          </button>
 
           <button
             onClick={() => onRotateCanvas?.('clockwise')}
