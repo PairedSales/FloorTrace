@@ -7,7 +7,8 @@
   },
   "rooms": [
     { "name": "BEDROOM 1 (left)", "click": [95, 158], "labelBbox": [50, 150, 92, 14], "dims": [10.667, 13.333], "rect": [15, 16, 170, 206], "minIou": 0.75 },
-    { "name": "BEDROOM 2 (left)", "click": [264, 95], "labelBbox": [221, 105, 74, 13], "dims": [10.667, 10.0], "rect": [178, 15, 312, 160], "minIou": 0.5 },
+    { "name": "BEDROOM 2 (left)", "click": [264, 95], "labelBbox": [221, 105, 74, 13], "dims": [10.667, 10.0], "rect": [207, 16, 358, 160], "minIou": 0.75,
+      "note": "Was [178, 15, 312, 160] with minIou lowered to 0.5, which permitted a 42% error indefinitely. Both edges were wrong. Left: 178 sits inside the closet strip, which BEDROOM 1's own truth (right edge 170) already excludes from that room, so it belongs to neither rect; the partition between closet and bedroom is the wall run at x=200-210. Right: 312 is the bed outline (7px, 63% column coverage), not a wall; the room's right wall is the run at x=354-372 (19px, 100% coverage) shared with the stairwell. The corrected box also matches the label: 151px / 10.667ft = 14.2 px/ft against 14.3-14.5 for the neighbouring bedrooms, where the old box implied 12.6." },
     { "name": "BEDROOM 1 (right)", "click": [576, 87], "labelBbox": [542, 97, 74, 14], "dims": [10.667, 10.0], "rect": [483, 14, 632, 159], "minIou": 0.75 },
     { "name": "BEDROOM 2 (right)", "click": [739, 152], "labelBbox": [702, 162, 74, 12], "dims": [10.667, 13.333], "rect": [665, 15, 832, 205], "minIou": 0.6 },
     { "name": "LIVING ROOM (left)", "click": [263, 383], "labelBbox": [226, 393, 74, 12], "dims": [11.0, 16.667], "rect": [180, 325, 360, 591], "minIou": 0.75 },

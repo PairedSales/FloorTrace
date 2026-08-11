@@ -57,6 +57,32 @@ const boundaryConstraints = () => {
   };
 };
 
+// Pixels per foot the project already believes in, for the room detector to
+// size the next room against. Prefers the rooms measured so far — a median
+// over several rooms survives one bad rectangle, which the single calibration
+// scale derived from the first room cannot. Null until there is something
+// worth trusting, where the detector falls back to matching aspect alone.
+const roomScaleHint = () => {
+  const state = useAppStore.getState();
+  const samples = state.rooms.flatMap((r) => (
+    r.feetPerPixel?.x > 0 && r.feetPerPixel?.y > 0
+      ? [1 / r.feetPerPixel.x, 1 / r.feetPerPixel.y]
+      : []
+  ));
+  if (samples.length >= 4) {
+    const robust = robustScale(samples);
+    // A spread this wide means the rooms disagree about the drawing, not that
+    // one of them is slightly off; sizing against their median would spread
+    // the disagreement rather than resolve it.
+    if (robust && robust.spread <= 2) return { x: robust.value, y: robust.value };
+  }
+  const { calibrated, feetPerPixel } = state.calibration;
+  if (calibrated && feetPerPixel?.x > 0 && feetPerPixel?.y > 0) {
+    return { x: 1 / feetPerPixel.x, y: 1 / feetPerPixel.y };
+  }
+  return null;
+};
+
 const excludedAreasNote = (traced) => {
   const garages = traced.excludedGarages ?? 0;
   const others = (traced.excludedRegions ?? 0) - garages;
@@ -793,7 +819,9 @@ function App() {
     setIsProcessing(true, 'Finding room\\u2026');
     const startImage = image;
     try {
-      detected = await detectRoomFromClick(image, point, { labelBbox, labelDims: dims });
+      detected = await detectRoomFromClick(image, point, {
+        labelBbox, labelDims: dims, pixelsPerFoot: roomScaleHint(),
+      });
       if (useAppStore.getState().image === startImage && detected?.overlay) {
         overlay = {
           ...detected.overlay,
@@ -832,6 +860,17 @@ function App() {
           ? { x: 1 / detected.pixelsPerFoot.x, y: 1 / detected.pixelsPerFoot.y }
           : null,
       });
+      // The detector already knows when it could not confirm this room's
+      // walls, and the very next statement calibrates the whole project from
+      // the rectangle. Saying nothing made a doubtful room indistinguishable
+      // from a certain one at exactly the moment it mattered most.
+      if (detected.confidence < 0.5) {
+        notify(
+          'This room’s outline is uncertain, and the scale comes from it — '
+          + 'check the overlay against the room before trusting the area.',
+          { type: 'warning', duration: 8000 },
+        );
+      }
     }
 
     const dimStrings = { width: String(dims.width), height: String(dims.height) };

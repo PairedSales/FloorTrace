@@ -155,15 +155,29 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
     .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }));
 };
 
+// Partitioning the page into wall networks and climbing each one's closing
+// ladder is by far the most expensive thing the tracer does, and it depends on
+// nothing but the analysis: constraints only reach scoring, excludeRegions and
+// garage carving only reach buildFloor. Both are therefore memoised per image,
+// so the footprint clamp a room click needs and the perimeter trace that
+// follows it stop paying for the same search twice.
+const memo = (cache, key, compute) => {
+  if (!cache) return compute();
+  if (cache.has(key)) return cache.get(key);
+  const value = compute();
+  cache.set(key, value);
+  return value;
+};
+
 // Everything a network's footprint components need to become floors.
-const detectFloorNet = (net, analysis, options, constraints) => {
+const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   const { width, height, wallThickness } = analysis;
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
   const fitOptions = {
     ...options.fit,
     mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
   };
-  const generated = generateCandidates(net, analysis, options);
+  const generated = memo(cache, `gen|${netKey}`, () => generateCandidates(net, analysis, options));
   if (!generated.candidates.length) return null;
 
   // Constraints are page-wide but a network is one drawing: on a multi-floor
@@ -184,7 +198,8 @@ const detectFloorNet = (net, analysis, options, constraints) => {
     ? localConstraints
     : null;
 
-  const evidence = createEvidence(analysis, net.mask, net.ribbon);
+  const evidence = memo(cache, `ev|${netKey}`,
+    () => createEvidence(analysis, net.mask, net.ribbon));
   const ctx = {
     analysis,
     evidence,
@@ -370,15 +385,22 @@ export const traceBoundary = (analysis, options = {}) => {
   const brush = options.brush ?? null;
   const warnings = [];
 
+  // A caller-supplied mask is not part of the cache key, so it opts out of the
+  // memo rather than risk answering for a different drawing. A brush opts out
+  // for the same reason and more strongly: its nets, evidence and candidates
+  // all vary with the stroke, which no key here carries — and a drawn trace
+  // almost always follows an auto trace of the very same image.
+  const cache = (options.mask || brush) ? null : (options.searchCache ?? null);
   // In draw mode the brush declares the partition: one painted loop is one
   // building, whatever the ink under it does. That is the whole point — the
   // page-scope merge and reject rules below are exactly what fails on the
   // plans a user reaches for this tool on.
   const nets = brush
     ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
-    : partitionWallNetworks(
-      options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
-    );
+    : memo(cache, `nets|${maxFloors}|${options.maxCloseRadius ?? ''}`, () =>
+      partitionWallNetworks(
+        options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
+      ));
   if (!nets.length) return null;
 
   if (brush) {
@@ -405,7 +427,8 @@ export const traceBoundary = (analysis, options = {}) => {
     ? { ...options, autoGarage: false, autoShaded: false }
     : options;
 
-  for (const net of nets) {
+  for (let netIndex = 0; netIndex < nets.length; netIndex += 1) {
+    const net = nets[netIndex];
     if (floors.length >= maxFloors) break;
     // A network sitting inside an already-traced outline is interior detail
     // (stair block, island, courtyard ring), not another floor. Tested against
@@ -416,7 +439,7 @@ export const traceBoundary = (analysis, options = {}) => {
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
     if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    const detected = detectFloorNet(net, analysis, options, constraints)
+    const detected = detectFloorNet(net, analysis, options, constraints, cache, netIndex)
       ?? (brush ? freehandFloorNet(net, analysis, options) : null);
     if (!detected) continue;
     searches.push(detected.search);

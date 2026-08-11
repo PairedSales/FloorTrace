@@ -27,27 +27,93 @@ const componentMask = (labels, component, width) => {
   return mask;
 };
 
+// Ink extent of a mask, or null when it is empty.
+const inkBounds = (mask, width, height) => {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[row + x]) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      maxY = y;
+    }
+  }
+  return maxX < 0 ? null : { minX, minY, maxX, maxY };
+};
+
 // Enclose a mask: everything the border flood cannot reach.
+//
+// A wall network occupies its own corner of the page, but every rung of the
+// closing ladder used to close, flood and label the *whole* raster — on a sheet
+// carrying four plans, three quarters of that is morphology on blank paper.
+// Working in the mask's own ink box, grown by the closing radius, is exact
+// rather than approximate: beyond that margin the closed mask is empty and
+// connected to the page border, so those pixels are "outside" either way, and
+// the box is measured from the mask itself so no caller can get it wrong.
 export const measureFootprint = (wallMask, width, height, radius) => {
-  const closed = radius > 0 ? closeRect(wallMask, width, height, radius) : wallMask;
-  const outside = floodOutside(closed, width, height);
+  const bounds = inkBounds(wallMask, width, height);
+  if (!bounds) return null;
+  const pad = radius + 2;
+  const cx0 = Math.max(0, bounds.minX - pad);
+  const cy0 = Math.max(0, bounds.minY - pad);
+  const cw = Math.min(width - 1, bounds.maxX + pad) - cx0 + 1;
+  const ch = Math.min(height - 1, bounds.maxY + pad) - cy0 + 1;
+  const cropped = cw < width || ch < height;
+
+  let src = wallMask;
+  if (cropped) {
+    src = new Uint8Array(cw * ch);
+    for (let y = 0; y < ch; y += 1) {
+      const from = (cy0 + y) * width + cx0;
+      src.set(wallMask.subarray(from, from + cw), y * cw);
+    }
+  }
+
+  const closed = radius > 0 ? closeRect(src, cw, ch, radius) : src;
+  const outside = floodOutside(closed, cw, ch);
   const footprint = new Uint8Array(closed.length);
   for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
-  const { labels, components } = labelComponents(footprint, width, height);
-  if (!components.length) return null;
+  const local = labelComponents(footprint, cw, ch);
+  if (!local.components.length) return null;
+
+  let labels = local.labels;
+  let components = local.components;
+  if (cropped) {
+    labels = new Int32Array(width * height).fill(-1);
+    for (let y = 0; y < ch; y += 1) {
+      labels.set(local.labels.subarray(y * cw, y * cw + cw), (cy0 + y) * width + cx0);
+    }
+    components = local.components.map((c) => ({
+      id: c.id,
+      size: c.size,
+      bbox: {
+        minX: c.bbox.minX + cx0,
+        minY: c.bbox.minY + cy0,
+        maxX: c.bbox.maxX + cx0,
+        maxY: c.bbox.maxY + cy0,
+      },
+    }));
+  }
+
   let largest = components[0];
   let totalEnclosed = 0;
   for (const comp of components) {
     totalEnclosed += comp.size;
     if (comp.size > largest.size) largest = comp;
   }
-  return { labels, closed, components, largest, totalEnclosed, radius };
+  // The closed mask is deliberately not returned: nothing downstream reads it,
+  // and every ladder rung was holding a full-page copy of one alive.
+  return { labels, components, largest, totalEnclosed, radius };
 };
 
 export const footprintEntry = (measured, component, width) => ({
   mask: componentMask(measured.labels, component, width),
   labels: measured.labels,
-  closed: measured.closed,
   componentId: component.id,
   area: component.size,
   bbox: component.bbox,
@@ -279,10 +345,16 @@ export const generateCandidates = (net, analysis, options = {}) => {
     climb('all', 'raw', net.mask, 0, [sealedAll ?? radii[0]]);
   }
 
-  // Rescues the caller can request after scoring the base hypotheses.
+  // Rescues the caller can request after scoring the base hypotheses. They are
+  // idempotent because this whole result is memoised per image and replayed by
+  // the next trace of it: a second `structural()` would otherwise append an
+  // empty ladder to `search` on every reuse.
   const rescue = {
     hasStructural: Boolean(structuralMask),
     hasCorridor: Boolean(net.ribbon),
+    usedStructural: false,
+    usedSpan: false,
+    usedCorridor: false,
     /**
      * Draw mode only: the user's stroke standing in for wall. This is the one
      * hypothesis that can close a loop the drawing never closed, so it exists
@@ -290,18 +362,22 @@ export const generateCandidates = (net, analysis, options = {}) => {
      * pixel of it that crosses blank paper costs support.
      */
     corridor: () => {
-      if (!net.ribbon) return;
+      if (!net.ribbon || rescue.usedCorridor) return;
+      rescue.usedCorridor = true;
       climb('all', 'corridor', orMasks(net.ribbon.slice(), net.mask), 0, radii);
     },
     /** Only the strokes thick enough to be structural. */
     structural: () => {
-      if (!structuralMask) return;
+      if (!structuralMask || rescue.usedStructural) return;
+      rescue.usedStructural = true;
       climb('structural', 'weld', bridgeRunsGuarded(
         structuralMask, width, height, maxGap, minFlank, probeDepth,
       ), 0, radii);
     },
     /** Wall lines painted across their full extent. */
     span: () => {
+      if (rescue.usedSpan) return;
+      rescue.usedSpan = true;
       const segs = segmentsFor(net.mask);
       const spanned = orMasks(segmentSpanMask(segs, width, height), weldedAll.slice());
       climb('all', 'span', spanned, bridgedSpan(segs).longest, radii);

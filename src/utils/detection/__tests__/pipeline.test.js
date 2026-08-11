@@ -488,6 +488,81 @@ describe('detectRoomFromClickCore', () => {
     expect((x2 - x1) * (y2 - y1)).toBeGreaterThan(400 * 250);
   });
 
+  // Aspect ratio is invariant to scale, so two candidate rectangles of the
+  // same shape are indistinguishable to it however far apart their sizes are.
+  // The scale the rest of the project already agrees on is what separates them.
+  describe('project scale prior', () => {
+    // A room in the corner of a wider building (so it stays well under the
+    // "no room is most of the floor" guard), bounded by thin partitions at
+    // x=350/y=280 that growth passes on its way to the 550/450 walls.
+    const roomBehindThinPartitions = () => {
+      const img = createImage(1400, 500);
+      wall(img, 50, 50, 1350, 50, 8);
+      wall(img, 50, 450, 1350, 450, 8);
+      wall(img, 50, 50, 50, 450, 8);
+      wall(img, 1350, 50, 1350, 450, 8);
+      wall(img, 550, 50, 550, 450, 8);
+      wall(img, 350, 60, 350, 440, 2);
+      wall(img, 60, 280, 540, 280, 2);
+      return img;
+    };
+    const click = { x: 250, y: 200 };
+    // Aspect 1.25, matching the outer shell (500x400) exactly.
+    const labelDims = { width: 12.5, height: 10 };
+
+    it('runs on to the shell when nothing knows how big a foot is', () => {
+      const room = detectRoomFromClickCore(roomBehindThinPartitions(), click, { labelDims });
+      expect(room).toBeTruthy();
+      const [, , x2, y2] = bboxOf(room);
+      expect(x2).toBeGreaterThan(500);
+      expect(y2).toBeGreaterThan(400);
+    });
+
+    it('stops at the partitions when the label says the room is that size', () => {
+      // 24 px/ft makes the label 300x240 px: the partitioned rectangle, not
+      // the shell, which at this scale would be a 20ft-wide bedroom.
+      const room = detectRoomFromClickCore(roomBehindThinPartitions(), click, {
+        labelDims, pixelsPerFoot: { x: 24, y: 24 },
+      });
+      expect(room).toBeTruthy();
+      const [, , x2, y2] = bboxOf(room);
+      expect(x2).toBeLessThan(400);
+      expect(y2).toBeLessThan(330);
+    });
+
+    it('leaves the answer alone when the scale agrees with the drawing', () => {
+      const free = detectRoomFromClickCore(roomBehindThinPartitions(), click, { labelDims });
+      const primed = detectRoomFromClickCore(roomBehindThinPartitions(), click, {
+        labelDims, pixelsPerFoot: { x: 40, y: 40 },
+      });
+      expect(bboxOf(primed)).toEqual(bboxOf(free));
+      expect(primed.confidence).toBeCloseTo(free.confidence, 10);
+    });
+
+    it('reports a room that disagrees with the project scale as doubtful', () => {
+      // Same building with no partitions, so there is no other rectangle to
+      // switch to and only the confidence can move.
+      const walled = () => {
+        const img = createImage(1400, 500);
+        wall(img, 50, 50, 1350, 50, 8);
+        wall(img, 50, 450, 1350, 450, 8);
+        wall(img, 50, 50, 50, 450, 8);
+        wall(img, 1350, 50, 1350, 450, 8);
+        wall(img, 550, 50, 550, 450, 8);
+        return img;
+      };
+      const alone = detectRoomFromClickCore(walled(), click, { labelDims });
+      // Same rectangle, same label — but every other room in this project
+      // measured a quarter of these pixels per foot, so one of them is wrong.
+      const contradicted = detectRoomFromClickCore(walled(), click, {
+        labelDims, pixelsPerFoot: { x: 10, y: 10 },
+      });
+      expect(bboxOf(contradicted)).toEqual(bboxOf(alone));
+      expect(alone.confidence).toBeGreaterThan(0.9);
+      expect(contradicted.confidence).toBeLessThan(0.4 * alone.confidence);
+    });
+  });
+
   it('returns null when clicked outside the building', () => {
     const img = createImage(600, 400);
     wall(img, 150, 100, 450, 100, 8);

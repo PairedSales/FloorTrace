@@ -15,7 +15,7 @@ import { growRoomRect } from './room.js';
 import { buildSat } from './raster.js';
 import { polygonBounds, mapPolygonToOriginal, ringSetArea } from './polygon.js';
 import { validateBoundaryResult } from './validate.js';
-import { getCachedAnalysis } from './cache.js';
+import { getCachedAnalysis, getSearchCache } from './cache.js';
 import { rasterizeBrush } from './brush.js';
 
 const toOverlay = (bounds) => ({
@@ -85,7 +85,11 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     : null;
   const source = brush ? 'drawn' : 'auto';
   const boundary = traceBoundary(analysis, {
-    ...options.boundary, excludeRegions, constraints, brush,
+    ...options.boundary,
+    excludeRegions,
+    constraints,
+    brush,
+    searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
   });
   if (!boundary) {
     return {
@@ -174,6 +178,18 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   };
 };
 
+// One SAT per clamped floor, not per click: every room placed on a floorplan
+// was rebuilding the same page-sized table before growing its rectangle.
+const footprintSats = new WeakMap();
+
+const footprintSat = (target, analysis) => {
+  const cached = footprintSats.get(target);
+  if (cached) return cached;
+  const sat = buildSat(target.footprintMask, analysis.width, analysis.height);
+  footprintSats.set(target, sat);
+  return sat;
+};
+
 export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => {
   if (!clickPoint) return null;
   const t0 = Date.now();
@@ -196,9 +212,22 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // On multi-floor pages, clamp to the floor under the click so rooms outside
   // the largest footprint aren't rejected. Garage carving is off here:
   // clicking a garage label must still detect the garage room.
+  //
+  // The search cache is what makes this affordable: this trace and the
+  // perimeter trace that follows a room placement climb the same closing
+  // ladder, and the ladder is ~84% of a trace. The boundary options join the
+  // memo key — keyed on the image alone, a second call with different options
+  // was silently answered with the first call's geometry.
   const boundary = getCachedAnalysis(
-    options.cacheKey ? `${options.cacheKey}::roomclamp` : null, maxDimension, options.analyze,
-    () => traceBoundary(analysis, { ...options.boundary, autoGarage: false }),
+    options.cacheKey
+      ? `${options.cacheKey}::roomclamp::${JSON.stringify(options.boundary ?? null)}`
+      : null,
+    maxDimension, options.analyze,
+    () => traceBoundary(analysis, {
+      ...options.boundary,
+      autoGarage: false,
+      searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
+    }),
   );
   let footprintInfo = null;
   if (boundary) {
@@ -210,7 +239,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     footprintInfo = {
       footprintMask: target.footprintMask,
       footprintArea: target.footprintArea,
-      satFootprint: buildSat(target.footprintMask, analysis.width, analysis.height),
+      satFootprint: footprintSat(target, analysis),
     };
   }
   const labelBbox = options.labelBbox
@@ -222,9 +251,14 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     }
     : null;
 
+  // Scale hint in original image px per foot -> working scale.
+  const hint = options.pixelsPerFoot;
   const room = growRoomRect(analysis, footprintInfo, workPoint, {
     labelBbox,
     labelDims: options.labelDims,
+    pixelsPerFoot: hint?.x > 0 && hint?.y > 0
+      ? { x: hint.x * analysis.scaleX, y: hint.y * analysis.scaleY }
+      : null,
   });
   if (!room) return null;
 

@@ -204,6 +204,35 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
   // the rectangle whose aspect best matches the label, penalizing choices
   // that skip past walls (closets extend rooms; leaks should not).
   const labelDims = options.labelDims;
+
+  // Aspect alone is invariant to both translation and scale: a rectangle of
+  // exactly the right shape assembled from the wrong pair of walls scores
+  // perfectly. Where the project already has a scale — from the rooms placed
+  // before this one, or an explicit calibration — the label states the room's
+  // size in pixels outright, which is the one piece of evidence that can tell
+  // those apart. Supplied in working-scale px per foot, or null on the first
+  // room, where behaviour is unchanged.
+  // The tolerance is not conservatism for its own sake: printed dimensions are
+  // nominal and are not all measured to the same face, so the labels on one
+  // real plan imply scales spanning ~15% between rooms (ExampleFloorplan6:
+  // 13.97 to 16.36 px/ft). Anything inside that band is the drawing being
+  // normal, and a prior that argues with it moves correct edges. Beyond it,
+  // a room has leaked through a doorway or stopped a bay short.
+  const SCALE_TOLERANCE = 0.22;
+  const ppf = options.pixelsPerFoot;
+  const scaled = ppf?.x > 0 && ppf?.y > 0 && labelDims?.width > 0 && labelDims?.height > 0
+    ? (w, h) => {
+      const off = (actual, expected) =>
+        Math.max(0, Math.abs(Math.log(actual / expected)) - SCALE_TOLERANCE);
+      // The label may state the room the other way round, exactly as the
+      // aspect test already allows for; the swapped reading pays for itself.
+      const direct = off(w, labelDims.width * ppf.x) + off(h, labelDims.height * ppf.y);
+      const swapped = off(w, labelDims.height * ppf.x)
+        + off(h, labelDims.width * ppf.y) + 0.3;
+      return Math.min(direct, swapped) / 2;
+    }
+    : null;
+
   if (labelDims?.width > 0 && labelDims?.height > 0) {
     const target = labelDims.width / labelDims.height;
     const comboCost = (p) => {
@@ -235,6 +264,9 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       if (footprintInfo?.footprintArea && w * h > 0.55 * footprintInfo.footprintArea) {
         penalty += 0.6;
       }
+      // Added to the aspect term rather than replacing it, so a scale that is
+      // itself a little off can break ties without overruling the drawing.
+      if (scaled) penalty += 0.6 * scaled(w, h);
       return err + penalty;
     };
 
@@ -279,6 +311,12 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       // A virtual side may only pull the rect inward: pushing past the
       // wall-confirmed (or footprint-clamped) edge would leave the room, and
       // it must not cut the clicked point out of the rect.
+      // Measured against this room's own wall-confirmed axis, deliberately,
+      // and not against the project scale: the label's stated feet and the
+      // drawing's px/ft disagree by up to 15% room to room, and the confirmed
+      // axis carries this room's own version of that error, so the ratio
+      // cancels it. Substituting the project median here moved a correct
+      // open-plan edge by 21px.
       if (yScore >= xScore && yScore > 0.5 && h0 > 6) {
         const expected = (h0 / labelDims.height) * labelDims.width;
         if (evidence(chosen.left) >= evidence(chosen.right)) {
@@ -356,6 +394,14 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       Math.abs(Math.log(aspect * target)),
     );
     confidence *= err < 0.1 ? 1 : err < 0.25 ? 0.85 : err < 0.5 ? 0.6 : 0.35;
+  }
+  // Agreeing with its own label proves only that the rectangle has the right
+  // shape — a room measured one bay off agrees with itself perfectly. The
+  // rooms already placed are the second opinion on its size, and the scale
+  // this one is about to set for the whole project depends on it.
+  if (scaled) {
+    const sizeErr = scaled(w, h);
+    confidence *= sizeErr <= 0 ? 1 : sizeErr < 0.15 ? 0.8 : sizeErr < 0.35 ? 0.55 : 0.3;
   }
   confidence = Math.max(0.05, Math.min(0.98, confidence));
 
