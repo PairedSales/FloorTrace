@@ -41,5 +41,10 @@ scripts/_*.mjs
 .ocrperf/
 .perfprobe/
 
+# One-off audit/analysis write-ups kept locally. They are snapshots of a
+# particular commit and go stale the moment the code moves — docs/ is for
+# the ones worth maintaining.
+*-Audit.md
+
 # Real-world appraisal order artifacts (never commit)
 cmp-vendors.*
