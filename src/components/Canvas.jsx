@@ -1,9 +1,10 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore from '../store/appStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
+import { useDrawTool } from '../hooks/useDrawTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
 
 // Sub-system Hooks
@@ -61,6 +62,11 @@ const Canvas = React.memo(forwardRef(({
   angleToolState,
   onAngleToolStateChange,
   onAngleToolToggle,
+  drawModeActive,
+  drawBrushSize,
+  drawStrokes,
+  onDrawModeToggle,
+  onFinishDrawMode,
 }, ref) => {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
@@ -116,6 +122,7 @@ const Canvas = React.memo(forwardRef(({
     viewportSyncToken,
     manualEntryMode,
     eraserToolActive,
+    drawModeActive,
     cropToolActive,
     traceInteractionMode,
     draggingRoom: routerRef.current?.draggingRoom ?? false,
@@ -147,6 +154,9 @@ const Canvas = React.memo(forwardRef(({
     }, [onPerimeterUpdate]),
     getCanvasCoords,
   });
+
+  // ── 3b. Draw Tool ──────────────────────────────────────────────────────────
+  const drawTool = useDrawTool({ drawModeActive, getCanvasCoords });
 
   // ── 4. Crop Tool ───────────────────────────────────────────────────────────
   const crop = useCropTool({
@@ -196,6 +206,7 @@ const Canvas = React.memo(forwardRef(({
     lineToolActive,
     drawAreaActive,
     angleToolActive,
+    drawModeActive,
     manualEntryMode,
     traceInteractionMode,
     autoSnapEnabled,
@@ -231,9 +242,12 @@ const Canvas = React.memo(forwardRef(({
     onAddMeasurementLine,
     onMeasurementLineUpdate,
 
-    // Eraser & Crop
+    // Eraser, Crop & Draw
     eraser,
     crop,
+    drawTool,
+    onDrawModeToggle,
+    onFinishDrawMode,
 
     // Callbacks
     onRoomOverlayUpdate,
@@ -407,7 +421,7 @@ const Canvas = React.memo(forwardRef(({
           onMouseUp={router.handleStageMouseUp}
           onDblClick={router.handleStageDoubleClick}
           onDblTap={router.handleStageDoubleClick}
-          style={{ cursor: eraserToolActive ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
+          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
         >
           {camera.isImageReady && (
             <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
@@ -465,6 +479,13 @@ const Canvas = React.memo(forwardRef(({
               manualEntryMode={manualEntryMode}
               scale={camera.scale}
               isPreviewInvalid={perimeter.isPreviewInvalid}
+            />
+
+            <DrawModeLayer
+              drawStrokes={drawStrokes}
+              currentStroke={drawTool.currentStroke}
+              brushSize={drawBrushSize}
+              visible={drawModeActive}
             />
 
             <MeasurementLayer
@@ -526,6 +547,18 @@ const Canvas = React.memo(forwardRef(({
                   strokeWidth={2 / camera.scale}
                   fill="rgba(255, 85, 85, 0.15)"
                   dash={[4 / camera.scale, 4 / camera.scale]}
+                  listening={false}
+                />
+              )}
+
+              {drawModeActive && router.currentMousePos && (
+                <Circle
+                  x={router.currentMousePos.x}
+                  y={router.currentMousePos.y}
+                  radius={drawBrushSize / 2}
+                  stroke="#8BE9FD"
+                  strokeWidth={2 / camera.scale}
+                  fill="rgba(139, 233, 253, 0.18)"
                   listening={false}
                 />
               )}

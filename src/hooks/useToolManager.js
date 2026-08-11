@@ -25,6 +25,7 @@ export function useToolManager() {
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const cropToolActive   = useAppStore((s) => s.cropToolActive);
   const angleToolActive   = useAppStore((s) => s.angleToolActive);
+  const drawModeActive   = useAppStore((s) => s.drawModeActive);
 
   const setLineToolActive         = useAppStore((s) => s.setLineToolActive);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -33,6 +34,7 @@ export function useToolManager() {
   const setEraserToolActive       = useAppStore((s) => s.setEraserToolActive);
   const setCropToolActive         = useAppStore((s) => s.setCropToolActive);
   const setAngleToolActive         = useAppStore((s) => s.setAngleToolActive);
+  const setDrawModeActive         = useAppStore((s) => s.setDrawModeActive);
   const setMeasurementLines       = useAppStore((s) => s.setMeasurementLines);
   const setCustomShapes           = useAppStore((s) => s.setCustomShapes);
 
@@ -51,6 +53,7 @@ export function useToolManager() {
     setEraserToolActive(false);
     setCropToolActive(false);
     setAngleToolActive(false);
+    setDrawModeActive(false);
   }, [
     lineToolActive,
     drawAreaActive,
@@ -61,6 +64,7 @@ export function useToolManager() {
     setCurrentCustomShape,
     setCurrentMeasurementLine,
     setDrawAreaActive,
+    setDrawModeActive,
     setEraserToolActive,
     setLineToolActive,
   ]);
@@ -118,6 +122,18 @@ export function useToolManager() {
     setAngleToolActive(true);
   }, [angleToolActive, deactivateAll, setAngleToolActive]);
 
+  // Draw mode owns the perimeter, so activating it is not symmetric with the
+  // other tools: App clears the outline and the strokes around this call.
+  const handleDrawModeToggle = useCallback(() => {
+    if (drawModeActive) {
+      setDrawModeActive(false);
+      return false;
+    }
+    deactivateAll();
+    setDrawModeActive(true);
+    return true;
+  }, [drawModeActive, deactivateAll, setDrawModeActive]);
+
   // ── clear all measurement lines and custom shapes ─────────────────────────
 
   const handleClearTools = useCallback(() => {
@@ -134,6 +150,7 @@ export function useToolManager() {
     handleEraserToolToggle,
     handleCropToolToggle,
     handleAngleToolToggle,
+    handleDrawModeToggle,
     handleClearTools,
   };
 }

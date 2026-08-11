@@ -16,6 +16,7 @@ import { buildSat } from './raster.js';
 import { polygonBounds, mapPolygonToOriginal, ringSetArea } from './polygon.js';
 import { validateBoundaryResult } from './validate.js';
 import { getCachedAnalysis, getSearchCache } from './cache.js';
+import { rasterizeBrush } from './brush.js';
 
 const toOverlay = (bounds) => ({
   x1: bounds.minX,
@@ -78,10 +79,16 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     keyword: r.keyword,
   }));
   const constraints = scaleConstraints(options.constraints, analysis);
+  // Draw mode: strokes and brush radius arrive in original image px.
+  const brush = options.brush
+    ? rasterizeBrush(options.brush.strokes, options.brush.radius, analysis)
+    : null;
+  const source = brush ? 'drawn' : 'auto';
   const boundary = traceBoundary(analysis, {
     ...options.boundary,
     excludeRegions,
     constraints,
+    brush,
     searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
   });
   if (!boundary) {
@@ -94,7 +101,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       quality: {
         confidence: 0,
         warnings: [{ code: 'no-boundary', severity: 'error', message: 'no wall outline could be traced' }],
-        source: 'auto',
+        source,
       },
       debug: { elapsedMs: Date.now() - t0 },
     };
@@ -130,6 +137,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       // A label inside a deliberately excluded region (a garage, a porch) is
       // outside the outline on purpose, not evidence of a bad trace.
       exemptRegions: options.excludeRegions ?? [],
+      userDrawn: Boolean(brush),
     },
   );
 
@@ -149,7 +157,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       confidence,
       warnings,
       usedFallback: boundary.usedFallback,
-      source: 'auto',
+      source,
       floorCount: floors.length,
       candidate: boundary.debug.candidate,
       areaPx: outer ? ringSetArea(outer.polygon, mapRings(boundary.holes, scaleX, scaleY)) : 0,

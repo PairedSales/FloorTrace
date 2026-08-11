@@ -351,8 +351,21 @@ export const generateCandidates = (net, analysis, options = {}) => {
   // empty ladder to `search` on every reuse.
   const rescue = {
     hasStructural: Boolean(structuralMask),
+    hasCorridor: Boolean(net.ribbon),
     usedStructural: false,
     usedSpan: false,
+    usedCorridor: false,
+    /**
+     * Draw mode only: the user's stroke standing in for wall. This is the one
+     * hypothesis that can close a loop the drawing never closed, so it exists
+     * to guarantee an answer — but it still has to win on score, and every
+     * pixel of it that crosses blank paper costs support.
+     */
+    corridor: () => {
+      if (!net.ribbon || rescue.usedCorridor) return;
+      rescue.usedCorridor = true;
+      climb('all', 'corridor', orMasks(net.ribbon.slice(), net.mask), 0, radii);
+    },
     /** Only the strokes thick enough to be structural. */
     structural: () => {
       if (!structuralMask || rescue.usedStructural) return;

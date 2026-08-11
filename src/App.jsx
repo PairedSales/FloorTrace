@@ -123,6 +123,9 @@ function App() {
   const cropToolActive = useAppStore((s) => s.cropToolActive);
   const angleToolActive = useAppStore((s) => s.angleToolActive);
   const angleToolState = useAppStore((s) => s.angleToolState);
+  const drawModeActive = useAppStore((s) => s.drawModeActive);
+  const drawBrushSize = useAppStore((s) => s.drawBrushSize);
+  const drawStrokes = useAppStore((s) => s.drawStrokes);
 
   // Floor management
   const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
@@ -152,6 +155,9 @@ function App() {
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
+  const setDrawBrushSize = useAppStore((s) => s.setDrawBrushSize);
+  const setDrawStrokes = useAppStore((s) => s.setDrawStrokes);
+  const setDrawModeActive = useAppStore((s) => s.setDrawModeActive);
 
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -189,6 +195,7 @@ function App() {
     handleEraserToolToggle,
     handleCropToolToggle,
     handleAngleToolToggle,
+    handleDrawModeToggle,
     handleClearTools,
   } = useToolManager();
 
@@ -460,16 +467,30 @@ function App() {
     handleDrop,
   } = useDragAndDrop(notify, handleManualMode, checkUnsavedChanges);
 
-  // Switch to manual outline drawing: clear the auto-detected perimeter and
-  // let the user draw the exterior themselves. This is the fallback whenever
-  // the tracer is unsure, so it is offered from the failure toast as well as
-  // from the toolbar.
+  // Vertex-by-vertex outline placement. Draw mode is the default fallback now,
+  // but placing exact corners is still the right tool when the plan is clean
+  // and the user knows precisely where the wall goes.
   const handleDrawExterior = useCallback(() => {
     undoManager.save();
+    setDrawModeActive(false);
     setPerimeterOverlay(null);
     setPerimeterVertices([]); // activate manual vertex placement
     notify('Click to place the exterior outline. Esc/Enter to finish.', { type: 'info' });
-  }, [setPerimeterOverlay, setPerimeterVertices, notify]);
+  }, [setDrawModeActive, setPerimeterOverlay, setPerimeterVertices, notify]);
+
+  // Draw mode: paint roughly over the exterior walls and let the tracer read
+  // the strokes as a corridor. This is the fallback whenever auto-detection
+  // fails, so it is entered from the failure path as well as from the toolbar.
+  const handleDrawMode = useCallback(({ message, keepStrokes = false } = {}) => {
+    undoManager.save();
+    setPerimeterVertices(null);
+    setPerimeterOverlay(null);
+    if (!keepStrokes) setDrawStrokes([]);
+    // Always enters; the toggle would turn it back off when already on.
+    if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
+    notify(message ?? 'Paint over the exterior walls. [ and ] resize the brush, Enter when done.',
+      { type: 'info', duration: 7000 });
+  }, [setPerimeterVertices, setPerimeterOverlay, setDrawStrokes, handleDrawModeToggle, notify]);
 
   // Apply detected boundaries to perimeter traces. Returns the number of
   // floors applied (0 = nothing usable). A single floor updates the active
@@ -481,11 +502,12 @@ function App() {
     const floors = getFloorBoundariesForMode(boundaryResult, interiorMode);
     if (!floors.length) return 0;
 
+    const source = boundaryResult?.quality?.source ?? 'auto';
     const shaped = floors.map((boundary) => ({
       vertices: boundary.polygon.map((point) => ({ x: point.x, y: point.y })),
       holes: boundary.holes.map((hole) => hole.map((point) => ({ x: point.x, y: point.y }))),
       quality: {
-        source: 'auto',
+        source,
         confidence: boundary.confidence,
         warnings: boundary.warnings,
       },
@@ -508,7 +530,13 @@ function App() {
     const quality = qualitySummary(traced?.quality);
     const mode = useInteriorWalls ? 'inner' : 'outer';
     const excludedNote = excludedAreasNote(traced ?? {});
-    const drawAction = { label: 'Draw exterior', onClick: handleDrawExterior };
+    const drawn = traced?.quality?.source === 'drawn';
+    // A drawn trace that went wrong is corrected by painting again, not by
+    // switching to a different tool, so the offer differs from the auto path's.
+    const drawAction = drawn
+      ? { label: 'Redraw', onClick: () => handleDrawMode({ keepStrokes: true,
+        message: 'Add or adjust strokes, then press Enter.' }) }
+      : { label: 'Draw mode', onClick: () => handleDrawMode() };
 
     if (!floorCount) {
       toast.error(quality.reason
@@ -517,9 +545,10 @@ function App() {
       return;
     }
 
+    const noun = drawn ? 'Exterior traced from your outline' : 'Perimeter detected';
     const what = floorCount > 1
-      ? `Detected ${floorCount} floors (${mode} wall mode)`
-      : `Perimeter detected (${mode} wall mode)`;
+      ? `${drawn ? 'Traced' : 'Detected'} ${floorCount} floors (${mode} wall mode)`
+      : `${noun} (${mode} wall mode)`;
 
     if (quality.level === 'good') {
       notify(`${what}.${excludedNote}`, { type: 'success', duration: 2500 });
@@ -532,43 +561,80 @@ function App() {
       duration: 10000,
       action: drawAction,
     });
-  }, [useInteriorWalls, handleDrawExterior, notify]);
+  }, [useInteriorWalls, handleDrawMode, notify]);
 
-  const runTrace = useCallback(async (message) => {
-    if (!image) return;
+  // Returns the quality level of the applied trace, so the caller can decide
+  // whether to fall back. `brush` carries draw mode's strokes (original image
+  // px) and turns the whole stage into a search inside those strokes.
+  const runTrace = useCallback(async (message, brush = null) => {
+    if (!image) return null;
     setIsProcessing(true, message);
     const startImage = image;
     try {
       const traced = await traceFloorplanBoundary(image, {
         excludeRegions: nonGlaExcludeRegions(),
         constraints: boundaryConstraints(),
+        ...(brush ? { brush } : {}),
       });
 
-      if (useAppStore.getState().image !== startImage) return;
+      if (useAppStore.getState().image !== startImage) return null;
+      // Kept for brush results too: a drawn trace has the same inner/outer
+      // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
       const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
       reportTrace(traced, floorCount);
+      return floorCount ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Perimeter detection failed:', error);
         toast.error('Perimeter detection failed.', {
           duration: 8000,
-          action: { label: 'Draw exterior', onClick: handleDrawExterior },
+          action: { label: 'Draw mode', onClick: () => handleDrawMode() },
         });
       }
+      return 'failed';
     } finally {
       if (useAppStore.getState().image === startImage) {
         setIsProcessing(false);
       }
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
-    reportTrace, handleDrawExterior]);
+    reportTrace, handleDrawMode]);
 
+  // Auto-detection, with draw mode as its fallback. A result the detector
+  // itself rates poor or worse is not something to hand over as an answer, so
+  // the brush is put in the user's hand rather than merely offered.
   const handleTracePerimeter = useCallback(async () => {
     if (!image) return;
     undoManager.save();
-    await runTrace('Tracing exterior walls…');
-  }, [image, runTrace]);
+    const level = await runTrace('Tracing exterior walls…');
+    if (level === 'failed' || level === 'poor') {
+      handleDrawMode({
+        message: 'Auto-detection could not read this plan. Paint over the exterior walls instead — [ and ] resize the brush, Enter when done.',
+      });
+    }
+  }, [image, runTrace, handleDrawMode]);
+
+  // Draw mode's commit: hand the painted strokes to the tracer as a corridor.
+  const handleFinishDrawMode = useCallback(async () => {
+    const state = useAppStore.getState();
+    const strokes = state.drawStrokes;
+    if (!strokes.length) {
+      setDrawModeActive(false);
+      notify('Nothing painted — draw mode closed.', { type: 'info' });
+      return;
+    }
+    undoManager.save();
+    setDrawModeActive(false);
+    const level = await runTrace('Reading your outline…', {
+      strokes,
+      radius: state.drawBrushSize / 2,
+    });
+    // The strokes are kept when the result is doubtful: re-entering draw mode
+    // to add one more pass is the natural correction, and discarding them
+    // would make the user paint the whole outline again.
+    if (level === 'good' || level === 'fair') setDrawStrokes([]);
+  }, [runTrace, setDrawModeActive, setDrawStrokes, notify]);
 
   const handleInteriorWallToggle = (value) => {
     undoManager.save();
@@ -908,13 +974,19 @@ function App() {
   }, [setAngleToolState]);
 
   // ── Keyboard shortcuts (wired after stable callbacks are defined) ─────────
+  // Whichever brush [ and ] currently resize. Draw mode wins when both are
+  // somehow on, but the tool manager makes them mutually exclusive anyway.
+  const activeBrush = drawModeActive
+    ? { field: 'drawBrushSize', setSize: setDrawBrushSize, min: 8, max: 400, step: 6 }
+    : eraserToolActive
+      ? { field: 'eraserBrushSize', setSize: setEraserBrushSize, min: 4, max: 200, step: 4 }
+      : null;
+
   useKeyboardShortcuts({
     onPaste: handlePasteImage,
     onFileOpen: handleFileOpen,
     onSaveProject: handleSaveProject,
-    eraserToolActive,
-    eraserBrushSize,
-    setEraserBrushSize,
+    activeBrush,
     onRotateCanvas: handleRotateCanvas,
   });
 
@@ -937,7 +1009,9 @@ function App() {
         onRestart={handleRestart}
         showPanelOptions={showPanelOptions}
         onOptionsToggle={handleOptionsToggle}
-        onDrawExterior={handleDrawExterior}
+        onDrawExterior={() => handleDrawMode()}
+        drawModeActive={drawModeActive}
+        onFinishDrawMode={handleFinishDrawMode}
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
         onHelpOpen={handleHelpOpen}
@@ -997,6 +1071,11 @@ function App() {
             angleToolState={angleToolState}
             onAngleToolStateChange={handleAngleToolStateChange}
             onAngleToolToggle={handleAngleToolToggle}
+            drawModeActive={drawModeActive}
+            drawBrushSize={drawBrushSize}
+            drawStrokes={drawStrokes}
+            onDrawModeToggle={handleDrawModeToggle}
+            onFinishDrawMode={handleFinishDrawMode}
           />
         </div>
 
@@ -1044,6 +1123,8 @@ function App() {
               onCropToolToggle={handleCropToolToggle}
               angleToolActive={angleToolActive}
               onAngleToolToggle={handleAngleToolToggle}
+              onOutlineByVertex={handleDrawExterior}
+              outlineByVertexActive={perimeterVertices !== null}
               onRotateCanvas={handleRotateCanvas}
               measurementLines={measurementLines}
               customShapes={customShapes}

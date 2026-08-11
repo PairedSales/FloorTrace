@@ -17,11 +17,14 @@ import * as undoManager from '../store/undoManager';
  * @param {() => void} config.onPaste        - triggered by Ctrl+V
  * @param {() => void} config.onFileOpen     - triggered by Ctrl+O
  * @param {(isSaveAs: boolean) => void} config.onSaveProject - triggered by Ctrl+S / Ctrl+Shift+S
- * @param {boolean}    config.eraserToolActive
- * @param {number}     config.eraserBrushSize
- * @param {(size: number) => void} config.setEraserBrushSize
+ * @param {{field, setSize, min, max, step}|null} config.activeBrush - whichever
+ *   brush tool is currently on; `[` and `]` resize it. There is more than one
+ *   brush now, so the binding describes "the active brush" rather than naming
+ *   the eraser. `field` is the store key rather than the value: key repeat
+ *   delivers faster than React re-renders, and a captured value makes every
+ *   press in one frame resolve to the same new size.
  */
-export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, eraserToolActive, eraserBrushSize, setEraserBrushSize, onRotateCanvas }) {
+export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, activeBrush, onRotateCanvas }) {
   // ── keydown ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -36,16 +39,14 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, erase
         return;
       }
 
-      // Eraser brush size shortcuts (no modifier keys required)
+      // Brush size shortcuts (no modifier keys required)
       if (!e.ctrlKey && !e.metaKey) {
-        if (e.key === '[' && eraserToolActive) {
+        if ((e.key === '[' || e.key === ']') && activeBrush) {
           e.preventDefault();
-          setEraserBrushSize(Math.max(4, eraserBrushSize - 4));
-          return;
-        }
-        if (e.key === ']' && eraserToolActive) {
-          e.preventDefault();
-          setEraserBrushSize(Math.min(200, eraserBrushSize + 4));
+          const { field, setSize, min = 4, max = 200, step = 4 } = activeBrush;
+          const size = useAppStore.getState()[field];
+          const next = e.key === '[' ? size - step : size + step;
+          setSize(Math.max(min, Math.min(max, next)));
           return;
         }
         if (e.key.toLowerCase() === 'o') {
@@ -105,7 +106,7 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, erase
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onPaste, onFileOpen, onSaveProject, eraserToolActive, eraserBrushSize, setEraserBrushSize, onRotateCanvas]);
+  }, [onPaste, onFileOpen, onSaveProject, activeBrush, onRotateCanvas]);
 
   // ── mousedown: side buttons for undo/redo ─────────────────────────────────
   useEffect(() => {

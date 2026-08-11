@@ -144,6 +144,55 @@ export const bboxOf = (overlay) => [overlay.x1, overlay.y1, overlay.x2, overlay.
 
 export const areaError = (measured, truth) => Math.abs(measured - truth) / truth;
 
+// ── draw mode: the sloppy user ──────────────────────────────────────────────
+
+// Deterministic pseudo-noise, so a jitter tolerance is a fixed test and not a
+// flake waiting for an unlucky seed.
+const wobble = (seed) => {
+  const s = Math.sin(seed * 12.9898) * 43758.5453;
+  return (s - Math.floor(s)) * 2 - 1;
+};
+
+/**
+ * A brush stroke someone would actually draw around `polygon`: walked at
+ * `step` px, pushed `offset` px outward from the centroid, and wobbled by up to
+ * `jitter` px in both axes. Returns the `{points}` stroke shape the pipeline
+ * takes.
+ */
+export const strokeAround = (polygon, { offset = 0, jitter = 0, step = 12, seed = 1 } = {}) => {
+  const pts = polygon.map(toPoint);
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  const points = [];
+  let n = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const count = Math.max(1, Math.round(len / step));
+    for (let k = 0; k < count; k += 1) {
+      const t = k / count;
+      let x = a.x + (b.x - a.x) * t;
+      let y = a.y + (b.y - a.y) * t;
+      if (offset) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        x += (dx / d) * offset;
+        y += (dy / d) * offset;
+      }
+      n += 1;
+      if (jitter) {
+        x += wobble(seed * 7 + n) * jitter;
+        y += wobble(seed * 13 + n * 3) * jitter;
+      }
+      points.push({ x, y });
+    }
+  }
+  points.push(points[0]);
+  return { points };
+};
+
 // ── scenario builders ───────────────────────────────────────────────────────
 
 // A plain rectangular house with an optional opening cut into its bottom wall.
