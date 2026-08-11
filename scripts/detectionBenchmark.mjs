@@ -50,6 +50,7 @@ import {
   traceFloorplanBoundaryCore,
 } from '../src/utils/detection/pipeline.js';
 import { polygonArea, ringSetArea } from '../src/utils/detection/polygon.js';
+import { robustScale } from '../src/utils/detection/validate.js';
 import { loadPng, bboxOf, bboxIou, polygonIou, pct } from './lib/benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -217,17 +218,25 @@ const run = () => {
       }
     }
 
+    // Rooms are placed in order and each one feeds the next, exactly as the
+    // app does it (App.jsx roomScaleHint): scoring every room against a blank
+    // project measured a flow the user never has after the first click.
     const roomResults = [];
+    const scaleSamples = [];
     for (const room of truth?.rooms ?? []) {
+      const robust = scaleSamples.length >= 4 ? robustScale(scaleSamples) : null;
+      const hint = robust && robust.spread <= 2 ? { x: robust.value, y: robust.value } : null;
       const opts = {
         labelBbox: room.labelBbox
           ? { x: room.labelBbox[0], y: room.labelBbox[1], width: room.labelBbox[2], height: room.labelBbox[3] }
           : undefined,
         labelDims: room.dims ? { width: room.dims[0], height: room.dims[1] } : undefined,
+        pixelsPerFoot: hint,
       };
       const t1 = Date.now();
       const result = detectRoomFromClickCore(imageData, { x: room.click[0], y: room.click[1] }, opts);
       const ms = Date.now() - t1;
+      if (result?.pixelsPerFoot) scaleSamples.push(result.pixelsPerFoot.x, result.pixelsPerFoot.y);
       const score = scoreRoom(result, room, ppf);
       out.push(`${score.line}  (${ms}ms)`);
       roomResults.push({ name: room.name, pass: score.pass, scored: score.scored });

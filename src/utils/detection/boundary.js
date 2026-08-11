@@ -154,15 +154,29 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
     .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }));
 };
 
+// Partitioning the page into wall networks and climbing each one's closing
+// ladder is by far the most expensive thing the tracer does, and it depends on
+// nothing but the analysis: constraints only reach scoring, excludeRegions and
+// garage carving only reach buildFloor. Both are therefore memoised per image,
+// so the footprint clamp a room click needs and the perimeter trace that
+// follows it stop paying for the same search twice.
+const memo = (cache, key, compute) => {
+  if (!cache) return compute();
+  if (cache.has(key)) return cache.get(key);
+  const value = compute();
+  cache.set(key, value);
+  return value;
+};
+
 // Everything a network's footprint components need to become floors.
-const detectFloorNet = (net, analysis, options, constraints) => {
+const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   const { width, height, wallThickness } = analysis;
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
   const fitOptions = {
     ...options.fit,
     mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
   };
-  const generated = generateCandidates(net, analysis, options);
+  const generated = memo(cache, `gen|${netKey}`, () => generateCandidates(net, analysis, options));
   if (!generated.candidates.length) return null;
 
   // Constraints are page-wide but a network is one drawing: on a multi-floor
@@ -183,7 +197,7 @@ const detectFloorNet = (net, analysis, options, constraints) => {
     ? localConstraints
     : null;
 
-  const evidence = createEvidence(analysis, net.mask);
+  const evidence = memo(cache, `ev|${netKey}`, () => createEvidence(analysis, net.mask));
   const ctx = {
     analysis,
     evidence,
@@ -322,9 +336,13 @@ export const traceBoundary = (analysis, options = {}) => {
   const constraints = options.constraints ?? null;
   const warnings = [];
 
-  const nets = partitionWallNetworks(
-    options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
-  );
+  // A caller-supplied mask is not part of the cache key, so it opts out of the
+  // memo rather than risk answering for a different drawing.
+  const cache = options.mask ? null : (options.searchCache ?? null);
+  const nets = memo(cache, `nets|${maxFloors}|${options.maxCloseRadius ?? ''}`, () =>
+    partitionWallNetworks(
+      options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
+    ));
   if (!nets.length) return null;
 
   const floors = [];
@@ -332,7 +350,8 @@ export const traceBoundary = (analysis, options = {}) => {
   const alternatives = [];
   let worstConfidence = 1;
 
-  for (const net of nets) {
+  for (let netIndex = 0; netIndex < nets.length; netIndex += 1) {
+    const net = nets[netIndex];
     if (floors.length >= maxFloors) break;
     // A network sitting inside an already-traced outline is interior detail
     // (stair block, island, courtyard ring), not another floor. Tested against
@@ -343,7 +362,7 @@ export const traceBoundary = (analysis, options = {}) => {
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
     if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    const detected = detectFloorNet(net, analysis, options, constraints);
+    const detected = detectFloorNet(net, analysis, options, constraints, cache, netIndex);
     if (!detected) continue;
     searches.push(detected.search);
     alternatives.push(detected.alternatives);

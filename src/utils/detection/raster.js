@@ -148,22 +148,37 @@ export const dilateRows = (mask, width, height, r) => {
   return out;
 };
 
+// Column passes carry one running value per column, so the obvious loop order
+// (whole column, then next column) touches memory with a `width` stride and
+// misses cache on nearly every pixel. Sweeping a tile of adjacent columns
+// together keeps the state in registers-worth of scratch and the reads
+// sequential; the result is identical, it is the traversal that changes.
+const COL_TILE = 64;
+
 export const dilateCols = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
   const INF = height + r + 1;
-  for (let x = 0; x < width; x += 1) {
-    let dist = INF;
+  const dist = new Int32Array(COL_TILE);
+  for (let x0 = 0; x0 < width; x0 += COL_TILE) {
+    const n = Math.min(COL_TILE, width - x0);
+    dist.fill(INF, 0, n);
     for (let y = 0; y < height; y += 1) {
-      const idx = y * width + x;
-      dist = mask[idx] ? 0 : dist + 1;
-      if (dist <= r) out[idx] = 1;
+      const row = y * width + x0;
+      for (let i = 0; i < n; i += 1) {
+        const d = mask[row + i] ? 0 : dist[i] + 1;
+        dist[i] = d;
+        if (d <= r) out[row + i] = 1;
+      }
     }
-    dist = INF;
+    dist.fill(INF, 0, n);
     for (let y = height - 1; y >= 0; y -= 1) {
-      const idx = y * width + x;
-      dist = mask[idx] ? 0 : dist + 1;
-      if (dist <= r) out[idx] = 1;
+      const row = y * width + x0;
+      for (let i = 0; i < n; i += 1) {
+        const d = mask[row + i] ? 0 : dist[i] + 1;
+        dist[i] = d;
+        if (d <= r) out[row + i] = 1;
+      }
     }
   }
   return out;
@@ -195,19 +210,22 @@ const erodeRows = (mask, width, height, r) => {
 const erodeCols = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
-  for (let x = 0; x < width; x += 1) {
-    let y = 0;
-    while (y < height) {
-      if (!mask[y * width + x]) {
-        y += 1;
-        continue;
+  const runStart = new Int32Array(COL_TILE);
+  for (let x0 = 0; x0 < width; x0 += COL_TILE) {
+    const n = Math.min(COL_TILE, width - x0);
+    runStart.fill(-1, 0, n);
+    for (let y = 0; y <= height; y += 1) {
+      const row = y * width + x0;
+      for (let i = 0; i < n; i += 1) {
+        if (y < height && mask[row + i]) {
+          if (runStart[i] < 0) runStart[i] = y;
+          continue;
+        }
+        if (runStart[i] < 0) continue;
+        const to = y - 1 - r;
+        for (let k = runStart[i] + r; k <= to; k += 1) out[k * width + x0 + i] = 1;
+        runStart[i] = -1;
       }
-      let end = y;
-      while (end < height && mask[end * width + x]) end += 1;
-      const from = y + r;
-      const to = end - 1 - r;
-      for (let k = from; k <= to; k += 1) out[k * width + x] = 1;
-      y = end;
     }
   }
   return out;
@@ -336,58 +354,77 @@ export const orMasks = (target, source) => {
   return target;
 };
 
+// Both fills below queue horizontal *spans* rather than pixels. The per-pixel
+// queue they replace re-derived x and y with a modulo and a division for every
+// pop and enqueued each pixel individually; together they were over a third of
+// every boundary trace. Spans visit each pixel once, in row order, and the
+// output is identical — only the traversal changes.
+const growSpanStack = (stack) => {
+  const grown = new Int32Array(stack.length * 2);
+  grown.set(stack);
+  return grown;
+};
+
 export const labelComponents = (mask, width, height) => {
   const labels = new Int32Array(width * height).fill(-1);
-  const queue = new Int32Array(width * height);
   const components = [];
+  let stack = new Int32Array(3072);
+  let sp = 0;
+  let id = 0;
+  let size = 0;
+  let minX = 0;
+  let minY = 0;
+  let maxX = 0;
+  let maxY = 0;
+
+  // Label every unvisited run of the component inside [xFrom, xTo] on row y,
+  // extending each run to its full width before recording it.
+  const scanRow = (y, xFrom, xTo) => {
+    const row = y * width;
+    let x = xFrom;
+    while (x <= xTo) {
+      if (!mask[row + x] || labels[row + x] !== -1) {
+        x += 1;
+        continue;
+      }
+      let a = x;
+      while (a > 0 && mask[row + a - 1] && labels[row + a - 1] === -1) a -= 1;
+      let b = x;
+      while (b + 1 < width && mask[row + b + 1] && labels[row + b + 1] === -1) b += 1;
+      for (let k = a; k <= b; k += 1) labels[row + k] = id;
+      size += b - a + 1;
+      if (a < minX) minX = a;
+      if (b > maxX) maxX = b;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (sp + 3 > stack.length) stack = growSpanStack(stack);
+      stack[sp] = y;
+      stack[sp + 1] = a;
+      stack[sp + 2] = b;
+      sp += 3;
+      x = b + 1;
+    }
+  };
 
   for (let start = 0; start < mask.length; start += 1) {
     if (!mask[start] || labels[start] !== -1) continue;
-    const id = components.length;
-    let head = 0;
-    let tail = 0;
-    queue[tail] = start;
-    tail += 1;
-    labels[start] = id;
-    let size = 0;
-    let minX = width;
-    let minY = height;
-    let maxX = 0;
-    let maxY = 0;
-
-    while (head < tail) {
-      const idx = queue[head];
-      head += 1;
-      const x = idx % width;
-      const y = (idx / width) | 0;
-      size += 1;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-
-      if (x + 1 < width && mask[idx + 1] && labels[idx + 1] === -1) {
-        labels[idx + 1] = id;
-        queue[tail] = idx + 1;
-        tail += 1;
-      }
-      if (x > 0 && mask[idx - 1] && labels[idx - 1] === -1) {
-        labels[idx - 1] = id;
-        queue[tail] = idx - 1;
-        tail += 1;
-      }
-      if (y + 1 < height && mask[idx + width] && labels[idx + width] === -1) {
-        labels[idx + width] = id;
-        queue[tail] = idx + width;
-        tail += 1;
-      }
-      if (y > 0 && mask[idx - width] && labels[idx - width] === -1) {
-        labels[idx - width] = id;
-        queue[tail] = idx - width;
-        tail += 1;
-      }
+    id = components.length;
+    size = 0;
+    minX = width;
+    minY = height;
+    maxX = 0;
+    maxY = 0;
+    sp = 0;
+    const sx = start % width;
+    scanRow((start / width) | 0, sx, sx);
+    while (sp > 0) {
+      sp -= 3;
+      const y = stack[sp];
+      const x1 = stack[sp + 1];
+      const x2 = stack[sp + 2];
+      if (y > 0) scanRow(y - 1, x1, x2);
+      if (y + 1 < height) scanRow(y + 1, x1, x2);
     }
-
     components.push({ id, size, bbox: { minX, minY, maxX, maxY } });
   }
 
@@ -397,33 +434,44 @@ export const labelComponents = (mask, width, height) => {
 // Flood the background reachable from the image border (4-connected).
 export const floodOutside = (mask, width, height) => {
   const outside = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let tail = 0;
-  const seed = (idx) => {
-    if (!mask[idx] && !outside[idx]) {
-      outside[idx] = 1;
-      queue[tail] = idx;
-      tail += 1;
+  let stack = new Int32Array(3072);
+  let sp = 0;
+
+  const scanRow = (y, xFrom, xTo) => {
+    const row = y * width;
+    let x = xFrom;
+    while (x <= xTo) {
+      if (mask[row + x] || outside[row + x]) {
+        x += 1;
+        continue;
+      }
+      let a = x;
+      while (a > 0 && !mask[row + a - 1] && !outside[row + a - 1]) a -= 1;
+      let b = x;
+      while (b + 1 < width && !mask[row + b + 1] && !outside[row + b + 1]) b += 1;
+      for (let k = a; k <= b; k += 1) outside[row + k] = 1;
+      if (sp + 3 > stack.length) stack = growSpanStack(stack);
+      stack[sp] = y;
+      stack[sp + 1] = a;
+      stack[sp + 2] = b;
+      sp += 3;
+      x = b + 1;
     }
   };
-  for (let x = 0; x < width; x += 1) {
-    seed(x);
-    seed((height - 1) * width + x);
-  }
+
+  scanRow(0, 0, width - 1);
+  if (height > 1) scanRow(height - 1, 0, width - 1);
   for (let y = 0; y < height; y += 1) {
-    seed(y * width);
-    seed(y * width + width - 1);
+    scanRow(y, 0, 0);
+    if (width > 1) scanRow(y, width - 1, width - 1);
   }
-  let head = 0;
-  while (head < tail) {
-    const idx = queue[head];
-    head += 1;
-    const x = idx % width;
-    const y = (idx / width) | 0;
-    if (x + 1 < width) seed(idx + 1);
-    if (x > 0) seed(idx - 1);
-    if (y + 1 < height) seed(idx + width);
-    if (y > 0) seed(idx - width);
+  while (sp > 0) {
+    sp -= 3;
+    const y = stack[sp];
+    const x1 = stack[sp + 1];
+    const x2 = stack[sp + 2];
+    if (y > 0) scanRow(y - 1, x1, x2);
+    if (y + 1 < height) scanRow(y + 1, x1, x2);
   }
   return outside;
 };
