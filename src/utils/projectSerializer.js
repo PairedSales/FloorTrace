@@ -25,6 +25,18 @@ const vertexSchema = z.object({
   y: z.number(),
 });
 
+// How much the saved scale can be trusted. Declared, not left to zod's
+// key-stripping: a reopened project would otherwise keep the doubtful scale
+// and lose the reason it was doubtful, which is the one direction this file
+// must never fail in.
+const scaleQualitySchema = z.object({
+  level: z.string(),
+  reason: z.string().nullable().optional(),
+  disagreement: z.number().optional(),
+  adopted: z.boolean().optional(),
+  roomCount: z.number().optional(),
+}).nullable().optional();
+
 const calibrationSchema = z.object({
   calibrated: z.boolean(),
   feetPerPixel: z.union([
@@ -34,6 +46,7 @@ const calibrationSchema = z.object({
   source: z.string().nullable().optional(),
   calibratedRoomId: z.string().nullable().optional(),
   createdAt: z.number().nullable().optional(),
+  quality: scaleQualitySchema,
 }).optional();
 
 const roomDimensionsSchema = z.object({

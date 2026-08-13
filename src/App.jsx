@@ -19,9 +19,9 @@ import {
   warmupOcrEngines,
   releaseOcrWorkersWhenIdle
 } from './utils/DimensionsOCR';
-import { scaleIsotropy, robustScale } from './utils/detection/validate';
-import { qualitySummary } from './utils/boundaryQuality';
-import useAppStore, { selectCombinedArea, selectPerimeterOverlay } from './store/appStore';
+import { robustScale, orientDimsToBox, decideProjectScale } from './utils/detection/validate';
+import { qualitySummary, scaleQualitySummary } from './utils/boundaryQuality';
+import useAppStore, { selectCombinedArea, selectPerimeterOverlay, otherRoomScaleSamples } from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
@@ -167,6 +167,8 @@ function App() {
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
+  const dimensionWarnTimerRef = useRef(null); // Holds the scale warning until typing settles
+  const dimensionBlurTimerRef = useRef(null); // Survives focus moving between sub-fields
 
   // Central toast helper. Prefer an explicit type so severity isn't guessed
   // from wording: notify('Saved', { type: 'success' }).
@@ -215,6 +217,8 @@ function App() {
     return () => {
       terminateDetectionWorker();
       terminateOcrWorker();
+      clearTimeout(dimensionWarnTimerRef.current);
+      clearTimeout(dimensionBlurTimerRef.current);
     };
   }, []);
 
@@ -717,46 +721,49 @@ function App() {
     if (overlayWidth === 0 || overlayHeight === 0) return;
     if (isNaN(dimWidth) || isNaN(dimHeight) || dimWidth <= 0 || dimHeight <= 0) return;
 
-    // Scale X is based on horizontal width:
-    let scaleX = dimWidth / overlayWidth;
-    // Scale Y is based on vertical height:
-    let scaleY = dimHeight / overlayHeight;
+    // The label's two numbers are not tagged with an axis and the overlay's
+    // are, so the pairing \u2014 and any residual disagreement, either inside this
+    // room or against the rooms already measured \u2014 is settled here, by the
+    // same rule the canvas previews during a drag.
+    const decision = decideProjectScale({
+      dimWidth, dimHeight, boxWidth: overlayWidth, boxHeight: overlayHeight,
+      otherSamples: otherRoomScaleSamples(useAppStore.getState().rooms, overlay),
+    });
+    const { x: scaleX, y: scaleY } = decision.scale;
 
-    if (!scaleIsotropy(scaleX, scaleY).ok && options.announce !== false) {
-      // Pool every room measured so far. One bad rectangle cannot move the
-      // median, so the project keeps a usable scale instead of adopting the
-      // outlier.
-      const samples = useAppStore.getState().rooms
-        .flatMap((r) => (r.feetPerPixel ? [r.feetPerPixel.x, r.feetPerPixel.y] : []));
-      const robust = samples.length >= 4 ? robustScale(samples) : null;
-      if (robust) {
-        scaleX = robust.value;
-        scaleY = robust.value;
-        notify(
-          'This room\u2019s width and height disagree about the scale; using the '
-          + 'median of the rooms measured so far.',
-          { type: 'warning', duration: 6000 },
-        );
-      } else {
-        notify(
-          'This room\u2019s width and height disagree about the scale \u2014 check '
-          + 'the room outline and its label.',
-          { type: 'warning', duration: 6000 },
-        );
-      }
+    // Say it out loud only when the answer changed or is in doubt; the Area
+    // panel carries the same verdict for as long as the scale is in force,
+    // because that is where the question is actually asked.
+    const summary = scaleQualitySummary(decision);
+    if (summary && summary.level === 'check' && options.announce !== false) {
+      notify(summary.detail, {
+        type: 'warning',
+        duration: 8000,
+        // One id: the blur check and the typing backstop can both land on the
+        // same mismatch, and it is one problem, not two.
+        id: 'room-scale-disagreement',
+      });
     }
 
-    // Only apply if the scale has actually changed
+    // Only apply if the scale or its verdict has actually changed
     const currentCalibration = useAppStore.getState().calibration;
     const currentScale = currentCalibration.feetPerPixel;
 
     const hasChanged = !currentCalibration.calibrated ||
       typeof currentScale !== 'object' ||
       Math.abs((currentScale?.x ?? 0) - scaleX) > 1e-9 ||
-      Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9;
+      Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9 ||
+      (currentCalibration.quality?.level ?? 'ok') !== decision.level ||
+      (currentCalibration.quality?.reason ?? null) !== decision.reason;
 
     if (hasChanged) {
-      applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration');
+      applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration', {
+        level: decision.level,
+        reason: decision.reason,
+        disagreement: decision.disagreement,
+        adopted: decision.adopted,
+        roomCount: decision.roomCount,
+      });
     }
   }, [applyRoomCalibration, notify]);
 
@@ -873,7 +880,13 @@ function App() {
       }
     }
 
-    const dimStrings = { width: String(dims.width), height: String(dims.height) };
+    // Store the label the way the room is drawn, so the panel, the overlay and
+    // the scale all describe the same rectangle.
+    const placed = orientDimsToBox(
+      dims.width, dims.height,
+      Math.abs(overlay.x2 - overlay.x1), Math.abs(overlay.y2 - overlay.y1),
+    );
+    const dimStrings = { width: String(placed.width), height: String(placed.height) };
     setRoomDimensions(dimStrings);
     setRoomOverlay(overlay);
     updateScale(dimStrings, overlay);
@@ -930,11 +943,25 @@ function App() {
     const s = useAppStore.getState();
     s.setShowHelpModal(!s.showHelpModal);
   }, []);
+  // Typing a dimension fires this per keystroke, and half of a typed pair
+  // disagrees with the room by construction: 16.7 entered as the width of a
+  // room whose height still reads 16.7 is not a mismatch worth reporting. The
+  // scale still follows every keystroke; only the warning waits until the
+  // numbers stop moving, and then judges what the user actually left behind.
   const handleDimensionsChange = useCallback((dims) => {
     setRoomDimensions(dims);
-    if (useAppStore.getState().roomOverlay) {
-      updateScale(dims, useAppStore.getState().roomOverlay);
-    }
+    if (!useAppStore.getState().roomOverlay) return;
+    updateScale(dims, useAppStore.getState().roomOverlay, { announce: false });
+    clearTimeout(dimensionWarnTimerRef.current);
+    dimensionWarnTimerRef.current = setTimeout(() => {
+      // Backstop for an edit that never blurs (Enter, or the panel closing).
+      // While a field still has focus the pair is mid-edit by definition.
+      if (dimensionEditActiveRef.current) return;
+      const s = useAppStore.getState();
+      if (s.roomOverlay && s.roomDimensions.width && s.roomDimensions.height) {
+        updateScale(s.roomDimensions, s.roomOverlay);
+      }
+    }, 1200);
   }, [setRoomDimensions, updateScale]);
   const handleUnitChange = useCallback((u) => {
     undoManager.save();
@@ -962,15 +989,28 @@ function App() {
     notify(value ? 'Autosave on exit enabled' : 'Autosave on exit disabled');
   }, [handleSaveOnExitChange, notify]);
 
+  // Focus moving between the feet and inches sub-fields is one edit, not two:
+  // cancelling the pending clear is what makes "still editing" true for the
+  // whole visit, rather than false from the first tab onward.
   const handleDimensionFocus = useCallback(() => {
+    clearTimeout(dimensionBlurTimerRef.current);
     if (!dimensionEditActiveRef.current) {
       dimensionEditActiveRef.current = true;
       undoManager.save();
     }
   }, []);
   const handleDimensionBlur = useCallback(() => {
-    setTimeout(() => { dimensionEditActiveRef.current = false; }, 0);
-  }, []);
+    clearTimeout(dimensionBlurTimerRef.current);
+    dimensionBlurTimerRef.current = setTimeout(() => {
+      dimensionEditActiveRef.current = false;
+      // The user has left the fields: now the pair on screen is what they
+      // meant, and is worth judging out loud.
+      const s = useAppStore.getState();
+      if (s.roomOverlay && s.roomDimensions.width && s.roomDimensions.height) {
+        updateScale(s.roomDimensions, s.roomOverlay);
+      }
+    }, 0);
+  }, [updateScale]);
   const handleHelpClose = useCallback(() => setShowHelpModal(false), [setShowHelpModal]);
   const handleSaveUndoPoint = useCallback(() => undoManager.save(), []);
   const handleCancelUndoSave = useCallback(() => undoManager.cancelLastSave(), []);

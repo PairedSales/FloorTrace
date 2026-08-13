@@ -150,11 +150,39 @@ export const validateBoundaryResult = (result, context = {}) => {
   return { warnings, factor: Math.max(0, Math.min(1, factor)) };
 };
 
+// How far apart one room's two scales may be before the room, not the drawing,
+// is what is wrong.
+export const ISOTROPY_TOLERANCE = 0.05;
+
+// Which way round a label's two numbers go. A label states a room's two sides
+// but not which one runs across the page: vertical labels are rotated, and
+// "12 x 14" is written the way it reads, not the way it is drawn. Binding the
+// first number to x regardless is what makes one room imply two different
+// scales. The rectangle already knows the answer — its longer side is the
+// room's longer measurement — so pair them that way. Equivalent to picking the
+// pairing with the smaller x/y scale disagreement, which is why it never makes
+// the calibration less isotropic than the direct reading.
+export const orientDimsToBox = (dimWidth, dimHeight, boxWidth, boxHeight) => {
+  const asWritten = { width: dimWidth, height: dimHeight, swapped: false };
+  if (!(dimWidth > 0) || !(dimHeight > 0) || !(boxWidth > 0) || !(boxHeight > 0)) return asWritten;
+  const label = Math.log(dimWidth / dimHeight);
+  const box = Math.log(boxWidth / boxHeight);
+  // How far apart the two scales end up under each reading. Preferring the
+  // smaller is the same rule as "longest side to longest measurement", but it
+  // is only applied once the direct reading is off by more than a calibration
+  // is allowed to be: on a near-square room both readings pass, and the sign
+  // of a sub-pixel difference must not decide which axis carries which scale.
+  const direct = Math.abs(label - box);
+  const swapped = Math.abs(label + box);
+  if (direct <= ISOTROPY_TOLERANCE || swapped >= direct) return asWritten;
+  return { width: dimHeight, height: dimWidth, swapped: true };
+};
+
 // Isotropy of a room calibration: two scalars derived from one room must
 // agree, or the room rectangle does not match the label it was measured from.
 // This is the cheapest correctness check available to the app and needs no new
 // state — sx and sy are both already in hand wherever a scale is set.
-export const scaleIsotropy = (scaleX, scaleY, tolerance = 0.05) => {
+export const scaleIsotropy = (scaleX, scaleY, tolerance = ISOTROPY_TOLERANCE) => {
   if (!(scaleX > 0) || !(scaleY > 0)) return { ok: false, ratio: NaN, logDistance: Infinity };
   const ratio = scaleX / scaleY;
   const logDistance = Math.abs(Math.log(ratio));
@@ -172,4 +200,96 @@ export const robustScale = (estimates) => {
   const kept = values.filter((v) => Math.abs(Math.log(v / median)) <= 0.25);
   const refined = kept.length ? kept[(kept.length / 2) | 0] : median;
   return { value: refined, median, spread, samples: values.length, kept: kept.length };
+};
+
+// The feet per pixel one room implies: the label oriented to the rectangle,
+// and, where the two axes still disagree, one scalar instead of two — a plan
+// is drawn at one scale, so a disagreement is measurement error and not
+// anisotropic pixels. `samples` are the feet per pixel of the rooms measured
+// so far; their median survives one bad rectangle, which this room's own pair
+// cannot. Falls back to the geometric mean, the isotropic scale that preserves
+// the area the room's label states.
+// One function because two callers must never answer differently: the numbers
+// the canvas shows while a room corner is being dragged are the calibration
+// that same drag commits on release.
+export const resolveRoomScale = (dimWidth, dimHeight, boxWidth, boxHeight, samples = []) => {
+  const dim = orientDimsToBox(dimWidth, dimHeight, boxWidth, boxHeight);
+  const x = dim.width / boxWidth;
+  const y = dim.height / boxHeight;
+  const isotropy = scaleIsotropy(x, y);
+  if (isotropy.ok) return { x, y, isotropy, resolved: false };
+  const robust = samples.length >= 4 ? robustScale(samples) : null;
+  const value = robust && robust.spread <= 2 ? robust.value : Math.sqrt(x * y);
+  return { x: value, y: value, isotropy, resolved: true };
+};
+
+// How far apart two rooms on one real plan may legitimately land. Printed
+// dimensions are nominal and are not all measured to the same face, so one
+// drawing's labels imply scales spanning ~15% room to room (ExampleFloorplan6:
+// 13.97 to 16.36 px/ft). Beyond this a room has not been measured differently,
+// it has been measured wrong. Same reasoning and value as room.js's own
+// SCALE_TOLERANCE, kept separate so neither is tuned by accident.
+export const PLAN_SPREAD_TOLERANCE = 0.22;
+
+// The scale the whole project should use once this room has been measured, and
+// how much to trust it. Two independent things can be wrong, and the app can
+// only resolve one of them on its own:
+//
+//   - the room against itself: its label and its rectangle imply different
+//     scales. Resolvable (one scalar), but the disagreement is evidence that
+//     one of the two is wrong, and the area moves with it.
+//   - the room against the rooms already measured: nothing inside one room can
+//     detect this, and it is the case where both of a room's numbers are wrong
+//     together — a label read from the neighbouring room, an outline a whole
+//     bay out. Two rooms outvote one, so an outlier no longer rescales the
+//     project; it is reported instead.
+export const decideProjectScale = ({
+  dimWidth, dimHeight, boxWidth, boxHeight, otherSamples = [],
+}) => {
+  const room = resolveRoomScale(dimWidth, dimHeight, boxWidth, boxHeight, otherSamples);
+  const roomScale = room.x;
+  const others = otherSamples.length >= 2 ? robustScale(otherSamples) : null;
+  const authoritative = !!others && otherSamples.length >= 4 && others.spread <= 2;
+  const gap = others ? Math.abs(Math.log(roomScale / others.value)) : 0;
+
+  if (others && gap > PLAN_SPREAD_TOLERANCE) {
+    return authoritative
+      ? {
+        scale: { x: others.value, y: others.value },
+        adopted: false,
+        level: 'check',
+        reason: 'room-vs-project',
+        disagreement: gap,
+        roomScale,
+        projectScale: others.value,
+        roomCount: Math.floor(otherSamples.length / 2),
+      }
+      : {
+        // A single earlier room is a second opinion, not a majority: take the
+        // new measurement, but say that the two do not agree.
+        scale: { x: roomScale, y: room.y },
+        adopted: true,
+        level: 'check',
+        reason: 'room-vs-project',
+        disagreement: gap,
+        roomScale,
+        projectScale: others.value,
+        roomCount: Math.floor(otherSamples.length / 2),
+      };
+  }
+
+  // Graded, because the size of the disagreement is the size of the doubt: a
+  // few percent is a printed dimension being nominal and is worth stating but
+  // not worrying about; a third is a rectangle or a label that is simply wrong.
+  const d = room.isotropy.logDistance;
+  return {
+    scale: { x: room.x, y: room.y },
+    adopted: true,
+    level: room.isotropy.ok ? 'ok' : d > 0.25 ? 'check' : 'note',
+    reason: room.isotropy.ok ? null : 'room-internal',
+    disagreement: room.isotropy.ok ? 0 : d,
+    roomScale,
+    projectScale: others ? others.value : null,
+    roomCount: Math.floor(otherSamples.length / 2),
+  };
 };

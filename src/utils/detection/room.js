@@ -8,9 +8,13 @@
 // candidates whose rectangle best matches the label's aspect ratio.
 
 import { satSum } from './raster.js';
+import { orientDimsToBox } from './validate.js';
 
 const COV_STRONG = 0.6;
 const COV_THIN = 0.8;
+// An essentially unbroken wall across the whole span: a side this well drawn
+// is a real side, and no label reading may invent one inside it.
+const COV_SOLID = 0.9;
 const THICK_MIN = 0.22;
 
 const SIDES = [
@@ -302,12 +306,53 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
     const w0 = chosen.right.edge - chosen.left.edge;
     const h0 = chosen.bottom.edge - chosen.top.edge;
     const err0 = w0 > 0 && h0 > 0 ? Math.abs(Math.log((w0 / h0) / target)) : Infinity;
-    if (err0 > 0.35) {
+    // A label written the other way round is not an open plan. If the
+    // transposed reading explains this rectangle almost exactly there is
+    // nothing to rescue, and rescuing anyway invented a side across a room
+    // that was fully drawn — the guard below cannot catch it, because any wall
+    // with a door in it reads well short of solid.
+    // Only near-exact, deliberately: a rectangle that is merely closer one way
+    // round than the other is how a room that stopped a bay short looks, and
+    // that one does need the rescue.
+    const errSwapped = w0 > 0 && h0 > 0 ? Math.abs(Math.log((w0 / h0) * target)) : Infinity;
+    if (err0 > 0.35 && errSwapped > 0.1) {
       const evidence = (c) => (c.kind === 'thick' || c.kind === 'beyond'
         ? c.cov + c.thick
         : c.kind === 'thin' ? c.cov * 0.5 : 0);
       const xScore = Math.min(evidence(chosen.left), evidence(chosen.right));
       const yScore = Math.min(evidence(chosen.top), evidence(chosen.bottom));
+      // Best wall coverage within a band of an invented edge: is anything
+      // actually drawn where the label says the room ends?
+      const inkAt = (axis, edge) => {
+        let best = 0;
+        for (let d = -band; d <= band; d += 1) {
+          const pos = edge + d;
+          if (pos < 0 || pos > limitFor({ axis })) continue;
+          best = Math.max(best, lineCoverage({ axis }, pos).cov);
+        }
+        return best;
+      };
+      // A label states two lengths but not which one runs across the page, so
+      // both readings are candidates and the ink at the edge each one implies
+      // decides between them. Ties keep the label as written.
+      const bestEdge = (axis, lengths, place) => {
+        let best = null;
+        for (const len of lengths) {
+          const edge = place(Math.round(len));
+          if (edge === null) continue;
+          const cov = inkAt(axis, edge);
+          if (!best || cov > best.cov + 1e-9) best = { edge, cov };
+        }
+        return best;
+      };
+      // The rescue invents a side, so the drawing has to justify it: either
+      // there is wall ink where it lands, or the side it replaces was never a
+      // solid wall. Without this, a rectangle closed on all four sides was cut
+      // down to the aspect of a label that merely read the other way round —
+      // silently, since the room then agreed with its own label perfectly.
+      const justified = (current, best) => best
+        && (best.cov >= 0.3
+          || !((current.kind === 'thick' || current.kind === 'beyond') && current.cov >= COV_SOLID));
       // A virtual side may only pull the rect inward: pushing past the
       // wall-confirmed (or footprint-clamped) edge would leave the room, and
       // it must not cut the clicked point out of the rect.
@@ -318,29 +363,47 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       // cancels it. Substituting the project median here moved a correct
       // open-plan edge by 21px.
       if (yScore >= xScore && yScore > 0.5 && h0 > 6) {
-        const expected = (h0 / labelDims.height) * labelDims.width;
+        const lengths = [
+          (h0 / labelDims.height) * labelDims.width,
+          (h0 / labelDims.width) * labelDims.height,
+        ];
         if (evidence(chosen.left) >= evidence(chosen.right)) {
-          const edge = Math.round(chosen.left.edge + expected);
-          if (edge < chosen.right.edge && edge >= px - 2) {
-            chosen.right = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          const best = bestEdge('x', lengths, (len) => {
+            const edge = chosen.left.edge + len;
+            return edge < chosen.right.edge && edge >= px - 2 ? edge : null;
+          });
+          if (justified(chosen.right, best)) {
+            chosen.right = { edge: best.edge, cov: 0, thick: 0, kind: 'virtual' };
           }
         } else {
-          const edge = Math.round(chosen.right.edge - expected);
-          if (edge > chosen.left.edge && edge <= px + 2) {
-            chosen.left = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          const best = bestEdge('x', lengths, (len) => {
+            const edge = chosen.right.edge - len;
+            return edge > chosen.left.edge && edge <= px + 2 ? edge : null;
+          });
+          if (justified(chosen.left, best)) {
+            chosen.left = { edge: best.edge, cov: 0, thick: 0, kind: 'virtual' };
           }
         }
       } else if (xScore > 0.5 && w0 > 6) {
-        const expected = (w0 / labelDims.width) * labelDims.height;
+        const lengths = [
+          (w0 / labelDims.width) * labelDims.height,
+          (w0 / labelDims.height) * labelDims.width,
+        ];
         if (evidence(chosen.top) >= evidence(chosen.bottom)) {
-          const edge = Math.round(chosen.top.edge + expected);
-          if (edge < chosen.bottom.edge && edge >= py - 2) {
-            chosen.bottom = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          const best = bestEdge('y', lengths, (len) => {
+            const edge = chosen.top.edge + len;
+            return edge < chosen.bottom.edge && edge >= py - 2 ? edge : null;
+          });
+          if (justified(chosen.bottom, best)) {
+            chosen.bottom = { edge: best.edge, cov: 0, thick: 0, kind: 'virtual' };
           }
         } else {
-          const edge = Math.round(chosen.bottom.edge - expected);
-          if (edge > chosen.top.edge && edge <= py + 2) {
-            chosen.top = { edge, cov: 0, thick: 0, kind: 'virtual' };
+          const best = bestEdge('y', lengths, (len) => {
+            const edge = chosen.bottom.edge - len;
+            return edge > chosen.top.edge && edge <= py + 2 ? edge : null;
+          });
+          if (justified(chosen.top, best)) {
+            chosen.top = { edge: best.edge, cov: 0, thick: 0, kind: 'virtual' };
           }
         }
       }
@@ -430,8 +493,14 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
 
   // The scale this one room implies. A per-room px/ft is what makes a robust
   // multi-room calibration (and any cross-check between rooms) possible.
-  const pixelsPerFoot = labelDims?.width > 0 && labelDims?.height > 0
-    ? { x: w / labelDims.width, y: h / labelDims.height }
+  // Oriented to the rectangle: every scoring term above already accepts the
+  // label the other way round, so dividing by the unswapped pair here is what
+  // turned a transposed label into a room that implies two different scales.
+  const oriented = labelDims?.width > 0 && labelDims?.height > 0
+    ? orientDimsToBox(labelDims.width, labelDims.height, w, h)
+    : null;
+  const pixelsPerFoot = oriented
+    ? { x: w / oriented.width, y: h / oriented.height }
     : null;
 
   return {
