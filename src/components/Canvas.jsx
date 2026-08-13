@@ -1,11 +1,12 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
-import useAppStore from '../store/appStore';
+import useAppStore, { roomScaleSamples } from '../store/appStore';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { useDrawTool } from '../hooks/useDrawTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
+import { resolveRoomScale } from '../utils/detection/validate';
 
 // Sub-system Hooks
 import { useCameraController } from './canvas/hooks/useCameraController';
@@ -85,6 +86,7 @@ const Canvas = React.memo(forwardRef(({
   const stageY = useAppStore((s) => s.stageY);
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
+  const rooms = useAppStore((s) => s.rooms);
   const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
@@ -356,17 +358,20 @@ const Canvas = React.memo(forwardRef(({
       const overlayWidth = Math.abs(router.localRoomOverlay.x2 - router.localRoomOverlay.x1);
       const overlayHeight = Math.abs(router.localRoomOverlay.y2 - router.localRoomOverlay.y1);
       if (overlayWidth > 0 && overlayHeight > 0 && !isNaN(dimWidth) && !isNaN(dimHeight)) {
-        return {
-          x: dimWidth / overlayWidth,
-          y: dimHeight / overlayHeight
-        };
+        // The whole committed rule, not just the pairing half: these are the
+        // numbers the drag applies on release, so a wall must not read one
+        // length under the mouse and another the moment it is let go.
+        const { x, y } = resolveRoomScale(
+          dimWidth, dimHeight, overlayWidth, overlayHeight, roomScaleSamples(rooms),
+        );
+        return { x, y };
       }
     }
     if (typeof feetPerPixel === 'number') {
       return { x: feetPerPixel, y: feetPerPixel };
     }
     return feetPerPixel;
-  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel]);
+  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
 
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;

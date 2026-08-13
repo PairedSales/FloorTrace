@@ -35,6 +35,7 @@ const workingStateDefaults = () => ({
     source: null,
     calibratedRoomId: null,
     createdAt: null,
+    quality: null,
   },
   mode: 'normal',
   isProcessing: false,
@@ -245,7 +246,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
-  applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration') => {
+  applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration', quality = null) => {
     if (mutationSource !== 'room-calibration') {
       throw new Error(
         "Only explicit room calibration may modify calibration scale"
@@ -274,6 +275,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         source: 'room-calibration',
         calibratedRoomId: roomId,
         createdAt: Date.now(),
+        // How much this scale can be trusted, kept with the scale itself: the
+        // area is rendered from it long after the toast that announced it has
+        // gone, and "is this number right" must stay answerable.
+        quality,
       },
       isDirty: true,
     });
@@ -429,6 +434,30 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     set(patch);
   },
 })));
+
+// Feet per pixel of every room measured so far: the sample set a robust
+// multi-room scale is taken from. Takes `rooms` rather than the store so a
+// component can derive it from its own subscription without a new array
+// identity on every unrelated store change.
+export const roomScaleSamples = (rooms = []) =>
+  rooms.flatMap((r) => (r.feetPerPixel ? [r.feetPerPixel.x, r.feetPerPixel.y] : []));
+
+// The same, minus the room currently under the overlay. A room being measured
+// cannot be its own second opinion: it is already in `rooms` by the time the
+// scale is set, and comparing it with itself would agree every time.
+export const otherRoomScaleSamples = (rooms = [], overlay = null) => {
+  if (!overlay) return roomScaleSamples(rooms);
+  const left = Math.min(overlay.x1, overlay.x2);
+  const right = Math.max(overlay.x1, overlay.x2);
+  const top = Math.min(overlay.y1, overlay.y2);
+  const bottom = Math.max(overlay.y1, overlay.y2);
+  return roomScaleSamples(rooms.filter((r) => {
+    if (!r.rect) return true;
+    const cx = (r.rect.left + r.rect.right) / 2;
+    const cy = (r.rect.top + r.rect.bottom) / 2;
+    return !(cx >= left && cx <= right && cy >= top && cy <= bottom);
+  }));
+};
 
 // ── Memoized selectors ────────────────────────────────────────────────────────
 

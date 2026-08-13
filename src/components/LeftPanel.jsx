@@ -3,7 +3,7 @@ import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea } from '../utils/areaCalculator';
-import { qualitySummary } from '../utils/boundaryQuality';
+import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
 import InchesInput from './InchesInput';
 import { toast } from 'sonner';
 
@@ -30,6 +30,7 @@ const LeftPanel = ({
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
+  const scaleQuality = useAppStore((s) => s.calibration?.quality);
 
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -103,6 +104,9 @@ const LeftPanel = ({
   };
 
   const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
+  // Whether this area can be trusted, stated where the area is read rather
+  // than in a toast that has already gone by the time anyone asks.
+  const scaleNote = scaleQualitySummary(scaleQuality);
   const floorsInTotal = perimeterTraces.filter(
     (t) => t.visible && t.vertices && t.vertices.length >= 3
   ).length;
@@ -246,6 +250,16 @@ const LeftPanel = ({
               </p>
             )}
         </div>
+        {scaleNote && area > 0 && (
+          <p
+            title={scaleNote.detail}
+            className={`mt-1.5 text-[10px] leading-snug text-center cursor-help ${
+              scaleNote.level === 'check' ? 'text-amber-400/90' : 'text-slate-500'
+            }`}
+          >
+            {scaleNote.level === 'check' ? '⚠ ' : ''}{scaleNote.short}
+          </p>
+        )}
       </section>
 
       {perimeterTraces.length > 1 && (

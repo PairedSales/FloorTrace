@@ -32,6 +32,51 @@ export const primaryWarning = (warnings) => {
   return detailText(pool[0]);
 };
 
+// How the scale a room set is presented. The area is the number the user acts
+// on, so every message here says what the disagreement means for the area
+// rather than describing the geometry that produced it.
+const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 100);
+
+export const scaleQualitySummary = (quality) => {
+  if (!quality || quality.level === 'ok' || !quality.reason) return null;
+  const pct = percentApart(quality.disagreement ?? 0);
+
+  if (quality.reason === 'room-vs-project') {
+    const rooms = `${quality.roomCount} room${quality.roomCount === 1 ? '' : 's'}`;
+    return quality.adopted
+      ? {
+        level: 'check',
+        short: 'This room disagrees with the last one',
+        detail: `This room is about ${pct}% out from the ${rooms} measured before it, `
+          + 'and the newer measurement is the one now in use. One of the two outlines '
+          + 'or labels is wrong — measure a third room to settle it.',
+      }
+      : {
+        level: 'check',
+        short: 'Kept the scale from earlier rooms',
+        detail: `This room implies a scale about ${pct}% different from the ${rooms} `
+          + 'measured before it, so it was not used — areas are unchanged. Check this '
+          + 'room’s outline and label.',
+      };
+  }
+
+  // room-internal
+  return quality.level === 'check'
+    ? {
+      level: 'check',
+      short: `Areas may be off by ~${pct}%`,
+      detail: `This room’s outline and its label disagree by about ${pct}% about how `
+        + 'big the room is. The scale was set from the average of the two, so areas '
+        + 'could be off by roughly that much. Check the outline against the label.',
+    }
+    : {
+      level: 'note',
+      short: 'Scale averaged from this room',
+      detail: `This room’s outline and label are about ${pct}% apart, which is normal `
+        + 'for printed dimensions. The scale is the average of the two.',
+    };
+};
+
 export const qualitySummary = (quality) => {
   const confidence = quality?.confidence ?? null;
   const level = qualityLevel(confidence);

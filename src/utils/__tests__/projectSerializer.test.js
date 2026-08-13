@@ -178,6 +178,32 @@ describe('projectSerializer', () => {
       const { statePatch } = deserializeSketch(project);
       expect(statePatch.calibration.feetPerPixel).toEqual({ x: 3.5, y: 3.5 });
     });
+
+    it('carries how much the scale can be trusted through a round trip', () => {
+      // Reopening a project must not keep a doubtful scale while losing the
+      // reason it was doubtful — that is a warning silently downgraded to none.
+      const storeState = createMockStoreState();
+      storeState.calibration.quality = {
+        level: 'check',
+        reason: 'room-vs-project',
+        disagreement: 0.4,
+        adopted: false,
+        roomCount: 3,
+      };
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.calibration.quality).toEqual(storeState.calibration.quality);
+    });
+
+    it('accepts a project saved before scale quality existed', () => {
+      const storeState = createMockStoreState();
+      delete storeState.calibration.quality;
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+      expect(deserializeSketch(project).statePatch.calibration.quality).toBeUndefined();
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
