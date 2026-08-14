@@ -430,15 +430,15 @@ const PerimeterLayer = ({
       {(perimeterTraces || []).map((trace) => {
         if (!trace.visible || trace.id === activeTraceId) return null;
         const color = trace.color || '#BD93F9';
-        const fillRgba = hexToRgba(color, 0.05);
-        const strokeRgba = hexToRgba(color, 0.4);
+        const fillRgba = hexToRgba(color, 0.15);
+        const strokeRgba = hexToRgba(color, 0.75);
 
         return (
           <Line
             key={`inactive-outline-${trace.id}`}
             points={trace.vertices ? trace.vertices.flatMap(v => [v.x, v.y]) : []}
             stroke={strokeRgba}
-            strokeWidth={1.5 / scale}
+            strokeWidth={2 / scale}
             closed={true}
             fill={fillRgba}
             listening={false}
