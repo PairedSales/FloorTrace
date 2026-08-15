@@ -137,6 +137,11 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
   'isDirty',
   'traceInteractionMode',
   'drawModeActive',
+  // A fresh `Math.random()` per `setViewportTransform` call, whose only reader
+  // compares it against a ref that is null on mount — so a persisted value can
+  // never match anything. Persisting it only guaranteed that every camera
+  // update looked like a state change to the autosave subscription.
+  'viewportSyncToken',
 ];
 const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_AUTOSAVE_FIELDS.includes(k)
