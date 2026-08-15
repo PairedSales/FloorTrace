@@ -365,8 +365,14 @@ const growSpanStack = (stack) => {
   return grown;
 };
 
-export const labelComponents = (mask, width, height) => {
-  const labels = new Int32Array(width * height).fill(-1);
+// `narrow` halves the label payload for callers that *retain* it — the
+// boundary search memoises one page-sized array per closing-ladder rung, where
+// component ids number in the hundreds. It is a hint, not a contract: a mask
+// that produces more ids than Int16 can hold widens back to Int32 mid-run, so
+// no caller has to prove a bound.
+export const labelComponents = (mask, width, height, narrow = false) => {
+  let labels = new (narrow ? Int16Array : Int32Array)(width * height).fill(-1);
+  let widenAt = narrow ? 32767 : Infinity;
   const components = [];
   let stack = new Int32Array(3072);
   let sp = 0;
@@ -409,6 +415,12 @@ export const labelComponents = (mask, width, height) => {
   for (let start = 0; start < mask.length; start += 1) {
     if (!mask[start] || labels[start] !== -1) continue;
     id = components.length;
+    if (id > widenAt) {
+      const wide = new Int32Array(labels.length);
+      wide.set(labels);
+      labels = wide;
+      widenAt = Infinity;
+    }
     size = 0;
     minX = width;
     minY = height;

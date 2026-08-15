@@ -78,13 +78,15 @@ export const measureFootprint = (wallMask, width, height, radius) => {
   const outside = floodOutside(closed, cw, ch);
   const footprint = new Uint8Array(closed.length);
   for (let i = 0; i < closed.length; i += 1) footprint[i] = outside[i] ? 0 : 1;
-  const local = labelComponents(footprint, cw, ch);
+  // Narrow labels: this array is what the search memo holds one of per rung.
+  const local = labelComponents(footprint, cw, ch, true);
   if (!local.components.length) return null;
 
   let labels = local.labels;
   let components = local.components;
   if (cropped) {
-    labels = new Int32Array(width * height).fill(-1);
+    const Labels = local.labels.constructor;
+    labels = new Labels(width * height).fill(-1);
     for (let y = 0; y < ch; y += 1) {
       labels.set(local.labels.subarray(y * cw, y * cw + cw), (cy0 + y) * width + cx0);
     }
@@ -260,6 +262,11 @@ export const generateCandidates = (net, analysis, options = {}) => {
   const candidates = [];
   const search = [];
   const evaluated = new Set();
+  // What a kept candidate will cost the search memo, charged as it is built so
+  // the memo can stop before it holds more than a tab can afford. Only when
+  // this search is the one being memoised: a caller-supplied mask and draw mode
+  // both opt out of the memo (see traceBoundary), so neither spends its budget.
+  const memoBudget = (options.mask || options.brush) ? null : options.searchCache;
 
   // Reference enclosure for a ladder: the most a rung enclosed before the
   // point where extra radius stopped sealing and started annexing. A sealed
@@ -317,6 +324,7 @@ export const generateCandidates = (net, analysis, options = {}) => {
         };
         candidates.push(candidate);
         group.push(candidate);
+        memoBudget?.retain?.(entry.mask.byteLength + fp.labels.byteLength);
       }
       if (seal.seal >= SEALED && sealedRadius === null) sealedRadius = r;
     }
@@ -410,6 +418,8 @@ export const generateCandidates = (net, analysis, options = {}) => {
       coverage.total += w;
     }
   }
+  // Two plain arrays, one entry per wall pixel of the network.
+  memoBudget?.retain?.(coverage.index.length * 16);
 
   return { candidates, search, wallBboxArea, maxRadius, coverage, rescue, sealedThreshold: SEALED };
 };
