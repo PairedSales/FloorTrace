@@ -149,11 +149,13 @@ function App() {
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const voidToolActive = useAppStore((s) => s.voidToolActive);
   const angleToolActive = useAppStore((s) => s.angleToolActive);
   const angleToolState = useAppStore((s) => s.angleToolState);
   const drawModeActive = useAppStore((s) => s.drawModeActive);
   const drawBrushSize = useAppStore((s) => s.drawBrushSize);
   const drawStrokes = useAppStore((s) => s.drawStrokes);
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
 
   // Floor management
   const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
@@ -233,7 +235,9 @@ function App() {
     handleCropToolToggle,
     handleAngleToolToggle,
     handleDrawModeToggle,
+    handleScaleToolToggle,
     handleClearTools,
+    handleVoidToolToggle,
   } = useToolManager();
 
   // Declared after handlePasteImage / handleFileOpen (see below) so the
@@ -326,8 +330,19 @@ function App() {
       toast.dismiss('angle-toast');
     }
 
+    // 8. Scale Tool
+    if (scaleToolActive) {
+      toast.info('Click both ends of a length you know, then type it in the Scale panel. Esc to cancel.', {
+        id: 'scale-tool-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('scale-tool-toast');
+    }
+
     // Cleanup all toasts on unmount
     return () => {
+      toast.dismiss('scale-tool-toast');
       toast.dismiss('perimeter-vertices-toast');
       toast.dismiss('manual-entry-toast');
       toast.dismiss('line-tool-toast');
@@ -345,7 +360,8 @@ function App() {
     currentCustomShape?.vertices?.length,
     eraserToolActive,
     cropToolActive,
-    angleToolActive
+    angleToolActive,
+    scaleToolActive
   ]);
 
 
@@ -556,7 +572,14 @@ function App() {
     const source = boundaryResult?.quality?.source ?? 'auto';
     const shaped = floors.map((boundary) => ({
       vertices: boundary.polygon.map((point) => ({ x: point.x, y: point.y })),
-      holes: boundary.holes.map((hole) => hole.map((point) => ({ x: point.x, y: point.y }))),
+      // The one boundary where pipeline holes become trace holes, and so the
+      // one place the provenance tag is applied — the detector itself keeps
+      // emitting bare rings.
+      holes: boundary.holes.map((hole, i) => ({
+        id: `hole-auto-${i}`,
+        ring: hole.map((point) => ({ x: point.x, y: point.y })),
+        source: 'auto',
+      })),
       quality: {
         source,
         confidence: boundary.confidence,
@@ -724,6 +747,10 @@ function App() {
     // Room rectangles are in image pixels, so a crop moves every one of them
     // and an erase can remove the wall a room was measured against.
     setRooms([]);
+    // `scaleLines` and `calibration` deliberately survive: the crop tool keeps
+    // the canvas at full size and redraws the selection in place, and neither
+    // it nor the eraser resamples, so image-pixel coordinates — and therefore
+    // feet-per-pixel — are invariant across both. Do not add a defensive reset.
   }, [setImage, setTracedBoundaries, setRooms]);
 
   const handleAddMeasurementLine = useCallback((line) => {
@@ -814,15 +841,21 @@ function App() {
     }
   }, [setPerimeterOverlay, setPerimeterVertices]);
 
-  // Delete a specific perimeter vertex by index (right-click on vertex)
+  // Delete a specific perimeter vertex by index (right-click, or Delete on a
+  // selected vertex). The floor of three needs a voice: with a visible
+  // selection and a Delete key, a silent no-op reads as a broken keybinding.
   const handleDeletePerimeterVertex = useCallback((index) => {
     const overlay = selectPerimeterOverlay(useAppStore.getState());
-    if (!overlay?.vertices || overlay.vertices.length <= 3) return;
+    if (!overlay?.vertices) return;
+    if (overlay.vertices.length <= 3) {
+      notify('A perimeter needs at least three points.', { type: 'warning' });
+      return;
+    }
     updatePerimeterVertices(
       overlay.vertices.filter((_, i) => i !== index),
       true
     );
-  }, [updatePerimeterVertices]);
+  }, [updatePerimeterVertices, notify]);
 
   // Auto-trace exterior boundary after a room overlay is placed.
   const autoTraceExterior = useCallback(
@@ -1095,6 +1128,17 @@ function App() {
     onSaveProject: handleSaveProject,
     activeBrush,
     onRotateCanvas: handleRotateCanvas,
+    onFitToWindow: handleFitToWindow,
+    hasArea: area > 0,
+    onLineToolToggle: handleLineToolToggle,
+    onDrawAreaToggle: handleDrawAreaToggle,
+    onAngleToolToggle: handleAngleToolToggle,
+    onOutlineByVertex: handleDrawExterior,
+    onCropToolToggle: handleCropToolToggle,
+    onEraserToolToggle: handleEraserToolToggle,
+    onDrawExterior: handleDrawMode,
+    onVoidToolToggle: handleVoidToolToggle,
+    onScaleToolToggle: handleScaleToolToggle,
   });
 
   // Desktop UI
@@ -1183,6 +1227,8 @@ function App() {
             drawStrokes={drawStrokes}
             onDrawModeToggle={handleDrawModeToggle}
             onFinishDrawMode={handleFinishDrawMode}
+            voidToolActive={voidToolActive}
+            onVoidToolToggle={handleVoidToolToggle}
           />
         </div>
 
@@ -1230,6 +1276,8 @@ function App() {
               onCropToolToggle={handleCropToolToggle}
               angleToolActive={angleToolActive}
               onAngleToolToggle={handleAngleToolToggle}
+              scaleToolActive={scaleToolActive}
+              onScaleToolToggle={handleScaleToolToggle}
               onOutlineByVertex={handleDrawExterior}
               outlineByVertexActive={perimeterVertices !== null}
               onRotateCanvas={handleRotateCanvas}
@@ -1239,6 +1287,8 @@ function App() {
               currentCustomShape={currentCustomShape}
               onClearTools={handleClearTools}
               hasArea={area > 0}
+              voidToolActive={voidToolActive}
+              onVoidToolToggle={handleVoidToolToggle}
             />
           )}
         </div>

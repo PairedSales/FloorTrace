@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import useAppStore from '../../../store/appStore';
 import { getCanvasCoordinates } from '../canvasUtils';
 import { hasSelfIntersection } from '../../../utils/geometryValidation';
+import { shortcutsBlocked } from '../../../utils/keyboardGuard';
+import { useScaleLine } from '../../../hooks/useScaleLine';
 import { toast } from 'sonner';
 
 export function useToolRouter({
@@ -16,6 +18,7 @@ export function useToolRouter({
   drawAreaActive,
   angleToolActive,
   drawModeActive,
+  scaleToolActive,
   manualEntryMode,
   traceInteractionMode,
   autoSnapEnabled,
@@ -33,6 +36,9 @@ export function useToolRouter({
   perimeterOverlay,
   perimeterVertices,
   draggingVertex,
+  selectedVertexIndex,
+  setSelectedVertexIndex,
+  onDeletePerimeterVertex,
   handleClosePerimeter,
   handleAddPerimeterVertex,
   handleInsertPerimeterVertex,
@@ -53,12 +59,21 @@ export function useToolRouter({
   onAddMeasurementLine,
   onMeasurementLineUpdate,
 
+  // Sub-system: Scale line
+  currentScaleLine,
+
   // Sub-system: Eraser, Crop & Draw Hooks (directly instantiated in Canvas)
   eraser,
   crop,
   drawTool,
   onFinishDrawMode,
   onDrawModeToggle,
+
+  // ── void tool ────────────────────────────────────────────────────────────
+  voidToolActive,
+  voidTool,
+  onVoidToolToggle,
+  // ── end void tool ────────────────────────────────────────────────────────
 
   // Callbacks from Zustand/App
   onRoomOverlayUpdate,
@@ -79,9 +94,17 @@ export function useToolRouter({
 
   const [currentMousePos, setCurrentMousePos] = useState(null);
 
+  // ── void tool ──────────────────────────────────────────────────────────────
+  // { traceId, holeId } of the void ring under the cursor's last click.
+  const [selectedHole, setSelectedHole] = useState(null);
+  // ── end void tool ──────────────────────────────────────────────────────────
+
   // Local drag state to bypass Zustand at 60fps
   const [localRoomOverlay, setLocalRoomOverlay] = useState(null);
   const [localMeasurementLine, setLocalMeasurementLine] = useState(null);
+  const [localScaleLine, setLocalScaleLine] = useState(null);
+  const [selectedScaleLineIndex, setSelectedScaleLineIndex] = useState(null);
+  const { removeLine: removeScaleLine } = useScaleLine();
 
   const isDraggingRef = useRef(false);
   const dragStartPosRef = useRef(null);
@@ -107,6 +130,7 @@ export function useToolRouter({
 
   const activeRoomOverlay = localRoomOverlay || roomOverlay;
   const activeMeasurementLine = localMeasurementLine || currentMeasurementLine;
+  const activeScaleLine = localScaleLine || currentScaleLine;
 
   // Context Menu: Cancel crop or measurement line drawing on right-click
   const handleStageContextMenu = useCallback((e) => {
@@ -159,7 +183,16 @@ export function useToolRouter({
       crop.handleCropMouseDown(stage);
       return;
     }
-  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop]);
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    if (voidToolActive) {
+      e.evt.preventDefault();
+      voidTool.handleVoidMouseDown(stage);
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
+  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop,
+    voidToolActive, voidTool]);
 
   // Stage Mouse Move
   const handleStageMouseMove = useCallback((e) => {
@@ -217,6 +250,15 @@ export function useToolRouter({
       crop.handleCropMouseMove(stage);
       return;
     }
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    // Unconditional while the tool is on: the rubber band between placed
+    // corners has to follow the cursor with no button held.
+    if (voidToolActive) {
+      voidTool.handleVoidMouseMove(stage);
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
 
     // Detect if mouse moved enough to trigger a drag rather than a click
     if (dragStartPosRef.current && !isDraggingRef.current) {
@@ -294,6 +336,15 @@ export function useToolRouter({
       });
     }
 
+    // ── scale line preview ──────────────────────────────────────────────────
+    if (scaleToolActive && currentScaleLine && currentScaleLine.start) {
+      setLocalScaleLine({
+        start: currentScaleLine.start,
+        end: mousePoint
+      });
+    }
+    // ── end scale line preview ──────────────────────────────────────────────
+
     // Custom shape preview mouse pos tracking
     if (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) {
       setCurrentMousePos(mousePoint);
@@ -314,12 +365,16 @@ export function useToolRouter({
     draggingRoomCorner,
     lineToolActive,
     currentMeasurementLine,
+    scaleToolActive,
+    currentScaleLine,
     drawAreaActive,
     currentCustomShape,
     perimeterVertices,
     draggingVertex,
     getCanvasCoords,
     stageRef,
+    voidToolActive,
+    voidTool,
   ]);
 
   // Stage Mouse Up
@@ -364,6 +419,15 @@ export function useToolRouter({
       crop.handleCropMouseUp(crop.cropSelection);
       return;
     }
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    // Both gestures land here: a press that travelled commits a rectangle, a
+    // press that did not places the next polygon corner.
+    if (voidTool.isVoidingRef.current) {
+      voidTool.handleVoidMouseUp();
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
 
     // End room overlay dragging
     if (draggingRoom && localRoomOverlay) {
@@ -412,7 +476,7 @@ export function useToolRouter({
     } else {
       dragStartPosRef.current = null;
     }
-  }, [drawTool, eraser, crop, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
+  }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
 
   // Window mouseUp listener (handles commits when mouse is released outside canvas bounds)
   useEffect(() => {
@@ -446,10 +510,15 @@ export function useToolRouter({
       if (crop.isCroppingRef.current) {
         crop.handleCropMouseUp(crop.cropSelection);
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      if (voidTool.isVoidingRef.current) {
+        voidTool.handleVoidMouseUp();
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
     };
     window.addEventListener('mouseup', handleWindowMouseUp);
     return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [drawTool, eraser, crop, scaleRef, stageRef, viewportSyncTokenRef]);
+  }, [drawTool, eraser, crop, voidTool, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Stage Clicks
   const handleStageClick = useCallback((e) => {
@@ -462,17 +531,21 @@ export function useToolRouter({
     }
 
     const target = e.target;
-    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')) {
+    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')
+      || target?.hasName?.('scale-line') || target?.hasName?.('void-hole')) {
       return;
     }
 
     setSelectedMeasurementLineIndex(null);
     setSelectedCustomShapeIndex(null);
+    setSelectedScaleLineIndex(null);
+    setSelectedHole(null); // void tool
     
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
       (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && handleAddPerimeterVertex && perimeterVertices !== null) ||
       (lineToolActive && onMeasurementLineUpdate) ||
+      scaleToolActive ||
       (drawAreaActive && onCustomShapeUpdate);
     
     if (!needsSingleClickHandling) {
@@ -508,6 +581,32 @@ export function useToolRouter({
         onCanvasClick(clickPoint);
         return;
       }
+
+      // ── scale line placement ────────────────────────────────────────────
+      // Ahead of perimeter vertex placement: an explicitly activated tool
+      // beats a mode that was merely left on. Corner snapping is what "click
+      // both ends of this wall" wants, and it returns null when it finds
+      // nothing, so a printed scale bar degrades to a raw click.
+      if (scaleToolActive) {
+        const snapped = (autoSnapEnabled && !e.evt?.shiftKey)
+          ? findVertexSnapPoint(clickPoint) : null;
+        const finalPoint = snapped || clickPoint;
+        const store = useAppStore.getState();
+        if (!store.currentScaleLine) {
+          store.setCurrentScaleLine({ start: finalPoint, end: finalPoint });
+        } else {
+          store.addScaleLine({
+            id: `scale-${Date.now()}`,
+            start: store.currentScaleLine.start,
+            end: finalPoint,
+            feet: null,
+          });
+          store.setCurrentScaleLine(null);
+          setLocalScaleLine(null);
+        }
+        return;
+      }
+      // ── end scale line placement ────────────────────────────────────────
       
       if (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && handleAddPerimeterVertex && perimeterVertices !== null) {
         const targetType = e.target.getType();
@@ -603,6 +702,7 @@ export function useToolRouter({
     eraserToolActive,
     cropToolActive,
     drawModeActive,
+    scaleToolActive,
     setLocalMeasurementLine,
   ]);
 
@@ -624,6 +724,27 @@ export function useToolRouter({
       return;
     }
 
+    // ── scale line commit ─────────────────────────────────────────────────
+    const storeCurrentScaleLine = useAppStore.getState().currentScaleLine;
+    if (scaleToolActive && storeCurrentScaleLine && storeCurrentScaleLine.start) {
+      const stage = e.target.getStage();
+      if (!stage) return;
+      const finalPoint = getCanvasCoords(stage);
+      if (!finalPoint) return;
+
+      const store = useAppStore.getState();
+      store.addScaleLine({
+        id: `scale-${Date.now()}`,
+        start: storeCurrentScaleLine.start,
+        end: finalPoint,
+        feet: null,
+      });
+      store.setCurrentScaleLine(null);
+      setLocalScaleLine(null);
+      return;
+    }
+    // ── end scale line commit ─────────────────────────────────────────────
+
     const storeCustomShape = useAppStore.getState().currentCustomShape;
     if (drawAreaActive && storeCustomShape && !storeCustomShape.closed && storeCustomShape.vertices.length >= 3) {
       const finalShape = { ...storeCustomShape, closed: true };
@@ -633,7 +754,7 @@ export function useToolRouter({
     }
 
     if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive
-      || drawModeActive) return;
+      || drawModeActive || scaleToolActive) return;
     
     const targetType = e.target.getType();
     if (targetType === 'Circle') return;
@@ -657,31 +778,57 @@ export function useToolRouter({
     onAddCustomShape,
     onCustomShapeUpdate,
     getCanvasCoords,
+    scaleToolActive,
     setLocalMeasurementLine,
   ]);
 
   // Keyboard Event Listener
   const handleKeyDown = useCallback((e) => {
-    const activeElement = document.activeElement;
-    const isTypingIntoField = activeElement && (
-      activeElement.tagName === 'INPUT' ||
-      activeElement.tagName === 'TEXTAREA' ||
-      activeElement.isContentEditable
-    );
-
-    if (isTypingIntoField) return;
+    if (shortcutsBlocked(e.target)) return;
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
+      // ── Delete targets, in priority order ──────────────────────────────────
+      // A live line/shape selection must not be shadowed by a stale vertex
+      // selection, so the vertex case comes last.
       if (selectedMeasurementLineIndex !== null && onMeasurementLinesChange) {
         onMeasurementLinesChange(measurementLines.filter((_, index) => index !== selectedMeasurementLineIndex));
         setSelectedMeasurementLineIndex(null);
         return;
       }
 
+      // ── scale line ────────────────────────────────────────────────────────
+      // Through the same path as the panel's own remove, so the scale is
+      // re-resolved from what is left rather than outliving its evidence.
+      if (selectedScaleLineIndex !== null) {
+        const doomed = useAppStore.getState().scaleLines[selectedScaleLineIndex];
+        if (doomed) removeScaleLine(doomed.id);
+        setSelectedScaleLineIndex(null);
+        return;
+      }
+      // ── end scale line ────────────────────────────────────────────────────
+
+      // ── void tool ──────────────────────────────────────────────────────────
+      if (selectedHole) {
+        onSaveUndoPoint?.();
+        useAppStore.getState().removeHole(selectedHole.traceId, selectedHole.holeId);
+        setSelectedHole(null);
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
+
       if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
         onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
         setSelectedCustomShapeIndex(null);
+        return;
       }
+
+      if (selectedVertexIndex !== null && onDeletePerimeterVertex) {
+        // Selection is left alone: the delete is refused below three vertices,
+        // and the vertex array changing identity clears it on success.
+        onDeletePerimeterVertex(selectedVertexIndex);
+        return;
+      }
+      // ── end delete targets ────────────────────────────────────────────────
       return;
     }
 
@@ -692,6 +839,14 @@ export function useToolRouter({
         if (!drawTool.cancelDraw()) onDrawModeToggle?.();
         return;
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      // Same two-stage shape as draw mode: drop the shape in progress first, so
+      // a mis-started void does not cost the tool.
+      if (voidToolActive) {
+        if (!voidTool.cancelVoid()) onVoidToolToggle?.();
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
       if (eraserToolActive) {
         eraser.cancelErase();
       } else if (cropToolActive) {
@@ -702,8 +857,22 @@ export function useToolRouter({
         onDrawAreaToggle();
       } else if (angleToolActive && onAngleToolToggle) {
         onAngleToolToggle();
+      // ── scale line ──────────────────────────────────────────────────────
+      // No undo point: the only state this clears is the gesture in progress,
+      // and the committed lines and calibration are untouched.
+      } else if (scaleToolActive) {
+        useAppStore.getState().setCurrentScaleLine(null);
+        useAppStore.getState().setScaleToolActive(false);
+        setLocalScaleLine(null);
+      // ── end scale line ──────────────────────────────────────────────────
       } else if (perimeterVertices !== null) {
         useAppStore.getState().setPerimeterVertices(null);
+      } else if (manualEntryMode) {
+        // Without this, Esc left the user in overlay-placement mode with only
+        // the standing toast to say so.
+        useAppStore.getState().setManualEntryMode(false);
+      } else if (selectedVertexIndex !== null) {
+        setSelectedVertexIndex?.(null);
       }
       return;
     }
@@ -713,6 +882,12 @@ export function useToolRouter({
         onFinishDrawMode?.();
         return;
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      if (voidToolActive) {
+        voidTool.closeVoidPolygon();
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
       if (perimeterVertices && perimeterVertices.length > 2) {
         if (hasSelfIntersection(perimeterVertices, true)) {
           toast.error('Cannot close perimeter: would cause self-intersection.');
@@ -751,8 +926,20 @@ export function useToolRouter({
     drawTool,
     onDrawModeToggle,
     onFinishDrawMode,
+    scaleToolActive,
+    selectedScaleLineIndex,
+    removeScaleLine,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
+    selectedVertexIndex,
+    setSelectedVertexIndex,
+    onDeletePerimeterVertex,
+    manualEntryMode,
+    voidToolActive,
+    voidTool,
+    onVoidToolToggle,
+    selectedHole,
+    onSaveUndoPoint,
   ]);
 
   useEffect(() => {
@@ -821,6 +1008,9 @@ export function useToolRouter({
     localMeasurementLine,
     activeRoomOverlay,
     activeMeasurementLine,
+    activeScaleLine,
+    selectedScaleLineIndex,
+    setSelectedScaleLineIndex,
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,
@@ -830,5 +1020,9 @@ export function useToolRouter({
     handleRoomMouseDown,
     handleRoomCornerMouseDown,
     rightClickPannedRef,
+    // ── void tool ────────────────────────────────────────────────────────────
+    selectedHole,
+    setSelectedHole,
+    // ── end void tool ────────────────────────────────────────────────────────
   };
 }

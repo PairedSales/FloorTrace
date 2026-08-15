@@ -205,6 +205,37 @@ describe('projectSerializer', () => {
       expect(() => validateProjectSchema(project)).not.toThrow();
       expect(deserializeSketch(project).statePatch.calibration.quality).toBeUndefined();
     });
+
+    it('carries a trace type and its colour source through a round trip', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].type = 'garage';
+      storeState.perimeterTraces[0].colorSource = 'type';
+      storeState.perimeterTraces[0].color = '#FFB86C';
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const trace = deserializeSketch(project).statePatch.perimeterTraces[0];
+      expect(trace.type).toBe('garage');
+      expect(trace.colorSource).toBe('type');
+      expect(trace.color).toBe('#FFB86C');
+    });
+
+    // The migration that has to be non-destructive: a project saved before
+    // types must not collapse its multi-coloured floors into one hue.
+    it('imports a project saved before types as GLA with its colours intact', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces = [
+        { ...storeState.perimeterTraces[0], id: 'a', color: '#BD93F9' },
+        { ...storeState.perimeterTraces[0], id: 'b', color: '#8BE9FD' },
+      ];
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const traces = deserializeSketch(project).statePatch.perimeterTraces;
+      expect(traces.map((t) => t.type)).toEqual(['gla', 'gla']);
+      expect(traces.map((t) => t.colorSource)).toEqual(['user', 'user']);
+      expect(traces.map((t) => t.color)).toEqual(['#BD93F9', '#8BE9FD']);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -251,6 +282,54 @@ describe('projectSerializer', () => {
         closed: true,
         // missing vertices
       }];
+      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // hole provenance
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('trace holes', () => {
+    const ring = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
+
+    const withHoles = (holes) => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].holes = holes;
+      return serializeSketch(storeState);
+    };
+
+    it('round-trips a mixed set of tagged and bare holes', () => {
+      const holes = [
+        { id: 'hole-auto-0', ring: ring(4), source: 'auto' },
+        { id: 'hole-user-0', ring: ring(6), source: 'user' },
+        ring(8),
+      ];
+      const project = withHoles(holes);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes).toEqual(holes);
+    });
+
+    // The tag is what keeps a hand-punched void alive across a re-trace, so
+    // losing it in the file would make reopening a project quietly destructive.
+    it('keeps the source tag rather than stripping it to a bare ring', () => {
+      const project = withHoles([{ id: 'h1', ring: ring(4), source: 'user' }]);
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes[0].source).toBe('user');
+    });
+
+    // A file written before provenance existed carries bare rings.
+    it('accepts a v1 file whose holes are bare rings', () => {
+      const project = withHoles([ring(4), ring(6)]);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes).toEqual([ring(4), ring(6)]);
+    });
+
+    it('still rejects a hole that is neither shape', () => {
+      const project = withHoles([{ id: 'h1', source: 'user' }]); // no ring
       expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
   });
@@ -364,6 +443,56 @@ describe('projectSerializer', () => {
         images: { [hashDataUrl(IMAGE_A)]: IMAGE_A },
       };
       expect(deserializeSketch(legacy).statePatch.image).toBe(IMAGE_A);
+    });
+  });
+
+  // A hand-set scale must survive a reopen with the evidence it rests on and
+  // the reason to doubt it. Losing either leaves a number nobody can check.
+  describe('line calibration', () => {
+    const withScaleLines = () => ({
+      ...createMockStoreState(),
+      scaleLines: [
+        { id: 'scale-1', start: { x: 10, y: 10 }, end: { x: 210, y: 10 }, feet: 20 },
+        { id: 'scale-2', start: { x: 10, y: 10 }, end: { x: 10, y: 110 }, feet: 10.4 },
+      ],
+      calibration: {
+        calibrated: true,
+        feetPerPixel: { x: 0.1, y: 0.104 },
+        source: 'line-calibration',
+        calibratedRoomId: null,
+        createdAt: 1234567890,
+        quality: {
+          level: 'note',
+          reason: 'scale-anisotropic',
+          disagreement: 0.0392,
+          adopted: true,
+          source: 'line',
+          lineCount: 2,
+          lengthPx: 100,
+          feet: 10.4,
+          axes: ['x', 'y'],
+        },
+      },
+    });
+
+    it('round-trips the lines, the source and the reason to doubt it', () => {
+      const project = serializeSketch(withScaleLines());
+      validateProjectSchema(project);
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.scaleLines).toHaveLength(2);
+      expect(statePatch.scaleLines[0].feet).toBe(20);
+      expect(statePatch.calibration.source).toBe('line-calibration');
+      expect(statePatch.calibration.quality.source).toBe('line');
+      expect(statePatch.calibration.quality.reason).toBe('scale-anisotropic');
+      expect(statePatch.calibration.quality.lineCount).toBe(2);
+      expect(statePatch.calibration.quality.axes).toEqual(['x', 'y']);
+    });
+
+    it('still parses a file that predates scale lines', () => {
+      const project = serializeSketch(createMockStoreState());
+      expect(() => validateProjectSchema(project)).not.toThrow();
+      expect(deserializeSketch(project).statePatch.scaleLines).toBeUndefined();
     });
   });
 });

@@ -39,6 +39,7 @@ export function useCanvasPan({
   eraserToolActive,
   drawModeActive,
   cropToolActive,
+  voidToolActive,
   traceInteractionMode,
   viewportSyncTokenRef,
 }) {
@@ -92,6 +93,7 @@ export function useCanvasPan({
   const canPanCanvas = useMemo(() => {
     if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
     if (manualEntryMode || eraserToolActive || drawModeActive || cropToolActive) return false;
+    if (voidToolActive) return false; // a void rectangle is a drag; panning would eat it
     if (traceInteractionMode === 'drawing') return false; // vertex placement mode
     return !isZoomingRef.current;
   }, [
@@ -103,6 +105,7 @@ export function useCanvasPan({
     eraserToolActive,
     drawModeActive,
     cropToolActive,
+    voidToolActive,
     traceInteractionMode,
     isZoomingRef,
   ]);

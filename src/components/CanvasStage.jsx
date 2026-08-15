@@ -12,10 +12,12 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { useDrawTool } from '../hooks/useDrawTool';
+import { useVoidTool } from '../hooks/useVoidTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
 import { resolveRoomScale } from '../utils/detection/validate';
 
@@ -80,6 +82,8 @@ const CanvasStage = React.memo(({
   drawStrokes,
   onDrawModeToggle,
   onFinishDrawMode,
+  voidToolActive,
+  onVoidToolToggle,
 }) => {
   const stageRef = useRef(null);
   const renderCountRef = useRef(0);
@@ -98,9 +102,16 @@ const CanvasStage = React.memo(({
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
   const rooms = useAppStore((s) => s.rooms);
+  // Read here rather than threaded through App -> Canvas: the scale tool has
+  // no callbacks App owns, so a prop chain would be three files of pass-through.
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
+  const scaleLines = useAppStore((s) => s.scaleLines);
+  const currentScaleLine = useAppStore((s) => s.currentScaleLine);
+  const calibrated = useAppStore((s) => s.calibration?.calibrated);
   const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
+  const focusedWarning = useAppStore((s) => s.focusedWarning);
 
   // Shared refs to break mutual dependencies between hooks
   const cameraRef = useRef(null);
@@ -137,6 +148,7 @@ const CanvasStage = React.memo(({
     eraserToolActive,
     drawModeActive,
     cropToolActive,
+    voidToolActive,
     traceInteractionMode,
     draggingRoom: routerRef.current?.draggingRoom ?? false,
     draggingRoomCorner: routerRef.current?.draggingRoomCorner ?? null,
@@ -180,6 +192,13 @@ const CanvasStage = React.memo(({
     getCanvasCoords,
   });
 
+  // ── 4b. Void Tool ──────────────────────────────────────────────────────────
+  const voidTool = useVoidTool({
+    voidToolActive,
+    getCanvasCoords,
+    scaleRef: camera.scaleRef,
+  });
+
   // ── 5. Measurement System ──────────────────────────────────────────────────
   const measurement = useMeasurementSystem({
     measurementLines,
@@ -220,6 +239,7 @@ const CanvasStage = React.memo(({
     drawAreaActive,
     angleToolActive,
     drawModeActive,
+    scaleToolActive,
     manualEntryMode,
     traceInteractionMode,
     autoSnapEnabled,
@@ -235,6 +255,9 @@ const CanvasStage = React.memo(({
     perimeterOverlay,
     perimeterVertices,
     draggingVertex: perimeter.draggingVertex,
+    selectedVertexIndex: perimeter.selectedVertexIndex,
+    setSelectedVertexIndex: perimeter.setSelectedVertexIndex,
+    onDeletePerimeterVertex,
     handleClosePerimeter: perimeter.handleClosePerimeter,
     handleAddPerimeterVertex: perimeter.handleAddPerimeterVertex,
     handleInsertPerimeterVertex: perimeter.handleInsertPerimeterVertex,
@@ -255,12 +278,20 @@ const CanvasStage = React.memo(({
     onAddMeasurementLine,
     onMeasurementLineUpdate,
 
+    // Scale line
+    currentScaleLine,
+
     // Eraser, Crop & Draw
     eraser,
     crop,
     drawTool,
     onDrawModeToggle,
     onFinishDrawMode,
+
+    // Void
+    voidToolActive,
+    voidTool,
+    onVoidToolToggle,
 
     // Callbacks
     onRoomOverlayUpdate,
@@ -406,6 +437,69 @@ const CanvasStage = React.memo(({
     return feetPerPixel;
   }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
 
+  // The warning the panel is showing, resolved against live state every render
+  // rather than read from anything stored — see utils/warningAnchors.js. A
+  // focus left on a deleted trace or a re-traced outline resolves to nothing.
+  const warningAnchor = useMemo(() => {
+    if (!focusedWarning) return null;
+    const trace = (perimeterTraces || []).find((t) => t.id === focusedWarning.traceId);
+    const warning = trace?.quality?.warnings?.[focusedWarning.index];
+    if (!warning) return null;
+    return resolveAnchor(warning, {
+      trace, traces: perimeterTraces, rooms, detectedDimensions,
+    });
+  }, [focusedWarning, perimeterTraces, rooms, detectedDimensions]);
+
+  // Highlight always; move the camera only when the anchor is not already on
+  // screen with ~15% padding, and never zoom *in* — the user has framed the
+  // plan deliberately, and the anchor is often the whole outline.
+  useEffect(() => {
+    const stage = stageRef.current;
+    const layer = contentLayerRef.current;
+    const bounds = anchorBounds(warningAnchor);
+    if (!stage || !layer || !bounds) return;
+
+    // Layer-relative, so the canvas rotation is already applied and only the
+    // stage's own scale/position remain to be chosen.
+    const transform = layer.getTransform();
+    const corners = [
+      { x: bounds.minX, y: bounds.minY }, { x: bounds.maxX, y: bounds.minY },
+      { x: bounds.maxX, y: bounds.maxY }, { x: bounds.minX, y: bounds.maxY },
+    ].map((p) => transform.point(p));
+    const xs = corners.map((p) => p.x);
+    const ys = corners.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const scale = stage.scaleX();
+    const vw = stage.width();
+    const vh = stage.height();
+    if (!(scale > 0) || !(vw > 0) || !(vh > 0)) return;
+    const padX = vw * 0.075;
+    const padY = vh * 0.075;
+    const visible = stage.x() + scale * minX >= padX
+      && stage.x() + scale * maxX <= vw - padX
+      && stage.y() + scale * minY >= padY
+      && stage.y() + scale * maxY <= vh - padY;
+    if (visible) return;
+
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const target = Math.max(0.1, Math.min(
+      scale,
+      spanX > 0 ? (vw - 2 * padX) / spanX : Infinity,
+      spanY > 0 ? (vh - 2 * padY) / spanY : Infinity,
+    ));
+    // No sync token: the camera controller's own effect is what applies this
+    // to the stage, and it skips any transform it recognises as its own.
+    setViewportTransform(target, {
+      x: vw / 2 - target * (minX + maxX) / 2,
+      y: vh / 2 - target * (minY + maxY) / 2,
+    }, null);
+  }, [warningAnchor, setViewportTransform]);
+
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
     const cy = camera.imageObj ? camera.imageObj.height / 2 : 0;
@@ -437,7 +531,7 @@ const CanvasStage = React.memo(({
           onMouseUp={router.handleStageMouseUp}
           onDblClick={router.handleStageDoubleClick}
           onDblTap={router.handleStageDoubleClick}
-          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
+          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : (cropToolActive || voidToolActive) ? 'crosshair' : 'default' }}
         >
           {camera.isImageReady && (
             <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
@@ -466,12 +560,20 @@ const CanvasStage = React.memo(({
               detectedDimensions={detectedDimensions}
               unit={unit}
               draggingVertex={perimeter.draggingVertex}
+              selectedVertexIndex={perimeter.selectedVertexIndex}
+              onVertexSelect={perimeter.setSelectedVertexIndex}
               onVertexDragStart={perimeter.handleVertexDragStart}
               onVertexDragMove={perimeter.handleVertexDragMove}
               onVertexDragEnd={perimeter.handleVertexDragEnd}
               onDeletePerimeterVertex={handleDeletePerimeterVertex}
               isSelfIntersecting={perimeter.isSelfIntersecting}
+              voidToolActive={voidToolActive}
+              voidCandidate={voidTool.candidate}
+              selectedHole={router.selectedHole}
+              onHoleSelect={router.setSelectedHole}
             />
+
+            <WarningHighlightLayer anchor={warningAnchor} scale={camera.scale} />
 
             <DimensionOverlay
               mode={mode}
@@ -513,6 +615,19 @@ const CanvasStage = React.memo(({
               onMeasurementLineSelect={measurement.handleMeasurementLineSelect}
               onMeasurementLineDragEnd={measurement.handleMeasurementLineDragEnd}
               onMeasurementLinesChange={handleMeasurementLinesChange}
+            />
+
+            <ScaleLineLayer
+              scaleLines={scaleLines}
+              currentScaleLine={router.activeScaleLine}
+              scaleToolActive={scaleToolActive}
+              calibrated={calibrated}
+              scale={camera.scale}
+              feetPerPixel={activeFeetPerPixel}
+              unit={unit}
+              unitStyle={unitStyle}
+              selectedScaleLineIndex={router.selectedScaleLineIndex}
+              onScaleLineSelect={router.setSelectedScaleLineIndex}
             />
 
             <ShapeLayer

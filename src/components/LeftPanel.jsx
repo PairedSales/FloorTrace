@@ -1,11 +1,128 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
-import useAppStore from '../store/appStore';
+import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair } from 'lucide-react';
+import useAppStore, { selectAreaByType } from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
-import { calculateArea } from '../utils/areaCalculator';
-import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
+import { calculateArea, holeRings } from '../utils/areaCalculator';
+import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
+import { resolveAnchor } from '../utils/warningAnchors';
+import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import InchesInput from './InchesInput';
+import ScaleSection from './ScaleSection';
 import { toast } from 'sonner';
+
+const SEVERITY_DOT = { error: 'bg-red-400', warn: 'bg-amber-400', info: 'bg-slate-500' };
+
+const WarningRow = ({ warning, anchor, active, onFocus }) => (
+  <div className="flex items-start gap-1.5 py-0.5">
+    <span className={`mt-[3px] w-1.5 h-1.5 rounded-full shrink-0 ${SEVERITY_DOT[warning.severity] ?? SEVERITY_DOT.warn}`} />
+    <div className="min-w-0 flex-1">
+      <p className="text-[9px] font-semibold leading-tight text-slate-300">{warning.label}</p>
+      <p className="text-[9px] leading-tight text-slate-500">{warning.detail}</p>
+    </div>
+    {anchor && (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFocus();
+        }}
+        title={active ? 'Hide on canvas' : 'Show on canvas'}
+        className={`p-0.5 rounded shrink-0 transition-colors ${
+          active ? 'text-accent bg-chrome-800' : 'text-slate-500 hover:text-slate-200 hover:bg-chrome-800'
+        }`}
+      >
+        <Crosshair className="w-3 h-3" />
+      </button>
+    )}
+  </div>
+);
+
+/**
+ * The detector's reasons for doubting one trace, ranked and inspectable.
+ * The collapsed line is the first entry of the same ranked list the expansion
+ * shows, so the two cannot disagree about which warning is worst. Severity is
+ * read from the warning rather than the trace: `label-outside` is deliberately
+ * gentler on a hand-drawn outline, and must keep reading as a warning there.
+ */
+const TraceQuality = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarning, onFocus }) => {
+  const [showNotes, setShowNotes] = useState(false);
+  const ranked = rankedWarnings(quality.warnings);
+  const notes = ranked.filter((w) => w.severity === 'info');
+  const reasons = ranked.filter((w) => w.severity !== 'info');
+  const perFloor = reasons.filter((w) => w.scope !== 'result');
+  const wholeDrawing = reasons.filter((w) => w.scope === 'result');
+
+  const tone = quality.level === 'good' ? 'text-slate-500'
+    : quality.level === 'fair' ? 'text-amber-400' : 'text-red-400';
+  const headline = quality.level === 'good'
+    ? `${ranked.length} note${ranked.length === 1 ? '' : 's'}`
+    : `${quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}`
+      + `${quality.reason ? ` · ${quality.reason}` : ''}`;
+
+  const row = (warning) => (
+    <WarningRow
+      key={warning.index}
+      warning={warning}
+      anchor={resolveAnchor(quality.warnings[warning.index], anchorCtx)}
+      active={focusedWarning?.traceId === trace.id && focusedWarning?.index === warning.index}
+      onFocus={() => onFocus(warning.index)}
+    />
+  );
+
+  return (
+    <div className="pl-3.5">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className={`flex w-full items-start gap-0.5 text-left text-[9px] leading-tight cursor-pointer hover:opacity-80 ${tone}`}
+      >
+        {expanded
+          ? <ChevronDown className="w-2.5 h-2.5 mt-px shrink-0" />
+          : <ChevronRight className="w-2.5 h-2.5 mt-px shrink-0" />}
+        <span className="min-w-0">{headline}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-1 space-y-0.5">
+          {perFloor.map(row)}
+          {wholeDrawing.length > 0 && (
+            <>
+              <p className="pt-1 text-[8px] uppercase tracking-wider text-slate-600">This drawing</p>
+              {wholeDrawing.map(row)}
+            </>
+          )}
+          {notes.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowNotes((v) => !v);
+              }}
+              className="text-[9px] text-slate-600 hover:text-slate-400 cursor-pointer"
+            >
+              {showNotes ? '· hide' : `· ${notes.length} note${notes.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+          {showNotes && notes.map(row)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// `−2 voids (1 yours)`. A subtraction the user asserted by hand reads
+// differently from one the detector guessed, so a mixed set says which is which.
+const voidNote = (holes) => {
+  const rings = holeRings(holes).filter((r) => r?.length >= 3);
+  if (!rings.length) return '';
+  const mine = (holes ?? []).filter((h) => h?.source === 'user').length;
+  const mixed = mine > 0 && mine < rings.length;
+  return ` −${rings.length} ${rings.length === 1 ? 'void' : 'voids'}${mixed ? ` (${mine} yours)` : ''}`;
+};
 
 const LeftPanel = ({
   roomDimensions,
@@ -29,8 +146,17 @@ const LeftPanel = ({
   const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
+  const setPerimeterTraceType = useAppStore((s) => s.setPerimeterTraceType);
+  const areas = useAppStore(selectAreaByType);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
+  // Live state the warning anchors are derived from, so a crop or a re-scan
+  // cannot leave a highlight pointing at the wrong part of the image.
+  const rooms = useAppStore((s) => s.rooms);
+  const detectedDimensions = useAppStore((s) => s.detectedDimensions);
+  const focusedWarning = useAppStore((s) => s.focusedWarning);
+  const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
+  const [openQualityTraceId, setOpenQualityTraceId] = useState(null);
 
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -103,17 +229,40 @@ const LeftPanel = ({
     setEditingField(null);
   };
 
-  const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
+  // The headline is GLA, per the ANSI Z765 shape. With no GLA trace at all it
+  // would read 0 and the app would look broken, so the grand total stands in.
+  const typedRows = TRACE_TYPES.filter((t) => (areas.byType[t.id] ?? 0) > 0);
+  const showBreakdown = typedRows.length > 1;
+  const noGla = areas.gla === 0 && areas.total > 0;
+  const glaCount = areas.counts[DEFAULT_TRACE_TYPE] ?? 0;
+  const breakdownRows = noGla
+    ? typedRows
+    : typedRows.filter((t) => t.id !== DEFAULT_TRACE_TYPE);
+  const { value: areaText, suffix: areaSuffix } = formatArea(
+    noGla ? areas.total : areas.gla, unit
+  );
+  const areaCaption = noGla
+    ? 'Total · no GLA trace'
+    : (showBreakdown || glaCount > 1)
+      ? `GLA · ${glaCount} ${glaCount === 1 ? 'floor' : 'floors'}`
+      : null;
   // Whether this area can be trusted, stated where the area is read rather
   // than in a toast that has already gone by the time anyone asks.
   const scaleNote = scaleQualitySummary(scaleQuality);
-  const floorsInTotal = perimeterTraces.filter(
-    (t) => t.visible && t.vertices && t.vertices.length >= 3
-  ).length;
 
   const handleCopyArea = () => {
-    navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
-    toast.success(`Area copied to clipboard: ${areaText} ${areaSuffix}`);
+    if (!showBreakdown) {
+      navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
+      toast.success(`Area copied to clipboard: ${areaText} ${areaSuffix}`);
+      return;
+    }
+    // Tab-separated so it pastes into a report or a spreadsheet as rows.
+    const lines = typedRows.map(
+      (t) => `${t.label}\t${formatArea(areas.byType[t.id], unit).value} ${areaSuffix}`
+    );
+    lines.push(`Total\t${formatArea(areas.total, unit).value} ${areaSuffix}`);
+    navigator.clipboard.writeText(lines.join('\n'));
+    toast.success('Area breakdown copied to clipboard');
   };
 
   return (
@@ -202,6 +351,10 @@ const LeftPanel = ({
           )}
         </section>
 
+        {/* Scale — the length input for a hand-drawn scale line. Renders
+            nothing until the Scale tool is on or a line scale is in force. */}
+        <ScaleSection unit={unit} />
+
         <div className="panel-divider mx-3" />
 
         {/* Area Display */}
@@ -235,7 +388,9 @@ const LeftPanel = ({
           </div>
           <div 
             onDoubleClick={handleCopyArea}
-            title="Double-click to copy to clipboard"
+            title={showBreakdown
+              ? 'Double-click to copy the breakdown to clipboard'
+              : 'Double-click to copy to clipboard'}
             className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2 cursor-pointer hover:bg-chrome-950/80 hover:border-accent/40 active:scale-[0.98] transition-all duration-200 pointer-events-auto"
           >
             <div className="font-mono font-bold text-accent leading-none text-center" style={{
@@ -244,12 +399,33 @@ const LeftPanel = ({
               {areaText}
               <span className="text-accent/60 text-sm font-medium ml-1">{areaSuffix}</span>
             </div>
-            {floorsInTotal > 1 && (
+            {areaCaption && (
               <p className="mt-1 text-[10px] text-slate-500 text-center">
-                Combined total · {floorsInTotal} floors
+                {areaCaption}
               </p>
             )}
+            {showBreakdown && (
+              <div className="mt-1.5 border-t border-chrome-700/70 pt-1.5 space-y-0.5">
+                {breakdownRows.map((t) => (
+                  <div key={t.id} className="flex items-baseline justify-between text-[10px] text-slate-400">
+                    <span>{t.label}</span>
+                    <span className="font-mono">{formatArea(areas.byType[t.id], unit).value}</span>
+                  </div>
+                ))}
+                <div className="flex items-baseline justify-between border-t border-chrome-700/70 pt-1 text-[10px] font-semibold text-slate-300">
+                  <span>Total</span>
+                  <span className="font-mono">{formatArea(areas.total, unit).value}</span>
+                </div>
+              </div>
+            )}
         </div>
+        {/* Says what the grouping is and is not, so the layout cannot imply a
+            certification nobody made. */}
+        {showBreakdown && (
+          <p className="mt-1.5 text-[9px] leading-snug text-center text-slate-600">
+            Grouped in the ANSI Z765 style — not a certified measurement.
+          </p>
+        )}
         {scaleNote && area > 0 && (
           <p
             title={scaleNote.detail}
@@ -370,10 +546,24 @@ const LeftPanel = ({
 
                       {/* Derived Area & Status */}
                       <div className="flex items-center justify-between pl-3.5 text-[9px] text-slate-500 font-mono">
+                        {/* Area type — native select so it stays keyboard
+                            accessible in a 228px panel. */}
+                        <select
+                          value={normalizeTraceType(trace.type)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setPerimeterTraceType(trace.id, e.target.value)}
+                          title="Area type"
+                          className="shrink-0 max-w-[62px] cursor-pointer rounded border border-chrome-700 bg-chrome-900 py-px pl-1 pr-0.5 text-[9px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                        >
+                          {TRACE_TYPES.map((t) => (
+                            <option key={t.id} value={t.id}>{t.label}</option>
+                          ))}
+                        </select>
+                        {/* end area type */}
                         <span>
                           {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
                           {trace.closed ? ' (Closed)' : ' (Drawing)'}
-                          {trace.holes?.length ? ` −${trace.holes.length} void` : ''}
+                          {voidNote(trace.holes)}
                         </span>
                         <span>
                           {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}
@@ -381,17 +571,27 @@ const LeftPanel = ({
                       </div>
 
                       {/* Detection quality — a low-confidence outline stays
-                          marked as one after it is on the canvas. */}
-                      {quality && quality.level !== 'good' && (
-                        <div
-                          className={`pl-3.5 text-[9px] leading-tight ${
-                            quality.level === 'fair' ? 'text-amber-400' : 'text-red-400'
-                          }`}
-                          title={quality.warnings.map((w) => w.message).join('; ')}
-                        >
-                          {quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}
-                          {quality.reason ? ` · ${quality.reason}` : ''}
-                        </div>
+                          marked as one after it is on the canvas, and every
+                          reason it carries is inspectable rather than hidden
+                          in a tooltip the user cannot read or act on. */}
+                      {quality && (quality.level !== 'good' || quality.warnings.length > 0) && (
+                        <TraceQuality
+                          trace={trace}
+                          quality={quality}
+                          expanded={openQualityTraceId === trace.id}
+                          onToggle={() => setOpenQualityTraceId(
+                            openQualityTraceId === trace.id ? null : trace.id
+                          )}
+                          anchorCtx={{
+                            trace, traces: perimeterTraces, rooms, detectedDimensions,
+                          }}
+                          focusedWarning={focusedWarning}
+                          onFocus={(index) => setFocusedWarning(
+                            focusedWarning?.traceId === trace.id && focusedWarning?.index === index
+                              ? null
+                              : { traceId: trace.id, index }
+                          )}
+                        />
                       )}
                     </div>
                   );

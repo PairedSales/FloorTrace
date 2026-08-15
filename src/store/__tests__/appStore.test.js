@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { selectPerimeterOverlay, AUTOSAVE_FIELDS } from '../appStore';
+import useAppStore, {
+  selectAreaByType,
+  selectCombinedArea,
+  selectPerimeterOverlay,
+  AUTOSAVE_FIELDS,
+  CALIBRATION_SOURCES,
+  PERSISTENT_FLOOR_FIELDS,
+} from '../appStore';
 import * as undoManager from '../undoManager';
-import { calculateArea } from '../../utils/areaCalculator';
+import { calculateArea, holeRings } from '../../utils/areaCalculator';
 
 const SCALE = { x: 1, y: 1 };
 
@@ -18,6 +25,16 @@ const courtyard = [
   { x: 60, y: 60 },
   { x: 40, y: 60 },
 ];
+// A 10 x 10 light well the user punched by hand: 100 px².
+const lightWell = [
+  { x: 10, y: 10 },
+  { x: 20, y: 10 },
+  { x: 20, y: 20 },
+  { x: 10, y: 20 },
+];
+const autoHole = { id: 'hole-auto-0', ring: courtyard, source: 'auto' };
+const userHole = { id: 'hole-user-0', ring: lightWell, source: 'user' };
+
 // One corner dragged out, the way handleVertexDragEnd hands back a new array.
 const moved = [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
@@ -53,14 +70,38 @@ describe('setPerimeterOverlay', () => {
     expect(calculateArea(t.vertices, SCALE)).toBe(11000);
   });
 
-  it('clears holes when they are explicitly supplied as empty', () => {
-    seedTracedFloor();
+  // The semantic change the void tool turns on: supplying holes replaces what
+  // the detector found, and only that. A void the user punched is their
+  // assertion about the building — the wall-mode toggle reaches this path in
+  // one click and must not silently take it back.
+  it('clears auto holes and keeps user holes when holes are supplied as empty', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
 
     useAppStore.getState().setPerimeterOverlay({ vertices: moved, holes: [] });
 
     const t = activeTrace();
-    expect(t.holes).toEqual([]);
-    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(11000);
+    expect(t.holes).toEqual([userHole]);
+    // 11000 px² of outline, minus only the 100 px² the user punched.
+    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(10900);
+  });
+
+  it('replaces the detector voids on a re-trace and keeps the hand-punched one', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
+
+    const reTraced = { id: 'hole-auto-0', ring: lightWell, source: 'auto' };
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [reTraced] });
+
+    const t = activeTrace();
+    expect(t.holes).toEqual([userHole, reTraced]);
+    expect(t.holes.filter((h) => h.source === 'auto')).toHaveLength(1);
+  });
+
+  it('drops an untagged hole on a re-trace — only a user tag survives', () => {
+    seedTracedFloor();
+
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
+
+    expect(activeTrace().holes).toEqual([]);
   });
 
   it('clears holes when the overlay is cleared entirely', () => {
@@ -87,6 +128,64 @@ describe('setPerimeterOverlay', () => {
   });
 });
 
+// One normalizer absorbs the two hole shapes, so a v1 `.floorplan` written
+// before provenance existed keeps loading and still has its voids subtracted.
+describe('holeRings', () => {
+  it('accepts both a bare ring and a tagged one', () => {
+    expect(holeRings([courtyard, userHole])).toEqual([courtyard, lightWell]);
+  });
+
+  it('is what makes the area agree across the two shapes', () => {
+    expect(calculateArea(outer, SCALE, [courtyard])).toBe(9600);
+    expect(calculateArea(outer, SCALE, [autoHole])).toBe(9600);
+  });
+
+  it('survives holes being absent or malformed', () => {
+    expect(holeRings(null)).toEqual([]);
+    expect(calculateArea(outer, SCALE, [null, {}, courtyard])).toBe(9600);
+  });
+});
+
+describe('addHole / removeHole', () => {
+  beforeEach(() => {
+    useAppStore.getState().resetOverlays();
+  });
+
+  const traceId = () => useAppStore.getState().activeTraceId;
+
+  it('tags a hand-punched void as the user\'s and appends it', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole] });
+    useAppStore.getState().addHole(traceId(), lightWell);
+
+    const t = activeTrace();
+    expect(t.holes).toHaveLength(2);
+    expect(t.holes[1]).toMatchObject({ ring: lightWell, source: 'user' });
+    expect(t.holes[1].id).toEqual(expect.any(String));
+    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(9500);
+  });
+
+  it('refuses a ring with fewer than three corners', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
+    useAppStore.getState().addHole(traceId(), [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
+
+    expect(activeTrace().holes).toEqual([]);
+  });
+
+  it('removes by id and leaves the others alone', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'hole-user-0');
+
+    expect(activeTrace().holes).toEqual([autoHole]);
+  });
+
+  it('removes an untagged ring by its positional key', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [courtyard, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'ring-0');
+
+    expect(activeTrace().holes).toEqual([userHole]);
+  });
+});
+
 describe('selectPerimeterOverlay', () => {
   beforeEach(() => {
     useAppStore.getState().resetOverlays();
@@ -110,6 +209,114 @@ describe('selectPerimeterOverlay', () => {
 
     expect(after).not.toBe(before);
     expect(after.holes).toEqual([]);
+  });
+});
+
+describe('selectAreaByType', () => {
+  const box = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
+  const trace = (id, type, size, visible = true) => ({
+    id,
+    name: id,
+    vertices: box(size),
+    holes: [],
+    closed: true,
+    visible,
+    locked: false,
+    type,
+    colorSource: 'type',
+    color: '#BD93F9',
+  });
+
+  const seed = (list) => useAppStore.setState({
+    perimeterTraces: list,
+    activeTraceId: list[0]?.id ?? null,
+    calibration: {
+      calibrated: true,
+      feetPerPixel: SCALE,
+      source: 'room-calibration',
+      calibratedRoomId: null,
+      createdAt: 1,
+      quality: null,
+    },
+  });
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+  });
+
+  it('splits area by type and keeps the grand total', () => {
+    seed([
+      trace('a', 'gla', 10),      // 100
+      trace('b', 'gla', 20),      // 400
+      trace('c', 'garage', 30),   // 900
+    ]);
+
+    const areas = selectAreaByType(useAppStore.getState());
+    expect(areas.byType).toEqual({ gla: 500, garage: 900 });
+    expect(areas.counts).toEqual({ gla: 2, garage: 1 });
+    expect(areas.gla).toBe(500);
+    expect(areas.total).toBe(1400);
+    expect(selectCombinedArea(useAppStore.getState())).toBe(1400);
+  });
+
+  it('treats an untyped trace as GLA', () => {
+    const untyped = trace('legacy', undefined, 10);
+    delete untyped.type;
+    seed([untyped]);
+
+    expect(selectAreaByType(useAppStore.getState()).gla).toBe(100);
+  });
+
+  it('drops a hidden trace from its own subtotal and from the total', () => {
+    seed([trace('a', 'gla', 10), trace('b', 'garage', 20, false)]);
+
+    const areas = selectAreaByType(useAppStore.getState());
+    expect(areas.byType.garage).toBeUndefined();
+    expect(areas.counts.garage).toBeUndefined();
+    expect(areas.total).toBe(100);
+  });
+
+  // The memo is the correctness requirement: this returns an object, so without
+  // a stable reference zustand's `Object.is` re-renders every consumer on every
+  // unrelated `set()`.
+  it('returns a reference-stable object across an unrelated set()', () => {
+    seed([trace('a', 'gla', 10)]);
+    const before = selectAreaByType(useAppStore.getState());
+
+    useAppStore.getState().setIsProcessing(true, 'working');
+    expect(selectAreaByType(useAppStore.getState())).toBe(before);
+
+    useAppStore.getState().setPerimeterTraceType('a', 'porch');
+    const after = selectAreaByType(useAppStore.getState());
+    expect(after).not.toBe(before);
+    expect(after.byType).toEqual({ porch: 100 });
+  });
+});
+
+describe('focusedWarning', () => {
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    useAppStore.getState().setFocusedWarning(null);
+  });
+
+  // Which warning is being inspected is a view of the document, not part of it:
+  // undoing an edit must not restore a highlight, and reopening a project must
+  // not start with one already on the canvas.
+  it('reaches neither a snapshot nor a draft', () => {
+    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 2 });
+    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 2 });
+
+    expect(AUTOSAVE_FIELDS).not.toContain('focusedWarning');
+    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('focusedWarning');
+    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('focusedWarning');
+  });
+
+  it('survives an undo rather than being reverted by one', () => {
+    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 0 });
+    undoManager.save();
+    useAppStore.getState().setUnit('metric');
+    undoManager.undo();
+    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
   });
 });
 
@@ -177,5 +384,82 @@ describe('tracedBoundaries weight and lifetime', () => {
     expect(useAppStore.getState().tracedBoundaries).toEqual(T_NEW);
     undoManager.undo();
     expect(useAppStore.getState().tracedBoundaries).toEqual(T_OLD);
+  });
+});
+
+// The calibration write path. `source` was a constant written everywhere and
+// read nowhere; these pin it as real provenance, and pin the guard that keeps
+// unrelated setters out of the scale.
+describe('applyRoomCalibration provenance', () => {
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    undoManager.clear();
+  });
+
+  it('accepts both calibrating gestures and writes source from the argument', () => {
+    useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'room-calibration');
+    expect(useAppStore.getState().calibration.source).toBe('room-calibration');
+
+    useAppStore.getState().applyRoomCalibration({ x: 0.2, y: 0.2 }, null, 'line-calibration');
+    expect(useAppStore.getState().calibration.source).toBe('line-calibration');
+    expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.2, y: 0.2 });
+  });
+
+  it('still refuses anything outside the allowlist', () => {
+    expect(CALIBRATION_SOURCES.has('room-calibration')).toBe(true);
+    expect(CALIBRATION_SOURCES.has('line-calibration')).toBe(true);
+    expect(() =>
+      useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'somewhere-else')
+    ).toThrow();
+    expect(useAppStore.getState().calibration.calibrated).toBe(false);
+  });
+});
+
+// The lines a hand-set scale rests on are document content: undoable, exported,
+// and — unlike `rooms` — untouched by a crop or an erase, because neither
+// resamples and both keep image-pixel coordinates.
+describe('scaleLines', () => {
+  const LINE = { id: 'scale-1', start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, feet: 10 };
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    undoManager.clear();
+  });
+
+  it('is snapshotted, autosaved and exported; the tool flags are not', () => {
+    expect(AUTOSAVE_FIELDS).toContain('scaleLines');
+    expect(PERSISTENT_FLOOR_FIELDS).toContain('scaleLines');
+    expect(PERSISTENT_FLOOR_FIELDS).not.toContain('scaleToolActive');
+    expect(PERSISTENT_FLOOR_FIELDS).not.toContain('currentScaleLine');
+  });
+
+  it('survives a snapshot and undo round-trip with the calibration it set', () => {
+    const s = useAppStore.getState();
+    s.setImage('data:image/png;base64,AAAA'); // undoManager.save() no-ops without one
+    s.addScaleLine(LINE);
+    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'line-calibration');
+
+    undoManager.save();
+    useAppStore.getState().setScaleLines([]);
+    useAppStore.getState().applyRoomCalibration({ x: 0.5, y: 0.5 }, null, 'room-calibration');
+
+    undoManager.undo();
+    expect(useAppStore.getState().scaleLines).toEqual([LINE]);
+    expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.1, y: 0.1 });
+    expect(useAppStore.getState().calibration.source).toBe('line-calibration');
+  });
+
+  it('retires the scale it set when cleared, and leaves a room scale alone', () => {
+    const s = useAppStore.getState();
+    s.addScaleLine(LINE);
+    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'line-calibration');
+    useAppStore.getState().clearLineCalibration();
+    expect(useAppStore.getState().scaleLines).toEqual([]);
+    expect(useAppStore.getState().calibration.calibrated).toBe(false);
+
+    useAppStore.getState().applyRoomCalibration({ x: 0.3, y: 0.3 }, null, 'room-calibration');
+    useAppStore.getState().clearLineCalibration();
+    expect(useAppStore.getState().calibration.calibrated).toBe(true);
+    expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.3, y: 0.3 });
   });
 });

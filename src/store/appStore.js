@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice, newTraceId } from './floorManager';
-import { calculateArea } from '../utils/areaCalculator';
+import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
+import {
+  DEFAULT_TRACE_TYPE,
+  normalizeTraceType,
+  normalizeTraces,
+  traceTypeColor,
+} from '../utils/traceTypes';
 
 /**
  * Default values for all working state fields (the state that participates in
@@ -23,7 +29,9 @@ const workingStateDefaults = () => ({
       closed: false,
       visible: true,
       locked: false,
-      color: '#BD93F9',
+      type: DEFAULT_TRACE_TYPE,
+      colorSource: 'type',
+      color: traceTypeColor(DEFAULT_TRACE_TYPE),
     }
   ],
   traceInteractionMode: 'idle',
@@ -57,6 +65,12 @@ const workingStateDefaults = () => ({
   angleToolState: null,
   measurementLines: [],
   currentMeasurementLine: null,
+  scaleToolActive: false,
+  // The lines the scale was asserted from, in original image px. Kept rather
+  // than just their result: a hand-set scale must stay inspectable and
+  // re-editable, and a second line has to be scored against the first.
+  scaleLines: [],
+  currentScaleLine: null,
   drawAreaActive: false,
   customShapes: [],
   currentCustomShape: null,
@@ -65,6 +79,7 @@ const workingStateDefaults = () => ({
   eraserToolActive: false,
   eraserBrushSize: 60,
   cropToolActive: false,
+  voidToolActive: false,
   // Draw mode: rough brush strokes over the exterior walls, which the tracer
   // then reads as a corridor constraint. Scratch input, not document content —
   // undoable and restored with a draft, but never written to a .floorplan.
@@ -156,9 +171,12 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
 const EXCLUDED_PERSISTENT_FIELDS = [
   'isProcessing', 'processingMessage', 'traceInteractionMode',
   'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
-  'cropToolActive', 'eraserBrushSize',
+  'cropToolActive', 'eraserBrushSize', 'voidToolActive',
   'drawModeActive', 'drawBrushSize', 'drawStrokes',
   'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
+  // `scaleLines` is deliberately absent: it is document content, the evidence
+  // a hand-set scale rests on.
+  'scaleToolActive', 'currentScaleLine',
   'canvasRotation',   // written to globalSettings
   'viewportSyncToken',
   'isDirty', 'projectId', // written to metadata
@@ -166,6 +184,12 @@ const EXCLUDED_PERSISTENT_FIELDS = [
 export const PERSISTENT_FLOOR_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_PERSISTENT_FIELDS.includes(k)
 );
+
+// Who may write the calibration scale. An allowlist rather than one string
+// equality so `source` can be real provenance instead of a constant that was
+// written everywhere and read nowhere; the guard's purpose — no accidental
+// scale writes from unrelated setters — is unchanged.
+export const CALIBRATION_SOURCES = new Set(['room-calibration', 'line-calibration']);
 
 // ──── helpers ────────────────────────────────────────────────────────────────
 
@@ -210,6 +234,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
   showPanelOptions: false,
   showHelpModal: false,
+  // Which detection warning the user is inspecting, as {traceId, index} into
+  // that trace's `quality.warnings`. Declared here rather than in the working
+  // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
+  // edit must not restore a highlight. Every reader resolves it against the
+  // live traces, so a focus left on a deleted trace simply renders nothing.
+  focusedWarning: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -238,7 +268,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         closed: true,
         visible: true,
         locked: false,
-        color: '#BD93F9',
+        type: DEFAULT_TRACE_TYPE,
+        colorSource: 'type',
+        color: traceTypeColor(DEFAULT_TRACE_TYPE),
       };
       set({
         perimeterTraces: [newTrace],
@@ -257,7 +289,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
           // rings a vertex edit did not touch, so an update that omits them
           // keeps them. Defaulting them to [] silently deleted every courtyard
           // on the first corner nudge and added the void back into the area.
-          holes: v ? ('holes' in v ? (v.holes ?? []) : (t.holes ?? [])) : [],
+          // Supplying them replaces only what the detector found — see mergeHoles.
+          holes: v ? ('holes' in v ? mergeHoles(t.holes, v.holes) : (t.holes ?? [])) : [],
           // Editing a trace by hand makes it the user's geometry, so an
           // auto-detection's confidence no longer describes it.
           quality: v && 'quality' in v ? v.quality : null,
@@ -281,7 +314,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
   applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration', quality = null) => {
-    if (mutationSource !== 'room-calibration') {
+    if (!CALIBRATION_SOURCES.has(mutationSource)) {
       throw new Error(
         "Only explicit room calibration may modify calibration scale"
       );
@@ -306,7 +339,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       calibration: {
         calibrated: true,
         feetPerPixel: targetScale,
-        source: 'room-calibration',
+        source: mutationSource,
         calibratedRoomId: roomId,
         createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
@@ -353,6 +386,26 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setAngleToolState: (v) => set({ angleToolState: v }),
   setMeasurementLines: (v) => set({ measurementLines: v }),
   setCurrentMeasurementLine: (v) => set({ currentMeasurementLine: v }),
+  setScaleToolActive: (v) => set({ scaleToolActive: v }),
+  setScaleLines: (v) => set({ scaleLines: v }),
+  setCurrentScaleLine: (v) => set({ currentScaleLine: v }),
+  addScaleLine: (line) => set((state) => (
+    line?.start && line?.end ? { scaleLines: [...state.scaleLines, line] } : {}
+  )),
+  removeScaleLine: (id) => set((state) => ({
+    scaleLines: state.scaleLines.filter((l) => l.id !== id),
+  })),
+  // Clearing the lines must retire the scale they asserted: a calibration
+  // whose evidence is gone is the green-but-wrong failure this codebase keeps
+  // re-learning. Gated on the source so a room calibration cannot be clobbered.
+  clearLineCalibration: () => set((state) => ({
+    scaleLines: [],
+    currentScaleLine: null,
+    calibration: state.calibration?.source === 'line-calibration'
+      ? workingStateDefaults().calibration
+      : state.calibration,
+    isDirty: true,
+  })),
   setDrawAreaActive: (v) => set({ drawAreaActive: v }),
   setCustomShapes: (v) => set({ customShapes: v }),
   setCurrentCustomShape: (v) => set({ currentCustomShape: v }),
@@ -369,6 +422,33 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
+  setVoidToolActive: (v) => set({ voidToolActive: v }),
+  /**
+   * Punch a void out of a trace by hand. Tagged `source: 'user'` so a later
+   * re-trace keeps it; callers save the undo point before calling.
+   */
+  addHole: (traceId, ring) => set((state) => {
+    if (!ring || ring.length < 3) return {};
+    const hole = {
+      id: `hole-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      ring,
+      source: 'user',
+    };
+    return {
+      perimeterTraces: (state.perimeterTraces || []).map((t) => (
+        t.id === traceId ? { ...t, holes: [...(t.holes ?? []), hole] } : t
+      )),
+      isDirty: true,
+    };
+  }),
+  removeHole: (traceId, holeId) => set((state) => ({
+    perimeterTraces: (state.perimeterTraces || []).map((t) => (
+      t.id === traceId
+        ? { ...t, holes: (t.holes ?? []).filter((h, i) => holeKey(h, i) !== holeId) }
+        : t
+    )),
+    isDirty: true,
+  })),
   setDrawModeActive: (v) => set({ drawModeActive: v }),
   setDrawBrushSize: (v) => set({ drawBrushSize: v }),
   setDrawStrokes: (v) => set({ drawStrokes: v }),
@@ -391,6 +471,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   }),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
+  setFocusedWarning: (v) => set({ focusedWarning: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────
@@ -436,6 +517,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     for (const k of SNAPSHOT_FIELDS) {
       patch[k] = snapshot[k] ?? defaults[k];
     }
+    // A `.floorplan` carries its undo stacks, so undoing into a pre-migration
+    // snapshot would otherwise hand back untyped traces.
+    patch.perimeterTraces = normalizeTraces(patch.perimeterTraces);
     // Older snapshots predate activeTraceId being captured — never leave the
     // selection dangling on a trace that no longer exists.
     const traces = patch.perimeterTraces || [];
@@ -472,6 +556,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       if (k in saved) {
         patch[k] = saved[k];
       }
+    }
+    // A draft written before types carries untyped traces.
+    if ('perimeterTraces' in patch) {
+      patch.perimeterTraces = normalizeTraces(patch.perimeterTraces);
     }
     // Also set isProcessing/processingMessage to false/empty when restoring
     patch.isProcessing = false;
@@ -548,15 +636,20 @@ export const selectPerimeterOverlay = (state) => {
 
 let lastFeetPerPixel = null;
 let lastTraces = [];
-let lastCombinedArea = 0;
+let lastAreaByType = null;
 
-/** Selector to get the combined total area of all visible traces */
-export const selectCombinedArea = (state) => {
+/**
+ * Area of the visible traces, split by type. The memo is a correctness
+ * requirement, not an optimisation: this returns an object, and zustand's
+ * default `Object.is` would re-render every consumer on every unrelated `set()`
+ * without a stable reference.
+ */
+export const selectAreaByType = (state) => {
   const traces = state.perimeterTraces || [];
   const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
 
   // Quick check for changes in feetPerPixel properties or trace object reference
-  let changed = !lastFeetPerPixel ||
+  let changed = !lastAreaByType || !lastFeetPerPixel ||
                 feetPerPixel.x !== lastFeetPerPixel.x ||
                 feetPerPixel.y !== lastFeetPerPixel.y ||
                 traces.length !== lastTraces.length;
@@ -570,18 +663,36 @@ export const selectCombinedArea = (state) => {
   }
 
   if (!changed) {
-    return lastCombinedArea;
+    return lastAreaByType;
   }
 
-  const areaValue = traces
-    .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
-    .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel, t.holes), 0);
+  const byType = {};
+  const counts = {};
+  let total = 0;
+  // Hiding a trace drops it from its own subtotal and from the total, which is
+  // what hiding a trace has always meant here.
+  for (const t of traces) {
+    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
+    const type = normalizeTraceType(t.type);
+    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
+    byType[type] = (byType[type] ?? 0) + value;
+    counts[type] = (counts[type] ?? 0) + 1;
+    total += value;
+  }
 
   lastFeetPerPixel = { ...feetPerPixel };
   lastTraces = traces.slice();
-  lastCombinedArea = areaValue;
-  return areaValue;
+  lastAreaByType = {
+    byType,
+    counts,
+    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
+    total,
+  };
+  return lastAreaByType;
 };
+
+/** Selector to get the combined total area of all visible traces */
+export const selectCombinedArea = (state) => selectAreaByType(state).total;
 
 export { AUTOSAVE_FIELDS };
 export default useAppStore;

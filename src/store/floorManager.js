@@ -1,4 +1,13 @@
 import * as undoManager from './undoManager';
+import {
+  DEFAULT_TRACE_TYPE,
+  assignTypeColors,
+  normalizeTraceType,
+  traceTypeColor,
+} from '../utils/traceTypes';
+// From areaCalculator, not appStore: appStore already imports createFloorSlice
+// from here, so sourcing it there made a cycle that only worked by hoisting.
+import { mergeHoles } from '../utils/areaCalculator';
 
 /**
  * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
@@ -8,16 +17,6 @@ import * as undoManager from './undoManager';
  * Legacy floor properties are removed from active Zustand state. Compatibility
  * translation is encapsulated inside the serialization layer.
  */
-
-const TRACE_COLORS = [
-  '#BD93F9', // Dracula Purple
-  '#8BE9FD', // Dracula Cyan
-  '#50FA7B', // Dracula Green
-  '#FF79C6', // Dracula Pink
-  '#FFB86C', // Dracula Orange
-  '#F1FA8C', // Dracula Yellow
-  '#FF5555', // Dracula Red
-];
 
 const ordinalSuffix = (num) =>
   num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
@@ -59,8 +58,6 @@ export function createFloorSlice(set, get) {
 
       const newId = newTraceId();
       const newName = generateTraceName(state.perimeterTraces);
-      const colorIndex = state.perimeterTraces.length % TRACE_COLORS.length;
-      const newColor = TRACE_COLORS[colorIndex];
 
       const newTrace = {
         id: newId,
@@ -69,11 +66,13 @@ export function createFloorSlice(set, get) {
         closed: false,
         visible: true,
         locked: false,
-        color: newColor,
+        type: DEFAULT_TRACE_TYPE,
+        colorSource: 'type',
+        color: traceTypeColor(DEFAULT_TRACE_TYPE),
       };
 
       set({
-        perimeterTraces: [...state.perimeterTraces, newTrace],
+        perimeterTraces: assignTypeColors([...state.perimeterTraces, newTrace]),
         activeTraceId: newId,
         traceInteractionMode: 'drawing',
         perimeterVertices: [], // start drawing immediately
@@ -121,7 +120,8 @@ export function createFloorSlice(set, get) {
       }
 
       set({
-        perimeterTraces: remainingTraces,
+        // Re-shaded so the lightness steps close up behind the deleted trace.
+        perimeterTraces: assignTypeColors(remainingTraces),
         activeTraceId: nextActiveId,
         traceInteractionMode: nextActiveId ? 'idle' : 'idle',
         perimeterVertices: null,
@@ -138,6 +138,25 @@ export function createFloorSlice(set, get) {
         t.id === traceId ? { ...t, name: newName } : t
       );
       set({ perimeterTraces: updated, isDirty: true });
+    },
+
+    /**
+     * Set a perimeter trace's area type. The type moves area between the
+     * reported subtotals, so it is document content and saves an undo snapshot.
+     */
+    setPerimeterTraceType: (traceId, type) => {
+      const state = get();
+      const traces = state.perimeterTraces || [];
+      if (!traces.some((t) => t.id === traceId)) return;
+      undoManager.save();
+
+      const nextType = normalizeTraceType(type);
+      set({
+        perimeterTraces: assignTypeColors(
+          traces.map((t) => (t.id === traceId ? { ...t, type: nextType } : t))
+        ),
+        isDirty: true,
+      });
     },
 
     /**
@@ -173,11 +192,15 @@ export function createFloorSlice(set, get) {
 
       let traces;
       if (current.length === normalized.length) {
-        // Identity is kept, and visibility is part of identity: re-tracing must
-        // not un-hide a trace the user hid.
+        // Identity is kept, and visibility and type are part of identity:
+        // re-tracing must not un-hide a trace the user hid, nor reset a garage
+        // the user typed back to GLA.
         traces = current.map((t, i) => ({
           ...t,
           ...normalized[i],
+          // Spreading `normalized[i]` would replace the holes wholesale, and a
+          // void the user punched is not the detector's to discard.
+          holes: mergeHoles(t.holes, normalized[i].holes),
           closed: true,
         }));
       } else {
@@ -185,12 +208,19 @@ export function createFloorSlice(set, get) {
           id: newTraceId(),
           name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
           ...floor,
+          // No identity to carry across a floor-count change, so the voids ride
+          // along by position — the common case is a floor gained or lost below
+          // the one that was punched.
+          holes: mergeHoles(current[i]?.holes, floor.holes),
           closed: true,
           visible: true,
           locked: false,
-          color: TRACE_COLORS[i % TRACE_COLORS.length],
+          type: DEFAULT_TRACE_TYPE,
+          colorSource: 'type',
+          color: traceTypeColor(DEFAULT_TRACE_TYPE),
         }));
       }
+      traces = assignTypeColors(traces);
 
       const activeStillExists = traces.some((t) => t.id === state.activeTraceId);
       set({
@@ -216,7 +246,9 @@ export function createFloorSlice(set, get) {
             closed: false,
             visible: true,
             locked: false,
-            color: '#BD93F9',
+            type: DEFAULT_TRACE_TYPE,
+            colorSource: 'type',
+            color: traceTypeColor(DEFAULT_TRACE_TYPE),
           }
         ],
         activeTraceId: defaultTraceId,

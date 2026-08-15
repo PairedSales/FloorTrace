@@ -9,8 +9,12 @@ import {
   Layers,
   Brush,
   Check,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
+import useUndoHistory from '../hooks/useUndoHistory';
+import * as undoManager from '../store/undoManager';
 
 const Toolbar = ({
   image,
@@ -32,6 +36,8 @@ const Toolbar = ({
   onAddFloor,
   floorCount,
 }) => {
+  const { canUndo, canRedo } = useUndoHistory();
+
   return (
     <header className="flex items-center h-12 px-3 bg-chrome-800 border-b border-chrome-700 select-none shrink-0">
       {/* Logo */}
@@ -78,6 +84,30 @@ const Toolbar = ({
         >
           <Download className="w-3.5 h-3.5" />
           <span>Save As</span>
+        </button>
+      </div>
+
+      <div className="w-px h-5 bg-chrome-700 mx-2" />
+
+      {/* History — icon-only; the tooltip is the point, since it is what
+          teaches the keybindings that already existed with no affordance. */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={undoManager.undo}
+          disabled={!canUndo}
+          className="toolbar-btn"
+          title="Undo (Ctrl+Z)"
+        >
+          <Undo2 className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={undoManager.redo}
+          disabled={!canRedo}
+          className="toolbar-btn"
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <Redo2 className="w-4 h-4" />
         </button>
       </div>
 

@@ -74,6 +74,20 @@ let undoStack = [];
 let redoStack = [];
 let savedRedoStackForCancel = null;
 
+// The stacks are module state, so a button has no way to observe them; every
+// site below that mutates either stack must emit or the buttons lie.
+const listeners = new Set();
+const emit = () => listeners.forEach((fn) => fn());
+
+export const subscribe = (fn) => {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+};
+export const canUndo = () => undoStack.length > 0;
+export const canRedo = () => redoStack.length > 0;
+
 /**
  * Return the image reference from the most recent snapshot, or null.
  * Used by createSnapshot to decide whether the image needs deep-cloning.
@@ -101,6 +115,7 @@ export function save() {
   savedRedoStackForCancel = redoStack;
   undoStack.push(internSnapshot(state.createSnapshot(lastSnapshotImage())));
   redoStack = [];
+  emit();
   
   // Set project state as dirty
   state.setIsDirty(true);
@@ -116,6 +131,7 @@ export function cancelLastSave() {
     redoStack = savedRedoStackForCancel;
     savedRedoStackForCancel = null;
     pruneImagePool();
+    emit();
   }
 }
 
@@ -129,6 +145,7 @@ export function undo() {
   useAppStore.getState().applySnapshot(resolveSnapshot(undoStack.pop()));
   pruneImagePool();
   useAppStore.getState().setIsDirty(true);
+  emit();
   return true;
 }
 
@@ -146,6 +163,7 @@ export function redo() {
   useAppStore.getState().applySnapshot(resolveSnapshot(redoStack.pop()));
   pruneImagePool();
   useAppStore.getState().setIsDirty(true);
+  emit();
   return true;
 }
 
@@ -158,6 +176,7 @@ export function clear() {
   redoStack = [];
   savedRedoStackForCancel = null;
   imagePool.clear();
+  emit();
 }
 
 /**
@@ -188,4 +207,5 @@ export function setHistoryState(history) {
       imagePool.set(k, v);
     }
   }
+  emit();
 }

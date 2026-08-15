@@ -8,6 +8,10 @@
  *  - Adjacent shared endpoints only
  */
 
+// Extension required: detection/validate.js imports this file, and the Node
+// benchmark harnesses load that path without Vite's extensionless resolution.
+import { pointInPolygon } from './detection/polygon.js';
+
 const EPSILON = 1e-5;
 const EPSILON_SQ = EPSILON * EPSILON;
 
@@ -251,6 +255,60 @@ export function validateVertexMove(vertices, dragIndex, newPoint, isClosed = tru
   }
 
   return true;
+}
+
+/** True when any edge of ring `a` crosses any edge of ring `b`. */
+function ringsCross(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      if (segmentsIntersect(a1, a2, b[j], b[(j + 1) % b.length])) return true;
+    }
+  }
+  return false;
+}
+
+const holdsAVertexOf = (ring, other) => other.some((v) => pointInPolygon(v, ring, []));
+
+/**
+ * A hand-punched void must be a simple ring lying wholly inside `outer` and
+ * clear of every ring already punched out of it. Exact rather than sampled —
+ * these polygons have a handful of vertices each.
+ *
+ * The edge-crossing check is the one vertex containment alone misses: a void
+ * spanning a concave notch can have every vertex inside and still cross a wall.
+ */
+export function validateHoleRing(ring, outer, existingHoles = []) {
+  if (!ring || ring.length < 3) {
+    return { ok: false, reason: 'A void needs at least three corners' };
+  }
+  if (!outer || outer.length < 3) {
+    return { ok: false, reason: 'No closed outline to punch a void out of' };
+  }
+
+  if (hasSelfIntersection(ring, true)) {
+    return { ok: false, reason: 'The void crosses itself' };
+  }
+
+  for (const v of ring) {
+    if (!pointInPolygon(v, outer, [])) {
+      return { ok: false, reason: 'The void must sit inside the outline' };
+    }
+  }
+
+  if (ringsCross(ring, outer)) {
+    return { ok: false, reason: 'The void crosses the outline' };
+  }
+
+  for (const other of existingHoles ?? []) {
+    if (!other || other.length < 3) continue;
+    if (ringsCross(ring, other) || holdsAVertexOf(other, ring) || holdsAVertexOf(ring, other)) {
+      return { ok: false, reason: 'The void overlaps another void' };
+    }
+  }
+
+  return { ok: true, reason: null };
 }
 
 /**

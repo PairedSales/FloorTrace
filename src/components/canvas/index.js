@@ -1,9 +1,11 @@
 export { default as RoomOverlayLayer } from './RoomOverlayLayer';
 export { default as PerimeterLayer } from './PerimeterLayer';
 export { default as MeasurementLayer } from './MeasurementLayer';
+export { default as ScaleLineLayer } from './ScaleLineLayer';
 export { default as ShapeLayer } from './ShapeLayer';
 export { default as DimensionOverlay } from './DimensionOverlay';
 export { default as PerimeterPlacementLayer } from './PerimeterPlacementLayer';
 export { default as DrawModeLayer } from './DrawModeLayer';
 export { default as AngleOverlay } from './AngleOverlay';
+export { default as WarningHighlightLayer } from './WarningHighlightLayer';
 export { getCanvasCoordinates, pointToLineDistance, getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';

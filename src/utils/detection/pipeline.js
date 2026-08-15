@@ -17,6 +17,7 @@ import { polygonBounds, mapPolygonToOriginal, ringSetArea } from './polygon.js';
 import { validateBoundaryResult } from './validate.js';
 import { getCachedAnalysis, getSearchCache } from './cache.js';
 import { rasterizeBrush } from './brush.js';
+import { RESULT_SCOPED_CODES } from '../boundaryQuality.js';
 
 const toOverlay = (bounds) => ({
   x1: bounds.minX,
@@ -38,6 +39,40 @@ const mapRings = (rings, scaleX, scaleY) =>
     .map((ring) => mapPolygonToOriginal(ring, scaleX, scaleY))
     .filter((ring) => ring.length >= 3);
 
+// `anchor` (where on the image to look) is filled by the detector in a later
+// pass; it is declared here so the field exists wherever a warning does.
+const tagWarning = (w) => ({
+  ...w,
+  scope: RESULT_SCOPED_CODES.has(w.code) ? 'result' : 'floor',
+  anchor: w.anchor ?? null,
+});
+
+const namesFloor = (w, i) => w.detail?.floor === i
+  || (Array.isArray(w.detail?.floors) && w.detail.floors.includes(i));
+
+// Validation is raised against the whole result, after the per-floor split the
+// app reads — so `label-outside`, `self-intersecting` and the rest lived only
+// in the toast and died with it. Fan each one back onto the floor its detail
+// names; whole-drawing findings go onto every floor, tagged so the panel can
+// say which is which. The top-level list is left exactly as it was.
+const fanOutWarnings = (floors, boundaryWarnings, validationWarnings) => {
+  const perFloor = new Set(floors.flatMap((f) => (f.warnings ?? []).map((w) => w.code)));
+  // Whatever the boundary stage raised above any single floor. Its list is the
+  // union of the floors' own warnings plus these, so the floors' codes are what
+  // separates them.
+  const resultOnly = boundaryWarnings.filter(
+    (w) => RESULT_SCOPED_CODES.has(w.code) && !perFloor.has(w.code),
+  );
+  return floors.map((floor, i) => ({
+    ...floor,
+    warnings: [
+      ...(floor.warnings ?? []),
+      ...validationWarnings.filter((w) => RESULT_SCOPED_CODES.has(w.code) || namesFloor(w, i)),
+      ...resultOnly,
+    ].map(tagWarning),
+  }));
+};
+
 // Constraints arrive in original image px; the detector works at the analysis
 // scale. Rooms are rectangles known to be inside the building; interior points
 // are label positions the OCR pass located and parsed.
@@ -55,6 +90,10 @@ const scaleConstraints = (constraints, analysis) => {
         top: r.rect.top * sy,
         bottom: r.rect.bottom * sy,
       },
+      // Kept unscaled so a `room-outside` warning can carry where the room was
+      // in original px. Rooms are written with `name: null`, so matching a
+      // warning back to one by name never resolves.
+      sourceRect: r.rect,
     }));
   const interiorPoints = (constraints.interiorPoints ?? [])
     .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -100,7 +139,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       excludedGarages: 0,
       quality: {
         confidence: 0,
-        warnings: [{ code: 'no-boundary', severity: 'error', message: 'no wall outline could be traced' }],
+        warnings: [tagWarning({ code: 'no-boundary', severity: 'error', message: 'no wall outline could be traced' })],
         source,
       },
       debug: { elapsedMs: Date.now() - t0 },
@@ -141,13 +180,13 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     },
   );
 
-  const warnings = [...(boundary.warnings ?? []), ...validation.warnings];
+  const warnings = [...(boundary.warnings ?? []), ...validation.warnings].map(tagWarning);
   const confidence = Math.max(0, Math.min(0.98, boundary.confidence * validation.factor));
 
   return {
     outer,
     inner,
-    floors,
+    floors: fanOutWarnings(floors, boundary.warnings ?? [], validation.warnings),
     holes: mapRings(boundary.holes, scaleX, scaleY),
     innerHoles: mapRings(boundary.innerHoles, scaleX, scaleY),
     // Top-level (not debug): the worker only forwards a whitelist of fields.

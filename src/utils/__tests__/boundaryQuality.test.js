@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { primaryWarning, qualitySummary } from '../boundaryQuality.js';
+import {
+  primaryWarning, qualitySummary, rankedWarnings, warningLabel, WARNING_CODES,
+} from '../boundaryQuality.js';
 import { warning } from '../detection/scoring.js';
 
 describe('primaryWarning', () => {
@@ -52,5 +54,56 @@ describe('primaryWarning', () => {
     expect(summary.level).toBe('poor');
     expect(summary.reason).toBe('the traced outline crosses itself');
     expect(summary.warnings).toHaveLength(2);
+  });
+});
+
+describe('rankedWarnings', () => {
+  it('agrees with primaryWarning about which warning is worst', () => {
+    const list = [
+      warning('no-alternative', null, 'info'),
+      warning('heavy-closing', { radius: 12 }),
+      warning('self-intersecting', { floor: 0 }, 'error'),
+      warning('no-inner', { floor: 0 }),
+    ];
+    const ranked = rankedWarnings(list);
+    expect(ranked.map((w) => w.code)).toEqual([
+      'self-intersecting', 'heavy-closing', 'no-inner', 'no-alternative',
+    ]);
+    expect(primaryWarning(list)).toBe(ranked[0].detail);
+  });
+
+  it('keeps the index of the source array so a click cannot land elsewhere', () => {
+    const list = [warning('no-inner', { floor: 0 }), warning('unsealed', null, 'error')];
+    const ranked = rankedWarnings(list);
+    expect(ranked[0].code).toBe('unsealed');
+    expect(list[ranked[0].index].code).toBe('unsealed');
+    expect(list[ranked[1].index].code).toBe('no-inner');
+  });
+
+  it('skips info notes when picking the primary, but still lists them', () => {
+    const list = [warning('no-alternative', null, 'info')];
+    expect(rankedWarnings(list)).toHaveLength(1);
+    expect(primaryWarning(list)).toBeNull();
+  });
+
+  it('derives the scope when the tag did not survive a round trip', () => {
+    const ranked = rankedWarnings([
+      warning('label-outside', { count: 1, of: 3 }, 'error'),
+      warning('unsealed', null, 'error'),
+    ]);
+    expect(ranked.find((w) => w.code === 'label-outside').scope).toBe('result');
+    expect(ranked.find((w) => w.code === 'unsealed').scope).toBe('floor');
+  });
+
+  it('prefers the tag the detector attached over the derived one', () => {
+    const [only] = rankedWarnings([{ ...warning('unsealed'), scope: 'result' }]);
+    expect(only.scope).toBe('result');
+  });
+
+  it('gives every code a headline, including one it has never seen', () => {
+    for (const code of WARNING_CODES) {
+      expect(warningLabel(code), code).toBeTruthy();
+    }
+    expect(warningLabel('some-future-code')).toBe('Some future code');
   });
 });

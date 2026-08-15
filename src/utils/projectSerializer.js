@@ -1,11 +1,18 @@
 import { z } from 'zod';
 import { internKey } from './hash';
+import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from './traceTypes';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // Floor state fields written to a project file. Derived from the store's one
 // declaration of working state rather than hand-listed here — the hand-listed
 // version silently dropped fields the app had come to depend on.
 export { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
+
+// The trace-type migration. Lives in traceTypes.js so `appStore` can run it on
+// the two entry points this file does not own without importing zod into the
+// entry chunk, and is re-exported here because this is the file that defines
+// what a saved trace may contain.
+export { normalizeTraces } from './traceTypes';
 
 // ── Zod Schema Definition ───────────────────────────────────────────────────
 
@@ -39,6 +46,13 @@ const scaleQualitySchema = z.object({
   // It selects which wording the Area panel uses, so a reopened project that
   // dropped it would describe an automatic scale in the manual flow's words.
   source: z.string().nullable().optional(),
+  // A line calibration's own evidence: which lines set it, how long the
+  // weakest was, and whether it holds one scalar or two. Dropped on reopen,
+  // a hand-set scale would describe itself in the automatic flow's words.
+  lineCount: z.number().optional(),
+  lengthPx: z.number().optional(),
+  feet: z.number().nullable().optional(),
+  axes: z.array(z.string()).optional(),
   rejected: z.array(z.object({
     name: z.string().nullable().optional(),
     reason: z.string(),
@@ -83,18 +97,34 @@ const traceQualitySchema = z.object({
   })).optional(),
 }).nullable().optional();
 
+// A hole is a bare ring or a tagged ring. Both shapes parse so a v1 file
+// written before provenance existed still opens; new files round-trip the tag,
+// which is what keeps a hand-punched void alive across a re-trace.
+const holeSchema = z.union([
+  z.array(vertexSchema),
+  z.object({
+    id: z.string().optional(),
+    ring: z.array(vertexSchema),
+    source: z.string().optional(),
+  }).catchall(z.any()),
+]);
+
 const perimeterTraceSchema = z.object({
   id: z.string(),
   name: z.string(),
   vertices: z.array(vertexSchema),
   // Enclosed voids (courtyards, light wells) subtracted from the trace's area.
-  holes: z.array(z.array(vertexSchema)).optional(),
+  holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
   closed: z.boolean(),
   visible: z.boolean(),
   locked: z.boolean(),
   color: z.string(),
+  // Which reported subtotal this trace's area lands in, and whether `color` is
+  // derived from that type or was chosen and must be preserved.
+  type: z.string().optional(),
+  colorSource: z.string().optional(),
 }).catchall(z.any());
 
 const roomSchema = z.object({
@@ -111,6 +141,15 @@ const roomSchema = z.object({
 const measurementLineSchema = z.object({
   start: vertexSchema,
   end: vertexSchema,
+});
+
+// A line the user drew and stated the true length of, in original image px.
+// `feet` is null between placing the line and typing its length.
+const scaleLineSchema = z.object({
+  id: z.string().optional(),
+  start: vertexSchema,
+  end: vertexSchema,
+  feet: z.number().nullable().optional(),
 });
 
 const customShapeSchema = z.object({
@@ -167,6 +206,7 @@ const floorStateSchema = z.object({
   ocrFailed: z.boolean().optional(),
   unit: z.string().optional(),
   measurementLines: z.array(measurementLineSchema).optional(),
+  scaleLines: z.array(scaleLineSchema).optional(),
   customShapes: z.array(customShapeSchema).optional(),
   tracedBoundaries: z.any().optional(),
   zoomScale: z.number().nullable().optional(),
@@ -382,7 +422,7 @@ export function deserializeSketch(project) {
     }
   }
 
-  let perimeterTraces = state.perimeterTraces || [];
+  let perimeterTraces = normalizeTraces(state.perimeterTraces || []);
   if (perimeterTraces.length === 0) {
     perimeterTraces = [
       {
@@ -392,7 +432,9 @@ export function deserializeSketch(project) {
         closed: false,
         visible: true,
         locked: false,
-        color: '#BD93F9',
+        type: DEFAULT_TRACE_TYPE,
+        colorSource: 'type',
+        color: traceTypeColor(DEFAULT_TRACE_TYPE),
       }
     ];
   }
