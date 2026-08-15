@@ -13,7 +13,7 @@ export const qualityLevel = (confidence) => {
   return 'poor';
 };
 
-const detailText = (warning) => {
+export const detailText = (warning) => {
   const d = warning.detail;
   if (!d) return warning.message;
   if (warning.code === 'bridged-opening') return `a ${d.px}px opening was bridged to close the outline`;
@@ -60,13 +60,71 @@ const UNRANKED = 999;
 const severityRank = (severity) => (severity === 'error' ? 0 : 1);
 const warningRank = (w) => severityRank(w.severity) * 1000 + (WARNING_RANK.get(w.code) ?? UNRANKED);
 
-// The single most important reason to doubt this trace, or null.
-export const primaryWarning = (warnings) => {
-  const pool = (warnings ?? []).filter((w) => w.severity !== 'info');
-  if (!pool.length) return null;
-  const worst = pool.reduce((a, b) => (warningRank(b) < warningRank(a) ? b : a));
-  return detailText(worst);
-};
+// Every code the detector is known to emit, in rank order. Exported so a guard
+// test can assert each one either resolves a canvas anchor or is declared
+// unanchorable — a warning added later must not become silently unclickable.
+export const WARNING_CODES = [...WARNING_RANK.keys()];
+
+// Warnings that describe the whole drawing rather than one floor. The panel
+// groups them under their own divider so a three-floor plan does not read as
+// three separate problems. Derived from the code, not only read from the tag
+// the detector attaches: the `.floorplan` schema types a warning's known fields
+// and drops the rest, so a reopened project arrives without `scope`.
+export const RESULT_SCOPED_CODES = new Set([
+  'label-outside', 'floors-rejected', 'no-alternative', 'no-boundary',
+]);
+
+const LABELS = new Map(Object.entries({
+  unsealed: 'Outline never closed',
+  'weak-wall-support': 'Weak wall support',
+  'bridged-opening': 'Opening bridged',
+  'heavy-closing': 'Heavy closing',
+  annexation: 'Reaches past its walls',
+  'wall-left-outside': 'Wall left outside',
+  'thin-structure-excluded': 'Thin structure excluded',
+  'incomplete-enclosure': 'Incomplete enclosure',
+  'floors-rejected': 'Outlines rejected',
+  'no-boundary': 'No outline traced',
+  'floor-empty': 'Floor has no polygon',
+  'self-intersecting': 'Outline crosses itself',
+  'covers-page': 'Covers the page',
+  'tiny-floor': 'Very small outline',
+  'inner-not-nested': 'Interior not nested',
+  'inner-over-inset': 'Interior inset far',
+  'no-inner': 'No interior envelope',
+  'floors-overlap': 'Floors overlap',
+  'room-outside': 'Room outside',
+  'label-outside': 'Label outside',
+  'no-alternative': 'Only one hypothesis',
+  'brush-mismatch': 'Does not match your outline',
+  'drawn-freehand': 'Freehand section',
+}));
+
+// A short headline for one warning. An unlisted code still gets a readable one
+// rather than being hidden, matching how WARNING_RANK treats it.
+export const warningLabel = (code) => LABELS.get(code)
+  ?? String(code ?? '').replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+// Every warning, worst first, in the shape the panel renders. `index` is the
+// position in the source array, not in this one: it is what identifies the
+// warning to focus, so re-ranking can never point the highlight at a different
+// warning than the one that was clicked.
+export const rankedWarnings = (warnings) => (warnings ?? [])
+  .map((w, index) => ({
+    index,
+    code: w.code,
+    severity: w.severity ?? 'warn',
+    label: warningLabel(w.code),
+    detail: detailText(w),
+    scope: w.scope ?? (RESULT_SCOPED_CODES.has(w.code) ? 'result' : 'floor'),
+  }))
+  .sort((a, b) => warningRank(a) - warningRank(b));
+
+// The single most important reason to doubt this trace, or null. Taken from
+// the same ranked list the panel expands, so the collapsed line and the list
+// cannot disagree about which warning is worst.
+export const primaryWarning = (warnings) =>
+  rankedWarnings(warnings).find((w) => w.severity !== 'info')?.detail ?? null;
 
 // How the scale a room set is presented. The area is the number the user acts
 // on, so every message here says what the disagreement means for the area

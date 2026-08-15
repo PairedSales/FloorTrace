@@ -646,3 +646,66 @@ describe('rectilinearFit', () => {
     expect(fit.length).toBe(5); // chamfer corner preserved
   });
 });
+
+// Validation runs on the whole result, after the per-floor split the app
+// reads. Its findings used to reach the top-level list only, so they existed
+// in the toast and nowhere else — the traces the panel renders never saw them.
+describe('traceFloorplanBoundaryCore validation routing', () => {
+  const twoFloors = () => {
+    const img = createImage(1000, 420);
+    wall(img, 50, 50, 420, 50, 8);
+    wall(img, 50, 370, 420, 370, 8);
+    wall(img, 50, 50, 50, 370, 8);
+    wall(img, 420, 50, 420, 370, 8);
+    wall(img, 560, 80, 950, 80, 8);
+    wall(img, 560, 340, 950, 340, 8);
+    wall(img, 560, 80, 560, 340, 8);
+    wall(img, 950, 80, 950, 340, 8);
+    return img;
+  };
+
+  it('lands a floor-scoped finding on the floor its detail names', () => {
+    const img = createImage(400, 300);
+    wall(img, 6, 6, 394, 6, 6);
+    wall(img, 6, 294, 394, 294, 6);
+    wall(img, 6, 6, 6, 294, 6);
+    wall(img, 394, 6, 394, 294, 6);
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced.floors.length).toBe(1);
+    const found = traced.floors[0].warnings.find((w) => w.code === 'covers-page');
+    expect(found).toBeTruthy();
+    expect(found.scope).toBe('floor');
+    expect(found.anchor).toBeNull();
+    // Still reported at the top level exactly once, as it always was.
+    expect(traced.quality.warnings.filter((w) => w.code === 'covers-page')).toHaveLength(1);
+  });
+
+  it('reaches every floor with a finding about the whole drawing', () => {
+    const traced = traceFloorplanBoundaryCore(twoFloors(), {
+      constraints: { interiorPoints: [{ x: 500, y: 20, name: '12 x 14' }] },
+    });
+    expect(traced.floors.length).toBe(2);
+    for (const floor of traced.floors) {
+      const found = floor.warnings.find((w) => w.code === 'label-outside');
+      expect(found).toBeTruthy();
+      expect(found.scope).toBe('result');
+      // Where the label is, so the panel can point at it without matching on a
+      // name two labels can share.
+      expect(found.detail.points).toEqual([{ x: 500, y: 20 }]);
+    }
+    expect(traced.quality.warnings.filter((w) => w.code === 'label-outside')).toHaveLength(1);
+  });
+
+  it('does not hand one floor another floor\'s warnings', () => {
+    const traced = traceFloorplanBoundaryCore(twoFloors());
+    expect(traced.floors.length).toBe(2);
+    traced.floors.forEach((floor, i) => {
+      for (const w of floor.warnings) {
+        if (w.detail?.floor !== undefined) expect(w.detail.floor).toBe(i);
+        expect(w).toHaveProperty('scope');
+        expect(w).toHaveProperty('anchor');
+      }
+    });
+  });
+});
