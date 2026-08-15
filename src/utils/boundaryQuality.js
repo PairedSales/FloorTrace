@@ -131,9 +131,18 @@ const autoScaleSummary = (quality) => {
   };
 };
 
+// The verdicts a single room's measurement produces, as opposed to a whole
+// scan's. Disjoint from the reasons autoScaleSummary knows.
+const ROOM_REASONS = new Set(['room-vs-auto', 'room-vs-project', 'room-internal']);
+
 export const scaleQualitySummary = (quality) => {
   if (!quality) return null;
-  if (quality.source === 'auto') return autoScaleSummary(quality);
+  // Reason before source: a room the project outvoted leaves the pooled scale
+  // in force, so its source is 'auto', but what needs saying is that this room
+  // was not used — not where the surviving scale came from.
+  if (quality.source === 'auto' && !ROOM_REASONS.has(quality.reason)) {
+    return autoScaleSummary(quality);
+  }
   if (quality.level === 'ok' || !quality.reason) return null;
   const pct = percentApart(quality.disagreement ?? 0);
 
