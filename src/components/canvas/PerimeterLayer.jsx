@@ -303,6 +303,7 @@ const PerimeterLayer = ({
   unit,
   draggingVertex,
   onVertexDragStart,
+  onVertexDragMove,
   onVertexDragEnd,
   onDeletePerimeterVertex,
   isSelfIntersecting = false,
@@ -369,6 +370,11 @@ const PerimeterLayer = ({
             next[idx] = { x, y };
             return next;
           });
+          // Report the position upward so the self-intersection check can run
+          // against it. Inside the rAF, not per mousemove: the parent stores
+          // this in state, and the frame is already the update rate for the
+          // local vertices below it.
+          onVertexDragMove?.(idx, { x, y });
         }
       });
     }
