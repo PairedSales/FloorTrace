@@ -12,7 +12,8 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { useDrawTool } from '../hooks/useDrawTool';
@@ -101,6 +102,7 @@ const CanvasStage = React.memo(({
   const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
+  const focusedWarning = useAppStore((s) => s.focusedWarning);
 
   // Shared refs to break mutual dependencies between hooks
   const cameraRef = useRef(null);
@@ -406,6 +408,69 @@ const CanvasStage = React.memo(({
     return feetPerPixel;
   }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
 
+  // The warning the panel is showing, resolved against live state every render
+  // rather than read from anything stored — see utils/warningAnchors.js. A
+  // focus left on a deleted trace or a re-traced outline resolves to nothing.
+  const warningAnchor = useMemo(() => {
+    if (!focusedWarning) return null;
+    const trace = (perimeterTraces || []).find((t) => t.id === focusedWarning.traceId);
+    const warning = trace?.quality?.warnings?.[focusedWarning.index];
+    if (!warning) return null;
+    return resolveAnchor(warning, {
+      trace, traces: perimeterTraces, rooms, detectedDimensions,
+    });
+  }, [focusedWarning, perimeterTraces, rooms, detectedDimensions]);
+
+  // Highlight always; move the camera only when the anchor is not already on
+  // screen with ~15% padding, and never zoom *in* — the user has framed the
+  // plan deliberately, and the anchor is often the whole outline.
+  useEffect(() => {
+    const stage = stageRef.current;
+    const layer = contentLayerRef.current;
+    const bounds = anchorBounds(warningAnchor);
+    if (!stage || !layer || !bounds) return;
+
+    // Layer-relative, so the canvas rotation is already applied and only the
+    // stage's own scale/position remain to be chosen.
+    const transform = layer.getTransform();
+    const corners = [
+      { x: bounds.minX, y: bounds.minY }, { x: bounds.maxX, y: bounds.minY },
+      { x: bounds.maxX, y: bounds.maxY }, { x: bounds.minX, y: bounds.maxY },
+    ].map((p) => transform.point(p));
+    const xs = corners.map((p) => p.x);
+    const ys = corners.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const scale = stage.scaleX();
+    const vw = stage.width();
+    const vh = stage.height();
+    if (!(scale > 0) || !(vw > 0) || !(vh > 0)) return;
+    const padX = vw * 0.075;
+    const padY = vh * 0.075;
+    const visible = stage.x() + scale * minX >= padX
+      && stage.x() + scale * maxX <= vw - padX
+      && stage.y() + scale * minY >= padY
+      && stage.y() + scale * maxY <= vh - padY;
+    if (visible) return;
+
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const target = Math.max(0.1, Math.min(
+      scale,
+      spanX > 0 ? (vw - 2 * padX) / spanX : Infinity,
+      spanY > 0 ? (vh - 2 * padY) / spanY : Infinity,
+    ));
+    // No sync token: the camera controller's own effect is what applies this
+    // to the stage, and it skips any transform it recognises as its own.
+    setViewportTransform(target, {
+      x: vw / 2 - target * (minX + maxX) / 2,
+      y: vh / 2 - target * (minY + maxY) / 2,
+    }, null);
+  }, [warningAnchor, setViewportTransform]);
+
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
     const cy = camera.imageObj ? camera.imageObj.height / 2 : 0;
@@ -472,6 +537,8 @@ const CanvasStage = React.memo(({
               onDeletePerimeterVertex={handleDeletePerimeterVertex}
               isSelfIntersecting={perimeter.isSelfIntersecting}
             />
+
+            <WarningHighlightLayer anchor={warningAnchor} scale={camera.scale} />
 
             <DimensionOverlay
               mode={mode}

@@ -210,6 +210,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
   showPanelOptions: false,
   showHelpModal: false,
+  // Which detection warning the user is inspecting, as {traceId, index} into
+  // that trace's `quality.warnings`. Declared here rather than in the working
+  // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
+  // edit must not restore a highlight. Every reader resolves it against the
+  // live traces, so a focus left on a deleted trace simply renders nothing.
+  focusedWarning: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -391,6 +397,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   }),
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
+  setFocusedWarning: (v) => set({ focusedWarning: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

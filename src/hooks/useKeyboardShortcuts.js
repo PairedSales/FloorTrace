@@ -40,6 +40,10 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, activ
         return;
       }
 
+      // Escape drops the warning highlight. Deliberately does not consume the
+      // event: anything else listening for Escape must still see it.
+      if (e.key === 'Escape') useAppStore.getState().setFocusedWarning(null);
+
       // Brush size shortcuts (no modifier keys required)
       if (!e.ctrlKey && !e.metaKey) {
         if ((e.key === '[' || e.key === ']') && activeBrush) {

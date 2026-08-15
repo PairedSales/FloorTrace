@@ -140,6 +140,9 @@ export const validateBoundaryResult = (result, context = {}) => {
         count: outside.length,
         of: labels.length,
         names: outside.slice(0, 4).map((l) => l.name ?? null).filter(Boolean),
+        // Where they are, not just what they read: two labels saying "12 x 14"
+        // are indistinguishable by name, and these are already original px.
+        points: outside.slice(0, 8).map(({ x, y }) => ({ x, y })),
       }, drawn ? 'warn' : 'error'));
       factor *= drawn
         ? Math.max(0.85, 1 - 0.3 * (outside.length / labels.length))

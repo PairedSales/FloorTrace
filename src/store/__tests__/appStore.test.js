@@ -113,6 +113,33 @@ describe('selectPerimeterOverlay', () => {
   });
 });
 
+describe('focusedWarning', () => {
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    useAppStore.getState().setFocusedWarning(null);
+  });
+
+  // Which warning is being inspected is a view of the document, not part of it:
+  // undoing an edit must not restore a highlight, and reopening a project must
+  // not start with one already on the canvas.
+  it('reaches neither a snapshot nor a draft', () => {
+    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 2 });
+    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 2 });
+
+    expect(AUTOSAVE_FIELDS).not.toContain('focusedWarning');
+    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('focusedWarning');
+    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('focusedWarning');
+  });
+
+  it('survives an undo rather than being reverted by one', () => {
+    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 0 });
+    undoManager.save();
+    useAppStore.getState().setUnit('metric');
+    undoManager.undo();
+    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
+  });
+});
+
 // `tracedBoundaries` is the detector result the interior/exterior toggle
 // re-applies. It is the heaviest field in a snapshot, so it is tempting to drop
 // from the field sets — these pin down why it cannot be, and how it is made

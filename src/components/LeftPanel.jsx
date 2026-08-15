@@ -1,11 +1,116 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea } from '../utils/areaCalculator';
-import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
+import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
+import { resolveAnchor } from '../utils/warningAnchors';
 import InchesInput from './InchesInput';
 import { toast } from 'sonner';
+
+const SEVERITY_DOT = { error: 'bg-red-400', warn: 'bg-amber-400', info: 'bg-slate-500' };
+
+const WarningRow = ({ warning, anchor, active, onFocus }) => (
+  <div className="flex items-start gap-1.5 py-0.5">
+    <span className={`mt-[3px] w-1.5 h-1.5 rounded-full shrink-0 ${SEVERITY_DOT[warning.severity] ?? SEVERITY_DOT.warn}`} />
+    <div className="min-w-0 flex-1">
+      <p className="text-[9px] font-semibold leading-tight text-slate-300">{warning.label}</p>
+      <p className="text-[9px] leading-tight text-slate-500">{warning.detail}</p>
+    </div>
+    {anchor && (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFocus();
+        }}
+        title={active ? 'Hide on canvas' : 'Show on canvas'}
+        className={`p-0.5 rounded shrink-0 transition-colors ${
+          active ? 'text-accent bg-chrome-800' : 'text-slate-500 hover:text-slate-200 hover:bg-chrome-800'
+        }`}
+      >
+        <Crosshair className="w-3 h-3" />
+      </button>
+    )}
+  </div>
+);
+
+/**
+ * The detector's reasons for doubting one trace, ranked and inspectable.
+ * The collapsed line is the first entry of the same ranked list the expansion
+ * shows, so the two cannot disagree about which warning is worst. Severity is
+ * read from the warning rather than the trace: `label-outside` is deliberately
+ * gentler on a hand-drawn outline, and must keep reading as a warning there.
+ */
+const TraceQuality = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarning, onFocus }) => {
+  const [showNotes, setShowNotes] = useState(false);
+  const ranked = rankedWarnings(quality.warnings);
+  const notes = ranked.filter((w) => w.severity === 'info');
+  const reasons = ranked.filter((w) => w.severity !== 'info');
+  const perFloor = reasons.filter((w) => w.scope !== 'result');
+  const wholeDrawing = reasons.filter((w) => w.scope === 'result');
+
+  const tone = quality.level === 'good' ? 'text-slate-500'
+    : quality.level === 'fair' ? 'text-amber-400' : 'text-red-400';
+  const headline = quality.level === 'good'
+    ? `${ranked.length} note${ranked.length === 1 ? '' : 's'}`
+    : `${quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}`
+      + `${quality.reason ? ` · ${quality.reason}` : ''}`;
+
+  const row = (warning) => (
+    <WarningRow
+      key={warning.index}
+      warning={warning}
+      anchor={resolveAnchor(quality.warnings[warning.index], anchorCtx)}
+      active={focusedWarning?.traceId === trace.id && focusedWarning?.index === warning.index}
+      onFocus={() => onFocus(warning.index)}
+    />
+  );
+
+  return (
+    <div className="pl-3.5">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className={`flex w-full items-start gap-0.5 text-left text-[9px] leading-tight cursor-pointer hover:opacity-80 ${tone}`}
+      >
+        {expanded
+          ? <ChevronDown className="w-2.5 h-2.5 mt-px shrink-0" />
+          : <ChevronRight className="w-2.5 h-2.5 mt-px shrink-0" />}
+        <span className="min-w-0">{headline}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-1 space-y-0.5">
+          {perFloor.map(row)}
+          {wholeDrawing.length > 0 && (
+            <>
+              <p className="pt-1 text-[8px] uppercase tracking-wider text-slate-600">This drawing</p>
+              {wholeDrawing.map(row)}
+            </>
+          )}
+          {notes.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowNotes((v) => !v);
+              }}
+              className="text-[9px] text-slate-600 hover:text-slate-400 cursor-pointer"
+            >
+              {showNotes ? '· hide' : `· ${notes.length} note${notes.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+          {showNotes && notes.map(row)}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const LeftPanel = ({
   roomDimensions,
@@ -31,6 +136,13 @@ const LeftPanel = ({
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
+  // Live state the warning anchors are derived from, so a crop or a re-scan
+  // cannot leave a highlight pointing at the wrong part of the image.
+  const rooms = useAppStore((s) => s.rooms);
+  const detectedDimensions = useAppStore((s) => s.detectedDimensions);
+  const focusedWarning = useAppStore((s) => s.focusedWarning);
+  const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
+  const [openQualityTraceId, setOpenQualityTraceId] = useState(null);
 
   const [localDimensions, setLocalDimensions] = useState(roomDimensions);
   const [displayValues, setDisplayValues] = useState({ width: '', height: '' });
@@ -381,17 +493,27 @@ const LeftPanel = ({
                       </div>
 
                       {/* Detection quality — a low-confidence outline stays
-                          marked as one after it is on the canvas. */}
-                      {quality && quality.level !== 'good' && (
-                        <div
-                          className={`pl-3.5 text-[9px] leading-tight ${
-                            quality.level === 'fair' ? 'text-amber-400' : 'text-red-400'
-                          }`}
-                          title={quality.warnings.map((w) => w.message).join('; ')}
-                        >
-                          {quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}
-                          {quality.reason ? ` · ${quality.reason}` : ''}
-                        </div>
+                          marked as one after it is on the canvas, and every
+                          reason it carries is inspectable rather than hidden
+                          in a tooltip the user cannot read or act on. */}
+                      {quality && (quality.level !== 'good' || quality.warnings.length > 0) && (
+                        <TraceQuality
+                          trace={trace}
+                          quality={quality}
+                          expanded={openQualityTraceId === trace.id}
+                          onToggle={() => setOpenQualityTraceId(
+                            openQualityTraceId === trace.id ? null : trace.id
+                          )}
+                          anchorCtx={{
+                            trace, traces: perimeterTraces, rooms, detectedDimensions,
+                          }}
+                          focusedWarning={focusedWarning}
+                          onFocus={(index) => setFocusedWarning(
+                            focusedWarning?.traceId === trace.id && focusedWarning?.index === index
+                              ? null
+                              : { traceId: trace.id, index }
+                          )}
+                        />
                       )}
                     </div>
                   );
