@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Group, Line, Circle, Arc, Rect, Text } from 'react-konva';
 import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen, findVertexNeighbors } from '../../utils/angleMath';
-import { measureSideLenWidth } from './canvasUtils';
+import { measureSideLenWidth, CANVAS_FONT_FAMILY } from './canvasUtils';
 
 /**
  * AngleOverlay renders the interactive protractor overlay for angle measurement.
@@ -417,7 +417,7 @@ const AngleOverlay = ({
         ref={labelTextRef}
         fill="#50FA7B"
         fontStyle="bold"
-        fontFamily="Inter, system-ui, sans-serif"
+        fontFamily={CANVAS_FONT_FAMILY}
         align="center"
         verticalAlign="middle"
         rotation={-canvasRotation}

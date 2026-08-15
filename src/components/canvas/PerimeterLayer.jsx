@@ -2,11 +2,10 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Rect, Text, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
-import { measureSideLenWidth, pointToLineDistance } from './canvasUtils';
+import {
+  measureSideLenWidth, pointToLineDistance, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
+} from './canvasUtils';
 import { calculateArea, getCentroid } from '../../utils/areaCalculator';
-
-const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
-const SIDE_LEN_FONT_STYLE = '500';
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
