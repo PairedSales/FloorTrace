@@ -95,6 +95,43 @@ every room's implied px/ft, which is exactly what Task B1 is measured against.
 **Decide before Wave B whether it lands first.** If it does, re-measure the
 `bench:scale` baseline and treat B1's adjudication against the new numbers.
 
+#### Adjudicated — it has now been measured
+
+It cannot be benched in isolation: it is based on `37096a7`, which predates
+`a568332`, so `scripts/scaleBenchmark.mjs` does not exist on it and `a568332`
+independently edited `ExampleFloorplan7.truth.json`. Merged onto master in a
+scratch worktree (clean auto-merge) it gives `npm test` 294/14, lint clean,
+`probe:exterior` **byte-identical**, and every boundary and floor polygon on
+every fixture unchanged — only room rectangles move, as a `room.js`-only change
+should.
+
+The 2×2, `bench:detection` IoU on ExampleFloorplan7 (the only fixture whose
+truth it edits):
+
+| OWNER'S SUITE | old truth | new truth |
+|---|---|---|
+| old code | 91.5% *(baseline)* | 91.9% |
+| new code | **91.5%** | 99.3% |
+
+The new code clears 45/45 against the **unedited** truth, so the truth edit is
+not load-bearing. Independent confirmation comes from fixtures it never touched:
+on ExampleFloorplan1 the six rooms' implied scales collapse from a **6.0%**
+spread to **0.6%** and consensus error against an unchanged target goes
+**+3.1% → +0.6%**, with all six room IoUs improving against independently
+authored truth. `bench:scale` goes 14/14 → **15/15** because EF7's `KNOWN`
+expected-failure — annotated *"Fix the rectangle, not the selector"* — becomes a
+real pass.
+
+Against it: EF6's `BEDROOM 2 (left)` and `BEDROOM 1 (right)` drop from 100.0%,
+but their truth rects are pixel-identical to the *old detector output*, so that
+100.0% was never independent evidence; EF6's one rect that plainly was measured
+improves. EF2's inter-room spread worsens (36.7% → 51.8%) with consensus error
+flat.
+
+**Recommendation: land it before Wave B integration** — B1 is adjudicated by
+`bench:scale`, and that instrument currently carries a ~5% common-mode bias on
+EF7. Not yet merged; awaiting sign-off.
+
 ---
 
 ## 1. Shared context
@@ -174,12 +211,42 @@ own worktree, per §0. Waves are strictly ordered.
 
 ### Wave A — user-visible wrong numbers (4 agents, parallel)
 
-| ID | Task | Files |
-|---|---|---|
-| **A1** | Preserve perimeter holes across an edit | `src/store/appStore.js`, new test |
-| **A2** | Make candidate selection a total order | `src/utils/detection/scoring.js`, new test |
-| **A3** | Report OCR failure as failure; show trace quality for one floor | `src/utils/DimensionsOCR.js`, `src/components/LeftPanel.jsx` |
-| **A4** | User-facing text and input fixes | `src/App.jsx`, `src/hooks/useKeyboardShortcuts.js`, `src/utils/boundaryQuality.js` |
+Integrated on `claude/remediation-wave-a`. Gate at that tip: lint 0 errors /
+2 warnings, `npm test` **306 passed / 16 files**, `bench:detection` **45/45**,
+`bench:scale` **14/14**, both bench outputs byte-identical to the §1 baseline.
+
+| ID | Task | Files | Status |
+|---|---|---|---|
+| **A1** | Preserve perimeter holes across an edit | `src/store/appStore.js`, new test | ✅ `b7e8e91` |
+| **A2** | Make candidate selection a total order | `src/utils/detection/scoring.js`, new test | ⛔ escalated — see below |
+| **A3** | Report OCR failure as failure; show trace quality for one floor | `src/utils/DimensionsOCR.js`, `src/components/LeftPanel.jsx` | ✅ `388af3b` |
+| **A4** | User-facing text and input fixes | `src/App.jsx`, `src/hooks/useKeyboardShortcuts.js`, `src/utils/boundaryQuality.js` | ✅ `39b990d` |
+
+**A2 escalated, and the finding is larger than the task.** The defect is not the
+predicted intransitive cycle but a *degenerate tie*: on `ExampleFloorplan.png`
+two candidates carry equal `radius` and equal `bridgedSpan` with scores inside
+the 0.015 epsilon, so the comparator returns `0` and `Array.prototype.sort`
+stability decides the winner by push order. Control: leaving `pickCandidate`
+**unmodified** and reversing the input array drops the bench to **44/45** — the
+45/45 baseline is a property of push order, not of the algorithm. The current
+winner is the *lower*-scoring candidate (0.9598 over 0.9704), so every
+principled total order flips it and loses EF1's `GARAGE` check. Re-scoped to
+include adjudicating which candidate is actually correct.
+
+Two further findings from A2, not yet fixed:
+
+- `src/utils/detection/boundary.js:262` — `ranked.find((c) => c.variant === 'all')`
+  is named `widest` and compared on `entry.area`, but returns the first in
+  **rank** order. A second, independent order-dependence.
+- `src/utils/detection/pipeline.js:213` — the comment promises `autoGarage: false`
+  guarantees a clicked garage is still detected. It does not.
+
+A3 also found that this document's own acceptance test for it is wrong: deleting
+`public/tesseract/eng.traineddata.gz` produces an **unsettled promise and a hang**,
+not an error toast. tesseract.js throws uncaught inside its own message handler,
+so `bootEntry`'s rejection handler in `src/utils/dimensions/ocrTesseract.js:106-111`
+never runs and `acquire` never resolves. Pre-existing, separate from A3, and
+un-timeout-ed anywhere on that path.
 
 ### Wave B — after A (2 agents, parallel)
 
