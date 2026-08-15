@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { selectPerimeterOverlay, AUTOSAVE_FIELDS } from '../appStore';
+import useAppStore, {
+  selectAreaByType,
+  selectCombinedArea,
+  selectPerimeterOverlay,
+  AUTOSAVE_FIELDS,
+} from '../appStore';
 import * as undoManager from '../undoManager';
 import { calculateArea } from '../../utils/areaCalculator';
 
@@ -110,6 +115,87 @@ describe('selectPerimeterOverlay', () => {
 
     expect(after).not.toBe(before);
     expect(after.holes).toEqual([]);
+  });
+});
+
+describe('selectAreaByType', () => {
+  const box = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
+  const trace = (id, type, size, visible = true) => ({
+    id,
+    name: id,
+    vertices: box(size),
+    holes: [],
+    closed: true,
+    visible,
+    locked: false,
+    type,
+    colorSource: 'type',
+    color: '#BD93F9',
+  });
+
+  const seed = (list) => useAppStore.setState({
+    perimeterTraces: list,
+    activeTraceId: list[0]?.id ?? null,
+    calibration: {
+      calibrated: true,
+      feetPerPixel: SCALE,
+      source: 'room-calibration',
+      calibratedRoomId: null,
+      createdAt: 1,
+      quality: null,
+    },
+  });
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+  });
+
+  it('splits area by type and keeps the grand total', () => {
+    seed([
+      trace('a', 'gla', 10),      // 100
+      trace('b', 'gla', 20),      // 400
+      trace('c', 'garage', 30),   // 900
+    ]);
+
+    const areas = selectAreaByType(useAppStore.getState());
+    expect(areas.byType).toEqual({ gla: 500, garage: 900 });
+    expect(areas.counts).toEqual({ gla: 2, garage: 1 });
+    expect(areas.gla).toBe(500);
+    expect(areas.total).toBe(1400);
+    expect(selectCombinedArea(useAppStore.getState())).toBe(1400);
+  });
+
+  it('treats an untyped trace as GLA', () => {
+    const untyped = trace('legacy', undefined, 10);
+    delete untyped.type;
+    seed([untyped]);
+
+    expect(selectAreaByType(useAppStore.getState()).gla).toBe(100);
+  });
+
+  it('drops a hidden trace from its own subtotal and from the total', () => {
+    seed([trace('a', 'gla', 10), trace('b', 'garage', 20, false)]);
+
+    const areas = selectAreaByType(useAppStore.getState());
+    expect(areas.byType.garage).toBeUndefined();
+    expect(areas.counts.garage).toBeUndefined();
+    expect(areas.total).toBe(100);
+  });
+
+  // The memo is the correctness requirement: this returns an object, so without
+  // a stable reference zustand's `Object.is` re-renders every consumer on every
+  // unrelated `set()`.
+  it('returns a reference-stable object across an unrelated set()', () => {
+    seed([trace('a', 'gla', 10)]);
+    const before = selectAreaByType(useAppStore.getState());
+
+    useAppStore.getState().setIsProcessing(true, 'working');
+    expect(selectAreaByType(useAppStore.getState())).toBe(before);
+
+    useAppStore.getState().setPerimeterTraceType('a', 'porch');
+    const after = selectAreaByType(useAppStore.getState());
+    expect(after).not.toBe(before);
+    expect(after.byType).toEqual({ porch: 100 });
   });
 });
 

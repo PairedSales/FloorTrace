@@ -205,6 +205,37 @@ describe('projectSerializer', () => {
       expect(() => validateProjectSchema(project)).not.toThrow();
       expect(deserializeSketch(project).statePatch.calibration.quality).toBeUndefined();
     });
+
+    it('carries a trace type and its colour source through a round trip', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].type = 'garage';
+      storeState.perimeterTraces[0].colorSource = 'type';
+      storeState.perimeterTraces[0].color = '#FFB86C';
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const trace = deserializeSketch(project).statePatch.perimeterTraces[0];
+      expect(trace.type).toBe('garage');
+      expect(trace.colorSource).toBe('type');
+      expect(trace.color).toBe('#FFB86C');
+    });
+
+    // The migration that has to be non-destructive: a project saved before
+    // types must not collapse its multi-coloured floors into one hue.
+    it('imports a project saved before types as GLA with its colours intact', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces = [
+        { ...storeState.perimeterTraces[0], id: 'a', color: '#BD93F9' },
+        { ...storeState.perimeterTraces[0], id: 'b', color: '#8BE9FD' },
+      ];
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const traces = deserializeSketch(project).statePatch.perimeterTraces;
+      expect(traces.map((t) => t.type)).toEqual(['gla', 'gla']);
+      expect(traces.map((t) => t.colorSource)).toEqual(['user', 'user']);
+      expect(traces.map((t) => t.color)).toEqual(['#BD93F9', '#8BE9FD']);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
