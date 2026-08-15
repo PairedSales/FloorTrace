@@ -235,6 +235,9 @@ const CanvasStage = React.memo(({
     perimeterOverlay,
     perimeterVertices,
     draggingVertex: perimeter.draggingVertex,
+    selectedVertexIndex: perimeter.selectedVertexIndex,
+    setSelectedVertexIndex: perimeter.setSelectedVertexIndex,
+    onDeletePerimeterVertex,
     handleClosePerimeter: perimeter.handleClosePerimeter,
     handleAddPerimeterVertex: perimeter.handleAddPerimeterVertex,
     handleInsertPerimeterVertex: perimeter.handleInsertPerimeterVertex,
@@ -466,6 +469,8 @@ const CanvasStage = React.memo(({
               detectedDimensions={detectedDimensions}
               unit={unit}
               draggingVertex={perimeter.draggingVertex}
+              selectedVertexIndex={perimeter.selectedVertexIndex}
+              onVertexSelect={perimeter.setSelectedVertexIndex}
               onVertexDragStart={perimeter.handleVertexDragStart}
               onVertexDragMove={perimeter.handleVertexDragMove}
               onVertexDragEnd={perimeter.handleVertexDragEnd}

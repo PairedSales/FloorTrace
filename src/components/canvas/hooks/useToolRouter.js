@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import useAppStore from '../../../store/appStore';
 import { getCanvasCoordinates } from '../canvasUtils';
 import { hasSelfIntersection } from '../../../utils/geometryValidation';
+import { shortcutsBlocked } from '../../../utils/keyboardGuard';
 import { toast } from 'sonner';
 
 export function useToolRouter({
@@ -33,6 +34,9 @@ export function useToolRouter({
   perimeterOverlay,
   perimeterVertices,
   draggingVertex,
+  selectedVertexIndex,
+  setSelectedVertexIndex,
+  onDeletePerimeterVertex,
   handleClosePerimeter,
   handleAddPerimeterVertex,
   handleInsertPerimeterVertex,
@@ -662,16 +666,12 @@ export function useToolRouter({
 
   // Keyboard Event Listener
   const handleKeyDown = useCallback((e) => {
-    const activeElement = document.activeElement;
-    const isTypingIntoField = activeElement && (
-      activeElement.tagName === 'INPUT' ||
-      activeElement.tagName === 'TEXTAREA' ||
-      activeElement.isContentEditable
-    );
-
-    if (isTypingIntoField) return;
+    if (shortcutsBlocked(e.target)) return;
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
+      // ── Delete targets, in priority order ──────────────────────────────────
+      // A live line/shape selection must not be shadowed by a stale vertex
+      // selection, so the vertex case comes last.
       if (selectedMeasurementLineIndex !== null && onMeasurementLinesChange) {
         onMeasurementLinesChange(measurementLines.filter((_, index) => index !== selectedMeasurementLineIndex));
         setSelectedMeasurementLineIndex(null);
@@ -681,7 +681,16 @@ export function useToolRouter({
       if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
         onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
         setSelectedCustomShapeIndex(null);
+        return;
       }
+
+      if (selectedVertexIndex !== null && onDeletePerimeterVertex) {
+        // Selection is left alone: the delete is refused below three vertices,
+        // and the vertex array changing identity clears it on success.
+        onDeletePerimeterVertex(selectedVertexIndex);
+        return;
+      }
+      // ── end delete targets ────────────────────────────────────────────────
       return;
     }
 
@@ -704,6 +713,12 @@ export function useToolRouter({
         onAngleToolToggle();
       } else if (perimeterVertices !== null) {
         useAppStore.getState().setPerimeterVertices(null);
+      } else if (manualEntryMode) {
+        // Without this, Esc left the user in overlay-placement mode with only
+        // the standing toast to say so.
+        useAppStore.getState().setManualEntryMode(false);
+      } else if (selectedVertexIndex !== null) {
+        setSelectedVertexIndex?.(null);
       }
       return;
     }
@@ -753,6 +768,10 @@ export function useToolRouter({
     onFinishDrawMode,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
+    selectedVertexIndex,
+    setSelectedVertexIndex,
+    onDeletePerimeterVertex,
+    manualEntryMode,
   ]);
 
   useEffect(() => {
