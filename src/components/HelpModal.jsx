@@ -8,6 +8,8 @@ const shortcuts = [
   { keys: 'O', description: 'Toggle options menu' },
   { keys: 'L', description: 'Toggle show lengths' },
   { keys: '[ / ]', description: 'Resize the active brush' },
+  { keys: 'R', description: 'Rotate canvas 45° clockwise' },
+  { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
   { keys: 'Enter', description: 'Finish drawing the exterior' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },
   { keys: 'Right-click', description: 'Delete a vertex' },

@@ -7,7 +7,8 @@ import * as undoManager from '../store/undoManager';
  *
  * Registers and cleans up all window-level input event listeners:
  *  - keydown: Ctrl+V (paste), Ctrl+O (file open), Ctrl+Z/Y (undo/redo),
- *             [ / ] (eraser brush size), O (toggle options), L (toggle side lengths)
+ *             [ / ] (eraser brush size), O (toggle options), L (toggle side lengths),
+ *             R / Shift+R (rotate the canvas either way)
  *  - mousedown: side buttons 3/4 for undo/redo
  *  - contextmenu: suppressed unless text is selected
  *
@@ -63,7 +64,9 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, activ
         }
         if (e.key.toLowerCase() === 'r') {
           e.preventDefault();
-          onRotateCanvas?.('clockwise');
+          // Counter-clockwise is Shift+R: Ctrl+R is the browser's reload on
+          // every platform and taking it stranded the user on a wedged page.
+          onRotateCanvas?.(e.shiftKey ? 'counterclockwise' : 'clockwise');
           return;
         }
       }
@@ -72,10 +75,6 @@ export function useKeyboardShortcuts({ onPaste, onFileOpen, onSaveProject, activ
         const key = e.key.toLowerCase();
 
         switch (key) {
-          case 'r':
-            e.preventDefault();
-            onRotateCanvas?.('counterclockwise');
-            break;
           case 'v':
             e.preventDefault();
             onPaste();
