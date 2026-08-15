@@ -17,6 +17,7 @@
 // place, and it earns it on one fixture (ExampleFloorplan2, 6.3% -> 0.6%).
 
 import { robustScale, ROBUST_KEEP_WINDOW } from './validate.js';
+import { roomIsNonGla } from '../dimensions/exteriorLabels.js';
 
 // Below this the detector is telling us it could not confirm the room's walls,
 // and a room it could not confirm is not a ruler. The gate works because
@@ -50,15 +51,6 @@ export const CONSENSUS_SPREAD_LIMIT = 0.45;
 // labelled to mean anything, and OCR routinely finds half of them.
 export const MIN_FOOTPRINT_TO_LABELS = 0.7;
 
-const centreOf = (rect) => ({
-  x: (rect.left + rect.right) / 2,
-  y: (rect.top + rect.bottom) / 2,
-});
-
-const inRegion = (point, region) =>
-  point.x >= region.x && point.x <= region.x + region.width
-  && point.y >= region.y && point.y <= region.y + region.height;
-
 /**
  * @param {Array} candidates rooms from detectRoomsFromLabels, each
  *   { labelId, rect, sides, confidence, pixelsPerFoot: {x, y}, labelDims }
@@ -82,7 +74,7 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     // A garage or a covered porch is inside the drawing but is not the
     // building the area serves, and its rectangle is the one most likely to
     // have been carved out from under the footprint.
-    if (nonGla.some((region) => inRegion(centreOf(room.rect), region))) {
+    if (roomIsNonGla(room, nonGla)) {
       rejected.push({ name, reason: 'non-gla', pixelsPerFoot: ppf.x });
       continue;
     }
@@ -149,8 +141,7 @@ export const selectProjectScale = (candidates = [], context = {}) => {
   // only the contributors makes the check agree with whatever it just chose —
   // three leaked rooms then vouch for the shrunken footprint they caused.
   const labelSqFt = candidates.reduce((sum, room) => (
-    room?.labelDims?.width > 0 && room.labelDims?.height > 0
-      && !nonGla.some((region) => room.rect && inRegion(centreOf(room.rect), region))
+    room?.labelDims?.width > 0 && room.labelDims?.height > 0 && !roomIsNonGla(room, nonGla)
       ? sum + room.labelDims.width * room.labelDims.height
       : sum
   ), 0);
