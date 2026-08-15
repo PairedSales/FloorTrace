@@ -47,8 +47,12 @@ const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
   );
   const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness));
   if (!fp) return false;
-  const entry = footprintEntry(fp, fp.largest, width);
-  return sealMetrics(entry, bboxAreaOf(bbox)).seal >= INDEPENDENT_SEAL;
+  // The two scalars sealMetrics reads. footprintEntry would build a page-sized
+  // component mask here, once per candidate net, and drop it unread.
+  const seal = sealMetrics(
+    { area: fp.largest.size, bboxArea: bboxAreaOf(fp.largest.bbox) }, bboxAreaOf(bbox),
+  );
+  return seal.seal >= INDEPENDENT_SEAL;
 };
 
 const contains = (outer, inner, margin) =>
@@ -110,13 +114,20 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
   // tell those three cases apart.
   const minMerge = Math.max(80, 0.002 * nets[0].size);
   const biggestBbox = bboxAreaOf(nets[0].bbox);
+  // Keyed on the merged id-set, since that is the whole input: net objects are
+  // mutated in place by a merge, so an object key is only correct while someone
+  // remembers to invalidate it by hand, and what it guards is a whole-page
+  // bridge and trace per net.
   const cache = new Map();
   const independentOf = (net) => {
-    if (!cache.has(net)) {
-      cache.set(net, bboxAreaOf(net.bbox) >= 0.15 * biggestBbox
-        && netSelfSeals(maskFor(net), width, height, net.bbox, wallThickness));
+    const key = [...net.ids].sort((x, y) => x - y).join(',');
+    let independent = cache.get(key);
+    if (independent === undefined) {
+      independent = bboxAreaOf(net.bbox) >= 0.15 * biggestBbox
+        && netSelfSeals(maskFor(net), width, height, net.bbox, wallThickness);
+      cache.set(key, independent);
     }
-    return cache.get(net);
+    return independent;
   };
 
   for (let merged = true; merged;) {
@@ -138,8 +149,6 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
         a.bbox.minY = Math.min(a.bbox.minY, b.bbox.minY);
         a.bbox.maxX = Math.max(a.bbox.maxX, b.bbox.maxX);
         a.bbox.maxY = Math.max(a.bbox.maxY, b.bbox.maxY);
-        cache.delete(a);
-        cache.delete(b);
         nets.splice(j, 1);
         merged = true;
         break;

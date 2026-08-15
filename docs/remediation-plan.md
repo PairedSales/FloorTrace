@@ -130,7 +130,33 @@ flat.
 
 **Recommendation: land it before Wave B integration** — B1 is adjudicated by
 `bench:scale`, and that instrument currently carries a ~5% common-mode bias on
-EF7. Not yet merged; awaiting sign-off.
+EF7.
+
+#### Landed — merged into the Wave C base as `16c0327`
+
+Signed off after Wave B had already integrated, so it went in ahead of Wave C
+instead, as its own PR (#179) against `master` rather than buried inside a wave.
+Re-gated on the Wave C base: lint 0/2, `npm test` **322 passed / 17 files**,
+`bench:detection` **45/45**, `bench:scale` **15/15** — the EF7 `KNOWN`
+expected-failure is gone, and no `KNOWN` entries remain.
+
+Every boundary and floor line in `bench:detection` is byte-identical; only room
+rectangles moved, which is what a `room.js`-only change should do:
+
+| fixture | room | before | after |
+|---|---|---|---|
+| EF1 | all six | 90.9–98.4% | **95.6–99.1%** (every one improves) |
+| EF3 | LIVING ROOM | 92.8% | **97.0%** |
+| EF3 | BASEMENT-L | 97.5% | 98.1% |
+| EF6 | BEDROOM 2 (left) | 100.0% | 97.3% |
+| EF6 | BEDROOM 1 (right) | 100.0% | 98.7% |
+| EF6 | LIVING ROOM (left) | 97.8% | **99.2%** |
+| EF7 | OWNER'S SUITE | 91.5% | **99.3%** |
+| EF7 | BEDROOM 2 | 86.2% | **88.9%** |
+
+The two EF6 drops are the ones the adjudication predicted and discounted: those
+truth rects are pixel-identical to the *old detector output*, so their 100.0%
+was never independent evidence.
 
 ---
 
@@ -169,6 +195,12 @@ npm run dev                 # Vite dev server (manual UI verification)
 | `npm run bench:detection` | **45/45 checks passed** |
 | `npm run bench:scale` | **14/14 checks passed** |
 | Search-cache retention, ExampleFloorplan5 | ~112 MB (measured by Task B2's probe) |
+
+**Superseded from Wave C onward.** The wall-face-seating commit landed in the
+Wave C base (`16c0327`, see §0), so agents from Wave C on are given these
+instead: `npm test` **322 passed / 17 files**, `bench:detection` **45/45** with
+moved room rectangles, `bench:scale` **15/15**, peak search-cache retention
+51.9 MB. Lint is unchanged at 0 errors / 2 warnings.
 
 ### Non-negotiable rules
 
@@ -211,9 +243,11 @@ own worktree, per §0. Waves are strictly ordered.
 
 ### Wave A — user-visible wrong numbers (4 agents, parallel)
 
-Integrated on `claude/remediation-wave-a`. Gate at that tip: lint 0 errors /
-2 warnings, `npm test` **306 passed / 16 files**, `bench:detection` **45/45**,
-`bench:scale` **14/14**, both bench outputs byte-identical to the §1 baseline.
+Integrated on `claude/remediation-wave-a`, PR #177. Gate at that tip: lint
+0 errors / 2 warnings, `npm test` **306 passed / 16 files**, `bench:detection`
+**45/45**, `bench:scale` **14/14**, both bench outputs byte-identical to the §1
+baseline. (A2's re-scoped commit merged in after that line was written, taking
+the branch to 321 passed / 17 files.)
 
 | ID | Task | Files | Status |
 |---|---|---|---|
@@ -301,10 +335,10 @@ un-timeout-ed anywhere on that path.
 
 ### Wave B — after A (2 agents, parallel)
 
-Integrated on `claude/remediation-wave-b`. Gate at that tip: lint 0 errors /
-2 warnings, `npm test` **313 passed / 16 files**, `bench:detection` **45/45 and
-byte-identical to the §1 baseline**, `bench:scale` **14/14**, peak search-cache
-retention **114.1 MB → 51.9 MB**.
+Integrated on `claude/remediation-wave-b`, PR #178 (stacked on #177). Gate at
+that tip: lint 0 errors / 2 warnings, `npm test` **321 passed / 17 files**,
+`bench:detection` **45/45 and byte-identical to the §1 baseline**, `bench:scale`
+**14/14**, peak search-cache retention **114.1 MB → 51.9 MB**.
 
 | ID | Task | Depends on | Files | Status |
 |---|---|---|---|---|
@@ -340,10 +374,82 @@ task.
 
 ### Wave C — after B (2 agents, parallel)
 
-| ID | Task | Depends on | Files |
-|---|---|---|---|
-| **C1** | Symmetric scale correction + extract the decision | B1 | `src/App.jsx`, `src/utils/detection/validate.js`, `src/hooks/useAutoScale.js` |
-| **C2** | Tracer performance | B2 | `src/utils/detection/{candidates,boundary,index}.js` |
+Base is `16c0327` — Wave B plus the wall-face-seating commit (§0). Agents were
+given **322 passed / 17 files, `bench:detection` 45/45, `bench:scale` 15/15** as
+their baseline, not the §1 numbers.
+
+Integrated on `claude/remediation-wave-c`. Gate at that tip: lint 0 errors /
+2 warnings, `npm test` **331 passed / 18 files**, `bench:detection` **45/45**,
+`bench:scale` **15/15**, and `bench:detection`, `bench:scale`, `probe:exterior`
+and `probe:exterior draw` all **byte-identical to the Wave C base** once timings
+are normalised. Wave C moved no geometry at all.
+
+| ID | Task | Depends on | Files | Status |
+|---|---|---|---|---|
+| **C1** | Symmetric scale correction + extract the decision | B1 | `src/App.jsx`, `src/utils/detection/validate.js`, `src/utils/boundaryQuality.js`, new test | ✅ `202de1d` |
+| **C2** | Tracer performance | B2 | `src/utils/detection/{candidates,boundary,index}.js` | ✅ `b2269c6` |
+
+**C1 took the brief's preferred route on the layering wrinkle** — `resolveScaleUpdate`
+takes `otherSamples` rather than `rooms`, so `validate.js` stays free of store
+imports — and the extraction was *not* larger than the brief assumed:
+`decideProjectScale` is untouched, no store restructuring, and `updateScale`
+went from ~80 lines to 24. It reproduced the asymmetry first, against three
+authoritative rooms at ~16 px/ft and a room implying 12: **drag #1 → 16 px/ft
+`adopted: false`, drag #2 → 12 px/ft `adopted: true`.**
+
+**C1 deviated once, into `boundaryQuality.js`, and it was necessary.** Writing
+`source: 'auto'` on a non-adopted decision routes `scaleQualitySummary` into
+`autoScaleSummary`, which knows nothing about `room-vs-project` and fell through
+to the generic auto-consensus note — presenting the *rejected room's* gap as if
+it were room-to-room spread. The guard dispatches on reason before source.
+Verified by the orchestrator rather than accepted: `selectProjectScale`'s
+top-level quality vocabulary is only `auto-consensus`, `area-implausible`,
+`rooms-disagree` and `too-few-rooms`, so `ROOM_REASONS` provably cannot
+intercept a genuine automatic path.
+
+C1 found and did not fix: `handleInteriorWallToggle` (`src/App.jsx:695`) still
+does not re-review the footprint, and provably need not — `tracedAreaPx` reads
+`floor.outer.polygon`, which the toggle only selects for *display*, so the area
+fed to `reviewAgainstFootprint` is toggle-invariant. It also notes the plain
+scan-then-drag path may be unreachable, since `placeRoom` already passes
+`pinned: true`; the `source: 'manual'`-on-rejection bug is still live on the
+typed-dimension paths, which are unpinned by design and now symmetric.
+
+**C2 landed all three changes and reports that change 2 is not the speedup this
+plan expected it to be.** The old object-keyed memo was already invalidated only
+when its net actually mutated, so it computed `netSelfSeals` exactly once per
+version of each net — which is what the id-set key also does. Recomputation
+count is unchanged. Its real value is that the memo no longer depends on someone
+remembering to hand-invalidate a key whose object is mutated in place. **The
+merge-loop cliff this task set out to remove is still there.**
+
+C2 also landed a fourth pure saving inherited from the recovered WIP:
+`netSelfSeals` no longer calls `footprintEntry`, which allocated a page-sized
+component mask per candidate net so `sealMetrics` could read two scalars off it.
+Verified identical by the orchestrator — `sealMetrics` reads only `.area` and
+`.bboxArea`, and `footprintEntry` sets those to exactly `fp.largest.size` and
+`bboxAreaOf(fp.largest.bbox)`.
+
+Timings, 4 interleaved A/B rounds, median of 4 per arm: **−3.0% over the sum of
+per-fixture medians**, every per-fixture delta inside a 4–22% within-arm spread.
+Six of seven point the same way, which is weakly suggestive and no more. The
+change is justified by the work removed, not by a wall-clock win these fixtures
+can resolve. **This is the honest answer, and it is the reason C2's acceptance
+was byte-identical output rather than a measured speedup.**
+
+Still open from C2:
+
+- **The real `netSelfSeals` cliff.** `boundary.js:43` calls `bridgeRuns` over
+  the **whole page** for a net whose ink is confined to `net.bbox`, and
+  `maskFor` allocates a full-page `Uint8Array` to feed it. Cropping both to the
+  bbox looks identical for `bridgeRuns` alone, but `measureFootprint` re-crops
+  to `inkBounds ± (radius+2)` and `closeRect`/`floodOutside` treat the array
+  border as outside — so a naive pre-crop moves the border and is **not**
+  provably identical without auditing those two border semantics. Needs
+  `raster.js`, which was outside C2's file list.
+- **`requestTimeout` is unverified by execution.** `index.js` is main-thread
+  worker-wrapper code with no test coverage and no jsdom in the repo. The 120 s
+  cap and the 2 s-per-label slope are judgement calls, read and linted only.
 
 ### Wave D — after C (3 agents, parallel)
 

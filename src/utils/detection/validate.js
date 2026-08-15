@@ -299,3 +299,80 @@ export const decideProjectScale = ({
     roomCount: Math.floor(otherSamples.length / 2),
   };
 };
+
+// One room's label and overlay resolved into the scale the project should hold,
+// the quality to record beside it, and whether either differs from what is in
+// force. Pure, and separate from the store write, because the asymmetry it
+// fixes was only reachable through two consecutive UI gestures: the same drag
+// was outvoted the first time and adopted the second, since the first one wrote
+// `source: 'manual'` even when the project had overruled it, and that write is
+// what `pinned` reads on the way back in.
+//
+// `otherSamples` (feet per pixel of every *other* measured room) is passed in
+// rather than derived, so this stays free of the store.
+export const resolveScaleUpdate = ({
+  dimensions, overlay, otherSamples = [], calibration = null, pinned = false,
+}) => {
+  if (!dimensions?.width || !dimensions?.height || !overlay) return null;
+
+  const dimWidth = parseFloat(dimensions.width);
+  const dimHeight = parseFloat(dimensions.height);
+  const boxWidth = Math.abs(overlay.x2 - overlay.x1);
+  const boxHeight = Math.abs(overlay.y2 - overlay.y1);
+  if (!(dimWidth > 0) || !(dimHeight > 0) || !(boxWidth > 0) || !(boxHeight > 0)) return null;
+
+  // Picking or dragging a room by hand is the user overruling the automatic
+  // consensus, and it has to win: after a scan the project already holds every
+  // room on the page, so decideProjectScale would find that majority
+  // authoritative and refuse to adopt the very room the user just placed. Once
+  // pinned it stays pinned, or a later nudge of the same overlay would hand the
+  // scale back to the rooms the user just rejected.
+  const isPinned = !!pinned || calibration?.quality?.source === 'manual';
+  const decision = decideProjectScale({
+    dimWidth, dimHeight, boxWidth, boxHeight,
+    otherSamples: isPinned ? [] : otherSamples,
+  });
+
+  // Pinned, but still told. The area is what moves: picking one room out of a
+  // measured consensus changed it by 27% on ExampleFloorplan6 at a scale gap of
+  // only 13%, because area goes as scale squared — and at 13% the existing
+  // room-to-room tolerance says nothing, so that landed silently. Anything past
+  // a few percent is now stated, and a gap wide enough to be a mistake is
+  // stated as one.
+  if (isPinned && otherSamples.length >= 2) {
+    const project = robustScale(otherSamples);
+    const gap = project ? Math.abs(Math.log(decision.roomScale / project.value)) : 0;
+    if (gap > 0.03) {
+      decision.level = gap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note';
+      decision.reason = 'room-vs-auto';
+      decision.disagreement = gap;
+      decision.adopted = true;
+      decision.roomCount = Math.floor(otherSamples.length / 2);
+    }
+  }
+
+  // The source is the provenance of the scale actually left in force. A
+  // decision the project outvoted keeps the pooled scale, so it is still the
+  // automatic one — calling it 'manual' pinned every later update to a room the
+  // app had just declined to use, and permanently disabled the footprint
+  // cross-check, which only revisits an automatic scale.
+  const quality = {
+    level: decision.level,
+    reason: decision.reason,
+    disagreement: decision.disagreement,
+    adopted: decision.adopted,
+    roomCount: decision.roomCount,
+    source: decision.adopted ? 'manual' : 'auto',
+  };
+
+  const currentScale = calibration?.feetPerPixel;
+  const changed = !calibration?.calibrated
+    || typeof currentScale !== 'object'
+    || Math.abs((currentScale?.x ?? 0) - decision.scale.x) > 1e-9
+    || Math.abs((currentScale?.y ?? 0) - decision.scale.y) > 1e-9
+    || (calibration.quality?.level ?? 'ok') !== quality.level
+    || (calibration.quality?.reason ?? null) !== quality.reason
+    || (calibration.quality?.source ?? null) !== quality.source;
+
+  return { scale: { x: decision.scale.x, y: decision.scale.y }, quality, changed };
+};
