@@ -1,5 +1,6 @@
 import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../utils/detection/pipeline';
 import { clearDetectionCache } from '../utils/detection/cache';
+import { wallSnapSegments } from '../utils/wallSnapEngine';
 import { hashDataUrl } from '../utils/hash';
 
 // Decoded image data is reused across requests for the same image: a room
@@ -104,6 +105,11 @@ self.onmessage = async (event) => {
       });
     } else if (type === 'traceFloorplanBoundary') {
       data = traceFloorplanBoundaryCore(imageData, options);
+    } else if (type === 'wallSnapSegments') {
+      // The snap engine's vectorisation, run here so it reuses this decode
+      // instead of doing its own full-resolution getImageData on the main
+      // thread mid-gesture. Only the segments cross back — no masks.
+      data = wallSnapSegments(imageData);
     } else {
       throw new Error(`Unsupported worker action: ${type}`);
     }
