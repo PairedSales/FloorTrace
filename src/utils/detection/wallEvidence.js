@@ -172,12 +172,19 @@ export const createEvidence = (analysis, netMask, assertedMask = null) => {
  * fabricated wall or noise spread thin.
  */
 export const contourSupport = (polygon, evidence, tol, step = 2) => {
-  if (!polygon || polygon.length < 3) return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0 };
+  if (!polygon || polygon.length < 3) {
+    return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0, longestGapSpan: null };
+  }
   let total = 0;
   let weighted = 0;
   let unsupported = 0;
   let gap = 0;
   let longestGap = 0;
+  // Where the longest unsupported run was. Recorded, not computed: these are
+  // sample points the loop already visits, held as scalars so the hot path
+  // still allocates nothing — the one object is built on return.
+  let fromX = 0; let fromY = 0;
+  let bestFromX = 0; let bestFromY = 0; let bestToX = 0; let bestToY = 0;
   for (let i = 0; i < polygon.length; i += 1) {
     const a = polygon[i];
     const b = polygon[(i + 1) % polygon.length];
@@ -193,19 +200,29 @@ export const contourSupport = (polygon, evidence, tol, step = 2) => {
       total += seg;
       weighted += level * seg;
       if (level <= 0) {
+        if (gap === 0) { fromX = x; fromY = y; }
         unsupported += seg;
         gap += seg;
-        if (gap > longestGap) longestGap = gap;
+        if (gap > longestGap) {
+          longestGap = gap;
+          bestFromX = fromX; bestFromY = fromY;
+          bestToX = x; bestToY = y;
+        }
       } else {
         gap = 0;
       }
     }
   }
-  if (total <= 0) return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0 };
+  if (total <= 0) {
+    return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0, longestGapSpan: null };
+  }
   return {
     mean: weighted / total,
     unsupportedFrac: unsupported / total,
     longestGap,
     total,
+    longestGapSpan: longestGap > 0
+      ? [{ x: bestFromX, y: bestFromY }, { x: bestToX, y: bestToY }]
+      : null,
   };
 };

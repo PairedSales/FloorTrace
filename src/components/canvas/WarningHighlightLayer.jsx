@@ -47,6 +47,30 @@ const WarningHighlightLayer = ({ anchor, scale }) => {
     );
   }
 
+  // Open polylines, not closed rings: a bridged opening is a gap across the
+  // outline and a run of weak support is a stretch along it. Drawn solid and
+  // thicker than the dashed shapes above — these point at a specific place,
+  // and the whole-outline anchors do not.
+  if (anchor.kind === 'segment') {
+    const runs = anchor.runs ?? (anchor.points ? [anchor.points] : []);
+    return (
+      <>
+        {runs.map((run, i) => (
+          <Line
+            key={`warning-run-${i}`}
+            points={(run ?? []).flatMap((v) => [v.x, v.y])}
+            stroke={COLOR}
+            strokeWidth={4 / scale}
+            lineCap="round"
+            lineJoin="round"
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      </>
+    );
+  }
+
   if (anchor.kind === 'point') {
     return (
       <>

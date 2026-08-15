@@ -20,6 +20,50 @@ export const traceTypeLabel = (type) => BY_ID.get(normalizeTraceType(type)).labe
 
 export const traceTypeColor = (type) => BY_ID.get(normalizeTraceType(type)).color;
 
+// GLA keeps the storey numbering; everything else is named for what it is, so a
+// garage stops arriving called "3rd Floor".
+const TYPE_NOUN = {
+  'below-grade': 'Basement',
+  garage: 'Garage',
+  porch: 'Porch',
+  unfinished: 'Unfinished',
+};
+
+const FLOOR_NAME = /^(\d+)(?:st|nd|rd|th) Floor$/;
+const ordinalSuffix = (n) => (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+
+const NOUNS = Object.values(TYPE_NOUN).join('|');
+const AUTO_NAME = new RegExp(`^(?:\\d+(?:st|nd|rd|th) Floor|(?:${NOUNS})(?: \\d+)?)$`);
+
+// Whether a name is one this module would have produced. Used to infer
+// `nameSource` for traces saved before it existed — a name the user typed must
+// never be overwritten by a type change.
+export const isAutoTraceName = (name) => AUTO_NAME.test((name ?? '').trim());
+
+// A name for `type` that does not collide with `others`. Storey numbering
+// counts from the highest "Nth Floor" on hand rather than a module counter:
+// a counter survives loadProject, so reopening a two-floor project used to
+// start naming at "7th Floor".
+export function autoTraceName(type, others = []) {
+  const resolved = normalizeTraceType(type);
+  const list = others || [];
+  if (resolved === 'gla') {
+    const highest = list.reduce((max, t) => {
+      const match = FLOOR_NAME.exec(t?.name || '');
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+    const num = Math.max(highest, list.length) + 1;
+    return `${num}${ordinalSuffix(num)} Floor`;
+  }
+  const noun = TYPE_NOUN[resolved];
+  const taken = new Set(list.map((t) => t?.name));
+  if (!taken.has(noun)) return noun;
+  for (let i = 2; i <= list.length + 2; i += 1) {
+    if (!taken.has(`${noun} ${i}`)) return `${noun} ${i}`;
+  }
+  return noun;
+}
+
 // A two-storey house is two GLA traces, so type alone cannot drive colour: the
 // hue says what kind of area it is and this lightness step separates floors
 // within that kind. Negative mixes toward black, positive toward white; index 0
@@ -57,11 +101,14 @@ export function assignTypeColors(traces) {
 // Migration. `colorSource` defaults to 'user' exactly when there is no `type`
 // to have derived a colour from, so a project saved before types keeps the
 // colours the user last saw instead of collapsing every floor into one hue.
+// `nameSource` is inferred from the name itself rather than defaulting: a trace
+// still called "2nd Floor" was never renamed, and one called "Guest Wing" was.
 export function normalizeTraces(traces) {
   if (!Array.isArray(traces)) return traces;
   return assignTypeColors(traces.map((t) => (t && typeof t === 'object' ? {
     ...t,
     type: normalizeTraceType(t.type),
     colorSource: t.colorSource ?? (t.type ? 'type' : 'user'),
+    nameSource: t.nameSource ?? (isAutoTraceName(t.name) ? 'auto' : 'user'),
   } : t)));
 }

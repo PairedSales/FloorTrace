@@ -2,12 +2,14 @@ import * as undoManager from './undoManager';
 import {
   DEFAULT_TRACE_TYPE,
   assignTypeColors,
+  autoTraceName,
   normalizeTraceType,
   traceTypeColor,
 } from '../utils/traceTypes';
 // From areaCalculator, not appStore: appStore already imports createFloorSlice
 // from here, so sourcing it there made a cycle that only worked by hoisting.
 import { mergeHoles } from '../utils/areaCalculator';
+import { markStaleHoles } from '../utils/geometryValidation';
 
 /**
  * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
@@ -31,21 +33,8 @@ const ordinalSuffix = (num) =>
 let traceIdCounter = 0;
 export const newTraceId = () => `trace-${Date.now()}-${(traceIdCounter += 1)}`;
 
-const FLOOR_NAME = /^(\d+)(?:st|nd|rd|th) Floor$/;
-
-/**
- * Generate a sequential trace name. Derived from the traces on hand rather
- * than a module counter: a counter survives loadProject/restoreFromSaved, so
- * reopening a project started naming at "7th Floor".
- */
-function generateTraceName(traces) {
-  const highest = (traces || []).reduce((max, t) => {
-    const match = FLOOR_NAME.exec(t.name || '');
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 0);
-  const num = Math.max(highest, (traces || []).length) + 1;
-  return `${num}${ordinalSuffix(num)} Floor`;
-}
+// Naming lives in traceTypes.js, which owns the taxonomy the names come from.
+const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
 
 export function createFloorSlice(set, get) {
   return {
@@ -68,6 +57,7 @@ export function createFloorSlice(set, get) {
         locked: false,
         type: DEFAULT_TRACE_TYPE,
         colorSource: 'type',
+        nameSource: 'auto',
         color: traceTypeColor(DEFAULT_TRACE_TYPE),
       };
 
@@ -135,7 +125,9 @@ export function createFloorSlice(set, get) {
     renamePerimeterTrace: (traceId, newName) => {
       const state = get();
       const updated = (state.perimeterTraces || []).map((t) =>
-        t.id === traceId ? { ...t, name: newName } : t
+        // `nameSource` pins the name against a later type change: once the user
+        // has typed one, changing the type must not take it back.
+        t.id === traceId ? { ...t, name: newName, nameSource: 'user' } : t
       );
       set({ perimeterTraces: updated, isDirty: true });
     },
@@ -151,9 +143,17 @@ export function createFloorSlice(set, get) {
       undoManager.save();
 
       const nextType = normalizeTraceType(type);
+      // An auto name follows the type; a name the user typed does not.
+      const others = traces.filter((t) => t.id !== traceId);
       set({
         perimeterTraces: assignTypeColors(
-          traces.map((t) => (t.id === traceId ? { ...t, type: nextType } : t))
+          traces.map((t) => (t.id === traceId
+            ? {
+              ...t,
+              type: nextType,
+              name: t.nameSource === 'user' ? t.name : autoTraceName(nextType, others),
+            }
+            : t))
         ),
         isDirty: true,
       });
@@ -200,7 +200,9 @@ export function createFloorSlice(set, get) {
           ...normalized[i],
           // Spreading `normalized[i]` would replace the holes wholesale, and a
           // void the user punched is not the detector's to discard.
-          holes: mergeHoles(t.holes, normalized[i].holes),
+          // Re-checked against the outline that just moved: a user void kept
+          // across the re-trace can land outside it, and is marked not dropped.
+          holes: markStaleHoles(mergeHoles(t.holes, normalized[i].holes), normalized[i].vertices),
           closed: true,
         }));
       } else {
@@ -211,12 +213,13 @@ export function createFloorSlice(set, get) {
           // No identity to carry across a floor-count change, so the voids ride
           // along by position — the common case is a floor gained or lost below
           // the one that was punched.
-          holes: mergeHoles(current[i]?.holes, floor.holes),
+          holes: markStaleHoles(mergeHoles(current[i]?.holes, floor.holes), floor.vertices),
           closed: true,
           visible: true,
           locked: false,
           type: DEFAULT_TRACE_TYPE,
           colorSource: 'type',
+          nameSource: 'auto',
           color: traceTypeColor(DEFAULT_TRACE_TYPE),
         }));
       }
@@ -248,6 +251,7 @@ export function createFloorSlice(set, get) {
             locked: false,
             type: DEFAULT_TRACE_TYPE,
             colorSource: 'type',
+            nameSource: 'auto',
             color: traceTypeColor(DEFAULT_TRACE_TYPE),
           }
         ],

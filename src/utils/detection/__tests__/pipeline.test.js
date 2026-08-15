@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectRoomFromClickCore, traceFloorplanBoundaryCore, boundaryByMode } from '../pipeline.js';
+import { detectRoomFromClickCore, traceFloorplanBoundaryCore, boundaryByMode, mapAnchor } from '../pipeline.js';
 import { rectilinearFit, polygonArea, polygonBounds } from '../polygon.js';
 
 const createImage = (width, height, value = 255) => {
@@ -707,5 +707,55 @@ describe('traceFloorplanBoundaryCore validation routing', () => {
         expect(w).toHaveProperty('anchor');
       }
     });
+  });
+});
+
+// The bug class this exists to prevent is invisible to every benchmark: nothing
+// in bench:detection or probe:exterior reads an anchor, so an anchor scaled the
+// wrong way stays green while pointing off the page.
+describe('mapAnchor', () => {
+  // A 2800px plan downscaled to 1400 gives scale 0.5, i.e. working px per
+  // ORIGINAL px. Mapping back to original must DIVIDE.
+  const SX = 0.5;
+  const SY = 0.5;
+
+  it('divides, so a working-px anchor lands back on the original image', () => {
+    const rect = mapAnchor({ kind: 'rect', x: 100, y: 200, width: 40, height: 60 }, SX, SY);
+    expect(rect).toEqual({ kind: 'rect', x: 200, y: 400, width: 80, height: 120 });
+  });
+
+  it('maps a ring outward, not inward', () => {
+    const ring = mapAnchor(
+      { kind: 'ring', rings: [[{ x: 10, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }]] }, SX, SY,
+    );
+    expect(ring.rings[0]).toEqual([{ x: 20, y: 20 }, { x: 40, y: 20 }, { x: 40, y: 40 }]);
+  });
+
+  it('maps every run of a multi-run segment', () => {
+    const seg = mapAnchor({
+      kind: 'segment',
+      runs: [[{ x: 4, y: 4 }, { x: 8, y: 4 }], [{ x: 0, y: 30 }, { x: 6, y: 30 }]],
+    }, SX, SY);
+    expect(seg.runs).toEqual([
+      [{ x: 8, y: 8 }, { x: 16, y: 8 }],
+      [{ x: 0, y: 60 }, { x: 12, y: 60 }],
+    ]);
+  });
+
+  it('maps a single-polyline segment', () => {
+    const seg = mapAnchor({ kind: 'segment', points: [{ x: 5, y: 5 }, { x: 9, y: 5 }] }, SX, SY);
+    expect(seg.points).toEqual([{ x: 10, y: 10 }, { x: 18, y: 10 }]);
+  });
+
+  it('is null-safe and rejects a kind it does not know', () => {
+    expect(mapAnchor(null, SX, SY)).toBeNull();
+    expect(mapAnchor({ kind: 'blob' }, SX, SY)).toBeNull();
+  });
+
+  // The direction check stated as the property rather than the arithmetic: a
+  // downscale means scale < 1, so original coordinates are always the larger.
+  it('grows coordinates whenever the raster was downscaled', () => {
+    const { x } = mapAnchor({ kind: 'rect', x: 700, y: 0, width: 1, height: 1 }, 0.35, 0.35);
+    expect(x).toBeGreaterThan(700);
   });
 });

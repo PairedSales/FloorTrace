@@ -540,6 +540,10 @@ export function useToolRouter({
     setSelectedCustomShapeIndex(null);
     setSelectedScaleLineIndex(null);
     setSelectedHole(null); // void tool
+    // Parity with the selections above. Safe without a `hasName` guard: the
+    // vertex handle sets `cancelBubble` in its own onClick, so selecting one
+    // never reaches this handler — only a click on empty canvas does.
+    setSelectedVertexIndex?.(null);
     
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
@@ -697,6 +701,7 @@ export function useToolRouter({
     onAddCustomShape,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
+    setSelectedVertexIndex,
     scaleRef,
     getCanvasCoords,
     eraserToolActive,

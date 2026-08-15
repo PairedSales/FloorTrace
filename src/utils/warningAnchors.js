@@ -81,7 +81,14 @@ const labelAnchor = (warning, ctx) => {
  */
 export const resolveAnchor = (warning, ctx) => {
   const code = warning?.code;
-  if (!code || UNANCHORED.has(code)) return null;
+  if (!code) return null;
+  // The detector's own anchor, already in original px. It wins over the derived
+  // ones because it is the geometry the warning was actually raised against,
+  // not a reconstruction from live state. `UNANCHORED` still describes what the
+  // *live* resolver can derive, so a code can sit in it and still arrive with
+  // one — a pre-Phase-2 draft has no stored anchor and correctly shows nothing.
+  if (warning.anchor) return warning.anchor;
+  if (UNANCHORED.has(code)) return null;
   if (WHOLE_OUTLINE.has(code)) return ownRing(ctx);
   if (code === 'floors-overlap') return overlapAnchor(warning, ctx);
   if (code === 'label-outside') return labelAnchor(warning, ctx);
@@ -106,7 +113,11 @@ export const anchorBounds = (anchor) => {
       maxX: anchor.x + anchor.width, maxY: anchor.y + anchor.height,
     };
   }
-  const points = anchor.kind === 'ring' ? (anchor.rings ?? []).flat() : (anchor.points ?? []);
+  const points = anchor.kind === 'ring'
+    ? (anchor.rings ?? []).flat()
+    // A segment carries several disconnected runs when the outline is weak in
+    // more than one stretch; the camera has to frame all of them.
+    : (anchor.runs ? anchor.runs.flat() : (anchor.points ?? []));
   if (!points.length) return null;
   let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
   for (const p of points) {

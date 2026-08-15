@@ -225,12 +225,67 @@ const WARNING_TEXT = {
   'drawn-freehand': 'no wall was found under part of the outline, so your stroke was used instead',
 };
 
-export const warning = (code, detail, severity = 'warn') => ({
-  code,
-  severity,
-  detail,
-  message: WARNING_TEXT[code] ?? code,
-});
+// `anchor` is where on the image the warning is about, in WORKING-RASTER px.
+// pipeline.js maps it to original px exactly once — it divides by scaleX/scaleY,
+// because those are working-per-original and so <= 1. Omitted when null so the
+// emitted shape is unchanged for every warning that has no geometry to point at.
+export const warning = (code, detail, severity = 'warn', anchor = null) => (anchor
+  ? { code, severity, detail, message: WARNING_TEXT[code] ?? code, anchor }
+  : { code, severity, detail, message: WARNING_TEXT[code] ?? code });
+
+/**
+ * The stretches of a contour that no wall was found under, as polylines.
+ *
+ * Deliberately here and not inside `contourSupport`: that runs once per
+ * candidate and returns four scalars, so collecting runs there would allocate
+ * per candidate in the hot path for geometry only the winner ever reads. This
+ * runs once per network, on the winner, and only once the warning has already
+ * fired — the same walk `contourSupport` did, repeated for its shape rather
+ * than its score. It feeds nothing back: the value is written into a warning
+ * and read by nothing that scores.
+ */
+const unsupportedRuns = (polygon, ctx, step = 2) => {
+  const evidence = ctx?.evidence;
+  const wallThickness = ctx?.analysis?.wallThickness;
+  if (!polygon || polygon.length < 3 || !evidence || !wallThickness) return null;
+  const tol = Math.max(2, Math.round(Math.max(2, wallThickness) * 0.9));
+
+  const runs = [];
+  let current = null;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-6) continue;
+    const samples = Math.max(1, Math.round(len / step));
+    for (let s = 0; s < samples; s += 1) {
+      const t = (s + 0.5) / samples;
+      const x = Math.round(a.x + (b.x - a.x) * t);
+      const y = Math.round(a.y + (b.y - a.y) * t);
+      if (evidence.levelAt(x, y, tol) <= 0) {
+        if (current) current.push({ x, y });
+        else current = [{ x, y }];
+      } else if (current) {
+        if (current.length >= 2) runs.push(current);
+        current = null;
+      }
+    }
+  }
+  if (current && current.length >= 2) runs.push(current);
+  if (!runs.length) return null;
+  // Longest first, capped: a highlight of forty fragments points at nothing.
+  runs.sort((p, q) => q.length - p.length);
+  return { kind: 'segment', runs: runs.slice(0, 6) };
+};
+
+// An inclusive integer bbox as a closed 4-point ring. `bboxAreaOf` uses
+// `max - min + 1`, so the +1 is that same convention, not a fudge.
+export const bboxRing = (b) => (b ? [
+  { x: b.minX, y: b.minY },
+  { x: b.maxX + 1, y: b.minY },
+  { x: b.maxX + 1, y: b.maxY + 1 },
+  { x: b.minX, y: b.maxY + 1 },
+] : null);
 
 /**
  * Confidence for the winning candidate. Deliberately pessimistic: unsupported
@@ -252,12 +307,20 @@ export const candidateConfidence = (scored, ctx) => {
   // legitimate answer, not a defect — the ribbon already grades it below
   // structural ink, so the bar for calling it *weak* drops accordingly.
   if (support.mean < (ctx.brush ? 0.4 : 0.6)) {
-    warnings.push(warning('weak-wall-support', { support: Number(support.mean.toFixed(3)) }));
+    warnings.push(warning('weak-wall-support', { support: Number(support.mean.toFixed(3)) }, 'warn',
+      unsupportedRuns(scored.shape?.polygon, ctx)));
     confidence *= 0.75;
   }
   if (support.longestGap > Math.max(24, 0.08 * perimeter)) {
     const px = Math.round(support.longestGap / ctx.scale);
-    warnings.push(warning('bridged-opening', { px }));
+    // The ends of the unsupported run the `px` figure measures. "A 34px opening
+    // was bridged" is unactionable until it can be pointed at. Note it lies on
+    // the candidate contour, which in interior-wall mode is inset from the
+    // outline the canvas draws — a hint at where to look, not a tracing of it.
+    warnings.push(warning('bridged-opening', { px }, 'warn',
+      support.longestGapSpan
+        ? { kind: 'segment', points: support.longestGapSpan }
+        : null));
     confidence *= 1 - Math.min(0.35, support.longestGap / (0.5 * perimeter));
   }
   if (scored.radius >= 0.6 * ctx.maxRadius) {
@@ -265,7 +328,12 @@ export const candidateConfidence = (scored, ctx) => {
     confidence *= 0.85;
   }
   if (scored.annex > 0.15) {
-    warnings.push(warning('annexation', { spill: Number(scored.annex.toFixed(2)) }));
+    // The two rectangles `annex` is literally the ratio of: what this candidate
+    // covers, against the wall network it was grown from. Both already measured.
+    warnings.push(warning('annexation', { spill: Number(scored.annex.toFixed(2)) }, 'warn',
+      (scored.entry?.bbox && ctx.wallBbox)
+        ? { kind: 'ring', rings: [bboxRing(scored.entry.bbox), bboxRing(ctx.wallBbox)] }
+        : null));
     confidence *= 1 - 0.4 * scored.annex;
   }
   if (scored.completeness < 0.9) {
@@ -277,8 +345,15 @@ export const candidateConfidence = (scored, ctx) => {
     confidence *= 0.6 + 0.4 * scored.coverage;
   }
   if (brushFit !== null && brushFit < 0.75) {
+    // The comparison itself: the band you painted against the outline that was
+    // traced. `regionFit` keeps only scalar counts, so the miss and spill
+    // regions do not exist to point at — these two do, and they are the pair
+    // the disagreement is between.
     warnings.push(warning('brush-mismatch', { fit: Number(brushFit.toFixed(2)) },
-      brushFit < 0.5 ? 'error' : 'warn'));
+      brushFit < 0.5 ? 'error' : 'warn',
+      (ctx.brush?.bbox && scored.shape?.polygon)
+        ? { kind: 'ring', rings: [bboxRing(ctx.brush.bbox), scored.shape.polygon] }
+        : null));
     confidence *= 0.4 + 0.6 * brushFit;
   }
   if (constraintScore) {

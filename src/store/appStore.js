@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice, newTraceId } from './floorManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
+import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import {
   DEFAULT_TRACE_TYPE,
   normalizeTraceType,
@@ -31,6 +32,7 @@ const workingStateDefaults = () => ({
       locked: false,
       type: DEFAULT_TRACE_TYPE,
       colorSource: 'type',
+      nameSource: 'auto',
       color: traceTypeColor(DEFAULT_TRACE_TYPE),
     }
   ],
@@ -270,6 +272,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         locked: false,
         type: DEFAULT_TRACE_TYPE,
         colorSource: 'type',
+        nameSource: 'auto',
         color: traceTypeColor(DEFAULT_TRACE_TYPE),
       };
       set({
@@ -282,15 +285,21 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
     const updatedTraces = currentTraces.map((t) => {
       if (t.id === activeId) {
+        const vertices = v?.vertices || [];
         return {
           ...t,
-          vertices: v?.vertices || [],
+          vertices,
           // Deliberately the opposite of `quality` below: holes are independent
           // rings a vertex edit did not touch, so an update that omits them
           // keeps them. Defaulting them to [] silently deleted every courtyard
           // on the first corner nudge and added the void back into the area.
           // Supplying them replaces only what the detector found — see mergeHoles.
-          holes: v ? ('holes' in v ? mergeHoles(t.holes, v.holes) : (t.holes ?? [])) : [],
+          // Re-checked against the new outline: a kept user void can end up
+          // outside it, and is then marked rather than dropped or subtracted.
+          holes: markStaleHoles(
+            v ? ('holes' in v ? mergeHoles(t.holes, v.holes) : (t.holes ?? [])) : [],
+            vertices,
+          ),
           // Editing a trace by hand makes it the user's geometry, so an
           // auto-detection's confidence no longer describes it.
           quality: v && 'quality' in v ? v.quality : null,
@@ -644,6 +653,32 @@ let lastAreaByType = null;
  * default `Object.is` would re-render every consumer on every unrelated `set()`
  * without a stable reference.
  */
+// Nesting is what double counting looks like here. `nonGla.js` normally carves
+// a garage out of the footprint, and a user who then traces it gets it in the
+// garage subtotal and out of GLA — correct. When the carve fails the garage is
+// still inside the GLA outline, so tracing it adds the same floor twice: once
+// in GLA and once in its own subtotal. Reported, never silently corrected —
+// which of the two is wrong is the user's call, not the app's.
+const NESTED_ENOUGH = 0.9;
+
+const findDoubleCounted = (traces) => {
+  const live = traces.filter((t) => t.visible && t.vertices?.length >= 3);
+  const found = [];
+  for (const inner of live) {
+    const innerType = normalizeTraceType(inner.type);
+    if (innerType === DEFAULT_TRACE_TYPE) continue;
+    for (const outer of live) {
+      if (outer === inner) continue;
+      if (normalizeTraceType(outer.type) !== DEFAULT_TRACE_TYPE) continue;
+      if (containmentRatio(inner.vertices, outer.vertices) >= NESTED_ENOUGH) {
+        found.push({ innerId: inner.id, innerName: inner.name, outerName: outer.name });
+        break;
+      }
+    }
+  }
+  return found;
+};
+
 export const selectAreaByType = (state) => {
   const traces = state.perimeterTraces || [];
   const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
@@ -687,6 +722,7 @@ export const selectAreaByType = (state) => {
     counts,
     gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
     total,
+    doubleCounted: findDoubleCounted(traces),
   };
   return lastAreaByType;
 };

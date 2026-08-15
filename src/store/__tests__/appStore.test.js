@@ -463,3 +463,67 @@ describe('scaleLines', () => {
     expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.3, y: 0.3 });
   });
 });
+
+// nonGla.js normally carves the garage out of the footprint. When that fails,
+// the garage is still inside the GLA outline, and tracing it by hand adds the
+// same floor to both subtotals.
+describe('double-count detection', () => {
+  const box = (x1, y1, x2, y2) => [
+    { x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 },
+  ];
+  const trace = (id, type, vertices, visible = true) => ({
+    id, name: id, vertices, holes: [], closed: true, visible, locked: false,
+    type, colorSource: 'type', nameSource: 'auto', color: '#BD93F9',
+  });
+  const seed = (list) => useAppStore.setState({
+    perimeterTraces: list,
+    activeTraceId: list[0]?.id ?? null,
+    calibration: {
+      calibrated: true, feetPerPixel: SCALE, source: 'room-calibration',
+      calibratedRoomId: null, createdAt: 1, quality: null,
+    },
+  });
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+  });
+
+  it('flags a garage drawn inside the GLA outline', () => {
+    seed([
+      trace('house', 'gla', box(0, 0, 100, 100)),
+      trace('garage', 'garage', box(10, 10, 40, 40)),
+    ]);
+
+    const { doubleCounted } = selectAreaByType(useAppStore.getState());
+    expect(doubleCounted).toHaveLength(1);
+    expect(doubleCounted[0]).toMatchObject({ innerId: 'garage', outerName: 'house' });
+  });
+
+  it('says nothing about a garage drawn beside the house', () => {
+    seed([
+      trace('house', 'gla', box(0, 0, 100, 100)),
+      trace('garage', 'garage', box(200, 0, 260, 60)),
+    ]);
+
+    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+  });
+
+  // Two storeys of a house are nested by construction and are not double counted.
+  it('does not flag one GLA floor sitting inside another', () => {
+    seed([
+      trace('first', 'gla', box(0, 0, 100, 100)),
+      trace('second', 'gla', box(10, 10, 90, 90)),
+    ]);
+
+    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+  });
+
+  it('ignores a hidden trace, which is already out of both totals', () => {
+    seed([
+      trace('house', 'gla', box(0, 0, 100, 100)),
+      trace('garage', 'garage', box(10, 10, 40, 40), false),
+    ]);
+
+    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+  });
+});

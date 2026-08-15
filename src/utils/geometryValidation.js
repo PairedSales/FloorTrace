@@ -312,6 +312,57 @@ export function validateHoleRing(ring, outer, existingHoles = []) {
 }
 
 /**
+ * Fraction of `inner`'s vertices that fall inside `outer`, plus its centroid.
+ *
+ * Deliberately vertex sampling rather than a real polygon intersection: the
+ * case this exists to catch is a trace wholly nested inside another (a garage
+ * drawn again inside the house outline the carve failed to remove), and a
+ * nested ring has every vertex inside. A partial overlap of two buildings is
+ * not double counting and is not worth a polygon clipper to detect.
+ */
+export function containmentRatio(inner, outer) {
+  if (!inner?.length || !outer || outer.length < 3) return 0;
+  let inside = 0;
+  for (const v of inner) if (pointInPolygon(v, outer, [])) inside += 1;
+  return inside / inner.length;
+}
+
+/**
+ * Re-check the user's voids against an outline that has just moved.
+ *
+ * A re-trace keeps `source: 'user'` holes deliberately — they are the user's
+ * assertion about the building, not the detector's. But the outline they were
+ * punched out of can move under them, leaving a void straddling or outside the
+ * new one. Dropping it would discard the assertion; saying nothing would report
+ * an area that subtracts a hole which is not in the building. So it is kept,
+ * marked, and (in `calculateArea`) not subtracted.
+ *
+ * Only user holes are checked: an auto hole was produced from this very
+ * outline, so it is inside by construction.
+ */
+export function markStaleHoles(holes, outer) {
+  if (!Array.isArray(holes) || !holes.length) return holes;
+  if (!outer || outer.length < 3) return holes;
+
+  let changed = false;
+  const next = holes.map((h) => {
+    if (!h || Array.isArray(h) || h.source !== 'user') return h;
+    // Checked against the outline alone: an overlap with another void is not
+    // something the re-trace caused, and flagging it here would be noise.
+    const { ok, reason } = validateHoleRing(h.ring, outer, []);
+    const stale = !ok;
+    if (stale === !!h.stale && (!stale || h.staleReason === reason)) return h;
+    changed = true;
+    return stale ? { ...h, stale: true, staleReason: reason } : (() => {
+      // The outline moved back over it — it counts again.
+      const { stale: _s, staleReason: _r, ...rest } = h;
+      return rest;
+    })();
+  });
+  return changed ? next : holes;
+}
+
+/**
  * Determines the winding order of the polygon.
  * Uses the signed Shoelace area.
  * Returns: 'CW' (visually clockwise in Y-down), 'CCW' (counterclockwise), or 'degenerate'.

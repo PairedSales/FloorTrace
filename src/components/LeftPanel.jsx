@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair } from 'lucide-react';
 import useAppStore, { selectAreaByType } from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
-import { calculateArea, holeRings } from '../utils/areaCalculator';
+import { calculateArea, holeRings, isSubtracted } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
 import { resolveAnchor } from '../utils/warningAnchors';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
@@ -116,12 +116,19 @@ const TraceQuality = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWa
 
 // `−2 voids (1 yours)`. A subtraction the user asserted by hand reads
 // differently from one the detector guessed, so a mixed set says which is which.
+// A void the outline moved out from under is counted apart from both: it is no
+// longer subtracted, so folding it into the count would overstate the deduction.
 const voidNote = (holes) => {
-  const rings = holeRings(holes).filter((r) => r?.length >= 3);
-  if (!rings.length) return '';
-  const mine = (holes ?? []).filter((h) => h?.source === 'user').length;
-  const mixed = mine > 0 && mine < rings.length;
-  return ` −${rings.length} ${rings.length === 1 ? 'void' : 'voids'}${mixed ? ` (${mine} yours)` : ''}`;
+  const list = holes ?? [];
+  const live = list.filter((h, i) => holeRings(list)[i]?.length >= 3 && isSubtracted(h));
+  const stale = list.filter((h, i) => holeRings(list)[i]?.length >= 3 && !isSubtracted(h)).length;
+  if (!live.length && !stale) return '';
+  const mine = live.filter((h) => h?.source === 'user').length;
+  const mixed = mine > 0 && mine < live.length;
+  const head = live.length
+    ? ` −${live.length} ${live.length === 1 ? 'void' : 'voids'}${mixed ? ` (${mine} yours)` : ''}`
+    : '';
+  return `${head}${stale ? ` ⚠ ${stale} outside` : ''}`;
 };
 
 const LeftPanel = ({
@@ -424,6 +431,18 @@ const LeftPanel = ({
         {showBreakdown && (
           <p className="mt-1.5 text-[9px] leading-snug text-center text-slate-600">
             Grouped in the ANSI Z765 style — not a certified measurement.
+          </p>
+        )}
+        {/* Stated, never corrected: which of the two traces is wrong is the
+            user's call. Silence here is the failure this app is prone to —
+            a total that looks fine while counting one floor twice. */}
+        {areas.doubleCounted?.length > 0 && (
+          <p className="mt-1.5 px-1 text-[9px] leading-snug text-amber-400/90">
+            {areas.doubleCounted.map((d) => (
+              <span key={d.innerId} className="block">
+                ⚠ {d.innerName} sits inside {d.outerName}, so its area is counted twice.
+              </span>
+            ))}
           </p>
         )}
         {scaleNote && area > 0 && (
