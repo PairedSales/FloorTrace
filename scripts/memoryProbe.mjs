@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
-import { clearDetectionCache } from '../src/utils/detection/cache.js';
+import { clearDetectionCache, getSearchCache } from '../src/utils/detection/cache.js';
 import { loadPng } from './lib/benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,6 +72,12 @@ const probe = (file) => {
   const afterCold = settle();
   const warm = timed(() => traceFloorplanBoundaryCore(imageData, { cacheKey: file }));
   const afterWarm = settle();
+  // What the search *charged* itself, and whether that tripped the budget. A
+  // memo that evicted reports a healthy retention figure and a warm replay
+  // that costs full price, so the two numbers only mean something together.
+  const searchCache = getSearchCache(file, 1400, undefined);
+  const charged = searchCache.bytes ?? 0;
+  const evicted = Boolean(searchCache.overBudget);
   clearDetectionCache();
   const afterClear = settle();
 
@@ -82,9 +88,12 @@ const probe = (file) => {
   console.log(`   uncached retains  +${mb(afterUncached - base)} MB   (${uncached.ms}ms)`);
   console.log(`   cached   retains  +${mb(afterCold - afterUncached)} MB   (${cold.ms}ms cold)`);
   console.log(`   after warm replay +${mb(afterWarm - afterUncached)} MB   (${warm.ms}ms warm)`);
+  console.log(`   search charged     ${mb(charged)} MB   ${evicted ? '** MEMO EVICTED **' : 'memo alive'}`);
   console.log(`   clearCache freed   ${mb(afterWarm - afterClear)} MB`);
   console.log('');
-  return { file, retained: afterCold - afterUncached, coldMs: cold.ms, warmMs: warm.ms };
+  return {
+    file, retained: afterCold - afterUncached, coldMs: cold.ms, warmMs: warm.ms, charged, evicted,
+  };
 };
 
 const files = collectImages(process.argv.slice(2));
@@ -94,8 +103,16 @@ if (!files.length) {
 }
 
 let worst = null;
+const evicted = [];
 for (const file of files) {
   const result = probe(file);
   if (!worst || result.retained > worst.retained) worst = result;
+  if (result.evicted) evicted.push(result);
 }
 console.log(`=== WORST: ${path.basename(worst.file)} retains ${mb(worst.retained)} MB ===`);
+if (evicted.length) {
+  console.log(`=== ${evicted.length}/${files.length} EVICTED: `
+    + `${evicted.map((r) => `${path.basename(r.file)} (${mb(r.charged)} MB, warm ${r.warmMs}ms)`).join(', ')} ===`);
+} else {
+  console.log(`=== 0/${files.length} evicted — every fixture keeps its memo ===`);
+}
