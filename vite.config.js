@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
@@ -10,6 +10,11 @@ export default defineConfig({
   server: globalThis.process?.env?.PORT
     ? { port: Number(globalThis.process.env.PORT) }
     : undefined,
+  test: {
+    // Nested git worktrees carry their own copies of the suite; collecting them
+    // makes a stale worktree fail master's tests. eslint ignores .claude too.
+    exclude: [...configDefaults.exclude, '**/.claude/**'],
+  },
   build: {
     rollupOptions: {
       output: {
