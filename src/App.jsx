@@ -20,7 +20,7 @@ import {
   releaseOcrWorkersWhenIdle
 } from './utils/DimensionsOCR';
 import {
-  robustScale, orientDimsToBox, decideProjectScale, PLAN_SPREAD_TOLERANCE,
+  robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
 import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
@@ -94,6 +94,16 @@ const roomScaleHint = () => {
     return { x: 1 / feetPerPixel.x, y: 1 / feetPerPixel.y };
   }
   return null;
+};
+
+// Traced floor area in image pixels. Every floor, not the largest: the labels
+// are spread over all of them, and weighing them against one floor reports a
+// correct scale on a multi-floor sheet as implausible.
+const tracedAreaPx = (traced) => {
+  const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
+  return floors.reduce((sum, floor) => (
+    floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
+  ), 0);
 };
 
 const excludedAreasNote = (traced) => {
@@ -622,6 +632,12 @@ function App() {
       // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
       const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+      // Every trace, not only the one the automatic scan ran: the footprint is
+      // the one check on the scale that survives a majority of bad rooms, and a
+      // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure
+      // selection over rooms already measured, and no-ops unless the scale in
+      // force is still the automatic one.
+      if (floorCount) reviewAgainstFootprint(tracedAreaPx(traced));
       reportTrace(traced, floorCount);
       return floorCount ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
@@ -639,7 +655,7 @@ function App() {
       }
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
-    reportTrace, handleDrawMode]);
+    reportTrace, handleDrawMode, reviewAgainstFootprint]);
 
   // Auto-detection, with draw mode as its fallback. A result the detector
   // itself rates poor or worse is not something to hand over as an answer, so
@@ -735,62 +751,25 @@ function App() {
 
 
 
-  // Update scale based on room dimensions and overlay.
-  //
-  // Two scalars come out of one room and the area is their product, so an
-  // error in either is silently reinterpreted as "the drawing has non-square
-  // pixels" - a room measured wrong one way and wrong the other way still
-  // lands inside the plausible range. Comparing them is the cheapest
-  // correctness check the app has, and every room the detector has placed is
-  // a second opinion on the same number.
+  // Set the project scale from one room. The decision — which rooms get a
+  // vote, what the verdict is, whether anything moved — is resolveScaleUpdate's
+  // and is unit-tested there; what is left here is the store write and the
+  // toast, the two things a pure function cannot do.
   const updateScale = useCallback((dimensions, overlay, options = {}) => {
-    if (!dimensions.width || !dimensions.height || !overlay) return;
-
-    const dimWidth = parseFloat(dimensions.width);
-    const dimHeight = parseFloat(dimensions.height);
-    const overlayWidth = Math.abs(overlay.x2 - overlay.x1);
-    const overlayHeight = Math.abs(overlay.y2 - overlay.y1);
-
-    if (overlayWidth === 0 || overlayHeight === 0) return;
-    if (isNaN(dimWidth) || isNaN(dimHeight) || dimWidth <= 0 || dimHeight <= 0) return;
-
-    // Picking a room by hand is the user overruling the automatic consensus,
-    // and it has to win: after a scan the project already holds every room on
-    // the page, so decideProjectScale would find that majority authoritative
-    // and refuse to adopt the very room the user just chose. Once pinned it
-    // stays pinned, or a later nudge of the same overlay would hand the scale
-    // back to the rooms the user just rejected.
     const state = useAppStore.getState();
-    const pinned = options.pinned || state.calibration.quality?.source === 'manual';
-    const others = otherRoomScaleSamples(state.rooms, overlay);
-    const decision = decideProjectScale({
-      dimWidth, dimHeight, boxWidth: overlayWidth, boxHeight: overlayHeight,
-      otherSamples: pinned ? [] : others,
+    const resolved = resolveScaleUpdate({
+      dimensions,
+      overlay,
+      otherSamples: otherRoomScaleSamples(state.rooms, overlay),
+      calibration: state.calibration,
+      pinned: !!options.pinned,
     });
-    const { x: scaleX, y: scaleY } = decision.scale;
-
-    // Pinned, but still told. The area is what moves: picking one room out of a
-    // measured consensus changed it by 27% on ExampleFloorplan6 at a scale gap
-    // of only 13%, because area goes as scale squared — and at 13% the existing
-    // room-to-room tolerance says nothing, so that landed silently. Anything
-    // past a few percent is now stated, and a gap wide enough to be a mistake
-    // is stated as one.
-    if (pinned && others.length >= 2) {
-      const project = robustScale(others);
-      const gap = project ? Math.abs(Math.log(decision.roomScale / project.value)) : 0;
-      if (gap > 0.03) {
-        decision.level = gap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note';
-        decision.reason = 'room-vs-auto';
-        decision.disagreement = gap;
-        decision.adopted = true;
-        decision.roomCount = Math.floor(others.length / 2);
-      }
-    }
+    if (!resolved) return;
 
     // Say it out loud only when the answer changed or is in doubt; the Area
     // panel carries the same verdict for as long as the scale is in force,
     // because that is where the question is actually asked.
-    const summary = scaleQualitySummary(decision);
+    const summary = scaleQualitySummary(resolved.quality);
     if (summary && summary.level === 'check' && options.announce !== false) {
       notify(summary.detail, {
         type: 'warning',
@@ -801,36 +780,20 @@ function App() {
       });
     }
 
-    // Only apply if the scale or its verdict has actually changed
-    const currentCalibration = useAppStore.getState().calibration;
-    const currentScale = currentCalibration.feetPerPixel;
-
-    const hasChanged = !currentCalibration.calibrated ||
-      typeof currentScale !== 'object' ||
-      Math.abs((currentScale?.x ?? 0) - scaleX) > 1e-9 ||
-      Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9 ||
-      (currentCalibration.quality?.level ?? 'ok') !== decision.level ||
-      (currentCalibration.quality?.reason ?? null) !== decision.reason ||
-      (currentCalibration.quality?.source ?? null) !== 'manual';
-
-    if (hasChanged) {
-      applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration', {
-        level: decision.level,
-        reason: decision.reason,
-        disagreement: decision.disagreement,
-        adopted: decision.adopted,
-        roomCount: decision.roomCount,
-        source: 'manual',
-      });
+    if (resolved.changed) {
+      applyRoomCalibration(resolved.scale, null, 'room-calibration', resolved.quality);
     }
   }, [applyRoomCalibration, notify]);
 
-  // Update room overlay position
+  // Update room overlay position. Pinned: dragging the overlay is the user
+  // correcting the room the app got wrong, and unpinned it was outvoted by the
+  // consensus that produced the wrong room — then adopted verbatim on the very
+  // next drag, once the rejected write had pinned the calibration.
   const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
     if (saveAction) undoManager.save();
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
-      updateScale(roomDimensions, overlay);
+      updateScale(roomDimensions, overlay, { pinned: true });
     }
   }, [setRoomOverlay, roomDimensions, updateScale]);
 
@@ -895,19 +858,11 @@ function App() {
       return;
     }
 
+    // The footprint cross-check runs inside runTrace now, so it lands here too
+    // — and equally on every later re-trace, which used to leave the verdict
+    // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
-
-    // The traced building is the one check that survives a majority of bad
-    // rooms, and it only exists now. Every floor, not the largest: the labels
-    // are spread over all of them, and weighing them against one floor reports
-    // a correct scale on a multi-floor sheet as implausible.
-    const traced = useAppStore.getState().tracedBoundaries;
-    const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
-    const areaPx = floors.reduce((sum, floor) => (
-      floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
-    ), 0);
-    reviewAgainstFootprint(areaPx);
-  }, [measureAndCalibrate, reviewAgainstFootprint, autoTraceExterior, setIsProcessing]);
+  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing]);
 
   useEffect(() => {
     afterScanRef.current = runAutoScale;
