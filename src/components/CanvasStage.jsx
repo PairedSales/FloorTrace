@@ -12,7 +12,7 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
 import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
@@ -99,6 +99,12 @@ const CanvasStage = React.memo(({
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
   const rooms = useAppStore((s) => s.rooms);
+  // Read here rather than threaded through App -> Canvas: the scale tool has
+  // no callbacks App owns, so a prop chain would be three files of pass-through.
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
+  const scaleLines = useAppStore((s) => s.scaleLines);
+  const currentScaleLine = useAppStore((s) => s.currentScaleLine);
+  const calibrated = useAppStore((s) => s.calibration?.calibrated);
   const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
@@ -222,6 +228,7 @@ const CanvasStage = React.memo(({
     drawAreaActive,
     angleToolActive,
     drawModeActive,
+    scaleToolActive,
     manualEntryMode,
     traceInteractionMode,
     autoSnapEnabled,
@@ -259,6 +266,9 @@ const CanvasStage = React.memo(({
     setSelectedMeasurementLineIndex: measurement.setSelectedMeasurementLineIndex,
     onAddMeasurementLine,
     onMeasurementLineUpdate,
+
+    // Scale line
+    currentScaleLine,
 
     // Eraser, Crop & Draw
     eraser,
@@ -585,6 +595,19 @@ const CanvasStage = React.memo(({
               onMeasurementLineSelect={measurement.handleMeasurementLineSelect}
               onMeasurementLineDragEnd={measurement.handleMeasurementLineDragEnd}
               onMeasurementLinesChange={handleMeasurementLinesChange}
+            />
+
+            <ScaleLineLayer
+              scaleLines={scaleLines}
+              currentScaleLine={router.activeScaleLine}
+              scaleToolActive={scaleToolActive}
+              calibrated={calibrated}
+              scale={camera.scale}
+              feetPerPixel={activeFeetPerPixel}
+              unit={unit}
+              unitStyle={unitStyle}
+              selectedScaleLineIndex={router.selectedScaleLineIndex}
+              onScaleLineSelect={router.setSelectedScaleLineIndex}
             />
 
             <ShapeLayer

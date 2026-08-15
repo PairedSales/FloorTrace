@@ -3,6 +3,7 @@ import useAppStore from '../../../store/appStore';
 import { getCanvasCoordinates } from '../canvasUtils';
 import { hasSelfIntersection } from '../../../utils/geometryValidation';
 import { shortcutsBlocked } from '../../../utils/keyboardGuard';
+import { useScaleLine } from '../../../hooks/useScaleLine';
 import { toast } from 'sonner';
 
 export function useToolRouter({
@@ -17,6 +18,7 @@ export function useToolRouter({
   drawAreaActive,
   angleToolActive,
   drawModeActive,
+  scaleToolActive,
   manualEntryMode,
   traceInteractionMode,
   autoSnapEnabled,
@@ -57,6 +59,9 @@ export function useToolRouter({
   onAddMeasurementLine,
   onMeasurementLineUpdate,
 
+  // Sub-system: Scale line
+  currentScaleLine,
+
   // Sub-system: Eraser, Crop & Draw Hooks (directly instantiated in Canvas)
   eraser,
   crop,
@@ -86,6 +91,9 @@ export function useToolRouter({
   // Local drag state to bypass Zustand at 60fps
   const [localRoomOverlay, setLocalRoomOverlay] = useState(null);
   const [localMeasurementLine, setLocalMeasurementLine] = useState(null);
+  const [localScaleLine, setLocalScaleLine] = useState(null);
+  const [selectedScaleLineIndex, setSelectedScaleLineIndex] = useState(null);
+  const { removeLine: removeScaleLine } = useScaleLine();
 
   const isDraggingRef = useRef(false);
   const dragStartPosRef = useRef(null);
@@ -111,6 +119,7 @@ export function useToolRouter({
 
   const activeRoomOverlay = localRoomOverlay || roomOverlay;
   const activeMeasurementLine = localMeasurementLine || currentMeasurementLine;
+  const activeScaleLine = localScaleLine || currentScaleLine;
 
   // Context Menu: Cancel crop or measurement line drawing on right-click
   const handleStageContextMenu = useCallback((e) => {
@@ -298,6 +307,15 @@ export function useToolRouter({
       });
     }
 
+    // ── scale line preview ──────────────────────────────────────────────────
+    if (scaleToolActive && currentScaleLine && currentScaleLine.start) {
+      setLocalScaleLine({
+        start: currentScaleLine.start,
+        end: mousePoint
+      });
+    }
+    // ── end scale line preview ──────────────────────────────────────────────
+
     // Custom shape preview mouse pos tracking
     if (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) {
       setCurrentMousePos(mousePoint);
@@ -318,6 +336,8 @@ export function useToolRouter({
     draggingRoomCorner,
     lineToolActive,
     currentMeasurementLine,
+    scaleToolActive,
+    currentScaleLine,
     drawAreaActive,
     currentCustomShape,
     perimeterVertices,
@@ -466,17 +486,20 @@ export function useToolRouter({
     }
 
     const target = e.target;
-    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')) {
+    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')
+      || target?.hasName?.('scale-line')) {
       return;
     }
 
     setSelectedMeasurementLineIndex(null);
     setSelectedCustomShapeIndex(null);
+    setSelectedScaleLineIndex(null);
     
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
       (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && handleAddPerimeterVertex && perimeterVertices !== null) ||
       (lineToolActive && onMeasurementLineUpdate) ||
+      scaleToolActive ||
       (drawAreaActive && onCustomShapeUpdate);
     
     if (!needsSingleClickHandling) {
@@ -512,6 +535,32 @@ export function useToolRouter({
         onCanvasClick(clickPoint);
         return;
       }
+
+      // ── scale line placement ────────────────────────────────────────────
+      // Ahead of perimeter vertex placement: an explicitly activated tool
+      // beats a mode that was merely left on. Corner snapping is what "click
+      // both ends of this wall" wants, and it returns null when it finds
+      // nothing, so a printed scale bar degrades to a raw click.
+      if (scaleToolActive) {
+        const snapped = (autoSnapEnabled && !e.evt?.shiftKey)
+          ? findVertexSnapPoint(clickPoint) : null;
+        const finalPoint = snapped || clickPoint;
+        const store = useAppStore.getState();
+        if (!store.currentScaleLine) {
+          store.setCurrentScaleLine({ start: finalPoint, end: finalPoint });
+        } else {
+          store.addScaleLine({
+            id: `scale-${Date.now()}`,
+            start: store.currentScaleLine.start,
+            end: finalPoint,
+            feet: null,
+          });
+          store.setCurrentScaleLine(null);
+          setLocalScaleLine(null);
+        }
+        return;
+      }
+      // ── end scale line placement ────────────────────────────────────────
       
       if (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && handleAddPerimeterVertex && perimeterVertices !== null) {
         const targetType = e.target.getType();
@@ -607,6 +656,7 @@ export function useToolRouter({
     eraserToolActive,
     cropToolActive,
     drawModeActive,
+    scaleToolActive,
     setLocalMeasurementLine,
   ]);
 
@@ -628,6 +678,27 @@ export function useToolRouter({
       return;
     }
 
+    // ── scale line commit ─────────────────────────────────────────────────
+    const storeCurrentScaleLine = useAppStore.getState().currentScaleLine;
+    if (scaleToolActive && storeCurrentScaleLine && storeCurrentScaleLine.start) {
+      const stage = e.target.getStage();
+      if (!stage) return;
+      const finalPoint = getCanvasCoords(stage);
+      if (!finalPoint) return;
+
+      const store = useAppStore.getState();
+      store.addScaleLine({
+        id: `scale-${Date.now()}`,
+        start: storeCurrentScaleLine.start,
+        end: finalPoint,
+        feet: null,
+      });
+      store.setCurrentScaleLine(null);
+      setLocalScaleLine(null);
+      return;
+    }
+    // ── end scale line commit ─────────────────────────────────────────────
+
     const storeCustomShape = useAppStore.getState().currentCustomShape;
     if (drawAreaActive && storeCustomShape && !storeCustomShape.closed && storeCustomShape.vertices.length >= 3) {
       const finalShape = { ...storeCustomShape, closed: true };
@@ -637,7 +708,7 @@ export function useToolRouter({
     }
 
     if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive
-      || drawModeActive) return;
+      || drawModeActive || scaleToolActive) return;
     
     const targetType = e.target.getType();
     if (targetType === 'Circle') return;
@@ -661,6 +732,7 @@ export function useToolRouter({
     onAddCustomShape,
     onCustomShapeUpdate,
     getCanvasCoords,
+    scaleToolActive,
     setLocalMeasurementLine,
   ]);
 
@@ -677,6 +749,17 @@ export function useToolRouter({
         setSelectedMeasurementLineIndex(null);
         return;
       }
+
+      // ── scale line ────────────────────────────────────────────────────────
+      // Through the same path as the panel's own remove, so the scale is
+      // re-resolved from what is left rather than outliving its evidence.
+      if (selectedScaleLineIndex !== null) {
+        const doomed = useAppStore.getState().scaleLines[selectedScaleLineIndex];
+        if (doomed) removeScaleLine(doomed.id);
+        setSelectedScaleLineIndex(null);
+        return;
+      }
+      // ── end scale line ────────────────────────────────────────────────────
 
       if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
         onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
@@ -711,6 +794,14 @@ export function useToolRouter({
         onDrawAreaToggle();
       } else if (angleToolActive && onAngleToolToggle) {
         onAngleToolToggle();
+      // ── scale line ──────────────────────────────────────────────────────
+      // No undo point: the only state this clears is the gesture in progress,
+      // and the committed lines and calibration are untouched.
+      } else if (scaleToolActive) {
+        useAppStore.getState().setCurrentScaleLine(null);
+        useAppStore.getState().setScaleToolActive(false);
+        setLocalScaleLine(null);
+      // ── end scale line ──────────────────────────────────────────────────
       } else if (perimeterVertices !== null) {
         useAppStore.getState().setPerimeterVertices(null);
       } else if (manualEntryMode) {
@@ -766,6 +857,9 @@ export function useToolRouter({
     drawTool,
     onDrawModeToggle,
     onFinishDrawMode,
+    scaleToolActive,
+    selectedScaleLineIndex,
+    removeScaleLine,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
     selectedVertexIndex,
@@ -840,6 +934,9 @@ export function useToolRouter({
     localMeasurementLine,
     activeRoomOverlay,
     activeMeasurementLine,
+    activeScaleLine,
+    selectedScaleLineIndex,
+    setSelectedScaleLineIndex,
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,

@@ -7,6 +7,7 @@ import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/bo
 import { resolveAnchor } from '../utils/warningAnchors';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import InchesInput from './InchesInput';
+import ScaleSection from './ScaleSection';
 import { toast } from 'sonner';
 
 const SEVERITY_DOT = { error: 'bg-red-400', warn: 'bg-amber-400', info: 'bg-slate-500' };
@@ -339,6 +340,10 @@ const LeftPanel = ({
             </div>
           )}
         </section>
+
+        {/* Scale — the length input for a hand-drawn scale line. Renders
+            nothing until the Scale tool is on or a line scale is in force. */}
+        <ScaleSection unit={unit} />
 
         <div className="panel-divider mx-3" />
 

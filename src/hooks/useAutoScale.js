@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { detectRoomsFromLabels } from '../utils/detection';
 import { selectProjectScale } from '../utils/detection/scale.js';
+import { isUserAsserted } from '../utils/detection/validate.js';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 
@@ -27,8 +28,13 @@ export function useAutoScale(notify) {
   // measuring anything again — selectProjectScale is pure.
   const lastRunRef = useRef(null);
 
+  // Returns whether the decision was actually written. The guard lives here
+  // rather than at the two call sites so measureAndCalibrate and
+  // reviewAgainstFootprint cannot diverge: this wrote unconditionally, so a
+  // re-scan silently discarded a scale the user had asserted by hand.
   const applyDecision = useCallback((decision) => {
-    if (!(decision?.pixelsPerFoot > 0)) return;
+    if (!(decision?.pixelsPerFoot > 0)) return false;
+    if (isUserAsserted(useAppStore.getState().calibration)) return false;
     useAppStore.getState().applyRoomCalibration(
       { x: decision.feetPerPixel, y: decision.feetPerPixel },
       null,
@@ -47,6 +53,7 @@ export function useAutoScale(notify) {
         })),
       },
     );
+    return true;
   }, []);
 
   /**
@@ -95,7 +102,25 @@ export function useAutoScale(notify) {
         y: 1 / c.pixelsPerFoot.y,
       },
     })));
-    applyDecision(decision);
+    if (!applyDecision(decision)) {
+      // A hand-set scale stands, but the measurement it disagreed with is
+      // still worth saying out loud: silently keeping either number is the
+      // failure this guard exists to prevent.
+      const held = useAppStore.getState().calibration.feetPerPixel;
+      const heldScale = Math.sqrt(Math.abs((held?.x ?? 0) * (held?.y ?? 0)));
+      const gap = heldScale > 0 ? Math.abs(Math.log(decision.feetPerPixel / heldScale)) : 0;
+      if (notify) {
+        notify(
+          'Kept the scale you set by hand.'
+          + (gap > 0.03
+            ? ` The ${decision.roomCount} room${decision.roomCount === 1 ? '' : 's'} measured `
+              + `on this page imply one about ${Math.round((Math.exp(gap) - 1) * 100)}% different.`
+            : ' The rooms measured on this page agree with it.'),
+          { type: gap > 0.03 ? 'warning' : 'info', duration: 8000, id: 'auto-scale' },
+        );
+      }
+      return decision;
+    }
 
     if (decision.level === 'check' && notify) {
       notify(

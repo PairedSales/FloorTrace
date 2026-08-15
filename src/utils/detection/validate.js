@@ -303,6 +303,15 @@ export const decideProjectScale = ({
   };
 };
 
+// The provenances that mean "the user said so". A scale asserted by hand
+// outranks anything the app measured, and it is a set rather than a string
+// comparison so the next caller to reach here with a new gesture's source
+// cannot hand the scale back to the pool the user overruled.
+export const PINNED_SOURCES = new Set(['manual', 'line']);
+
+export const isUserAsserted = (calibration) =>
+  PINNED_SOURCES.has(calibration?.quality?.source);
+
 // One room's label and overlay resolved into the scale the project should hold,
 // the quality to record beside it, and whether either differs from what is in
 // force. Pure, and separate from the store write, because the asymmetry it
@@ -330,7 +339,7 @@ export const resolveScaleUpdate = ({
   // authoritative and refuse to adopt the very room the user just placed. Once
   // pinned it stays pinned, or a later nudge of the same overlay would hand the
   // scale back to the rooms the user just rejected.
-  const isPinned = !!pinned || calibration?.quality?.source === 'manual';
+  const isPinned = !!pinned || isUserAsserted(calibration);
   const decision = decideProjectScale({
     dimWidth, dimHeight, boxWidth, boxHeight,
     otherSamples: isPinned ? [] : otherSamples,
@@ -378,4 +387,149 @@ export const resolveScaleUpdate = ({
     || (calibration.quality?.source ?? null) !== quality.source;
 
   return { scale: { x: decision.scale.x, y: decision.scale.y }, quality, changed };
+};
+
+// How far off axis a line may run and still be read as one axis's length. The
+// error that admits is worth stating rather than hiding: a line 5° off axis,
+// read as an axis length, is 1/cos(5°) = 0.4% long, and 1.5% at 10°.
+export const AXIS_TOLERANCE_DEG = 5;
+
+// Click precision is ~2 image px, so a 40 px line carries ±5% into the scale
+// and a 400 px line ±0.5%. A floor, not a measurement — zooming in before
+// clicking genuinely improves it.
+export const MIN_CONFIDENT_SCALE_LINE_PX = 100;
+const CLICK_PRECISION_PX = 2;
+
+const lineLengthPx = (line) =>
+  Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
+
+// Which axis a scale line measures, or 'diagonal' for one that measures both
+// at once and can therefore only be read isotropically.
+export const classifyScaleLine = (line) => {
+  if (!line?.start || !line?.end) return null;
+  const dx = Math.abs(line.end.x - line.start.x);
+  const dy = Math.abs(line.end.y - line.start.y);
+  if (!(dx > 0) && !(dy > 0)) return null;
+  const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (deg <= AXIS_TOLERANCE_DEG) return 'x';
+  if (deg >= 90 - AXIS_TOLERANCE_DEG) return 'y';
+  return 'diagonal';
+};
+
+// The scale a set of hand-drawn lines asserts. A line from A to B with true
+// length L gives one equation, L² = (Δx·sx)² + (Δy·sy)², in two unknowns:
+// one line is solvable only under sx = sy, and only a near-horizontal and a
+// near-vertical line together determine the two axes independently. Anything
+// else — a second parallel line, a second diagonal — is a fresh isotropic
+// assertion that supersedes rather than a new axis.
+//
+// Deliberately not pooled through robustScale: that exists because the *app*
+// measured those rooms, and a median over two deliberate user assertions would
+// be theatre. `roomSamples` are feet per pixel, the unit resolveScaleUpdate
+// already takes, and are reported against — never applied.
+export const resolveLineScale = ({ lines = [], roomSamples = [], calibration = null }) => {
+  const usable = (lines ?? []).filter((l) =>
+    l?.start && l?.end && l.feet > 0 && lineLengthPx(l) > 0);
+  if (!usable.length) return null;
+
+  // The most recent assertion of each kind wins. A diagonal fixes both axes at
+  // once, so it clears the axis lines drawn before it rather than joining them.
+  let ax = null;
+  let ay = null;
+  let diagonal = null;
+  for (const line of usable) {
+    const axis = classifyScaleLine(line);
+    if (axis === 'diagonal') {
+      diagonal = line;
+      ax = null;
+      ay = null;
+    } else {
+      diagonal = null;
+      if (axis === 'x') ax = line; else ay = line;
+    }
+  }
+
+  let scale;
+  let axes;
+  let isotropy = null;
+  let lengthPx;
+  let feet;
+  let lineCount;
+
+  if (ax && ay) {
+    const axPx = Math.abs(ax.end.x - ax.start.x);
+    const ayPx = Math.abs(ay.end.y - ay.start.y);
+    const sx = ax.feet / axPx;
+    const sy = ay.feet / ayPx;
+    isotropy = scaleIsotropy(sx, sy);
+    // Area is exactly linear in sx·sy, so collapsing an agreeing pair to their
+    // geometric mean leaves every reported area unchanged and moves only side
+    // lengths — the same trade resolveRoomScale makes.
+    const mean = Math.sqrt(sx * sy);
+    scale = isotropy.ok ? { x: mean, y: mean } : { x: sx, y: sy };
+    axes = ['x', 'y'];
+    // The weaker of the two lines: it is the one a click error hurts most.
+    const weakerIsX = axPx <= ayPx;
+    lengthPx = weakerIsX ? axPx : ayPx;
+    feet = weakerIsX ? ax.feet : ay.feet;
+    lineCount = 2;
+  } else {
+    const line = diagonal || ax || ay;
+    const px = lineLengthPx(line);
+    const s = line.feet / px;
+    scale = { x: s, y: s };
+    axes = [classifyScaleLine(line)];
+    lengthPx = px;
+    feet = line.feet;
+    lineCount = 1;
+  }
+
+  const rooms = roomSamples.length >= 2 ? robustScale(roomSamples) : null;
+  const lineScale = Math.sqrt(scale.x * scale.y);
+  const roomGap = rooms ? Math.abs(Math.log(lineScale / rooms.value)) : 0;
+
+  // Ranked by consequence, the rule boundaryQuality already sorts by: a scale
+  // the measured rooms contradict moves the area by twice the gap; two axis
+  // scalars in force change what the scale *is*; a short line is a precision
+  // floor the user can fix by zooming. All three carry a log distance, the
+  // unit percentApart expects.
+  let level = 'ok';
+  let reason = null;
+  let disagreement = 0;
+  if (rooms && roomGap > 0.03) {
+    level = roomGap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note';
+    reason = 'line-vs-rooms';
+    disagreement = roomGap;
+  } else if (isotropy && !isotropy.ok) {
+    level = 'note';
+    reason = 'scale-anisotropic';
+    disagreement = isotropy.logDistance;
+  } else if (lengthPx < MIN_CONFIDENT_SCALE_LINE_PX) {
+    level = 'note';
+    reason = 'short-line';
+    disagreement = Math.log(1 + CLICK_PRECISION_PX / lengthPx);
+  }
+
+  const quality = {
+    level,
+    reason,
+    disagreement,
+    adopted: true,
+    source: 'line',
+    lineCount,
+    lengthPx: Math.round(lengthPx),
+    feet,
+    axes,
+  };
+
+  const currentScale = calibration?.feetPerPixel;
+  const changed = !calibration?.calibrated
+    || typeof currentScale !== 'object'
+    || Math.abs((currentScale?.x ?? 0) - scale.x) > 1e-9
+    || Math.abs((currentScale?.y ?? 0) - scale.y) > 1e-9
+    || (calibration.quality?.level ?? 'ok') !== quality.level
+    || (calibration.quality?.reason ?? null) !== quality.reason
+    || (calibration.quality?.source ?? null) !== quality.source;
+
+  return { scale, quality, changed };
 };
