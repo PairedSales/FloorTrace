@@ -198,6 +198,11 @@ const cloneScan = (result) => ({
 
 /**
  * Detect all room dimensions in a floorplan image.
+ *
+ * Rejects if the scan fails. An empty result must only ever mean "this plan
+ * has no labels" — the scale now depends on the label count, so a swallowed
+ * worker crash would read as a clean scan of an unlabelled plan.
+ *
  * @param {string} imageDataUrl base64 data URL (PNG/JPG)
  * @returns {Promise<{dimensions: Array, exteriorLabels: Array, detectedFormat: string|null}>}
  */
@@ -229,7 +234,9 @@ export const detectAllDimensions = async (imageDataUrl) => {
     lastScan = { url: imageDataUrl, result };
     return cloneScan(result);
   } catch (error) {
+    // lastScan is assigned only after the await above, so a failed scan is
+    // never cached and the next call retries.
     console.error('DimensionsOCR error:', error);
-    return { dimensions: [], exteriorLabels: [], detectedFormat: null };
+    throw error;
   }
 };

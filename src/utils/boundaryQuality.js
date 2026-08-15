@@ -23,13 +23,49 @@ const detailText = (warning) => {
   return warning.message;
 };
 
+// Ordered by how wrong the square footage is if the warning is right, not by
+// the order the detector happened to push them. The first group means the area
+// cannot be trusted at all; the second means it is wrong by a knowable amount;
+// the third describes how the outline was reached rather than what it enclosed.
+// Anything unlisted sorts last but is still reportable.
+const WARNING_RANK = new Map([
+  'no-boundary',
+  'floor-empty',
+  'unsealed',
+  'self-intersecting',
+  'covers-page',
+  'floors-overlap',
+  'inner-not-nested',
+
+  'room-outside',
+  'label-outside',
+  'wall-left-outside',
+  'annexation',
+  'incomplete-enclosure',
+  'brush-mismatch',
+  'bridged-opening',
+  'thin-structure-excluded',
+  'tiny-floor',
+  'inner-over-inset',
+
+  'weak-wall-support',
+  'heavy-closing',
+  'drawn-freehand',
+  'no-inner',
+  'floors-rejected',
+  'no-alternative',
+].map((code, i) => [code, i]));
+
+const UNRANKED = 999;
+const severityRank = (severity) => (severity === 'error' ? 0 : 1);
+const warningRank = (w) => severityRank(w.severity) * 1000 + (WARNING_RANK.get(w.code) ?? UNRANKED);
+
 // The single most important reason to doubt this trace, or null.
 export const primaryWarning = (warnings) => {
-  if (!warnings?.length) return null;
-  const errors = warnings.filter((w) => w.severity === 'error');
-  const pool = errors.length ? errors : warnings.filter((w) => w.severity !== 'info');
+  const pool = (warnings ?? []).filter((w) => w.severity !== 'info');
   if (!pool.length) return null;
-  return detailText(pool[0]);
+  const worst = pool.reduce((a, b) => (warningRank(b) < warningRank(a) ? b : a));
+  return detailText(worst);
 };
 
 // How the scale a room set is presented. The area is the number the user acts

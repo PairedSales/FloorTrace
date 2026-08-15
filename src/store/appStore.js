@@ -240,7 +240,11 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         return {
           ...t,
           vertices: v?.vertices || [],
-          holes: v?.holes ?? (v ? [] : t.holes ?? []),
+          // Deliberately the opposite of `quality` below: holes are independent
+          // rings a vertex edit did not touch, so an update that omits them
+          // keeps them. Defaulting them to [] silently deleted every courtyard
+          // on the first corner nudge and added the void back into the area.
+          holes: v ? ('holes' in v ? (v.holes ?? []) : (t.holes ?? [])) : [],
           // Editing a trace by hand makes it the user's geometry, so an
           // auto-detection's confidence no longer describes it.
           quality: v && 'quality' in v ? v.quality : null,
@@ -485,8 +489,12 @@ export const otherRoomScaleSamples = (rooms = [], overlay = null) => {
 
 let lastActiveTraceId = null;
 let lastVertices = null;
+let lastHoles = null;
+let lastQuality = null;
 let lastOverlayResult = null;
 
+// Carries the whole trace geometry, not just `vertices`: a lossy adapter is how
+// an edit round-tripped through here could drop holes on the way back in.
 /** Selector to get the active perimeter overlay (compatibility adapter) */
 export const selectPerimeterOverlay = (state) => {
   const traces = state.perimeterTraces || [];
@@ -494,15 +502,28 @@ export const selectPerimeterOverlay = (state) => {
   if (!active) {
     lastActiveTraceId = null;
     lastVertices = null;
+    lastHoles = null;
+    lastQuality = null;
     lastOverlayResult = null;
     return null;
   }
-  if (state.activeTraceId === lastActiveTraceId && active.vertices === lastVertices) {
+  if (
+    state.activeTraceId === lastActiveTraceId &&
+    active.vertices === lastVertices &&
+    active.holes === lastHoles &&
+    active.quality === lastQuality
+  ) {
     return lastOverlayResult;
   }
   lastActiveTraceId = state.activeTraceId;
   lastVertices = active.vertices;
-  lastOverlayResult = { vertices: active.vertices };
+  lastHoles = active.holes;
+  lastQuality = active.quality;
+  lastOverlayResult = {
+    vertices: active.vertices,
+    holes: active.holes,
+    quality: active.quality,
+  };
   return lastOverlayResult;
 };
 
