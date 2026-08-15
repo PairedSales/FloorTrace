@@ -31,7 +31,7 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 `src/store/appStore.js` holds nearly all app state as a flat "working state" object (image, calibration, perimeter traces, tool states, etc.), defined once in `WORKING_STATE_DEFAULTS` so undo/autosave/reset can't drift out of sync with each other.
 
 - `SNAPSHOT_FIELDS` (working state minus transient UI/camera fields) is what `undoManager` snapshots on `undoManager.save()`. Callers call `undoManager.save()` themselves *before* mutating state for an undoable action — it is not automatic.
-- `AUTOSAVE_FIELDS` is the similar-but-not-identical subset persisted to localStorage (`draftStorage.js`) on change.
+- `AUTOSAVE_FIELDS` is the similar-but-not-identical subset persisted on change to IndexedDB, falling back to localStorage if IndexedDB is unavailable (`draftStorage.js`).
 - `PERSISTENT_FLOOR_FIELDS` (the `.floorplan` projection, re-exported by `projectSerializer.js`) is derived from the same declaration. Do not hand-maintain it: the hand-listed version is how `exteriorLabels` came to be autosaved but not exported, so reopening a project silently degraded every later trace.
 - `rooms[]` accumulates every room the detector has placed (rect, per-side wall faces, implied px/ft). It is the boundary stage's containment evidence and the sample set for a robust multi-room scale — a single `roomOverlay` could be neither. Perimeter traces additionally carry `holes` (enclosed voids, subtracted from area) and `quality` (detection confidence + warnings).
 - `src/store/undoManager.js` interns image data URLs into a hash-keyed pool (`hashDataUrl`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step.

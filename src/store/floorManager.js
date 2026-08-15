@@ -19,16 +19,22 @@ const TRACE_COLORS = [
   '#FF5555', // Dracula Red
 ];
 
-let nextTraceNumber = 2;
-
 const ordinalSuffix = (num) =>
   num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
 
+const FLOOR_NAME = /^(\d+)(?:st|nd|rd|th) Floor$/;
+
 /**
- * Generate a sequential trace name.
+ * Generate a sequential trace name. Derived from the traces on hand rather
+ * than a module counter: a counter survives loadProject/restoreFromSaved, so
+ * reopening a project started naming at "7th Floor".
  */
-function generateTraceName() {
-  const num = nextTraceNumber++;
+function generateTraceName(traces) {
+  const highest = (traces || []).reduce((max, t) => {
+    const match = FLOOR_NAME.exec(t.name || '');
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  const num = Math.max(highest, (traces || []).length) + 1;
   return `${num}${ordinalSuffix(num)} Floor`;
 }
 
@@ -42,7 +48,7 @@ export function createFloorSlice(set, get) {
       const state = get();
 
       const newId = `trace-${Date.now()}`;
-      const newName = generateTraceName();
+      const newName = generateTraceName(state.perimeterTraces);
       const colorIndex = state.perimeterTraces.length % TRACE_COLORS.length;
       const newColor = TRACE_COLORS[colorIndex];
 
@@ -157,11 +163,12 @@ export function createFloorSlice(set, get) {
 
       let traces;
       if (current.length === normalized.length) {
+        // Identity is kept, and visibility is part of identity: re-tracing must
+        // not un-hide a trace the user hid.
         traces = current.map((t, i) => ({
           ...t,
           ...normalized[i],
           closed: true,
-          visible: true,
         }));
       } else {
         const stamp = Date.now();
@@ -174,7 +181,6 @@ export function createFloorSlice(set, get) {
           locked: false,
           color: TRACE_COLORS[i % TRACE_COLORS.length],
         }));
-        nextTraceNumber = normalized.length + 1;
       }
 
       const activeStillExists = traces.some((t) => t.id === state.activeTraceId);
@@ -191,7 +197,6 @@ export function createFloorSlice(set, get) {
      * Reset floor manager/trace slice to initial state.
      */
     resetPerimeterTraces: () => {
-      nextTraceNumber = 2;
       const defaultTraceId = `trace-${Date.now()}`;
       set({
         perimeterTraces: [
