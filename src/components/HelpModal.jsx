@@ -11,11 +11,11 @@ const shortcuts = [
   { keys: '[ / ]', description: 'Resize the active brush' },
   { keys: 'R', description: 'Rotate canvas 45° clockwise' },
   { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  { keys: '1 – 7', description: 'Line, Area, Angle, Outline, Crop, Eraser, Draw Exterior' },
+  { keys: '1 – 9', description: 'Line, Area, Angle, Outline, Crop, Eraser, Draw Exterior, Void, Scale' },
   { keys: 'Alt / Shift + 1 – 7', description: 'Switch perimeter trace' },
-  { keys: 'Enter', description: 'Finish drawing the exterior' },
+  { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },
-  { keys: 'Delete', description: 'Delete the selected line, shape or vertex' },
+  { keys: 'Delete', description: 'Delete the selected line, shape, void or vertex' },
   { keys: 'Right-click', description: 'Delete a vertex' },
   { keys: `${mod} + O`, description: 'Open image' },
   { keys: `${mod} + V`, description: 'Paste image from clipboard' },
@@ -35,6 +35,8 @@ const tips = [
   'Click a vertex to select it, then press Delete to remove it.',
   'Use the Measure tool to draw measurement lines.',
   'Use the Draw tool to create custom area polygons.',
+  'No printed dimensions? Use Scale — drag a line along a wall you know the length of and type it in.',
+  'Use Void to punch out a courtyard or light well; it is subtracted from the area and survives a re-trace.',
   'Drag & drop an image file onto the canvas to open it.',
 ];
 

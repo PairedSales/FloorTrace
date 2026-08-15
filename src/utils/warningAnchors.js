@@ -86,6 +86,10 @@ export const resolveAnchor = (warning, ctx) => {
   if (code === 'floors-overlap') return overlapAnchor(warning, ctx);
   if (code === 'label-outside') return labelAnchor(warning, ctx);
   if (code === 'room-outside') {
+    // The rect the detector was handed, in original px. Preferred over the name
+    // because rooms are written with `name: null`, and two rooms can share one.
+    const anchor = rectAnchor(warning.detail?.rect);
+    if (anchor) return anchor;
     const name = warning.detail?.name;
     if (!name) return null;
     return rectAnchor((ctx?.rooms ?? []).find((r) => r.name === name && r.rect)?.rect);

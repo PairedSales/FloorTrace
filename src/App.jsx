@@ -1137,6 +1137,8 @@ function App() {
     onCropToolToggle: handleCropToolToggle,
     onEraserToolToggle: handleEraserToolToggle,
     onDrawExterior: handleDrawMode,
+    onVoidToolToggle: handleVoidToolToggle,
+    onScaleToolToggle: handleScaleToolToggle,
   });
 
   // Desktop UI

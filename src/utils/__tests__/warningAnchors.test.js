@@ -98,6 +98,27 @@ describe('resolveAnchor', () => {
     expect(anchor).toEqual({ kind: 'rect', x: 10, y: 10, width: 40, height: 30 });
   });
 
+  // The real-app case: addRoom and useAutoScale both write `name: null`, so
+  // name matching never resolves and the rect the detector was handed is the
+  // only thing that identifies the room.
+  it('resolves from the rect in the detail when the room has no name', () => {
+    const warning = {
+      code: 'room-outside',
+      detail: { name: null, cover: 0.2, rect: { left: 70, top: 80, right: 120, bottom: 130 } },
+    };
+    expect(resolveAnchor(warning, ctx()))
+      .toEqual({ kind: 'rect', x: 70, y: 80, width: 50, height: 50 });
+  });
+
+  it('prefers the detail rect over a same-named room', () => {
+    const warning = {
+      code: 'room-outside',
+      detail: { name: 'BEDROOM', rect: { left: 0, top: 0, right: 5, bottom: 5 } },
+    };
+    expect(resolveAnchor(warning, ctx()))
+      .toEqual({ kind: 'rect', x: 0, y: 0, width: 5, height: 5 });
+  });
+
   it('does not fall back to the outline when the room cannot be identified', () => {
     expect(resolveAnchor({ code: 'room-outside', detail: { name: null } }, ctx())).toBeNull();
     expect(resolveAnchor({ code: 'room-outside', detail: { name: 'DEN' } }, ctx())).toBeNull();

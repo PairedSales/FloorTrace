@@ -90,6 +90,10 @@ const scaleConstraints = (constraints, analysis) => {
         top: r.rect.top * sy,
         bottom: r.rect.bottom * sy,
       },
+      // Kept unscaled so a `room-outside` warning can carry where the room was
+      // in original px. Rooms are written with `name: null`, so matching a
+      // warning back to one by name never resolves.
+      sourceRect: r.rect,
     }));
   const interiorPoints = (constraints.interiorPoints ?? [])
     .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))

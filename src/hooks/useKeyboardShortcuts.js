@@ -47,6 +47,8 @@ export function useKeyboardShortcuts({
   onCropToolToggle,
   onEraserToolToggle,
   onDrawExterior,
+  onVoidToolToggle,
+  onScaleToolToggle,
 }) {
   // The digit → tool mapping is fixed, never renumbered by what the panel is
   // currently showing: a mapping that moves with app state is worse than one
@@ -59,6 +61,8 @@ export function useKeyboardShortcuts({
     { digit: '5', label: 'Crop', toggle: onCropToolToggle, available: true },
     { digit: '6', label: 'Eraser', toggle: onEraserToolToggle, available: true },
     { digit: '7', label: 'Draw Exterior', toggle: onDrawExterior, available: true },
+    { digit: '8', label: 'Void', toggle: onVoidToolToggle, available: hasArea, unavailable: 'Void needs a traced area to punch a hole in.' },
+    { digit: '9', label: 'Scale', toggle: onScaleToolToggle, available: true },
   ], [
     hasArea,
     onLineToolToggle,
@@ -68,6 +72,8 @@ export function useKeyboardShortcuts({
     onCropToolToggle,
     onEraserToolToggle,
     onDrawExterior,
+    onVoidToolToggle,
+    onScaleToolToggle,
   ]);
 
   // ── keydown ───────────────────────────────────────────────────────────────

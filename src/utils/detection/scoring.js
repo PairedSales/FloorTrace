@@ -76,7 +76,7 @@ export const scoreConstraints = (entry, analysis, constraints) => {
   for (const room of rooms) {
     const cover = rectCoverage(mask, width, height, room.rect ?? room);
     if (cover >= 0.9) roomHits += 1;
-    else roomMisses.push({ name: room.name, cover });
+    else roomMisses.push({ name: room.name, cover, rect: room.sourceRect ?? null });
   }
   let pointHits = 0;
   const pointMisses = [];
@@ -289,7 +289,11 @@ export const candidateConfidence = (scored, ctx) => {
     // late-stage copy of this check on the same grounds.)
     const severity = ctx.brush ? 'warn' : 'error';
     for (const miss of constraintScore.roomMisses) {
-      warnings.push(warning('room-outside', { name: miss.name, cover: Number(miss.cover.toFixed(2)) }, severity));
+      warnings.push(warning('room-outside', {
+        name: miss.name,
+        cover: Number(miss.cover.toFixed(2)),
+        rect: miss.rect,
+      }, severity));
     }
     if (constraintScore.pointMisses.length) {
       warnings.push(warning('label-outside', { count: constraintScore.pointMisses.length }, severity));
