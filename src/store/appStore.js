@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createFloorSlice } from './floorManager';
+import { createFloorSlice, newTraceId } from './floorManager';
 import { calculateArea } from '../utils/areaCalculator';
 
 /**
@@ -228,7 +228,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
     if (!activeId) {
       // Create a default first trace if none exists
-      const newId = `trace-${Date.now()}`;
+      const newId = newTraceId();
       const newTrace = {
         id: newId,
         name: '1st Floor',
