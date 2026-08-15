@@ -94,6 +94,13 @@ const traceQualitySchema = z.object({
     severity: z.string().optional(),
     message: z.string().optional(),
     detail: z.any().optional(),
+    // Declared, not left to inference: `z.object` strips unknown keys, so both
+    // of these would survive autosave and die on a `.floorplan` round trip —
+    // the asymmetry that already cost this repo `exteriorLabels`. `anchor` is
+    // in original image px and is what makes a warning clickable on reopen.
+    scope: z.string().optional(),
+    anchor: z.object({ kind: z.enum(['ring', 'rect', 'point', 'segment']) })
+      .catchall(z.any()).nullable().optional(),
   })).optional(),
 }).nullable().optional();
 

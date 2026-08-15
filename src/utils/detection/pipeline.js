@@ -39,8 +39,49 @@ const mapRings = (rings, scaleX, scaleY) =>
     .map((ring) => mapPolygonToOriginal(ring, scaleX, scaleY))
     .filter((ring) => ring.length >= 3);
 
-// `anchor` (where on the image to look) is filled by the detector in a later
-// pass; it is declared here so the field exists wherever a warning does.
+// Anchors are emitted in working-raster px. `scaleX`/`scaleY` are working px
+// per ORIGINAL px (raster.js: `width / ow`), so they are <= 1 and mapping back
+// DIVIDES — exactly what mapPolygonToOriginal does. Multiplying instead puts
+// every anchor off the page by 1/scale², and no benchmark would catch it,
+// because benchmarks never read anchors.
+export const mapAnchor = (anchor, scaleX, scaleY) => {
+  if (!anchor) return null;
+  if (anchor.kind === 'ring') {
+    return { kind: 'ring', rings: mapRings(anchor.rings, scaleX, scaleY) };
+  }
+  if (anchor.kind === 'point' || anchor.kind === 'segment') {
+    // A segment carries either one polyline (`points`) or several disconnected
+    // ones (`runs`) — weak support is rarely a single stretch.
+    if (anchor.runs) {
+      return {
+        kind: anchor.kind,
+        runs: anchor.runs.map((r) => mapPolygonToOriginal(r ?? [], scaleX, scaleY)),
+      };
+    }
+    return { kind: anchor.kind, points: mapPolygonToOriginal(anchor.points ?? [], scaleX, scaleY) };
+  }
+  if (anchor.kind === 'rect') {
+    return {
+      kind: 'rect',
+      x: anchor.x / scaleX,
+      y: anchor.y / scaleY,
+      width: anchor.width / scaleX,
+      height: anchor.height / scaleY,
+    };
+  }
+  return null;
+};
+
+// Applied to boundary-stage warnings only. validate.js runs on already-mapped
+// polygons and original-px labels, so anything it emits is original px already
+// and must never be scaled a second time — which is why this is not folded into
+// `tagWarning`, whose input list mixes both sources.
+const mapWarningAnchors = (list, scaleX, scaleY) => (list ?? []).map(
+  (w) => (w.anchor ? { ...w, anchor: mapAnchor(w.anchor, scaleX, scaleY) } : w)
+);
+
+// `anchor` is where on the image to look. Detector-emitted anchors arrive
+// already mapped; everything else has none.
 const tagWarning = (w) => ({
   ...w,
   scope: RESULT_SCOPED_CODES.has(w.code) ? 'result' : 'floor',
@@ -160,7 +201,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       holes: mapRings(floor.holes, scaleX, scaleY),
       innerHoles: mapRings(floor.innerHoles, scaleX, scaleY),
       confidence: floor.confidence,
-      warnings: floor.warnings,
+      warnings: mapWarningAnchors(floor.warnings, scaleX, scaleY),
       excluded: floor.excluded,
       excludedGarages: floor.excludedGarages,
       candidate: floor.candidate,
@@ -180,13 +221,16 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     },
   );
 
-  const warnings = [...(boundary.warnings ?? []), ...validation.warnings].map(tagWarning);
+  // Mapped from the same unmapped source objects the per-floor list came from,
+  // and `mapAnchor` is pure, so each object is mapped exactly once either way.
+  const boundaryWarnings = mapWarningAnchors(boundary.warnings, scaleX, scaleY);
+  const warnings = [...boundaryWarnings, ...validation.warnings].map(tagWarning);
   const confidence = Math.max(0, Math.min(0.98, boundary.confidence * validation.factor));
 
   return {
     outer,
     inner,
-    floors: fanOutWarnings(floors, boundary.warnings ?? [], validation.warnings),
+    floors: fanOutWarnings(floors, boundaryWarnings, validation.warnings),
     holes: mapRings(boundary.holes, scaleX, scaleY),
     innerHoles: mapRings(boundary.innerHoles, scaleX, scaleY),
     // Top-level (not debug): the worker only forwards a whitelist of fields.

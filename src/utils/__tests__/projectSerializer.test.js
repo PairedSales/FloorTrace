@@ -496,3 +496,76 @@ describe('projectSerializer', () => {
     });
   });
 });
+
+// `z.object` strips unknown keys, so an undeclared field survives autosave and
+// dies on a `.floorplan` — the asymmetry that already cost this repo
+// `exteriorLabels`. An anchor that does not survive is a warning that becomes
+// unclickable the moment a project is reopened.
+describe('warning anchors round-trip', () => {
+  const withAnchoredWarnings = () => ({
+    ...createMockStoreState(),
+    perimeterTraces: [{
+      id: 'trace-1',
+      name: '1st Floor',
+      vertices: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+      holes: [],
+      closed: true,
+      visible: true,
+      locked: false,
+      color: '#BD93F9',
+      quality: {
+        source: 'auto',
+        confidence: 0.62,
+        warnings: [
+          {
+            code: 'bridged-opening',
+            severity: 'warn',
+            message: 'a wide opening was bridged to close the outline',
+            detail: { px: 34 },
+            scope: 'floor',
+            anchor: { kind: 'segment', points: [{ x: 40, y: 12 }, { x: 74, y: 12 }] },
+          },
+          {
+            code: 'weak-wall-support',
+            severity: 'warn',
+            message: 'much of the outline is not drawn as a wall',
+            detail: { support: 0.41 },
+            scope: 'floor',
+            anchor: { kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 9, y: 0 }]] },
+          },
+        ],
+      },
+    }],
+    activeTraceId: 'trace-1',
+  });
+
+  it('keeps both the anchor and the scope through export and import', () => {
+    const project = serializeSketch(withAnchoredWarnings());
+    validateProjectSchema(project);
+
+    const { statePatch } = deserializeSketch(project);
+    const warnings = statePatch.perimeterTraces[0].quality.warnings;
+
+    expect(warnings[0].anchor).toEqual({
+      kind: 'segment', points: [{ x: 40, y: 12 }, { x: 74, y: 12 }],
+    });
+    expect(warnings[1].anchor).toEqual({
+      kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 9, y: 0 }]],
+    });
+    expect(warnings[0].scope).toBe('floor');
+  });
+
+  it('accepts a project written before anchors existed', () => {
+    const state = withAnchoredWarnings();
+    for (const w of state.perimeterTraces[0].quality.warnings) {
+      delete w.anchor;
+      delete w.scope;
+    }
+    const project = serializeSketch(state);
+    validateProjectSchema(project);
+
+    const { statePatch } = deserializeSketch(project);
+    expect(statePatch.perimeterTraces[0].quality.warnings[0].anchor).toBeUndefined();
+    expect(statePatch.perimeterTraces[0].quality.warnings[0].code).toBe('bridged-opening');
+  });
+});

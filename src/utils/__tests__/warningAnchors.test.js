@@ -137,3 +137,32 @@ describe('anchorBounds', () => {
     expect(anchorBounds(null)).toBeNull();
   });
 });
+
+// Phase 2: the detector fills `anchor` at emission for warnings that have no
+// live equivalent to derive one from.
+describe('detector-emitted anchors', () => {
+  it('prefers the emitted anchor over anything derived', () => {
+    const emitted = { kind: 'segment', points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] };
+    const warning = { code: 'self-intersecting', detail: {}, anchor: emitted };
+    // self-intersecting is a WHOLE_OUTLINE code, so Phase 1 would return the
+    // trace ring. The detector's own geometry is more specific and must win.
+    expect(resolveAnchor(warning, ctx())).toBe(emitted);
+  });
+
+  it('resolves a code that the live resolver alone cannot anchor', () => {
+    const emitted = { kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 5, y: 0 }]] };
+    expect(resolveAnchor({ code: 'weak-wall-support', detail: {}, anchor: emitted }, ctx()))
+      .toBe(emitted);
+    // Without one — a draft written before Phase 2 — it still declines rather
+    // than inventing a highlight.
+    expect(resolveAnchor({ code: 'bridged-opening', detail: {} }, ctx())).toBeNull();
+  });
+
+  it('bounds a multi-run segment across every run, so the camera frames them all', () => {
+    const bounds = anchorBounds({
+      kind: 'segment',
+      runs: [[{ x: 0, y: 0 }, { x: 10, y: 0 }], [{ x: 90, y: 40 }, { x: 100, y: 50 }]],
+    });
+    expect(bounds).toEqual({ minX: 0, minY: 0, maxX: 100, maxY: 50 });
+  });
+});

@@ -15,7 +15,7 @@ import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
   generateCandidates, footprintEntry, sealMetrics, measureFootprint,
 } from './candidates.js';
-import { scoreCandidate, pickCandidate, candidateConfidence, warning } from './scoring.js';
+import { scoreCandidate, pickCandidate, candidateConfidence, warning, bboxRing } from './scoring.js';
 import { buildFloor } from './footprint.js';
 import { brushNetworks, strokeRegion } from './brush.js';
 
@@ -218,6 +218,10 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     epsilon,
     fitOptions,
     wallBboxArea: generated.wallBboxArea,
+    // The wall network's own extent, for the `annexation` anchor: that warning
+    // is the ratio of the candidate's bbox to this one, so pointing at it means
+    // showing both. Read-only; nothing scores against it.
+    wallBbox: net.bbox ?? null,
     maxRadius: generated.maxRadius,
     coverage: generated.coverage,
     constraints: scopedConstraints,
@@ -527,7 +531,12 @@ export const traceBoundary = (analysis, options = {}) => {
         }];
         floor.excluded += 1;
         floor.warnings = [...floor.warnings,
-          warning('thin-structure-excluded', { size: thin.size }, 'warn')];
+          // The region already stored on the line above, pointed at rather than
+          // only counted. It is the union bbox of what may be several
+          // disconnected hairline areas, so it can span more than any one of
+          // them — a "look here" hint, not an outline of the thing.
+          warning('thin-structure-excluded', { size: thin.size }, 'warn',
+            { kind: 'ring', rings: [bboxRing(thin.bbox)] })];
       }
       floors.push(floor);
     }
