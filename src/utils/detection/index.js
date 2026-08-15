@@ -56,6 +56,13 @@ const runWorkerRequest = (
   worker.postMessage({ id, type, payload });
 });
 
+// Wall segments for the room-overlay snap engine, vectorised in the worker off
+// the decode it already holds for this image.
+export const computeWallSnapSegments = async (image) => {
+  if (!image) return null;
+  return runWorkerRequest('wallSnapSegments', { image }, 60_000);
+};
+
 export const detectRoomFromClick = async (image, clickPoint, options = {}) => {
   if (!image || !clickPoint) return null;
   return runWorkerRequest('detectRoomFromClick', {

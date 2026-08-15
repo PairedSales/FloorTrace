@@ -424,9 +424,11 @@ export const applyRegions = (footprint, regions, analysis, options) => {
   // instead of being silently dropped with the rest of the non-largest
   // components.
   const holes = [];
-  const { labels: voidLabels, components: voidComps } = labelComponents(
-    Uint8Array.from(newMask, (v) => (v ? 0 : 1)), width, height,
-  );
+  // Plain loop, not `Uint8Array.from(mask, fn)`: the mapper form walks the
+  // iterator protocol and dispatches per element, ~92 ns/px against ~4 ns/px.
+  const voids = new Uint8Array(newMask.length);
+  for (let i = 0; i < voids.length; i += 1) voids[i] = newMask[i] ? 0 : 1;
+  const { labels: voidLabels, components: voidComps } = labelComponents(voids, width, height);
   for (const comp of voidComps) {
     if (comp.bbox.minX === 0 || comp.bbox.minY === 0
       || comp.bbox.maxX === width - 1 || comp.bbox.maxY === height - 1) continue;
@@ -439,6 +441,8 @@ export const applyRegions = (footprint, regions, analysis, options) => {
       ...footprint,
       mask: newMask,
       labels: newLabels,
+      // Page-sized labels from `largestComponent`, so no crop frame.
+      frame: null,
       componentId: component.id,
       area: component.size,
       bbox: component.bbox,

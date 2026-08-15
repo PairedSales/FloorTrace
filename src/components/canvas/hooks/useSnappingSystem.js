@@ -1,6 +1,20 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { createImageSnapAnalyzer } from '../../../utils/imageSnapper';
-import { createWallSnapEngine } from '../../../utils/wallSnapEngine';
+import { createWallSnapEngine, wallSnapEngineFromSegments } from '../../../utils/wallSnapEngine';
+import { computeWallSnapSegments } from '../../../utils/detection';
+
+// Build the engine in the detection worker, which already holds this image
+// decoded, and fall back to the main-thread builder if that fails. Building it
+// on the main thread cost a full-natural-size getImageData plus a second
+// data-URL decode, landing a few frames into the first gesture after every
+// image change (and `image` changes on every crop, so this is not once per
+// session).
+const buildWallSnapEngine = (image) =>
+  computeWallSnapSegments(image)
+    .then((segments) => (segments
+      ? wallSnapEngineFromSegments(segments)
+      : createWallSnapEngine(image)))
+    .catch(() => createWallSnapEngine(image));
 
 export function useSnappingSystem({ autoSnapEnabled, image }) {
   const imageSnapAnalyzerRef = useRef(null);
@@ -19,6 +33,37 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
     wallSnapEngineSourceRef.current = null;
     wallSnapEngineLoadingRef.current = null;
   }, [image]);
+
+  // Warm the wall engine as soon as the image changes rather than on the first
+  // gesture. Safe to do eagerly only because the work is now in the worker —
+  // on the main thread this was the 12-60 ms stall it replaces.
+  //
+  // This is the one part of the change a user could notice: `handleStageMouseUp`
+  // commits the overlay from the last mousemove without re-snapping, so a quick
+  // flick that ended before the engine was ready used to commit an *unsnapped*
+  // rect, and now commits a snapped one. That is what auto-snap promises, and
+  // the rect feeds the implied px/ft, so it is a change worth stating.
+  useEffect(() => {
+    if (!autoSnapEnabled || !image) return;
+    let cancelled = false;
+    wallSnapEngineSourceRef.current = image;
+    wallSnapEngineLoadingRef.current = buildWallSnapEngine(image)
+      .then((engine) => {
+        if (cancelled || wallSnapEngineSourceRef.current !== image) return;
+        wallSnapEngineRef.current = engine;
+      })
+      .catch((error) => {
+        console.error('Failed to prepare wall snap engine:', error);
+      })
+      .finally(() => {
+        if (!cancelled && wallSnapEngineSourceRef.current === image) {
+          wallSnapEngineLoadingRef.current = null;
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoSnapEnabled, image]);
 
   const ensureImageSnapAnalyzer = useCallback(() => {
     if (!autoSnapEnabled || !image) {
@@ -80,7 +125,7 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
     }
 
     wallSnapEngineSourceRef.current = image;
-    wallSnapEngineLoadingRef.current = createWallSnapEngine(image)
+    wallSnapEngineLoadingRef.current = buildWallSnapEngine(image)
       .then((engine) => {
         if (wallSnapEngineSourceRef.current !== image) {
           return;

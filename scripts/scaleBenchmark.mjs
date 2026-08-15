@@ -80,9 +80,17 @@ const labelsFromOcr = async (file) => {
   const { detectDimensionsCore } = await import('../src/utils/dimensions/pipeline.js');
   const png = PNG.sync.read(fs.readFileSync(file));
   const image = { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
-  const toOcrInput = (like) => {
-    const out = new PNG({ width: like.width, height: like.height });
-    out.data = Buffer.from(like.data.buffer, like.data.byteOffset, like.data.byteLength);
+  // `env.toOcrInput` receives a gray `{data, width, height}`; pngjs wants RGBA.
+  const toOcrInput = (gray) => {
+    const out = new PNG({ width: gray.width, height: gray.height });
+    const rgba = Buffer.allocUnsafe(gray.width * gray.height * 4);
+    for (let i = 0, j = 0; i < gray.data.length; i += 1, j += 4) {
+      rgba[j] = gray.data[i];
+      rgba[j + 1] = gray.data[i];
+      rgba[j + 2] = gray.data[i];
+      rgba[j + 3] = 255;
+    }
+    out.data = rgba;
     return PNG.sync.write(out);
   };
   const result = await detectDimensionsCore(image, { toOcrInput, budgetMs: 6000 });

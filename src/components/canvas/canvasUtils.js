@@ -1,8 +1,14 @@
+// These named Inter, which the app has never loaded — so every canvas label
+// silently rendered in system-ui while the rest of the UI used Fira Sans. The
+// string is shared rather than repeated because it is measured here and
+// rendered by the Konva Text nodes: the two must name the same font or the
+// pill backgrounds are sized for a face the text is not drawn in.
+export const CANVAS_FONT_FAMILY = "'Fira Sans', system-ui, -apple-system, sans-serif";
 /** Font family and style used for OCR pill badge text (must match the Konva Text element). */
-export const OCR_PILL_FONT_FAMILY = 'Inter, system-ui, sans-serif';
+export const OCR_PILL_FONT_FAMILY = CANVAS_FONT_FAMILY;
 export const OCR_PILL_FONT_STYLE = 'bold';
 /** Font family and style used for side-length pill badge text (must match the Konva Text element). */
-export const SIDE_LEN_FONT_FAMILY = 'Inter, system-ui, sans-serif';
+export const SIDE_LEN_FONT_FAMILY = CANVAS_FONT_FAMILY;
 export const SIDE_LEN_FONT_STYLE = '500';
 /** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
 const _measureCtx = document.createElement('canvas').getContext('2d');

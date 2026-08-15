@@ -14,6 +14,10 @@ const MIN_STEP = 3;
 export function useDrawTool({ drawModeActive, getCanvasCoords }) {
   const isDrawingRef = useRef(false);
   const pathRef = useRef([]);
+  // The same path as a flat [x, y, x, y, …], grown two numbers at a time.
+  // Konva wants this shape, and rebuilding it from `points` per frame allocated
+  // a throwaway 2-element array per point of the whole stroke.
+  const flatRef = useRef([]);
   const startPosRef = useRef(null);
   const axisRef = useRef(null);
   const [currentStroke, setCurrentStroke] = useState(null);
@@ -29,7 +33,8 @@ export function useDrawTool({ drawModeActive, getCanvasCoords }) {
     startPosRef.current = pos;
     axisRef.current = null;
     pathRef.current = [pos];
-    setCurrentStroke({ points: [pos] });
+    flatRef.current = [pos.x, pos.y];
+    setCurrentStroke({ points: pathRef.current, flat: flatRef.current.slice() });
     return true;
   }, [drawModeActive, getCanvasCoords]);
 
@@ -58,7 +63,10 @@ export function useDrawTool({ drawModeActive, getCanvasCoords }) {
     if (last && Math.hypot(x - last.x, y - last.y) < MIN_STEP) return true;
 
     pathRef.current.push({ x, y });
-    setCurrentStroke({ points: pathRef.current.slice() });
+    flatRef.current.push(x, y);
+    // Konva needs a fresh array to notice the change; only the flat one is
+    // copied, and `points` rides along by reference for the commit path.
+    setCurrentStroke({ points: pathRef.current, flat: flatRef.current.slice() });
     return true;
   }, [getCanvasCoords]);
 
@@ -70,6 +78,7 @@ export function useDrawTool({ drawModeActive, getCanvasCoords }) {
 
     const points = pathRef.current;
     pathRef.current = [];
+    flatRef.current = [];
     setCurrentStroke(null);
 
     // A click without a drag is not a stroke; committing it would put an undo
@@ -87,6 +96,7 @@ export function useDrawTool({ drawModeActive, getCanvasCoords }) {
     startPosRef.current = null;
     axisRef.current = null;
     pathRef.current = [];
+    flatRef.current = [];
     setCurrentStroke(null);
     return true;
   }, []);

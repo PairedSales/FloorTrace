@@ -45,7 +45,10 @@ const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
     Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3)),
     Math.max(8, wallThickness * 2),
   );
-  const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness));
+  // `bbox` is exactly `inkBounds(bridged)`: `maskFor` measured it from these
+  // very pixels, and `bridgeRuns` only fills gaps *between* existing runs, so
+  // it cannot add ink outside them. Handing it over skips a full-page scan.
+  const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness), bbox);
   if (!fp) return false;
   // The two scalars sealMetrics reads. footprintEntry would build a page-sized
   // component mask here, once per candidate net, and drop it unread.
@@ -282,14 +285,17 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
       null,
     );
     if (widest && widest.entry.area > 1.02 * best.entry.area) {
-      const mask = new Uint8Array(widest.entry.mask.length);
+      // Both masks are derived on read — take them once, not once per pixel.
+      const widestMask = widest.entry.mask;
+      const bestMask = best.entry.mask;
+      const mask = new Uint8Array(widestMask.length);
       let size = 0;
       let minX = width;
       let minY = height;
       let maxX = -1;
       let maxY = -1;
       for (let i = 0; i < mask.length; i += 1) {
-        if (!widest.entry.mask[i] || best.entry.mask[i]) continue;
+        if (!widestMask[i] || bestMask[i]) continue;
         mask[i] = 1;
         size += 1;
         const x = i % width;
@@ -314,7 +320,7 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     .sort((a, b) => b.size - a.size)
     .map((c) => (c.id === best.entry.componentId
       ? best.entry
-      : footprintEntry(best.measured, c, width)));
+      : footprintEntry(best.measured, c, width, height)));
 
   return {
     floorComps,
@@ -326,6 +332,7 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     epsilon,
     fitOptions,
     evidence,
+    structuralInk: generated.structuralKept,
     alternatives: ranked.slice(1, 4).map((c) => ({
       variant: c.variant,
       policy: c.policy,
@@ -353,7 +360,7 @@ const freehandFloorNet = (net, analysis, options) => {
     net.ribbon, width, height, Math.max(4, Math.round((net.radius ?? 8) * 0.75)),
   );
   if (!measured?.largest) return null;
-  const entry = footprintEntry(measured, measured.largest, width);
+  const entry = footprintEntry(measured, measured.largest, width, height);
   const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
   return {
     floorComps: [entry],
@@ -371,6 +378,8 @@ const freehandFloorNet = (net, analysis, options) => {
       mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
     },
     evidence: createEvidence(analysis, net.mask, net.ribbon),
+    // No candidate generation ran, so floorPlausibility measures it itself.
+    structuralInk: null,
     alternatives: [],
     search: { variant: 'all', policy: 'freehand', tried: [] },
   };
@@ -379,11 +388,17 @@ const freehandFloorNet = (net, analysis, options) => {
 // Is this outline a building, or a legend, a title block or a detail drawing
 // that happens to be a closed box? Judged on the same evidence as everything
 // else rather than on bbox size alone.
-const floorPlausibility = (floor, net, analysis, evidence, constraints) => {
+// `structuralInk` is the numerator `generateCandidates` already computed for
+// this net — the identical `openRect` at the identical radius, twenty lines of
+// call stack earlier. Only the freehand fallback reaches here without one, and
+// it passes null rather than a default: this fraction feeds the legend
+// rejection below, where a wrong `1` silently keeps a legend as a building.
+const floorPlausibility = (floor, net, analysis, evidence, constraints, structuralInk) => {
   const { width, height, wallThickness } = analysis;
   const thickRadius = Math.max(1, Math.round(wallThickness * 0.3));
   const structural = thickRadius >= 2
-    ? inkCount(openRect(net.mask, width, height, thickRadius)) / Math.max(1, net.wallSize)
+    ? (structuralInk ?? inkCount(openRect(net.mask, width, height, thickRadius)))
+      / Math.max(1, net.wallSize)
     : 1;
   const support = contourSupport(
     floor.outerPolygon, evidence, Math.max(2, Math.round(Math.max(2, wallThickness) * 0.9)),
@@ -485,7 +500,7 @@ export const traceBoundary = (analysis, options = {}) => {
       };
       floor.usedFallback = detected.best.seal.seal < 0.55;
       floor.plausibility = floorPlausibility(
-        floor, net, analysis, detected.evidence, detected.constraints,
+        floor, net, analysis, detected.evidence, detected.constraints, detected.structuralInk,
       );
       floor.net = net;
       // The excluded region sits against this floor's outline rather than

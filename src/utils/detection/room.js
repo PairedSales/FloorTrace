@@ -9,6 +9,7 @@
 // edges are then seated on the wall faces they were only predicting.
 
 import { satSum } from './raster.js';
+import { coverageSats } from './analyze.js';
 import { orientDimsToBox } from './validate.js';
 
 const COV_STRONG = 0.6;
@@ -52,18 +53,22 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
 
   const limitFor = (side) => (side.axis === 'x' ? width - 1 : height - 1);
 
+  // Built on first use and memoised per analysis: a trace that never places a
+  // room never pays for them.
+  const sats = coverageSats(analysis);
+
   const lineCoverage = (side, pos) => {
     let span;
     let cov;
     let thick;
     if (side.axis === 'x') {
       span = rect.bottom - rect.top + 1;
-      cov = satSum(analysis.satSmearH, width, height, pos, rect.top, pos, rect.bottom) / span;
-      thick = satSum(analysis.satThickH, width, height, pos, rect.top, pos, rect.bottom) / span;
+      cov = satSum(sats.smearH, width, height, pos, rect.top, pos, rect.bottom) / span;
+      thick = satSum(sats.thickH, width, height, pos, rect.top, pos, rect.bottom) / span;
     } else {
       span = rect.right - rect.left + 1;
-      cov = satSum(analysis.satSmearV, width, height, rect.left, pos, rect.right, pos) / span;
-      thick = satSum(analysis.satThickV, width, height, rect.left, pos, rect.right, pos) / span;
+      cov = satSum(sats.smearV, width, height, rect.left, pos, rect.right, pos) / span;
+      thick = satSum(sats.thickV, width, height, rect.left, pos, rect.right, pos) / span;
     }
     return { cov, thick };
   };

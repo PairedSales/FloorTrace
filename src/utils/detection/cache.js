@@ -49,6 +49,14 @@ let searchCache = null;
 // keeps its memo and a multi-plan sheet does not.
 const SEARCH_BUDGET_BYTES = 32 * 1024 * 1024;
 
+// Overridable so the eviction path itself is testable: on the fixtures it is
+// reached only by the heaviest sheets, and "the memo agrees with a cold trace
+// while it is alive" is the weaker of the two properties that matter.
+let searchBudgetBytes = SEARCH_BUDGET_BYTES;
+export const setSearchBudgetBytes = (bytes) => {
+  searchBudgetBytes = bytes ?? SEARCH_BUDGET_BYTES;
+};
+
 class SearchCache extends Map {
   constructor() {
     super();
@@ -60,7 +68,7 @@ class SearchCache extends Map {
   retain(bytes) {
     if (this.overBudget) return;
     this.bytes += bytes;
-    if (this.bytes < SEARCH_BUDGET_BYTES) return;
+    if (this.bytes < searchBudgetBytes) return;
     this.overBudget = true;
     this.clear();
   }

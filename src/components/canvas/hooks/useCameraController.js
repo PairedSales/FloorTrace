@@ -34,6 +34,16 @@ export function useCameraController({
   const [imageObj, setImageObj] = useState(null);
   const [isImageReady, setIsImageReady] = useState(false);
 
+  // Read by the image-load effect but deliberately not a dependency of it.
+  // Every 45° rotate used to re-run the whole loader — `setIsImageReady(false)`
+  // then a fresh `new Image()` against the full data URL — which unmounts the
+  // background Layer, destroys and reallocates two stage-sized canvases, and
+  // shows a blank frame. The dependency bought nothing: the only read is in a
+  // branch that rotation cannot reach, because `zoomScale` is already non-null
+  // by then. A bare dep deletion trips react-hooks/exhaustive-deps, which is on.
+  const canvasRotationRef = useRef(canvasRotation);
+  canvasRotationRef.current = canvasRotation;
+
   const { handleWheel, isZoomingRef } = useCanvasZoom(
     stageRef,
     scaleRef,
@@ -147,7 +157,7 @@ export function useCameraController({
             const imgWidth = img.width;
             const imgHeight = img.height;
 
-            const angle = (canvasRotation * Math.PI) / 180;
+            const angle = (canvasRotationRef.current * Math.PI) / 180;
             const rotatedWidth = Math.abs(Math.cos(angle)) * imgWidth + Math.abs(Math.sin(angle)) * imgHeight;
             const rotatedHeight = Math.abs(Math.sin(angle)) * imgWidth + Math.abs(Math.cos(angle)) * imgHeight;
 
@@ -182,7 +192,7 @@ export function useCameraController({
       setIsImageReady(false);
     };
     img.src = image;
-  }, [image, canvasRotation, setViewportTransform, containerRef, stageRef]);
+  }, [image, setViewportTransform, containerRef, stageRef]);
 
   // Observe container size changes
   useEffect(() => {

@@ -10,14 +10,15 @@
 //  constraint  do the rooms and labels the rest of the app already found
 //              actually lie inside it
 
-import { traceComponentBoundary, simplifyRing, fitRing, polygonArea } from './polygon.js';
+import { simplifyRing, fitRing, polygonArea } from './polygon.js';
+import { traceFramedBoundary } from './labelFrame.js';
 import { contourSupport } from './wallEvidence.js';
 import { regionFit } from './brush.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
-  const ring = traceComponentBoundary(entry.labels, width, height, entry.componentId);
+  const ring = traceFramedBoundary(entry, width, height);
   if (ring.length < 3) return null;
   const simplified = simplifyRing(ring, epsilon);
   if (simplified.length < 3) return null;
@@ -66,17 +67,21 @@ export const scoreConstraints = (entry, analysis, constraints) => {
   const points = constraints?.interiorPoints ?? [];
   if (!rooms.length && !points.length) return null;
 
+  // `entry.mask` is derived on every read, so take it once — this runs for
+  // every candidate whenever constraints exist, which is exactly the repeated
+  // post-room-placement trace.
+  const mask = entry.mask;
   let roomHits = 0;
   const roomMisses = [];
   for (const room of rooms) {
-    const cover = rectCoverage(entry.mask, width, height, room.rect ?? room);
+    const cover = rectCoverage(mask, width, height, room.rect ?? room);
     if (cover >= 0.9) roomHits += 1;
     else roomMisses.push({ name: room.name, cover });
   }
   let pointHits = 0;
   const pointMisses = [];
   for (const point of points) {
-    if (pointInside(entry.mask, width, height, point)) pointHits += 1;
+    if (pointInside(mask, width, height, point)) pointHits += 1;
     else pointMisses.push(point);
   }
 
@@ -97,11 +102,26 @@ export const scoreConstraints = (entry, analysis, constraints) => {
 // drawn wall outside means part of the building was lost. Measured against
 // every enclosed component, not just the largest: two outlines drawn close
 // enough to share a wall network seal into two components of one footprint.
-const inkCoverage = (measured, coverage) => {
+const inkCoverage = (measured, coverage, width) => {
   if (!coverage?.total) return 1;
+  const { labels, frame } = measured;
+  const { x: xs, y: ys, weight } = coverage;
   let inside = 0;
-  for (let k = 0; k < coverage.index.length; k += 1) {
-    if (measured.labels[coverage.index[k]] >= 0) inside += coverage.weight[k];
+  if (!frame) {
+    for (let k = 0; k < xs.length; k += 1) {
+      if (labels[ys[k] * width + xs[k]] >= 0) inside += weight[k];
+    }
+    return inside / coverage.total;
+  }
+  // Outside the crop there is no enclosure by construction — which is exactly
+  // what the `-1` padding of the old page-sized array said.
+  const { x0, y0, w, h } = frame;
+  for (let k = 0; k < xs.length; k += 1) {
+    const fx = xs[k] - x0;
+    if (fx < 0 || fx >= w) continue;
+    const fy = ys[k] - y0;
+    if (fy < 0 || fy >= h) continue;
+    if (labels[fy * w + fx] >= 0) inside += weight[k];
   }
   return inside / coverage.total;
 };
@@ -117,7 +137,7 @@ export const scoreCandidate = (candidate, ctx) => {
 
   const tol = Math.max(2, Math.round(Math.max(2, wallThickness) * 0.9));
   const support = contourSupport(shape.polygon, evidence, tol);
-  const coverage = inkCoverage(candidate.measured, cov);
+  const coverage = inkCoverage(candidate.measured, cov, width);
 
   // Economy: closing radius and welded span are both fabrication. Prefer the
   // least-invented hypothesis that still holds together.

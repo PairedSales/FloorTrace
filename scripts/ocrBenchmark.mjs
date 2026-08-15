@@ -41,13 +41,20 @@ const loadPng = (filePath) => {
   };
 };
 
-const toOcrInput = (imageDataLike) => {
-  const png = new PNG({ width: imageDataLike.width, height: imageDataLike.height });
-  png.data = Buffer.from(
-    imageDataLike.data.buffer,
-    imageDataLike.data.byteOffset,
-    imageDataLike.data.byteLength
-  );
+// The pipeline hands `env.toOcrInput` a gray `{data, width, height}`; pngjs
+// wants w*h*4 RGBA, so the expansion the browser encoder no longer needs
+// happens here instead.
+const toOcrInput = (gray) => {
+  const { width, height, data } = gray;
+  const png = new PNG({ width, height });
+  const rgba = Buffer.allocUnsafe(width * height * 4);
+  for (let i = 0, j = 0; i < data.length; i += 1, j += 4) {
+    rgba[j] = data[i];
+    rgba[j + 1] = data[i];
+    rgba[j + 2] = data[i];
+    rgba[j + 3] = 255;
+  }
+  png.data = rgba;
   return PNG.sync.write(png);
 };
 

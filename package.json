@@ -16,6 +16,8 @@
     "probe:memory": "node --expose-gc scripts/memoryProbe.mjs"
   },
   "dependencies": {
+    "@fontsource/fira-code": "^5.3.0",
+    "@fontsource/fira-sans": "^5.3.0",
     "@paddlejs-models/ocr": "^1.2.4",
     "@techstark/opencv-js": "^5.0.0-release.1",
     "konva": "^10.0.2",

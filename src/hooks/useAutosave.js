@@ -3,6 +3,7 @@ import { shallow } from 'zustand/shallow';
 import useAppStore from '../store/appStore';
 import { AUTOSAVE_FIELDS } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
+import { hashDataUrl } from '../utils/hash';
 import { getDraft, setDraft, removeDraft } from '../utils/draftStorage';
 
 const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
@@ -12,6 +13,26 @@ const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
 // Selector: pick only the autosave-relevant fields from the store.
 const autosaveSelector = (state) =>
   AUTOSAVE_FIELDS.reduce((acc, k) => { acc[k] = state[k]; return acc; }, {});
+
+// Pure camera state: where the user is looking, not what they have drawn. Pan
+// and zoom are the most frequent interactions in a floorplan viewer and all six
+// call sites end in a store write, so before this gate every pause in a
+// stop-and-go pan rewrote the whole draft. The viewport is still persisted —
+// by the next write that carries a real edit, and by the exit flush — so the
+// only cost is that a restored draft opens on the last *edited* viewport.
+//
+// `canvasRotation` is deliberately not here: rotating is an edit to the
+// document, not a camera move.
+const CAMERA_ONLY_FIELDS = ['zoomScale', 'stageX', 'stageY', 'viewportSyncToken'];
+
+const onlyCameraMoved = (slice, prevSlice) => {
+  if (!prevSlice) return false;
+  for (const key of AUTOSAVE_FIELDS) {
+    if (CAMERA_ONLY_FIELDS.includes(key)) continue;
+    if (!Object.is(slice[key], prevSlice[key])) return false;
+  }
+  return true;
+};
 
 /**
  * useAutosave
@@ -45,11 +66,28 @@ export function useAutosave(notify) {
   // largest fixture), and re-serialising it every 2 s buys nothing a user can
   // see. Exit paths write it, so history still survives a normal close; a draft
   // saved without it restores the document and starts undo empty.
+  // The data URL last written to the image record. Compared by reference: the
+  // store hands back the same string until the image itself is replaced, so a
+  // pan, a vertex drag or a re-trace all leave it untouched and skip rewriting
+  // ~770 kB of base64. Only the image-load and crop paths mint a new one.
+  const writtenImageRef = useRef(null);
+
   const saveAutosavedDraft = useCallback(async (snapshot, { withHistory = false } = {}) => {
     try {
-      const payload = { state: snapshot };
+      const { image, ...stateWithoutImage } = snapshot;
+      const payload = { state: stateWithoutImage };
       if (withHistory) payload.history = undoManager.getHistoryState();
-      await setDraft(LOCAL_DRAFT_STORAGE_KEY, payload);
+      const imageChanged = writtenImageRef.current !== image;
+      await setDraft(
+        LOCAL_DRAFT_STORAGE_KEY,
+        payload,
+        { hash: hashDataUrl(image), dataUrl: image },
+        imageChanged,
+      );
+      // Only on the success path: `setDraft` swallows its IndexedDB failure and
+      // falls back to localStorage, and recording a write that did not happen
+      // would skip the image on every later write.
+      writtenImageRef.current = image;
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
       if (notify) notify('Autosave unavailable (storage full or blocked).', { type: 'warning' });
@@ -129,13 +167,16 @@ export function useAutosave(notify) {
         if (!saveOnExit) return;
 
         if (!slice.image) {
+          writtenImageRef.current = null;
           clearAutosavedDraft();
           return;
         }
 
-        // shallow equality is handled by the subscription itself — if we're
-        // here, at least one autosave-relevant field changed.
-        void prevSlice; // unused but documents intent
+        // Shallow equality is handled by the subscription itself, so at least
+        // one autosave-relevant field changed — but `setViewportTransform`
+        // mints a fresh `Math.random()` token per call, so even a camera update
+        // landing on identical scale and position always gets here.
+        if (onlyCameraMoved(slice, prevSlice)) return;
 
         // Debounce: wait 2 seconds of inactivity before writing the draft.
         // This write, not the unload handler below, is what actually protects
@@ -178,6 +219,7 @@ export function useAutosave(notify) {
 
       const snapshot = state.getAutosaveState();
       if (!snapshot.image) {
+        writtenImageRef.current = null;
         clearAutosavedDraft();
         return;
       }

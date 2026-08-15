@@ -16,7 +16,6 @@ import {
 import {
   detectAllDimensions,
   terminateOcrWorker,
-  warmupOcrEngines,
   releaseOcrWorkersWhenIdle
 } from './utils/DimensionsOCR';
 import {
@@ -34,6 +33,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
+import { useOcrWarmup } from './hooks/useOcrWarmup';
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
@@ -240,10 +240,11 @@ function App() {
   // shortcut hook can close over the stable callback references.
 
   // ── OCR engine warm-up & cleanup ─────────────────────────────────────────
-  // Boot the OCR engines in the background at mount so the first dimension
-  // scan doesn't pay multi-second engine initialisation.
+  // Warm-up is deliberately *not* at mount — see useOcrWarmup for why booting
+  // tesseract eagerly cost every visitor ~4.4 MB gz on the critical path.
+  useOcrWarmup();
+
   useEffect(() => {
-    warmupOcrEngines();
     return () => {
       terminateDetectionWorker();
       terminateOcrWorker();

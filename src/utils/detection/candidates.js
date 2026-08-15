@@ -12,20 +12,9 @@ import {
   orMasks,
 } from './raster.js';
 import { extractWallSegments, segmentSpanMask, bridgedSpan } from './wallEvidence.js';
+import { framedComponentMask } from './labelFrame.js';
 
 const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
-
-const componentMask = (labels, component, width) => {
-  const mask = new Uint8Array(labels.length);
-  const { minX, minY, maxX, maxY } = component.bbox;
-  for (let y = minY; y <= maxY; y += 1) {
-    const row = y * width;
-    for (let x = minX; x <= maxX; x += 1) {
-      if (labels[row + x] === component.id) mask[row + x] = 1;
-    }
-  }
-  return mask;
-};
 
 // Ink extent of a mask, or null when it is empty.
 const inkBounds = (mask, width, height) => {
@@ -86,15 +75,13 @@ export const measureFootprint = (wallMask, width, height, radius, knownBounds) =
   const local = labelComponents(footprint, cw, ch, true);
   if (!local.components.length) return null;
 
-  let labels = local.labels;
-  let components = local.components;
-  if (cropped) {
-    const Labels = local.labels.constructor;
-    labels = new Labels(width * height).fill(-1);
-    for (let y = 0; y < ch; y += 1) {
-      labels.set(local.labels.subarray(y * cw, y * cw + cw), (cy0 + y) * width + cx0);
-    }
-    components = local.components.map((c) => ({
+  // The labels stay in crop space and carry the window instead of being
+  // re-expanded to a page-sized array that is mostly `-1`. Components are
+  // still reported in page coordinates, which is the only part of the old
+  // expansion anything downstream actually wanted.
+  const frame = cropped ? { x0: cx0, y0: cy0, w: cw, h: ch } : null;
+  const components = cropped
+    ? local.components.map((c) => ({
       id: c.id,
       size: c.size,
       bbox: {
@@ -103,8 +90,8 @@ export const measureFootprint = (wallMask, width, height, radius, knownBounds) =
         maxX: c.bbox.maxX + cx0,
         maxY: c.bbox.maxY + cy0,
       },
-    }));
-  }
+    }))
+    : local.components;
 
   let largest = components[0];
   let totalEnclosed = 0;
@@ -114,18 +101,33 @@ export const measureFootprint = (wallMask, width, height, radius, knownBounds) =
   }
   // The closed mask is deliberately not returned: nothing downstream reads it,
   // and every ladder rung was holding a full-page copy of one alive.
-  return { labels, components, largest, totalEnclosed, radius };
+  return { labels: local.labels, frame, components, largest, totalEnclosed, radius };
 };
 
-export const footprintEntry = (measured, component, width) => ({
-  mask: componentMask(measured.labels, component, width),
-  labels: measured.labels,
-  componentId: component.id,
-  area: component.size,
-  bbox: component.bbox,
-  bboxArea: bboxAreaOf(component.bbox),
-  radius: measured.radius,
-});
+export const footprintEntry = (measured, component, width, height) => {
+  const entry = {
+    labels: measured.labels,
+    frame: measured.frame,
+    componentId: component.id,
+    area: component.size,
+    bbox: component.bbox,
+    bboxArea: bboxAreaOf(component.bbox),
+    radius: measured.radius,
+  };
+  // Derived on every read, deliberately never cached. The search memo holds one
+  // entry per kept ladder rung, so a lazy-but-memoised mask would report a
+  // small memo while the worker really held tens of megabytes — which is the
+  // property the byte budget exists to enforce. It is ~0.7 ms to rebuild, and
+  // callers that read it more than once spread the entry first (see buildFloor).
+  Object.defineProperty(entry, 'mask', {
+    enumerable: true,
+    configurable: true,
+    get: () => framedComponentMask(
+      entry.labels, entry.frame, entry.componentId, entry.bbox, width, height,
+    ),
+  });
+  return entry;
+};
 
 // How completely a footprint fills its wall network: the two quantities the
 // old boolean `isSealed` combined, kept separate and graded so a partially
@@ -255,9 +257,15 @@ export const generateCandidates = (net, analysis, options = {}) => {
   const netInk = inkCount(net.mask);
   const thickRadius = Math.max(1, Math.round(wallThickness * 0.3));
   let structuralMask = null;
+  // How much of this network is drawn thick enough to be structural. Returned
+  // because `floorPlausibility` needs exactly this fraction and was recomputing
+  // the same full-page opening once per floor — four separable morphological
+  // passes, and unlike this one it is not memoised across traces.
+  let structuralKept = null;
   if (thickRadius >= 2) {
     const structural = openRect(net.mask, width, height, thickRadius);
     const kept = inkCount(structural);
+    structuralKept = kept;
     // Only worth a separate hypothesis when it is neither everything nor
     // almost nothing.
     if (kept >= 0.2 * netInk && kept <= 0.95 * netInk) structuralMask = structural;
@@ -311,8 +319,11 @@ export const generateCandidates = (net, analysis, options = {}) => {
       const fp = measureFootprint(mask, width, height, r, bounds);
       tried.push({ radius: r, area: fp?.totalEnclosed ?? 0 });
       if (!fp) continue;
-      const entry = footprintEntry(fp, fp.largest, width);
-      const seal = sealMetrics(entry, wallBboxArea);
+      // The two scalars sealMetrics reads, taken straight off the component.
+      // Building the entry here would allocate a page-sized component mask for
+      // every rung, and five in eight rungs are discarded on the next line.
+      const area = fp.largest.size;
+      const seal = sealMetrics({ area, bboxArea: bboxAreaOf(fp.largest.bbox) }, wallBboxArea);
       // Enclosure of the whole rung, not just its largest piece: two floor
       // outlines that seal into two components have enclosed both of them.
       const enclosed = fp.components.reduce(
@@ -321,16 +332,20 @@ export const generateCandidates = (net, analysis, options = {}) => {
       const parts = fp.components.filter((c) => c.size >= 0.02 * fp.largest.size).length;
       rungs.push({ area: enclosed, parts });
       const sameAsPrevious = previousArea !== null
-        && Math.abs(entry.area - previousArea) <= 0.005 * previousArea;
-      previousArea = entry.area;
+        && Math.abs(area - previousArea) <= 0.005 * previousArea;
+      previousArea = area;
       if (!sameAsPrevious) {
+        const entry = footprintEntry(fp, fp.largest, width, height);
         const candidate = {
           variant, policy, radius: r, bridgedSpan: bridged, measured: fp, entry, seal,
           enclosed,
         };
         candidates.push(candidate);
         group.push(candidate);
-        memoBudget?.retain?.(entry.mask.byteLength + fp.labels.byteLength);
+        // Labels only: `entry.mask` is derived on read, so charging for it here
+        // would both allocate the array this change exists to avoid and bill
+        // the memo for bytes it does not hold.
+        memoBudget?.retain?.(fp.labels.byteLength);
       }
       if (seal.seal >= SEALED && sealedRadius === null) sealedRadius = r;
     }
@@ -412,20 +427,47 @@ export const generateCandidates = (net, analysis, options = {}) => {
   // strokes" hypothesis from quietly amputating a whole wing. Thin ink counts
   // for less, so discarding a dimension string welded to the wall by its own
   // extension lines costs almost nothing.
-  const coverage = { index: [], weight: [], total: 0 };
+  // Kept as page x/y rather than a page index: the footprint labels this is
+  // tested against live in their own crop, so an index would have to be
+  // decomposed with a divide and a modulo per wall pixel on every candidate.
+  const covX = [];
+  const covY = [];
+  const covW = [];
+  let covTotal = 0;
   for (let y = net.bbox.minY; y <= net.bbox.maxY; y += 1) {
     const row = y * width;
     for (let x = net.bbox.minX; x <= net.bbox.maxX; x += 1) {
       const i = row + x;
       if (!net.mask[i]) continue;
       const w = !structuralMask || structuralMask[i] ? 1 : 0.25;
-      coverage.index.push(i);
-      coverage.weight.push(w);
-      coverage.total += w;
+      covX.push(x);
+      covY.push(y);
+      covW.push(w);
+      covTotal += w;
     }
   }
-  // Two plain arrays, one entry per wall pixel of the network.
-  memoBudget?.retain?.(coverage.index.length * 16);
+  const coverage = {
+    x: new Int32Array(covX),
+    y: new Int32Array(covY),
+    // 1 and 0.25 are both exact in float32, so the weighted sum is unchanged.
+    weight: new Float32Array(covW),
+    total: covTotal,
+  };
+  memoBudget?.retain?.(
+    coverage.x.byteLength + coverage.y.byteLength + coverage.weight.byteLength,
+  );
 
-  return { candidates, search, wallBboxArea, maxRadius, coverage, rescue, sealedThreshold: SEALED };
+  return {
+    candidates,
+    search,
+    wallBboxArea,
+    maxRadius,
+    coverage,
+    rescue,
+    sealedThreshold: SEALED,
+    // `null` when no opening was run (thickRadius < 2), which is the case
+    // floorPlausibility scores as fully structural.
+    structuralKept,
+    netInk,
+  };
 };

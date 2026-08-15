@@ -21,6 +21,9 @@ let waiters = [];
 let generation = 0;
 let idleTimer = null;
 let idleDelay = 0;
+// Long enough that a re-scan or a second image reuses a warm pool, short
+// enough that a visitor who wandered off gets the memory back.
+const DEFAULT_IDLE_MS = 60000;
 
 const MAX_POOL = 4; // each worker holds the 5.2 MB traineddata plus a WASM heap
 
@@ -161,11 +164,23 @@ const applyPreset = async (entry, preset) => {
 /**
  * Boot one worker so the first real scan doesn't pay engine bootstrap inside
  * its time budget. Never rejects; resolves false if the engine failed to come up.
+ *
+ * Arms the teardown policy itself, so "a booted worker always has a teardown
+ * timer" is a property of this module rather than of whoever happened to call
+ * it. Warm-up used to leave `idleDelay` at 0 — which makes `scheduleIdleRelease`
+ * a no-op — so a worker booted outside a scan held a WASM heap and the 5.2 MB
+ * traineddata until the tab closed. `acquire` cancels a pending release and
+ * `release` re-arms it, so a scan can never be torn down underneath itself.
  */
-export const warmOcrEngine = () => {
+export const warmOcrEngine = (idleMs = DEFAULT_IDLE_MS) => {
   cancelIdleRelease();
+  idleDelay = idleMs;
   const entry = entries[0] || bootEntry();
-  return entry.ready.then(() => true, () => false);
+  const armed = (ok) => {
+    scheduleIdleRelease();
+    return ok;
+  };
+  return entry.ready.then(() => armed(true), () => armed(false));
 };
 
 /** Full-page sparse-text OCR. Returns flat lists of lines and words. */
@@ -236,7 +251,7 @@ export const collectLinesAndWords = (result) => {
  * OCR activity. Any read cancels it. Cheaper than tearing down after every
  * scan — a re-scan or a second image within the window reuses a warm pool.
  */
-export const releaseOcrWorkersWhenIdle = (ms = 60000) => {
+export const releaseOcrWorkersWhenIdle = (ms = DEFAULT_IDLE_MS) => {
   idleDelay = ms;
   cancelIdleRelease();
   scheduleIdleRelease();

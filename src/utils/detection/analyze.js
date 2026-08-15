@@ -193,13 +193,7 @@ export const analyzeFloorplan = (imageData, options = {}) => {
   const thickRadius = Math.max(1, Math.round(wallThickness * 0.3));
   const thickMask = openRect(wallMask, width, height, thickRadius);
 
-  // Directional smears + SATs: fast "does this column/row band touch a wall"
-  // queries for the room-growing scans.
   const band = Math.max(2, Math.round(wallThickness / 2));
-  const smearH = dilateRows(wallMask, width, height, band);
-  const smearV = dilateCols(wallMask, width, height, band);
-  const thickSmearH = dilateRows(thickMask, width, height, band);
-  const thickSmearV = dilateCols(thickMask, width, height, band);
 
   return {
     width,
@@ -215,11 +209,31 @@ export const analyzeFloorplan = (imageData, options = {}) => {
     thickMask,
     wallThickness,
     band,
-    smearH,
-    smearV,
-    satSmearH: buildSat(smearH, width, height),
-    satSmearV: buildSat(smearV, width, height),
-    satThickH: buildSat(thickSmearH, width, height),
-    satThickV: buildSat(thickSmearV, width, height),
   };
+};
+
+// Directional smears + SATs: fast "does this column/row band touch a wall"
+// queries, and the only consumer is growRoomRect's lineCoverage — so a
+// perimeter-only trace used to build all four and read none. They are 16 B/px
+// of the analysis entry, which the worker holds for as long as the image is
+// open, against 6 B/px for everything else in it.
+//
+// A memoising accessor rather than a getter on the analysis object:
+// `boundary.js` builds `{...analysis, wallMask: net.mask}` per floor, and a
+// spread would invoke a getter every time. The two undirected smears they are
+// built from had no readers at all and are now purely local.
+const coverageSatCache = new WeakMap();
+
+export const coverageSats = (analysis) => {
+  const cached = coverageSatCache.get(analysis);
+  if (cached) return cached;
+  const { wallMask, thickMask, width, height, band } = analysis;
+  const sats = {
+    smearH: buildSat(dilateRows(wallMask, width, height, band), width, height),
+    smearV: buildSat(dilateCols(wallMask, width, height, band), width, height),
+    thickH: buildSat(dilateRows(thickMask, width, height, band), width, height),
+    thickV: buildSat(dilateCols(thickMask, width, height, band), width, height),
+  };
+  coverageSatCache.set(analysis, sats);
+  return sats;
 };

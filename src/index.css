@@ -1,3 +1,16 @@
+/* Self-hosted, not the Google Fonts stylesheet. That <link> was a
+   render-blocking cross-origin request with no media/onload trick, and the
+   woff2 files could not even start downloading until it came back — a
+   serialized second hop, ~100-250 ms on a warm connection. It also left an
+   offline hole in an app that self-hosts its Tesseract assets precisely so it
+   works offline. Only the weights actually used are imported. */
+@import '@fontsource/fira-sans/400.css';
+@import '@fontsource/fira-sans/500.css';
+@import '@fontsource/fira-sans/600.css';
+@import '@fontsource/fira-code/500.css';
+@import '@fontsource/fira-code/600.css';
+@import '@fontsource/fira-code/700.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

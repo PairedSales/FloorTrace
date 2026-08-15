@@ -30,10 +30,32 @@ export default defineConfig({
         entryFileNames: `assets/[name].[hash].js`,
         chunkFileNames: `assets/[name].[hash].js`,
         assetFileNames: `assets/[name].[hash].[ext]`,
-        // Split heavy dependencies into separate chunks for faster initial load
-        manualChunks: {
-          'tesseract': ['tesseract.js'],
-          'konva': ['konva', 'react-konva'],
+        // Keep konva and tesseract out of the entry chunk. Both are reached
+        // only through a dynamic import (Canvas.jsx lazy-loads the whole stage
+        // subtree), so this is about *which* chunk they land in, not whether
+        // they are deferred — the deferral is the dynamic import's doing.
+        //
+        // The function form matters. The array form (`konva: ['konva',
+        // 'react-konva']`) let rollup hoist React itself into the konva chunk,
+        // because react-konva depends on it — so the entry statically imported
+        // the konva chunk to get `forwardRef`, konva was modulepreloaded in
+        // index.html, and none of it was actually deferred. Naming the modules
+        // by id assigns only those modules and leaves React where rollup's own
+        // reachability analysis puts it: the entry.
+        // React is pinned to its own chunk for the same reason: it is the
+        // dependency konva and the entry share, and leaving it unassigned lets
+        // rollup satisfy both by putting it in the konva chunk.
+        manualChunks(id) {
+          // Rollup's CommonJS interop helper is a single shared virtual module.
+          // Left unassigned it gets folded into whichever manual chunk claims
+          // it first — konva — and then *every* other chunk, the entry
+          // included, statically imports konva to reach it. That one helper
+          // was enough to keep 320 kB of konva on the critical path.
+          if (id.includes('commonjsHelpers')) return 'interop';
+          if (/node_modules[/\\](konva|react-konva)[/\\]/.test(id)) return 'konva';
+          if (/node_modules[/\\]tesseract\.js[/\\]/.test(id)) return 'tesseract';
+          if (/node_modules[/\\](react|react-dom|scheduler)[/\\]/.test(id)) return 'react';
+          return undefined;
         }
       }
     }

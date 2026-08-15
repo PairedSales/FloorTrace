@@ -56,26 +56,26 @@ export const findSegmentSnap = (segments, pos, spanA, spanB, tolerance, face = '
  *   ('lo' = left/top face, 'hi' = right/bottom face). Both return null when
  *   nothing qualifies.
  */
-export const createWallSnapEngine = async (imageSrc) => {
-  if (!imageSrc) {
-    const noop = () => null;
-    return { snapVerticalEdge: noop, snapHorizontalEdge: noop };
-  }
-
-  const image = await loadImageElement(imageSrc);
-  const naturalW = image.naturalWidth || image.width;
-  const naturalH = image.naturalHeight || image.height;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = naturalW;
-  canvas.height = naturalH;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0);
-  const imageData = ctx.getImageData(0, 0, naturalW, naturalH);
-
-  const { width, height, scaleX, scaleY, ink } = binarizeToWorkingScale(imageData, WORKING_MAX_DIMENSION);
+// The expensive half, kept free of DOM so it can run in the detection worker,
+// which already holds the decoded ImageData for this image. On the main thread
+// this cost a full-natural-size `getImageData` readback plus a data-URL decode
+// the worker had already paid for — 12-60 ms, and up to ~140 ms at 12 MP,
+// landing a few frames into the user's first gesture after every image change.
+//
+// Deliberately *not* pre-scaled before binarizing: Otsu would then run on a
+// resampled histogram, which changes the threshold, the segments, and where
+// edges snap.
+export const wallSnapSegments = (imageData) => {
+  const { width, height, scaleX, scaleY, ink } =
+    binarizeToWorkingScale(imageData, WORKING_MAX_DIMENSION);
   const { vertical, horizontal } = extractWallSegments(ink, width, height);
+  return { vertical, horizontal, scaleX, scaleY };
+};
 
+// Plain closures over already-extracted segments — the snapping maths, with no
+// image work left in it. Same numbers whether the segments came from the worker
+// or from the local fallback below.
+export const wallSnapEngineFromSegments = ({ vertical, horizontal, scaleX, scaleY }) => {
   const snapVerticalEdge = (x, y1, y2, tolerance = 12, face = 'lo') => {
     const snapped = findSegmentSnap(
       vertical,
@@ -102,3 +102,25 @@ export const createWallSnapEngine = async (imageSrc) => {
 
   return { snapVerticalEdge, snapHorizontalEdge };
 };
+
+/** Main-thread fallback for when the worker path is unavailable. */
+export const createWallSnapEngine = async (imageSrc) => {
+  if (!imageSrc) {
+    const noop = () => null;
+    return { snapVerticalEdge: noop, snapHorizontalEdge: noop };
+  }
+
+  const image = await loadImageElement(imageSrc);
+  const naturalW = image.naturalWidth || image.width;
+  const naturalH = image.naturalHeight || image.height;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = naturalW;
+  canvas.height = naturalH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0);
+  const imageData = ctx.getImageData(0, 0, naturalW, naturalH);
+
+  return wallSnapEngineFromSegments(wallSnapSegments(imageData));
+};
+

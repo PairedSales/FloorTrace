@@ -4,13 +4,13 @@
 
 import { erodeRect, labelComponents, openRect } from './raster.js';
 import {
-  traceComponentBoundary,
   simplifyRing,
   fitRing,
   polygonArea,
   polygonSignedArea,
   ringSetArea,
 } from './polygon.js';
+import { traceFramedBoundary } from './labelFrame.js';
 import { collectNonGlaRegions, arbitrateRegions, applyRegions, componentMask } from './nonGla.js';
 
 const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
@@ -25,8 +25,11 @@ const largestComponent = (mask, width, height) => {
   return { labels, component: best };
 };
 
-const polygonize = (labels, width, height, componentId, epsilon, fitOptions) => {
-  const ring = traceComponentBoundary(labels, width, height, componentId);
+// `carrier` is anything holding `{labels, frame, componentId}` — the footprint
+// entry's labels live in their own crop (labelFrame.js), everything else here
+// labels a page-sized mask and carries no frame.
+const polygonize = (carrier, width, height, epsilon, fitOptions) => {
+  const ring = traceFramedBoundary(carrier, width, height);
   if (ring.length < 3) return null;
   const simplified = simplifyRing(ring, epsilon);
   if (simplified.length < 3) return null;
@@ -178,10 +181,11 @@ const offsetPolygon = (polygon, insets, normals, sign = 1) => {
  */
 export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
   const { wallMask, width, height, wallThickness } = analysis;
-  let footprint = initialFootprint;
-  let outerResult = polygonize(
-    footprint.labels, width, height, footprint.componentId, epsilon, options.fit,
-  );
+  // Spread once: the entry's `mask` is a getter that rebuilds a page-sized
+  // array on every read (see footprintEntry), and everything below reads it
+  // repeatedly. This is the one place that wants it materialised.
+  let footprint = { ...initialFootprint };
+  let outerResult = polygonize(footprint, width, height, epsilon, options.fit);
   if (!outerResult) return null;
 
   let exteriorThickness = sampleExteriorThickness(
@@ -206,14 +210,14 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         ...footprint,
         mask: componentMask(kept.labels, kept.component, width),
         labels: kept.labels,
+        // Page-sized labels from `largestComponent`, so no crop frame.
+        frame: null,
         componentId: kept.component.id,
         area: kept.component.size,
         bbox: kept.component.bbox,
         bboxArea: bboxAreaOf(kept.component.bbox),
       };
-      const reOuter = polygonize(
-        candidate.labels, width, height, candidate.componentId, epsilon, options.fit,
-      );
+      const reOuter = polygonize(candidate, width, height, epsilon, options.fit);
       if (reOuter) {
         footprint = candidate;
         outerResult = reOuter;
@@ -250,10 +254,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         exteriorThickness,
       });
       if (applied.accepted.length) {
-        const carvedOuter = polygonize(
-          applied.footprint.labels, width, height, applied.footprint.componentId,
-          epsilon, options.fit,
-        );
+        const carvedOuter = polygonize(applied.footprint, width, height, epsilon, options.fit);
         if (carvedOuter) {
           footprint = applied.footprint;
           outerResult = carvedOuter;
@@ -272,7 +273,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
 
   const holes = [];
   for (const hole of holeSources) {
-    const shape = polygonize(hole.labels, width, height, hole.componentId, epsilon, options.fit);
+    const shape = polygonize(hole, width, height, epsilon, options.fit);
     if (shape && polygonArea(shape.polygon) > 0) holes.push(shape.polygon);
   }
 
@@ -295,7 +296,8 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     const innerComp = largestComponent(eroded, width, height);
     if (innerComp && innerComp.component.size > 0.2 * footprint.area) {
       const innerResult = polygonize(
-        innerComp.labels, width, height, innerComp.component.id, epsilon, options.fit,
+        { labels: innerComp.labels, frame: null, componentId: innerComp.component.id },
+        width, height, epsilon, options.fit,
       );
       if (innerResult && polygonArea(innerResult.polygon) > 0) {
         innerPolygon = innerResult.polygon;
