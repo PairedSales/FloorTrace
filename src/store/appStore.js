@@ -113,15 +113,23 @@ const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
 );
 
 /**
- * Fields that are lightweight (no image). Snapshots store the image reference
- * separately so it is only deep-cloned when it actually changes between undo
- * points, dramatically reducing memory usage.
+ * Snapshot fields carried by reference instead of deep-cloned. Both are replaced
+ * wholesale by their setters and never mutated in place, so N snapshots of an
+ * unchanged value share one copy. `tracedBoundaries` is here because it is the
+ * heaviest thing in a snapshot — 15.6 KB of a 16.8 KB snapshot on the largest
+ * fixture — and cloning it 50 times bought nothing.
  */
-const SNAPSHOT_FIELDS_NO_IMAGE = SNAPSHOT_FIELDS.filter((k) => k !== 'image');
+const SNAPSHOT_SHARED_FIELDS = ['image', 'tracedBoundaries'];
+const SNAPSHOT_CLONED_FIELDS = SNAPSHOT_FIELDS.filter(
+  (k) => !SNAPSHOT_SHARED_FIELDS.includes(k)
+);
 
 /**
- * The subset of field names written to localStorage on autosave.
- * Excludes transient UI state and changes tracking status.
+ * The subset of field names written to the autosaved draft.
+ * Excludes transient UI state and change tracking. `tracedBoundaries` is NOT
+ * excluded: it is what the interior/exterior toggle re-applies, so a restored
+ * draft without it has a toggle that silently does nothing — and a `.floorplan`
+ * carries it, which would make reopening a project better than restoring a draft.
  */
 const EXCLUDED_AUTOSAVE_FIELDS = [
   'isProcessing',
@@ -396,7 +404,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
    */
   createSnapshot: (prevImage) => {
     const state = get();
-    const lightweight = cloneSnapshot(pickFields(state, SNAPSHOT_FIELDS_NO_IMAGE));
+    const lightweight = cloneSnapshot(pickFields(state, SNAPSHOT_CLONED_FIELDS));
     // Fast path: reuse the same string reference when image hasn't changed.
     // undoManager's intern pool will deduplicate across reference boundaries.
     if (state.image === prevImage) {
@@ -404,6 +412,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     } else {
       lightweight.image = state.image;
     }
+    // Shared, not cloned: setTracedBoundaries always replaces the whole result
+    // and every reader (getFloorBoundariesForMode, tracedAreaPx) only reads it,
+    // so a snapshot taken before a re-trace still holds the result it was taken
+    // with. It stays snapshotted because undo must restore the trace the wall
+    // mode toggle re-applies — dropping it let an undone trace come back.
+    lightweight.tracedBoundaries = state.tracedBoundaries;
     return lightweight;
   },
 
