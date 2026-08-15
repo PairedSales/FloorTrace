@@ -453,17 +453,108 @@ Still open from C2:
 
 ### Wave D — after C (3 agents, parallel)
 
-| ID | Task | Depends on | Files |
-|---|---|---|---|
-| **D1** | Cache identity that can't alias two images | B2 | `src/workers/detectionWorker.js`, `src/store/undoManager.js`, `src/utils/hash.js` |
-| **D2** | Autosave weight and the unload claim | A1 | `src/store/appStore.js`, `src/hooks/useAutosave.js` |
-| **D3** | Remaining cleanup | C2 | `src/store/floorManager.js`, `src/utils/detection/boundary.js`, `CLAUDE.md` |
+Integrated on `claude/remediation-wave-d`. Gate at that tip: lint 0 errors /
+2 warnings, `npm test` **350 passed / 21 files**, `bench:detection` **45/45**,
+`bench:scale` **15/15**, `probe:exterior` and `probe:exterior draw`
+**byte-identical to the Wave C tip**, `npm run build` clean.
+
+| ID | Task | Depends on | Files | Status |
+|---|---|---|---|---|
+| **D1** | Cache identity that can't alias two images | B2 | `src/workers/detectionWorker.js`, `src/store/undoManager.js`, `src/utils/hash.js`, 3 new tests | ✅ `4fa6936` |
+| **D2** | Autosave weight and the unload claim | A1 | `src/store/appStore.js`, `src/hooks/useAutosave.js` | ✅ `a7bcb9e` |
+| **D3** | Remaining cleanup | C2 | `src/store/floorManager.js`, `src/utils/detection/boundary.js`, `CLAUDE.md`, new test | ✅ `94ad46f` |
+
+**D1 did not stub the collision — it found one.** `src/utils/__tests__/collidingDataUrls.js`
+holds two distinct, equal-length data URLs that genuinely collide under the
+current `hashDataUrl` (both → `dafa84e7`), found by enumerating base64 bodies;
+32 bits needs only ~50k candidates. Verified independently by the orchestrator.
+Its tests fail against the pre-fix code with exactly the described symptom: undo
+returns the wrong image, and the worker serves image A's pixels for image B.
+
+Route chosen by measurement, not preference: full-string FNV costs **4.20 ms**
+per `save()` on a 2 MB data URL, while `===` costs **0.00 ms** in the common
+case (the store hands back the same reference) and **0.067 ms** against an
+equal-but-distinct string. So verification is exact *and* ~60× cheaper.
+Interning survives — 1 pool entry across 10 saves of an unchanged image,
+asserted in a test, so no memory was traded for the correctness fix.
+
+D1 also had to fix a second aliasing the brief did not name: `cacheKey` keys
+`getCachedAnalysis`/`getSearchCache` too, so a shared key hands image B the
+geometry computed for A even with the pixel cache fixed. It is now
+`${hash}#${decodeCount}`, stable across requests for one image (which is what
+makes N room clicks cost one trace) and distinct across images.
+
+**D2 rejected both the brief's route and its documented fallback, and was
+right.** It verified rather than reasoned:
+
+- Dropping `tracedBoundaries` from `AUTOSAVE_FIELDS` is a real regression, as
+  the brief predicted — and worse than stated, since the field is in
+  `PERSISTENT_FLOOR_FIELDS` too, so reopening a `.floorplan` would become
+  strictly better than restoring a draft.
+- Dropping it from `SNAPSHOT_FIELDS` — **the documented fallback** — is not a
+  silent no-op but a correctness bug. `handleTracePerimeter` (`src/App.jsx:665`)
+  calls `undoManager.save()` *before* tracing, so undoing a trace would restore
+  the old perimeter while leaving the **new** result in the store; the next wall
+  mode toggle re-applies the geometry the user just undid, and the reported
+  square footage changes. The crop path fails the other way.
+
+Its third route keeps the field in both sets but stops *cloning* it:
+`SNAPSHOT_FIELDS_NO_IMAGE` became `SNAPSHOT_CLONED_FIELDS` /
+`SNAPSHOT_SHARED_FIELDS`, still derived from the single declaration. Safe
+because `setTracedBoundaries` replaces wholesale and every reader is pure —
+verified by the orchestrator, not just claimed. Debounced draft writes:
+**2334.3 → 755.4 KB** (EF3), **1488.4 → 573.4 KB** (EF5), **736.1 → 203.0 KB**
+(EF1); distinct `tracedBoundaries` objects across 50 snapshots **50 → 1**, and
+that identity survives IndexedDB's structured clone.
+
+**D3's `ctx.scale` item was display-only, and it proved it.** The value reaches
+exactly one place — `scoring.js:239`, the `bridged-opening` detail — while the
+confidence multiplier on the next line uses the raw `support.longestGap`. No
+bench fixture exercises it (six of seven analyse at `scaleX = 1`, and the one
+downscaled fixture emits no `bridged-opening`), so D3 forced downscales on the
+synthetic scenarios: a 166 px opening was announced as **104 px** at 0.625, and
+is now scale-invariant, with confidence bit-identical at every downscale. In
+practice this bit any image over 1400 px on its long edge.
+
+D3 deviated on item 3 because the brief's route crossed a file boundary:
+`loadProject`/`restoreFromSaved` live in `appStore.js`, which D2 owned. Rather
+than reach across, it deleted the module-level `nextTraceNumber` and derives the
+name from the traces on hand — equivalent on every existing path, and
+additionally correct after any project load.
+
+Item 6 was a phantom: **there is no dead-export list** anywhere in `docs/` or
+`CLAUDE.md`. D3 correctly did nothing rather than inventing one, and did not
+"fix" the main-thread `clearDetectionCache` no-op that B2 documented.
 
 ### Optional, last
 
 **E1** — collapse the lossy overlay adapter into a single `TraceResult` type the
 store holds whole. Only worth doing after A1/A3/C1 have shown which fields
 actually need to survive an edit.
+
+**A1, A3 and C1 have now all landed, so E1 is unblocked** and the evidence it
+was waiting for is in. What the four waves showed has to survive an edit:
+`holes` and `quality` (A1), per-trace `confidence` and `warnings[]` for a single
+floor (A3), and the `source`/`adopted` pair, which C1 showed is not one field
+but two questions — *where did this scale come from* and *was this room's
+correction taken* — conflated into one string. E1 should model those separately;
+writing `source: 'manual'` to mean "a room was measured" regardless of whether
+the measurement was used is precisely the bug C1 fixed.
+
+### Waves A–D are complete
+
+All eleven tasks landed, each on its own branch, each merged by the orchestrator
+after an independent gate. Final state: lint 0 errors / 2 pre-existing warnings,
+`npm test` **350 passed / 21 files** (from 293/14), `bench:detection` **45/45**,
+`bench:scale` **15/15** (from 14/14), `npm run build` clean. Peak search-cache
+retention 114.1 MB → 51.9 MB; debounced autosave writes down 62–72%.
+
+Every wave's `bench:detection`, `bench:scale`, `probe:exterior` and
+`probe:exterior draw` output was diffed in full against the previous wave's tip,
+not just checked for a passing total. The only geometry that moved in the entire
+programme was A2's two adjudicated checks (EF4 90.6% → 92.4%, EF6 100.0% →
+99.9%) and the room rectangles moved by the wall-face-seating commit — both
+argued on evidence other than the benchmark number.
 
 ---
 
@@ -1263,8 +1354,10 @@ Independent one-liners; land as one commit.
 4. **`CLAUDE.md`** says drafts persist to localStorage; `draftStorage.js` is
    IndexedDB with a localStorage fallback. Fix the sentence.
 5. **Indentation** at `src/utils/detection/boundary.js:466`.
-6. Consider removing `clearDetectionCache` from the dead-export list once B2b
-   has wired it up — verify it is actually called.
+6. ~~Consider removing `clearDetectionCache` from the dead-export list once B2b
+   has wired it up — verify it is actually called.~~ **There is no dead-export
+   list.** D3 grepped `docs/` and `CLAUDE.md` for one and found nothing; the
+   only mentions are this item and B2's own result record. Nothing to do.
 
 ### Acceptance
 
@@ -1283,6 +1376,33 @@ Independent one-liners; land as one commit.
 
 A1 is ready to execute immediately: the change is one expression, the failing
 test is specified, and no other file is involved.
+
+---
+
+## 3a. Open findings — surfaced by the waves, deliberately not fixed
+
+Every one of these was found by an agent that had a reason not to fix it inside
+its own task. They are recorded here so the reasons do not have to be
+rediscovered. Roughly in order of how much they matter.
+
+| # | Finding | Where | Why it was left |
+|---|---|---|---|
+| 1 | **No term in `scoreCandidate` is sensitive to enclosed area disappearing relative to a sibling hypothesis.** `support.mean` is normalised by the candidate's *own* perimeter, so excising a region along drawn wall removes one weakly-drawn edge and adds twice the well-drawn cut line — amputation raises it **unconditionally**, for any region of any size, whenever the removed edge is below the current mean. Its intended counterweight `coverage` counts ink pixels, and a garage's own walls stay inside the fingers, so losing a 47,000 px bay (~17% of the floor) cost coverage 0.003. `seal` is 1.000 either way. | `scoring.js` | Fixing it means choosing a scoring formulation validated only against the benchmark — the trap this document exists to warn about. Needs its own task, with an adjudication method that is not the bench. |
+| 2 | **OCR failure on a missing `traineddata` is an unsettled promise and a hang, not an error.** tesseract.js throws uncaught inside its own message handler, so `bootEntry`'s rejection handler never runs and `acquire` never resolves. Nothing on that path is timed out. | `src/utils/dimensions/ocrTesseract.js:106-111` | Pre-existing and separate from A3. It also means **this document's own acceptance test for A3 was wrong.** |
+| 3 | **`getCachedAnalysis`'s LRU is unbounded in bytes** (`MAX_ENTRIES = 4`), holding several page-sized masks per image for up to four images. With B2's search memo forced entirely off the fixtures still retain 11.6–32.5 MB, so this is now the *dominant* retention — it is why EF1 (50.3 MB) and EF7 (51.9 MB) sit just above 50 even though their search memos are only 28.5 and 21.0 MB. | `src/utils/detection/cache.js:10` | Out of B2's scope once the search memo was bounded. Straightforward follow-up; B2's `probe:memory` already measures it. |
+| 4 | **The real `netSelfSeals` cliff is still there.** `bridgeRuns` runs over the **whole page** for a net whose ink is confined to `net.bbox`, and `maskFor` allocates a full-page `Uint8Array` to feed it. C2's memo rekey is a correctness hardening, **not** the speedup this plan expected — recomputation count is unchanged. | `boundary.js:43`, `boundary.js:92` | Cropping to the bbox looks identical for `bridgeRuns` alone, but `measureFootprint` re-crops to `inkBounds ± (radius+2)` and `closeRect`/`floodOutside` treat the array border as outside — so a naive pre-crop moves the border and is **not** provably identical without auditing those two border semantics. Also needs `raster.js`. |
+| 5 | **`serializeSketch` keys exported images by raw `hashDataUrl`.** Two colliding images alias in the saved `.floorplan`, and `imageRef` can point at the wrong one on reopen — the same bug class D1 fixed in the other three places. | `src/utils/projectSerializer.js:274` | Outside D1's three files. The serializer should use the same intern discipline rather than the raw hash. |
+| 6 | **The `structural` rescue is ungated** — it runs unconditionally whenever a structural mask exists, while `span` immediately below it *is* gated. `candidates.js:227-229` describes the gate that should exist. | `boundary.js:230-233` | Needs a new threshold, which is a tuning decision A2 was explicitly forbidden from making against the bench. |
+| 7 | **The structural-with-garage footprint is geometrically degenerate** — two wall-width fingers tracing around the garage, cleaned up only when they fall under `buildFloor`'s 3% filament-shave budget. Latent now, reachable whenever `structural` wins by more than the epsilon on a plan with a thin-line-bounded bay. | `boundary.js` / `footprint.js` | Downstream of #6. |
+| 8 | **`requestTimeout` is unverified by execution.** `index.js` is main-thread worker-wrapper code with no test coverage and no jsdom in the repo. The 120 s cap and 2 s-per-label slope are judgement calls, read and linted only. | `src/utils/detection/index.js` | No test harness exists for it. Would need jsdom or a worker stub. |
+| 9 | `flushAutosaveNow` is still registered on `beforeunload`, where its async IndexedDB work will not reliably complete. Harmless and occasionally works; the comment is now honest about what actually protects the user (the 2 s debounce). | `src/hooks/useAutosave.js:189` | D2's brief did not ask for the listener to be removed. |
+
+Two things checked and found **not** to be problems, recorded so they are not
+re-investigated: `handleInteriorWallToggle` need not re-review the footprint
+(`tracedAreaPx` reads `floor.outer.polygon`, which the toggle only selects for
+*display*, so the area is toggle-invariant); and the main-thread
+`clearDetectionCache` call is correctly absent, since nothing on the main thread
+calls the pipeline cores.
 
 ---
 

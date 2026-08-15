@@ -219,7 +219,9 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     coverage: generated.coverage,
     constraints: scopedConstraints,
     brush: net.brush ?? null,
-    scale: 1,
+    // Working px per original px. Warning details divide by it so a bridged
+    // opening is reported at the size the user sees, not the downscale's.
+    scale: analysis.scaleX,
   };
   const scored = [];
   const scoreNew = () => {
@@ -482,7 +484,7 @@ export const traceBoundary = (analysis, options = {}) => {
         seal: Number(detected.best.seal.seal.toFixed(3)),
       };
       floor.usedFallback = detected.best.seal.seal < 0.55;
-  floor.plausibility = floorPlausibility(
+      floor.plausibility = floorPlausibility(
         floor, net, analysis, detected.evidence, detected.constraints,
       );
       floor.net = net;

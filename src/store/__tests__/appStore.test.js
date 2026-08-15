@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { selectPerimeterOverlay } from '../appStore';
+import useAppStore, { selectPerimeterOverlay, AUTOSAVE_FIELDS } from '../appStore';
+import * as undoManager from '../undoManager';
 import { calculateArea } from '../../utils/areaCalculator';
 
 const SCALE = { x: 1, y: 1 };
@@ -109,5 +110,72 @@ describe('selectPerimeterOverlay', () => {
 
     expect(after).not.toBe(before);
     expect(after.holes).toEqual([]);
+  });
+});
+
+// `tracedBoundaries` is the detector result the interior/exterior toggle
+// re-applies. It is the heaviest field in a snapshot, so it is tempting to drop
+// from the field sets — these pin down why it cannot be, and how it is made
+// cheap instead.
+describe('tracedBoundaries weight and lifetime', () => {
+  const IMG_A = 'data:image/png;base64,AAAA';
+  const IMG_B = 'data:image/png;base64,BBBB';
+  const T_OLD = { tag: 'old', floors: [{ outer: { polygon: [{ x: 0, y: 0 }] } }] };
+  const T_NEW = { tag: 'new', floors: [{ outer: { polygon: [{ x: 9, y: 9 }] } }] };
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    undoManager.clear();
+  });
+
+  it('is autosaved, so a restored draft can still toggle wall mode', () => {
+    expect(AUTOSAVE_FIELDS).toContain('tracedBoundaries');
+  });
+
+  // The memory win: 50 snapshots share one detector result rather than holding
+  // 50 deep clones of it. Safe only while nothing mutates it in place.
+  it('is shared by reference across snapshots while other fields are cloned', () => {
+    const s = useAppStore.getState();
+    s.setImage(IMG_A);
+    s.setTracedBoundaries(T_OLD);
+
+    const snap = useAppStore.getState().createSnapshot(null);
+    expect(snap.tracedBoundaries).toBe(T_OLD);
+    expect(snap.perimeterTraces).not.toBe(useAppStore.getState().perimeterTraces);
+    expect(snap.perimeterTraces).toEqual(useAppStore.getState().perimeterTraces);
+  });
+
+  // handleImageUpdate drops the trace because it describes the pre-crop image;
+  // undo puts that image back, so it must put the trace back too.
+  it('comes back with the image when a crop is undone', () => {
+    const s = useAppStore.getState();
+    s.setImage(IMG_A);
+    s.setTracedBoundaries(T_OLD);
+
+    undoManager.save();
+    useAppStore.getState().setImage(IMG_B);
+    useAppStore.getState().setTracedBoundaries(null);
+
+    undoManager.undo();
+    expect(useAppStore.getState().image).toBe(IMG_A);
+    expect(useAppStore.getState().tracedBoundaries).toEqual(T_OLD);
+  });
+
+  // Left out of snapshots, undoing a trace leaves the new result in the store
+  // and the next wall-mode toggle silently re-applies the undone geometry.
+  it('does not survive undo as the newer result', () => {
+    const s = useAppStore.getState();
+    s.setImage(IMG_A);
+    s.setTracedBoundaries(T_OLD);
+
+    undoManager.save();
+    useAppStore.getState().setTracedBoundaries(T_NEW);
+    undoManager.save();
+    useAppStore.getState().setTracedBoundaries(null);
+
+    undoManager.undo();
+    expect(useAppStore.getState().tracedBoundaries).toEqual(T_NEW);
+    undoManager.undo();
+    expect(useAppStore.getState().tracedBoundaries).toEqual(T_OLD);
   });
 });

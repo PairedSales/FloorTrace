@@ -17,9 +17,9 @@ const autosaveSelector = (state) =>
  * useAutosave
  *
  * Owns the entire draft-persistence lifecycle:
- *  - Restores the last autosaved draft from localStorage on mount.
- *  - Subscribes to relevant store fields and debounces writes to localStorage
- *    (2 s of inactivity before writing).
+ *  - Restores the last autosaved draft on mount.
+ *  - Subscribes to relevant store fields and debounces writes to the draft
+ *    store (2 s of inactivity before writing).
  *  - Exposes `saveOnExit` and `handleSaveOnExitChange` so the LeftPanel
  *    preference toggle can be wired without touching App directly.
  *
@@ -40,12 +40,15 @@ export function useAutosave(notify) {
     removeDraft(LOCAL_DRAFT_STORAGE_KEY);
   }, []);
 
-  const saveAutosavedDraft = useCallback(async (snapshot) => {
+  // `withHistory` is off for the recurring debounced write: the undo stack is up
+  // to 50 snapshots and dwarfs the document itself (2.3 MB vs 755 KB on the
+  // largest fixture), and re-serialising it every 2 s buys nothing a user can
+  // see. Exit paths write it, so history still survives a normal close; a draft
+  // saved without it restores the document and starts undo empty.
+  const saveAutosavedDraft = useCallback(async (snapshot, { withHistory = false } = {}) => {
     try {
-      const payload = {
-        state: snapshot,
-        history: undoManager.getHistoryState(),
-      };
+      const payload = { state: snapshot };
+      if (withHistory) payload.history = undoManager.getHistoryState();
       await setDraft(LOCAL_DRAFT_STORAGE_KEY, payload);
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
@@ -134,7 +137,9 @@ export function useAutosave(notify) {
         // here, at least one autosave-relevant field changed.
         void prevSlice; // unused but documents intent
 
-        // Debounce: wait 2 seconds of inactivity before writing to localStorage.
+        // Debounce: wait 2 seconds of inactivity before writing the draft.
+        // This write, not the unload handler below, is what actually protects
+        // the user's work.
         if (autosaveTimerRef.current) {
           clearTimeout(autosaveTimerRef.current);
         }
@@ -154,8 +159,13 @@ export function useAutosave(notify) {
     };
   }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
 
-  // Flush current working state immediately when the tab is being hidden or
-  // unloaded so accidental exits do not lose the most recent edits.
+  // Best-effort flush when the tab is hidden or unloaded, and the only write
+  // that carries the undo history. It is not a guarantee: setDraft opens an
+  // async IndexedDB transaction, which a browser is free to abandon once the
+  // page is going away — least likely to complete on `beforeunload`, most
+  // likely on `visibilitychange`, which fires while the page is still alive.
+  // What actually protects recent edits is the 2 s debounced write above; this
+  // narrows the window from 2 s to the last edit, and persists undo history.
   useEffect(() => {
     const flushAutosaveNow = () => {
       const state = useAppStore.getState();
@@ -172,7 +182,7 @@ export function useAutosave(notify) {
         return;
       }
 
-      saveAutosavedDraft(snapshot);
+      saveAutosavedDraft(snapshot, { withHistory: true });
     };
 
     const handleVisibilityChange = () => {

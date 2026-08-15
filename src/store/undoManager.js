@@ -1,5 +1,5 @@
 import useAppStore from './appStore';
-import { hashDataUrl } from '../utils/hash';
+import { internKey } from '../utils/hash';
 
 /**
  * Maximum number of undo steps kept across both stacks combined.
@@ -19,19 +19,21 @@ const MAX_UNDO = 50;
 // before the store applies the snapshot, so the rest of the app is unchanged.
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** @type {Map<string, string>} hash → full data URL */
+/** @type {Map<string, string>} intern key → full data URL */
 const imagePool = new Map();
 
 /**
- * Intern a data URL into the pool and return its hash key.
+ * Intern a data URL into the pool and return its key.
  * If two equal images arrive they resolve to the same key → single copy stored.
+ *
+ * The key must be an identity, not a bucket: it is what undo resolves back into
+ * `image`, so two images sharing a hash would restore the wrong drawing with no
+ * sign anything went wrong. `internKey` verifies the occupant before reusing a
+ * slot — the equal-image case still shares one copy, so interning is intact.
  */
 function internImage(dataUrl) {
-  if (!dataUrl) return null;
-  const key = hashDataUrl(dataUrl);
-  if (!imagePool.has(key)) {
-    imagePool.set(key, dataUrl);
-  }
+  const key = internKey(dataUrl, (k) => imagePool.get(k));
+  if (key !== null && !imagePool.has(key)) imagePool.set(key, dataUrl);
   return key;
 }
 
