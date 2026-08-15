@@ -250,10 +250,42 @@ un-timeout-ed anywhere on that path.
 
 ### Wave B — after A (2 agents, parallel)
 
-| ID | Task | Depends on | Files |
-|---|---|---|---|
-| **B1** | One definition of "this room is non-GLA" | A4 (`App.jsx`) | `src/utils/dimensions/exteriorLabels.js`, `src/utils/detection/scale.js`, `src/App.jsx` |
-| **B2** | Bound what the boundary search retains | A2 (deterministic pick) | `src/utils/detection/{cache,candidates,raster,index}.js`, `src/workers/detectionWorker.js`, `scripts/`, `package.json` |
+Integrated on `claude/remediation-wave-b`. Gate at that tip: lint 0 errors /
+2 warnings, `npm test` **313 passed / 16 files**, `bench:detection` **45/45 and
+byte-identical to the §1 baseline**, `bench:scale` **14/14**, peak search-cache
+retention **114.1 MB → 51.9 MB**.
+
+| ID | Task | Depends on | Files | Status |
+|---|---|---|---|---|
+| **B1** | One definition of "this room is non-GLA" | A4 (`App.jsx`) | `src/utils/dimensions/exteriorLabels.js`, `src/utils/detection/scale.js`, `src/App.jsx` | ✅ `88cc8de` |
+| **B2** | Bound what the boundary search retains | A2 (deterministic pick) | `src/utils/detection/{cache,candidates,raster,index}.js`, `src/workers/detectionWorker.js`, `scripts/`, `package.json` | ✅ `0b138cc` |
+
+**B1 met its own escalate condition and committed anyway**; the orchestrator
+adjudicated and upheld it. ExampleFloorplan1's consensus error moves
++3.1% → +3.6% because GARAGE is now correctly dropped. That regression is an
+artifact of the ~3% common-mode rectangle overshoot described in §0: overlaying
+B1 onto the wall-face-seating branch gives **15.60 px/ft / +0.6% both with and
+without the garage** — a perfect no-op. B1 also found the same centroid test a
+second time in `scale.js`'s `labelSqFt` cross-check and fixed both.
+
+**B2 deviated from the brief in three places, each measured.** The budget is
+**32 MB, not 48** (at 48, EF3's 42.9 MB memo stays under and EF3 still retains
+75.4 MB; 32 trips exactly the three heavy sheets and leaves the four normal ones
+memoised). `Int16Array`, not `Uint16Array`, because `scoring.js:104` tests
+`labels[...] >= 0`, which is unconditionally true for an unsigned array. And
+B2b's `clearDetectionCache()` was wired into the **worker only** — nothing on the
+main thread ever calls the pipeline cores, so the main-thread copy of `cache.js`
+module state is permanently empty and a call in `terminateDetectionWorker` would
+be a no-op twice over. A comment at `src/utils/detection/index.js:104` records
+this so it is not re-added.
+
+**Follow-up B2 surfaced and did not fix:** with the search memo forced entirely
+off, the fixtures still retain 11.6–32.5 MB. That is `getCachedAnalysis`'s LRU
+(`src/utils/detection/cache.js:10`, `MAX_ENTRIES = 4`), holding several
+page-sized masks per image for up to four images with no size bound. It is now
+the dominant retention, and it is why EF1 (50.3 MB) and EF7 (51.9 MB) sit just
+above 50 even though their search memos are only 28.5 and 21.0 MB. Worth its own
+task.
 
 ### Wave C — after B (2 agents, parallel)
 
