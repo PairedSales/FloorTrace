@@ -128,21 +128,29 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
 };
 
 // 1D dilation along rows: pixel on if any ink within +-r in its row.
+//
+// Run-based rather than two per-pixel distance sweeps. Identical operator —
+// a maximal ink run [a, b] is on within +-r exactly over [a-r, b+r], clamped
+// to the line, and the union over runs is what the sweeps compute one pixel at
+// a time. Neither form wraps. Erasing the two sweeps also lets `fill` memset
+// the painted span instead of a scalar store per pixel; the pair was 16.9% of
+// a cold trace's self time, because `closeRect` calls them on every rung of
+// every closing ladder. `raster.test.js` asserts the two forms bit-identical.
 export const dilateRows = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
-  const INF = width + r + 1;
   for (let y = 0; y < height; y += 1) {
     const row = y * width;
-    let dist = INF;
-    for (let x = 0; x < width; x += 1) {
-      dist = mask[row + x] ? 0 : dist + 1;
-      if (dist <= r) out[row + x] = 1;
-    }
-    dist = INF;
-    for (let x = width - 1; x >= 0; x -= 1) {
-      dist = mask[row + x] ? 0 : dist + 1;
-      if (dist <= r) out[row + x] = 1;
+    let x = 0;
+    while (x < width) {
+      if (!mask[row + x]) {
+        x += 1;
+        continue;
+      }
+      let end = x;
+      while (end < width && mask[row + end]) end += 1;
+      out.fill(1, row + Math.max(0, x - r), row + Math.min(width - 1, end - 1 + r) + 1);
+      x = end;
     }
   }
   return out;
@@ -158,26 +166,25 @@ const COL_TILE = 64;
 export const dilateCols = (mask, width, height, r) => {
   if (r <= 0) return mask.slice();
   const out = new Uint8Array(mask.length);
-  const INF = height + r + 1;
-  const dist = new Int32Array(COL_TILE);
+  // Same run-start bookkeeping `erodeCols` already uses, painting the run
+  // grown by r instead of shrunk by it. The sentinel row at y === height
+  // closes any run still open at the bottom edge.
+  const runStart = new Int32Array(COL_TILE);
   for (let x0 = 0; x0 < width; x0 += COL_TILE) {
     const n = Math.min(COL_TILE, width - x0);
-    dist.fill(INF, 0, n);
-    for (let y = 0; y < height; y += 1) {
+    runStart.fill(-1, 0, n);
+    for (let y = 0; y <= height; y += 1) {
       const row = y * width + x0;
       for (let i = 0; i < n; i += 1) {
-        const d = mask[row + i] ? 0 : dist[i] + 1;
-        dist[i] = d;
-        if (d <= r) out[row + i] = 1;
-      }
-    }
-    dist.fill(INF, 0, n);
-    for (let y = height - 1; y >= 0; y -= 1) {
-      const row = y * width + x0;
-      for (let i = 0; i < n; i += 1) {
-        const d = mask[row + i] ? 0 : dist[i] + 1;
-        dist[i] = d;
-        if (d <= r) out[row + i] = 1;
+        if (y < height && mask[row + i]) {
+          if (runStart[i] < 0) runStart[i] = y;
+          continue;
+        }
+        if (runStart[i] < 0) continue;
+        const to = Math.min(height - 1, y - 1 + r);
+        const col = x0 + i;
+        for (let k = Math.max(0, runStart[i] - r); k <= to; k += 1) out[k * width + col] = 1;
+        runStart[i] = -1;
       }
     }
   }
@@ -198,9 +205,10 @@ const erodeRows = (mask, width, height, r) => {
       }
       let end = x;
       while (end < width && mask[row + end]) end += 1;
-      const from = x + r;
-      const to = end - 1 - r;
-      for (let k = from; k <= to; k += 1) out[row + k] = 1;
+      // Guarded, not left to `fill` to no-op: when r exceeds the run on row 0
+      // the exclusive end goes negative, and `fill` reads a negative index as
+      // relative to the array length — which paints most of the mask.
+      if (end - r > x + r) out.fill(1, row + x + r, row + end - r);
       x = end;
     }
   }
