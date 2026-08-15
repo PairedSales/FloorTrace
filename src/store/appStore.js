@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice } from './floorManager';
 import { calculateArea } from '../utils/areaCalculator';
+import {
+  DEFAULT_TRACE_TYPE,
+  normalizeTraceType,
+  normalizeTraces,
+  traceTypeColor,
+} from '../utils/traceTypes';
 
 /**
  * Default values for all working state fields (the state that participates in
@@ -23,7 +29,9 @@ const workingStateDefaults = () => ({
       closed: false,
       visible: true,
       locked: false,
-      color: '#BD93F9',
+      type: DEFAULT_TRACE_TYPE,
+      colorSource: 'type',
+      color: traceTypeColor(DEFAULT_TRACE_TYPE),
     }
   ],
   traceInteractionMode: 'idle',
@@ -238,7 +246,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         closed: true,
         visible: true,
         locked: false,
-        color: '#BD93F9',
+        type: DEFAULT_TRACE_TYPE,
+        colorSource: 'type',
+        color: traceTypeColor(DEFAULT_TRACE_TYPE),
       };
       set({
         perimeterTraces: [newTrace],
@@ -436,6 +446,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     for (const k of SNAPSHOT_FIELDS) {
       patch[k] = snapshot[k] ?? defaults[k];
     }
+    // A `.floorplan` carries its undo stacks, so undoing into a pre-migration
+    // snapshot would otherwise hand back untyped traces.
+    patch.perimeterTraces = normalizeTraces(patch.perimeterTraces);
     // Older snapshots predate activeTraceId being captured — never leave the
     // selection dangling on a trace that no longer exists.
     const traces = patch.perimeterTraces || [];
@@ -472,6 +485,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       if (k in saved) {
         patch[k] = saved[k];
       }
+    }
+    // A draft written before types carries untyped traces.
+    if ('perimeterTraces' in patch) {
+      patch.perimeterTraces = normalizeTraces(patch.perimeterTraces);
     }
     // Also set isProcessing/processingMessage to false/empty when restoring
     patch.isProcessing = false;
@@ -548,15 +565,20 @@ export const selectPerimeterOverlay = (state) => {
 
 let lastFeetPerPixel = null;
 let lastTraces = [];
-let lastCombinedArea = 0;
+let lastAreaByType = null;
 
-/** Selector to get the combined total area of all visible traces */
-export const selectCombinedArea = (state) => {
+/**
+ * Area of the visible traces, split by type. The memo is a correctness
+ * requirement, not an optimisation: this returns an object, and zustand's
+ * default `Object.is` would re-render every consumer on every unrelated `set()`
+ * without a stable reference.
+ */
+export const selectAreaByType = (state) => {
   const traces = state.perimeterTraces || [];
   const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
 
   // Quick check for changes in feetPerPixel properties or trace object reference
-  let changed = !lastFeetPerPixel ||
+  let changed = !lastAreaByType || !lastFeetPerPixel ||
                 feetPerPixel.x !== lastFeetPerPixel.x ||
                 feetPerPixel.y !== lastFeetPerPixel.y ||
                 traces.length !== lastTraces.length;
@@ -570,18 +592,36 @@ export const selectCombinedArea = (state) => {
   }
 
   if (!changed) {
-    return lastCombinedArea;
+    return lastAreaByType;
   }
 
-  const areaValue = traces
-    .filter(t => t.visible && t.vertices && t.vertices.length >= 3)
-    .reduce((sum, t) => sum + calculateArea(t.vertices, feetPerPixel, t.holes), 0);
+  const byType = {};
+  const counts = {};
+  let total = 0;
+  // Hiding a trace drops it from its own subtotal and from the total, which is
+  // what hiding a trace has always meant here.
+  for (const t of traces) {
+    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
+    const type = normalizeTraceType(t.type);
+    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
+    byType[type] = (byType[type] ?? 0) + value;
+    counts[type] = (counts[type] ?? 0) + 1;
+    total += value;
+  }
 
   lastFeetPerPixel = { ...feetPerPixel };
   lastTraces = traces.slice();
-  lastCombinedArea = areaValue;
-  return areaValue;
+  lastAreaByType = {
+    byType,
+    counts,
+    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
+    total,
+  };
+  return lastAreaByType;
 };
+
+/** Selector to get the combined total area of all visible traces */
+export const selectCombinedArea = (state) => selectAreaByType(state).total;
 
 export { AUTOSAVE_FIELDS };
 export default useAppStore;

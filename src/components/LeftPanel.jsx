@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
-import useAppStore from '../store/appStore';
+import useAppStore, { selectAreaByType } from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
+import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import InchesInput from './InchesInput';
 import { toast } from 'sonner';
 
@@ -29,6 +30,8 @@ const LeftPanel = ({
   const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
+  const setPerimeterTraceType = useAppStore((s) => s.setPerimeterTraceType);
+  const areas = useAppStore(selectAreaByType);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
 
@@ -103,17 +106,40 @@ const LeftPanel = ({
     setEditingField(null);
   };
 
-  const { value: areaText, suffix: areaSuffix } = formatArea(area, unit);
+  // The headline is GLA, per the ANSI Z765 shape. With no GLA trace at all it
+  // would read 0 and the app would look broken, so the grand total stands in.
+  const typedRows = TRACE_TYPES.filter((t) => (areas.byType[t.id] ?? 0) > 0);
+  const showBreakdown = typedRows.length > 1;
+  const noGla = areas.gla === 0 && areas.total > 0;
+  const glaCount = areas.counts[DEFAULT_TRACE_TYPE] ?? 0;
+  const breakdownRows = noGla
+    ? typedRows
+    : typedRows.filter((t) => t.id !== DEFAULT_TRACE_TYPE);
+  const { value: areaText, suffix: areaSuffix } = formatArea(
+    noGla ? areas.total : areas.gla, unit
+  );
+  const areaCaption = noGla
+    ? 'Total · no GLA trace'
+    : (showBreakdown || glaCount > 1)
+      ? `GLA · ${glaCount} ${glaCount === 1 ? 'floor' : 'floors'}`
+      : null;
   // Whether this area can be trusted, stated where the area is read rather
   // than in a toast that has already gone by the time anyone asks.
   const scaleNote = scaleQualitySummary(scaleQuality);
-  const floorsInTotal = perimeterTraces.filter(
-    (t) => t.visible && t.vertices && t.vertices.length >= 3
-  ).length;
 
   const handleCopyArea = () => {
-    navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
-    toast.success(`Area copied to clipboard: ${areaText} ${areaSuffix}`);
+    if (!showBreakdown) {
+      navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
+      toast.success(`Area copied to clipboard: ${areaText} ${areaSuffix}`);
+      return;
+    }
+    // Tab-separated so it pastes into a report or a spreadsheet as rows.
+    const lines = typedRows.map(
+      (t) => `${t.label}\t${formatArea(areas.byType[t.id], unit).value} ${areaSuffix}`
+    );
+    lines.push(`Total\t${formatArea(areas.total, unit).value} ${areaSuffix}`);
+    navigator.clipboard.writeText(lines.join('\n'));
+    toast.success('Area breakdown copied to clipboard');
   };
 
   return (
@@ -235,7 +261,9 @@ const LeftPanel = ({
           </div>
           <div 
             onDoubleClick={handleCopyArea}
-            title="Double-click to copy to clipboard"
+            title={showBreakdown
+              ? 'Double-click to copy the breakdown to clipboard'
+              : 'Double-click to copy to clipboard'}
             className="bg-chrome-900/60 border border-chrome-700 rounded-lg px-3 py-2 cursor-pointer hover:bg-chrome-950/80 hover:border-accent/40 active:scale-[0.98] transition-all duration-200 pointer-events-auto"
           >
             <div className="font-mono font-bold text-accent leading-none text-center" style={{
@@ -244,12 +272,33 @@ const LeftPanel = ({
               {areaText}
               <span className="text-accent/60 text-sm font-medium ml-1">{areaSuffix}</span>
             </div>
-            {floorsInTotal > 1 && (
+            {areaCaption && (
               <p className="mt-1 text-[10px] text-slate-500 text-center">
-                Combined total · {floorsInTotal} floors
+                {areaCaption}
               </p>
             )}
+            {showBreakdown && (
+              <div className="mt-1.5 border-t border-chrome-700/70 pt-1.5 space-y-0.5">
+                {breakdownRows.map((t) => (
+                  <div key={t.id} className="flex items-baseline justify-between text-[10px] text-slate-400">
+                    <span>{t.label}</span>
+                    <span className="font-mono">{formatArea(areas.byType[t.id], unit).value}</span>
+                  </div>
+                ))}
+                <div className="flex items-baseline justify-between border-t border-chrome-700/70 pt-1 text-[10px] font-semibold text-slate-300">
+                  <span>Total</span>
+                  <span className="font-mono">{formatArea(areas.total, unit).value}</span>
+                </div>
+              </div>
+            )}
         </div>
+        {/* Says what the grouping is and is not, so the layout cannot imply a
+            certification nobody made. */}
+        {showBreakdown && (
+          <p className="mt-1.5 text-[9px] leading-snug text-center text-slate-600">
+            Grouped in the ANSI Z765 style — not a certified measurement.
+          </p>
+        )}
         {scaleNote && area > 0 && (
           <p
             title={scaleNote.detail}
@@ -370,6 +419,20 @@ const LeftPanel = ({
 
                       {/* Derived Area & Status */}
                       <div className="flex items-center justify-between pl-3.5 text-[9px] text-slate-500 font-mono">
+                        {/* Area type — native select so it stays keyboard
+                            accessible in a 228px panel. */}
+                        <select
+                          value={normalizeTraceType(trace.type)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setPerimeterTraceType(trace.id, e.target.value)}
+                          title="Area type"
+                          className="shrink-0 max-w-[76px] cursor-pointer rounded border border-chrome-700 bg-chrome-900 py-px pl-1 pr-0.5 text-[9px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                        >
+                          {TRACE_TYPES.map((t) => (
+                            <option key={t.id} value={t.id}>{t.label}</option>
+                          ))}
+                        </select>
+                        {/* end area type */}
                         <span>
                           {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
                           {trace.closed ? ' (Closed)' : ' (Drawing)'}

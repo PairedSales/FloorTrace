@@ -1,11 +1,18 @@
 import { z } from 'zod';
 import { internKey } from './hash';
+import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from './traceTypes';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // Floor state fields written to a project file. Derived from the store's one
 // declaration of working state rather than hand-listed here — the hand-listed
 // version silently dropped fields the app had come to depend on.
 export { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
+
+// The trace-type migration. Lives in traceTypes.js so `appStore` can run it on
+// the two entry points this file does not own without importing zod into the
+// entry chunk, and is re-exported here because this is the file that defines
+// what a saved trace may contain.
+export { normalizeTraces } from './traceTypes';
 
 // ── Zod Schema Definition ───────────────────────────────────────────────────
 
@@ -95,6 +102,10 @@ const perimeterTraceSchema = z.object({
   visible: z.boolean(),
   locked: z.boolean(),
   color: z.string(),
+  // Which reported subtotal this trace's area lands in, and whether `color` is
+  // derived from that type or was chosen and must be preserved.
+  type: z.string().optional(),
+  colorSource: z.string().optional(),
 }).catchall(z.any());
 
 const roomSchema = z.object({
@@ -382,7 +393,7 @@ export function deserializeSketch(project) {
     }
   }
 
-  let perimeterTraces = state.perimeterTraces || [];
+  let perimeterTraces = normalizeTraces(state.perimeterTraces || []);
   if (perimeterTraces.length === 0) {
     perimeterTraces = [
       {
@@ -392,7 +403,9 @@ export function deserializeSketch(project) {
         closed: false,
         visible: true,
         locked: false,
-        color: '#BD93F9',
+        type: DEFAULT_TRACE_TYPE,
+        colorSource: 'type',
+        color: traceTypeColor(DEFAULT_TRACE_TYPE),
       }
     ];
   }
