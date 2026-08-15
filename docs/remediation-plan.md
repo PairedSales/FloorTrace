@@ -130,7 +130,33 @@ flat.
 
 **Recommendation: land it before Wave B integration** — B1 is adjudicated by
 `bench:scale`, and that instrument currently carries a ~5% common-mode bias on
-EF7. Not yet merged; awaiting sign-off.
+EF7.
+
+#### Landed — merged into the Wave C base as `16c0327`
+
+Signed off after Wave B had already integrated, so it went in ahead of Wave C
+instead, as its own PR (#179) against `master` rather than buried inside a wave.
+Re-gated on the Wave C base: lint 0/2, `npm test` **322 passed / 17 files**,
+`bench:detection` **45/45**, `bench:scale` **15/15** — the EF7 `KNOWN`
+expected-failure is gone, and no `KNOWN` entries remain.
+
+Every boundary and floor line in `bench:detection` is byte-identical; only room
+rectangles moved, which is what a `room.js`-only change should do:
+
+| fixture | room | before | after |
+|---|---|---|---|
+| EF1 | all six | 90.9–98.4% | **95.6–99.1%** (every one improves) |
+| EF3 | LIVING ROOM | 92.8% | **97.0%** |
+| EF3 | BASEMENT-L | 97.5% | 98.1% |
+| EF6 | BEDROOM 2 (left) | 100.0% | 97.3% |
+| EF6 | BEDROOM 1 (right) | 100.0% | 98.7% |
+| EF6 | LIVING ROOM (left) | 97.8% | **99.2%** |
+| EF7 | OWNER'S SUITE | 91.5% | **99.3%** |
+| EF7 | BEDROOM 2 | 86.2% | **88.9%** |
+
+The two EF6 drops are the ones the adjudication predicted and discounted: those
+truth rects are pixel-identical to the *old detector output*, so their 100.0%
+was never independent evidence.
 
 ---
 
@@ -169,6 +195,12 @@ npm run dev                 # Vite dev server (manual UI verification)
 | `npm run bench:detection` | **45/45 checks passed** |
 | `npm run bench:scale` | **14/14 checks passed** |
 | Search-cache retention, ExampleFloorplan5 | ~112 MB (measured by Task B2's probe) |
+
+**Superseded from Wave C onward.** The wall-face-seating commit landed in the
+Wave C base (`16c0327`, see §0), so agents from Wave C on are given these
+instead: `npm test` **322 passed / 17 files**, `bench:detection` **45/45** with
+moved room rectangles, `bench:scale` **15/15**, peak search-cache retention
+51.9 MB. Lint is unchanged at 0 errors / 2 warnings.
 
 ### Non-negotiable rules
 
@@ -211,9 +243,11 @@ own worktree, per §0. Waves are strictly ordered.
 
 ### Wave A — user-visible wrong numbers (4 agents, parallel)
 
-Integrated on `claude/remediation-wave-a`. Gate at that tip: lint 0 errors /
-2 warnings, `npm test` **306 passed / 16 files**, `bench:detection` **45/45**,
-`bench:scale` **14/14**, both bench outputs byte-identical to the §1 baseline.
+Integrated on `claude/remediation-wave-a`, PR #177. Gate at that tip: lint
+0 errors / 2 warnings, `npm test` **306 passed / 16 files**, `bench:detection`
+**45/45**, `bench:scale` **14/14**, both bench outputs byte-identical to the §1
+baseline. (A2's re-scoped commit merged in after that line was written, taking
+the branch to 321 passed / 17 files.)
 
 | ID | Task | Files | Status |
 |---|---|---|---|
@@ -301,10 +335,10 @@ un-timeout-ed anywhere on that path.
 
 ### Wave B — after A (2 agents, parallel)
 
-Integrated on `claude/remediation-wave-b`. Gate at that tip: lint 0 errors /
-2 warnings, `npm test` **313 passed / 16 files**, `bench:detection` **45/45 and
-byte-identical to the §1 baseline**, `bench:scale` **14/14**, peak search-cache
-retention **114.1 MB → 51.9 MB**.
+Integrated on `claude/remediation-wave-b`, PR #178 (stacked on #177). Gate at
+that tip: lint 0 errors / 2 warnings, `npm test` **321 passed / 17 files**,
+`bench:detection` **45/45 and byte-identical to the §1 baseline**, `bench:scale`
+**14/14**, peak search-cache retention **114.1 MB → 51.9 MB**.
 
 | ID | Task | Depends on | Files | Status |
 |---|---|---|---|---|
@@ -340,10 +374,14 @@ task.
 
 ### Wave C — after B (2 agents, parallel)
 
-| ID | Task | Depends on | Files |
-|---|---|---|---|
-| **C1** | Symmetric scale correction + extract the decision | B1 | `src/App.jsx`, `src/utils/detection/validate.js`, `src/hooks/useAutoScale.js` |
-| **C2** | Tracer performance | B2 | `src/utils/detection/{candidates,boundary,index}.js` |
+Base is `16c0327` — Wave B plus the wall-face-seating commit (§0). Agents were
+given **322 passed / 17 files, `bench:detection` 45/45, `bench:scale` 15/15** as
+their baseline, not the §1 numbers.
+
+| ID | Task | Depends on | Files | Status |
+|---|---|---|---|---|
+| **C1** | Symmetric scale correction + extract the decision | B1 | `src/App.jsx`, `src/utils/detection/validate.js`, `src/hooks/useAutoScale.js` | in flight |
+| **C2** | Tracer performance | B2 | `src/utils/detection/{candidates,boundary,index}.js` | in flight |
 
 ### Wave D — after C (3 agents, parallel)
 
