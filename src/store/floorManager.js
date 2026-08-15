@@ -21,6 +21,16 @@ import { mergeHoles } from '../utils/areaCalculator';
 const ordinalSuffix = (num) =>
   num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
 
+/**
+ * Mint a trace id. A bare `Date.now()` is not unique: two traces created in the
+ * same millisecond shared an id, and `deletePerimeterTrace` filters by id, so
+ * deleting one deleted both. The counter is what guarantees uniqueness — unlike
+ * trace *names*, ids are never user-visible, so it surviving loadProject is
+ * harmless; the timestamp is only there to keep ids readable.
+ */
+let traceIdCounter = 0;
+export const newTraceId = () => `trace-${Date.now()}-${(traceIdCounter += 1)}`;
+
 const FLOOR_NAME = /^(\d+)(?:st|nd|rd|th) Floor$/;
 
 /**
@@ -46,7 +56,7 @@ export function createFloorSlice(set, get) {
       undoManager.save();
       const state = get();
 
-      const newId = `trace-${Date.now()}`;
+      const newId = newTraceId();
       const newName = generateTraceName(state.perimeterTraces);
 
       const newTrace = {
@@ -194,9 +204,8 @@ export function createFloorSlice(set, get) {
           closed: true,
         }));
       } else {
-        const stamp = Date.now();
         traces = normalized.map((floor, i) => ({
-          id: `trace-${stamp}-${i}`,
+          id: newTraceId(),
           name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
           ...floor,
           // No identity to carry across a floor-count change, so the voids ride
@@ -227,7 +236,7 @@ export function createFloorSlice(set, get) {
      * Reset floor manager/trace slice to initial state.
      */
     resetPerimeterTraces: () => {
-      const defaultTraceId = `trace-${Date.now()}`;
+      const defaultTraceId = newTraceId();
       set({
         perimeterTraces: [
           {

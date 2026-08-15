@@ -72,8 +72,6 @@ describe('trace types', () => {
   });
 
   it('gives two GLA traces distinguishable colours and re-shades on delete', () => {
-    // Via the detector rather than addPerimeterTrace: `trace-${Date.now()}`
-    // mints the same id twice inside one millisecond.
     useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
     const [first, second] = traces();
     expect(first.color).not.toBe(second.color);
@@ -199,6 +197,57 @@ describe('applyDetectedTraces and hand-punched voids', () => {
     expect(traces()[0].holes.filter((h) => h.source === 'user')).toHaveLength(1);
     // The floor that did not exist before has only what the detector found.
     expect(traces()[1].holes.every((h) => h.source === 'auto')).toBe(true);
+  });
+});
+
+// Ids used to be `trace-${Date.now()}`, so anything minted inside one
+// millisecond collided — and `deletePerimeterTrace` filters by id, so deleting
+// one of the twins deleted both.
+describe('trace ids', () => {
+  beforeEach(() => {
+    useAppStore.getState().resetPerimeterTraces();
+  });
+
+  const distinct = () => new Set(traces().map((t) => t.id));
+
+  it('are distinct for traces created in a tight loop', () => {
+    for (let i = 0; i < 6; i += 1) useAppStore.getState().addPerimeterTrace();
+
+    expect(traces()).toHaveLength(7); // the reset default + 6
+    expect(distinct().size).toBe(7);
+  });
+
+  it('deletes exactly one trace when several were created in the same tick', () => {
+    for (let i = 0; i < 3; i += 1) useAppStore.getState().addPerimeterTrace();
+    const doomed = traces()[1].id;
+
+    useAppStore.getState().deletePerimeterTrace(doomed);
+
+    expect(traces()).toHaveLength(3);
+    expect(traces().some((t) => t.id === doomed)).toBe(false);
+  });
+
+  it('does not collide across the reset, overlay and detection mints', () => {
+    const fromReset = traces()[0].id;
+
+    // setPerimeterOverlay's no-active-trace branch mints its own id.
+    useAppStore.setState({ perimeterTraces: [], activeTraceId: null });
+    useAppStore.getState().setPerimeterOverlay({ vertices: square(10) });
+    const fromOverlay = traces()[0].id;
+
+    useAppStore.getState().addPerimeterTrace();
+    const fromAdd = traces()[1].id;
+
+    // Two detection runs in the same tick. Both change the floor count, so both
+    // mint fresh ids — the equal-count branch reuses ids on purpose, to keep
+    // renames across a re-trace, and is not what this test is about.
+    useAppStore.getState().applyDetectedTraces([square(10), square(20), square(30)]);
+    const firstRun = traces().map((t) => t.id);
+    useAppStore.getState().applyDetectedTraces([square(40), square(50)]);
+    const secondRun = traces().map((t) => t.id);
+
+    const all = [fromReset, fromOverlay, fromAdd, ...firstRun, ...secondRun];
+    expect(new Set(all).size).toBe(all.length);
   });
 });
 
