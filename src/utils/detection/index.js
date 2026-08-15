@@ -23,7 +23,16 @@ const ensureWorker = () => {
   return detectionWorker;
 };
 
-const runWorkerRequest = (type, payload, timeoutMs = 30_000) => new Promise((resolve, reject) => {
+// A flat budget gets tighter the more there is to measure, and
+// detectRoomsFromLabels is one request covering every label on the page.
+// Tripping it terminates the worker, which discards the analysis cache, so the
+// retry is a cold start — the wrong answer to a page that was merely large.
+const requestTimeout = (payload) =>
+  Math.min(120_000, 30_000 + (payload?.labels?.length ?? 0) * 2_000);
+
+const runWorkerRequest = (
+  type, payload, timeoutMs = requestTimeout(payload),
+) => new Promise((resolve, reject) => {
   const worker = ensureWorker();
   const id = nextRequestId;
   nextRequestId += 1;

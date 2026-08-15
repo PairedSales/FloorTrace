@@ -55,8 +55,12 @@ const inkBounds = (mask, width, height) => {
 // rather than approximate: beyond that margin the closed mask is empty and
 // connected to the page border, so those pixels are "outside" either way, and
 // the box is measured from the mask itself so no caller can get it wrong.
-export const measureFootprint = (wallMask, width, height, radius) => {
-  const bounds = inkBounds(wallMask, width, height);
+//
+// `knownBounds` is that box passed in by a caller that already has it: one climb
+// walks a whole ladder over one unchanged mask, so measuring it per rung is the
+// same answer paid for N times.
+export const measureFootprint = (wallMask, width, height, radius, knownBounds) => {
+  const bounds = knownBounds === undefined ? inkBounds(wallMask, width, height) : knownBounds;
   if (!bounds) return null;
   const pad = radius + 2;
   const cx0 = Math.max(0, bounds.minX - pad);
@@ -298,11 +302,13 @@ export const generateCandidates = (net, analysis, options = {}) => {
     const rungs = [];
     let previousArea = null;
     let sealedRadius = null;
+    // The mask is fixed for the whole ladder, so its ink box is too.
+    const bounds = inkBounds(mask, width, height);
     for (const r of ladder) {
       const token = `${policy}:${variant}:${r}`;
       if (evaluated.has(token)) continue;
       evaluated.add(token);
-      const fp = measureFootprint(mask, width, height, r);
+      const fp = measureFootprint(mask, width, height, r, bounds);
       tried.push({ radius: r, area: fp?.totalEnclosed ?? 0 });
       if (!fp) continue;
       const entry = footprintEntry(fp, fp.largest, width);
