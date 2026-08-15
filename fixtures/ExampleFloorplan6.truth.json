@@ -1,4 +1,9 @@
 {
+  "scale": {
+    "pixelsPerFoot": 14.5,
+    "tolerance": 0.05,
+    "provenance": "Median of the 10 axes implied by the five ink-measured room rects below. Spot-checked against the ink: BEDROOM 1 (left)'s top wall is y=5-14 and its bottom wall y=206-210, giving faces 15 and 205 against the stored rect [16, 206]. The 17% spread (13.97-16.36) is the widest of any fixture and is the drawing, not the detector: the four bedrooms agree within 4% and LIVING ROOM sits 12% above them. That is the case a single-room calibration cannot survive and a multi-room consensus can."
+  },
   "boundary": {
     "outerBbox": [1, 1, 840, 599],
     "floors": [[1, 1, 840, 599]],

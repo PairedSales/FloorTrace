@@ -189,6 +189,12 @@ export const scaleIsotropy = (scaleX, scaleY, tolerance = ISOTROPY_TOLERANCE) =>
   return { ok: logDistance <= tolerance, ratio, logDistance };
 };
 
+// How far from the median an estimate may sit and still be one of the rooms
+// that sets the scale. Named because the scale selector has to reproduce the
+// same partition to report which rooms were used, and two copies of 0.25 would
+// have drifted the first time either was tuned.
+export const ROBUST_KEEP_WINDOW = 0.25;
+
 // Robust global scale from many per-room estimates: the median rejects the
 // individual rooms whose rectangle or label went wrong, which a single-room
 // calibration cannot do.
@@ -197,7 +203,7 @@ export const robustScale = (estimates) => {
   if (!values.length) return null;
   const median = values[(values.length / 2) | 0];
   const spread = values.length > 1 ? values[values.length - 1] / values[0] : 1;
-  const kept = values.filter((v) => Math.abs(Math.log(v / median)) <= 0.25);
+  const kept = values.filter((v) => Math.abs(Math.log(v / median)) <= ROBUST_KEEP_WINDOW);
   const refined = kept.length ? kept[(kept.length / 2) | 0] : median;
   return { value: refined, median, spread, samples: values.length, kept: kept.length };
 };

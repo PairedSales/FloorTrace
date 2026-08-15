@@ -37,9 +37,85 @@ export const primaryWarning = (warnings) => {
 // rather than describing the geometry that produced it.
 const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 100);
 
+// Nothing derived from the sample scatter is reported as a margin of error.
+// Measured across the fixtures, the spread of the rooms that set a scale and
+// the scale's actual error are uncorrelated: 1.8% scatter against 3.1% error on
+// one plan, 37% scatter against 0.6% error on another. What is reported instead
+// is what was observed — how many rooms agreed, and how far apart they were.
+const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
+
+const autoScaleSummary = (quality) => {
+  const rooms = roomsPhrase(quality.roomCount ?? 0);
+  const apart = percentApart(quality.disagreement ?? 0);
+
+  if (quality.reason === 'too-few-rooms') {
+    return {
+      level: 'check',
+      short: `Scale from ${rooms}`,
+      detail: `Only ${rooms} on this plan could be measured well enough to set the `
+        + 'scale, so nothing outvoted them. Areas rest on that — check one room’s '
+        + 'outline against its label, or click a dimension to set the scale from a '
+        + 'room you trust.',
+    };
+  }
+  if (quality.reason === 'rooms-disagree') {
+    return {
+      level: 'check',
+      short: `Rooms disagree by ~${apart}%`,
+      detail: `The ${rooms} used to set the scale imply sizes about ${apart}% apart, `
+        + 'which is more than printed dimensions normally vary. The middle of them is '
+        + 'in use. Check the outlines, or click a dimension to set the scale from one '
+        + 'room.',
+    };
+  }
+  if (quality.reason === 'area-implausible') {
+    return {
+      level: 'check',
+      short: 'Areas look too small for these rooms',
+      detail: 'At this scale the traced building comes out smaller than the rooms its '
+        + 'own labels describe, so the scale is probably too high and every area too '
+        + 'small. Click a dimension on a plainly rectangular room to set the scale '
+        + 'from it instead.',
+    };
+  }
+  // auto-consensus: worth stating, never worth worrying about. The area is read
+  // long after any toast, and "where did this number come from" stays asked.
+  //
+  // The visible line is the room count alone. The spread belongs in the detail:
+  // rooms that set a good scale can still span 30% (ExampleFloorplan6 does, and
+  // lands 0.4% from truth), and "agreeing within 30%" reads as a claim of
+  // precision that the number itself contradicts.
+  return {
+    level: 'note',
+    short: `Scale from ${rooms}`,
+    detail: `The scale was measured from ${rooms} on this plan rather than one, and is `
+      + `the middle of what they imply — individually they span about ${apart}%, which `
+      + 'is normal for printed dimensions. Click a dimension to set the scale from a '
+      + 'single room instead.',
+  };
+};
+
 export const scaleQualitySummary = (quality) => {
-  if (!quality || quality.level === 'ok' || !quality.reason) return null;
+  if (!quality) return null;
+  if (quality.source === 'auto') return autoScaleSummary(quality);
+  if (quality.level === 'ok' || !quality.reason) return null;
   const pct = percentApart(quality.disagreement ?? 0);
+
+  // The user picked one room out of a set the app had already measured. Their
+  // choice stands, but the area moves with the square of the scale, so a gap
+  // that reads as unremarkable between two rooms is not unremarkable in the
+  // number they are about to act on — say what it did.
+  if (quality.reason === 'room-vs-auto') {
+    const areaPct = Math.round((Math.exp(2 * (quality.disagreement ?? 0)) - 1) * 100);
+    const rooms = roomsPhrase(quality.roomCount ?? 0);
+    return {
+      level: quality.level === 'check' ? 'check' : 'note',
+      short: `Scale from this room, areas ~${areaPct}% different`,
+      detail: `This room implies a scale about ${pct}% from the ${rooms} the app measured `
+        + `itself, which moves every area by roughly ${areaPct}%. Your choice is in use. `
+        + 'Re-scan to go back to the measured average.',
+    };
+  }
 
   if (quality.reason === 'room-vs-project') {
     const rooms = `${quality.roomCount} room${quality.roomCount === 1 ? '' : 's'}`;

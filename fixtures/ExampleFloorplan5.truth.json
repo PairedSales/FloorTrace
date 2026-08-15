@@ -1,4 +1,10 @@
 {
+  "scale": {
+    "pixelsPerFoot": 12.67,
+    "tolerance": 0.04,
+    "knownBias": "room detection, not scale selection: `npm run bench:scale -- fixtures/ExampleFloorplan5.png --ocr` accepts only 2 of 14 labels and measures the square 12-0x12-0 room at 18.25 px/ft against its true 12.67, so the rectangles are leaking on this plan's double-line walls. The selector's own answer is that it cannot be trusted — it returns check/area-implausible at a ratio of 0.58 — which is the intended behaviour and not a scale-selection fix waiting to be made.",
+    "provenance": "Measured from the ink, since this plan has no room rects. The 12-0x12-0 room at label (892,634) is square and measures 152px on both axes -- walls x=812-817 and x=971-975 (faces 818, 970), y=552-556 and y=710-714 (faces 557, 709) -- giving 12.67 px/ft twice over with no orientation ambiguity. Corroborated by MSTR STE, whose 13'-2\" axis runs x=303..469 (166px, 12.61 px/ft). MSTR STE is deliberately NOT a scale anchor: it is L-shaped with a sitting alcove above its top wall, so its 17'-2\" side is not the 165px its main rectangle measures. That room is this fixture's irregular-room case."
+  },
   "boundary": {
     "outerBbox": [277, 54, 1050, 738],
     "floors": [[277, 54, 1050, 738]],

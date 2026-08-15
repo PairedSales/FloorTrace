@@ -56,6 +56,21 @@ export const detectRoomFromClick = async (image, clickPoint, options = {}) => {
   });
 };
 
+/**
+ * Measure every parsed dimension label as a room, in one request.
+ *
+ * `labels`: [{ id, point, labelBbox, labelDims }] in original image px.
+ * Returns an array positionally matching `labels`, with null where a label's
+ * room could not be found. One request rather than N because the worker's
+ * analysis and clamp trace are shared across the batch; issuing N separate
+ * `detectRoomFromClick` calls would re-pay neither, but would re-enter the
+ * queue N times and interleave with a perimeter trace.
+ */
+export const detectRoomsFromLabels = async (image, labels, options = {}) => {
+  if (!image || !labels?.length) return [];
+  return runWorkerRequest('detectRoomsFromLabels', { image, labels, options });
+};
+
 export const traceFloorplanBoundary = async (image, options = {}) => {
   if (!image) return null;
   return runWorkerRequest('traceFloorplanBoundary', {

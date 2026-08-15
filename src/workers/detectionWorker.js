@@ -59,6 +59,31 @@ self.onmessage = async (event) => {
 
     if (type === 'detectRoomFromClick') {
       data = detectRoomFromClickCore(imageData, payload.clickPoint, options);
+    } else if (type === 'detectRoomsFromLabels') {
+      // Every parsed label measured in one request. The shared cacheKey is the
+      // whole point: the analysis and the clamp trace are ~97% of a single room
+      // click, so the second label onward costs 1-3ms instead of another trace.
+      //
+      // No `pixelsPerFoot` prior, deliberately. It cannot move a rectangle —
+      // SCALE_TOLERANCE is wider than any error a real plan produces — but it
+      // does move `confidence`, and confidence is what decides which rooms the
+      // scale is taken from. Threading a running prior through the loop would
+      // make that selection depend on the order OCR happened to return labels.
+      data = (payload.labels ?? []).map((label) => {
+        const room = detectRoomFromClickCore(imageData, label.point, {
+          ...options,
+          labelBbox: label.labelBbox,
+          labelDims: label.labelDims,
+          pixelsPerFoot: null,
+        });
+        if (!room) return null;
+        return {
+          ...room,
+          labelId: label.id ?? null,
+          labelDims: label.labelDims ?? null,
+          debug: projectDebug(room.debug),
+        };
+      });
     } else if (type === 'traceFloorplanBoundary') {
       data = traceFloorplanBoundaryCore(imageData, options);
     } else {

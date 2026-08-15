@@ -19,7 +19,11 @@ import {
   warmupOcrEngines,
   releaseOcrWorkersWhenIdle
 } from './utils/DimensionsOCR';
-import { robustScale, orientDimsToBox, decideProjectScale } from './utils/detection/validate';
+import {
+  robustScale, orientDimsToBox, decideProjectScale, PLAN_SPREAD_TOLERANCE,
+} from './utils/detection/validate';
+import { ringSetArea } from './utils/detection/polygon';
+import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary, scaleQualitySummary } from './utils/boundaryQuality';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay, otherRoomScaleSamples } from './store/appStore';
 import * as undoManager from './store/undoManager';
@@ -45,8 +49,21 @@ const boundaryConstraints = () => {
   const overlapsNonGla = (bbox) => nonGla.some((n) =>
     bbox.x < n.x + n.width && n.x < bbox.x + bbox.width
     && bbox.y < n.y + n.height && n.y < bbox.y + bbox.height);
+  const centreInNonGla = (rect) => nonGla.some((n) => {
+    const cx = (rect.left + rect.right) / 2;
+    const cy = (rect.top + rect.bottom) / 2;
+    return cx >= n.x && cx <= n.x + n.width && cy >= n.y && cy <= n.y + n.height;
+  });
   return {
-    rooms: state.rooms.map((r) => ({ name: r.name ?? null, rect: r.rect })),
+    // A garage is inside the drawing but is exactly what the tracer is being
+    // asked to carve out, so asserting it as known-inside is wrong input even
+    // where it happens not to change the answer (candidates are scored before
+    // the carve — see floorplan-image.test.js). Same rule the interior points
+    // below have always followed; `rooms` only escaped it while it held the one
+    // room the user had clicked.
+    rooms: state.rooms
+      .filter((r) => r.rect && !centreInNonGla(r.rect))
+      .map((r) => ({ name: r.name ?? null, rect: r.rect })),
     interiorPoints: state.detectedDimensions
       .filter((d) => d.bbox && !overlapsNonGla(d.bbox))
       .map((d) => ({
@@ -145,6 +162,7 @@ function App() {
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
   const setDetectedDimensions = useAppStore((s) => s.setDetectedDimensions);
   const setExteriorLabels = useAppStore((s) => s.setExteriorLabels);
+  const setRooms = useAppStore((s) => s.setRooms);
   const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
@@ -195,6 +213,12 @@ function App() {
 
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave(notify);
   const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr(notify);
+  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale(notify);
+  // The scan runs before the exterior trace is even defined in this file, and
+  // the automatic path needs both. A ref rather than a reordering: moving
+  // handleManualMode below the tracer would drag handleFindRoomSize and its
+  // call sites with it.
+  const afterScanRef = useRef(null);
 
   const {
     handleLineToolToggle,
@@ -402,7 +426,7 @@ function App() {
         } else {
           setOcrFailed(false);
           const count = dimensions.length;
-          notify(`Detected ${count} dimension${count === 1 ? '' : 's'}. Select one to place the room.`, { type: 'success' });
+          notify(`Detected ${count} dimension${count === 1 ? '' : 's'}.`, { type: 'success' });
           // Auto-switch unit based on detected format. The parser's vocabulary
           // is {inches, decimal, meters} and the UI's is {inches, decimal,
           // metric}; without the mapping a metric plan set a unit no formatter
@@ -414,6 +438,11 @@ function App() {
               : uiUnit === 'metric' ? 'meters' : 'decimal feet';
             notify(`Switched to ${label} mode based on detected dimensions.`, { type: 'info' });
           }
+          // Everything from here is automatic: every label is measured, the
+          // rooms that agree set the scale, and the exterior is traced. The
+          // pills stay on screen, so clicking one still pins the scale to that
+          // room when the user can see the app chose badly.
+          await afterScanRef.current?.(dimensions);
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
@@ -449,6 +478,10 @@ function App() {
     setPerimeterOverlay(null);
     setPerimeterVertices(null);
     setDetectedDimensions([]);
+    // The rooms measured from the previous scan describe labels this one is
+    // about to re-read. Left behind, they voted in the new scan's scale and
+    // were still handed to the tracer as known-inside evidence.
+    setRooms([]);
 
     await handleManualMode(image, true);
   }, [
@@ -459,6 +492,7 @@ function App() {
     setPerimeterOverlay,
     setPerimeterVertices,
     setDetectedDimensions,
+    setRooms,
     handleManualMode,
   ]);
 
@@ -674,7 +708,10 @@ function App() {
     undoManager.save();
     setImage(newImageDataUrl);
     setTracedBoundaries(null);
-  }, [setImage, setTracedBoundaries]);
+    // Room rectangles are in image pixels, so a crop moves every one of them
+    // and an erase can remove the wall a room was measured against.
+    setRooms([]);
+  }, [setImage, setTracedBoundaries, setRooms]);
 
   const handleAddMeasurementLine = useCallback((line) => {
     // Clear the in-progress line before saving the snapshot so that undo restores
@@ -721,15 +758,38 @@ function App() {
     if (overlayWidth === 0 || overlayHeight === 0) return;
     if (isNaN(dimWidth) || isNaN(dimHeight) || dimWidth <= 0 || dimHeight <= 0) return;
 
-    // The label's two numbers are not tagged with an axis and the overlay's
-    // are, so the pairing \u2014 and any residual disagreement, either inside this
-    // room or against the rooms already measured \u2014 is settled here, by the
-    // same rule the canvas previews during a drag.
+    // Picking a room by hand is the user overruling the automatic consensus,
+    // and it has to win: after a scan the project already holds every room on
+    // the page, so decideProjectScale would find that majority authoritative
+    // and refuse to adopt the very room the user just chose. Once pinned it
+    // stays pinned, or a later nudge of the same overlay would hand the scale
+    // back to the rooms the user just rejected.
+    const state = useAppStore.getState();
+    const pinned = options.pinned || state.calibration.quality?.source === 'manual';
+    const others = otherRoomScaleSamples(state.rooms, overlay);
     const decision = decideProjectScale({
       dimWidth, dimHeight, boxWidth: overlayWidth, boxHeight: overlayHeight,
-      otherSamples: otherRoomScaleSamples(useAppStore.getState().rooms, overlay),
+      otherSamples: pinned ? [] : others,
     });
     const { x: scaleX, y: scaleY } = decision.scale;
+
+    // Pinned, but still told. The area is what moves: picking one room out of a
+    // measured consensus changed it by 27% on ExampleFloorplan6 at a scale gap
+    // of only 13%, because area goes as scale squared — and at 13% the existing
+    // room-to-room tolerance says nothing, so that landed silently. Anything
+    // past a few percent is now stated, and a gap wide enough to be a mistake
+    // is stated as one.
+    if (pinned && others.length >= 2) {
+      const project = robustScale(others);
+      const gap = project ? Math.abs(Math.log(decision.roomScale / project.value)) : 0;
+      if (gap > 0.03) {
+        decision.level = gap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note';
+        decision.reason = 'room-vs-auto';
+        decision.disagreement = gap;
+        decision.adopted = true;
+        decision.roomCount = Math.floor(others.length / 2);
+      }
+    }
 
     // Say it out loud only when the answer changed or is in doubt; the Area
     // panel carries the same verdict for as long as the scale is in force,
@@ -754,7 +814,8 @@ function App() {
       Math.abs((currentScale?.x ?? 0) - scaleX) > 1e-9 ||
       Math.abs((currentScale?.y ?? 0) - scaleY) > 1e-9 ||
       (currentCalibration.quality?.level ?? 'ok') !== decision.level ||
-      (currentCalibration.quality?.reason ?? null) !== decision.reason;
+      (currentCalibration.quality?.reason ?? null) !== decision.reason ||
+      (currentCalibration.quality?.source ?? null) !== 'manual';
 
     if (hasChanged) {
       applyRoomCalibration({ x: scaleX, y: scaleY }, null, 'room-calibration', {
@@ -763,6 +824,7 @@ function App() {
         disagreement: decision.disagreement,
         adopted: decision.adopted,
         roomCount: decision.roomCount,
+        source: 'manual',
       });
     }
   }, [applyRoomCalibration, notify]);
@@ -807,6 +869,53 @@ function App() {
     () => runTrace('Detecting exterior boundary…'),
     [runTrace],
   );
+
+  /**
+   * The automatic path, run once a scan has found labels: measure every one of
+   * them, calibrate from the rooms that agree, trace the exterior with those
+   * rooms as evidence, then judge the scale against the building it produced.
+   */
+  const runAutoScale = useCallback(async (dimensions) => {
+    const labels = dimensions
+      .filter((d) => d.bbox && d.width > 0 && d.height > 0)
+      .map((d) => ({
+        id: `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`,
+        point: { x: d.bbox.x + d.bbox.width / 2, y: d.bbox.y + d.bbox.height / 2 },
+        labelBbox: d.bbox,
+        labelDims: { width: d.width, height: d.height },
+      }));
+    if (!labels.length) return;
+
+    setIsProcessing(true, 'Measuring rooms…');
+    let decision = null;
+    try {
+      decision = await measureAndCalibrate(labels);
+    } finally {
+      setIsProcessing(false);
+    }
+    if (!decision) {
+      // Nothing measurable. The user still has the pills, which is the flow
+      // they had before this ran at all, so this is not worth a warning.
+      return;
+    }
+
+    await autoTraceExterior();
+
+    // The traced building is the one check that survives a majority of bad
+    // rooms, and it only exists now. Every floor, not the largest: the labels
+    // are spread over all of them, and weighing them against one floor reports
+    // a correct scale on a multi-floor sheet as implausible.
+    const traced = useAppStore.getState().tracedBoundaries;
+    const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
+    const areaPx = floors.reduce((sum, floor) => (
+      floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
+    ), 0);
+    reviewAgainstFootprint(areaPx);
+  }, [measureAndCalibrate, reviewAgainstFootprint, autoTraceExterior, setIsProcessing]);
+
+  useEffect(() => {
+    afterScanRef.current = runAutoScale;
+  }, [runAutoScale]);
 
   /**
    * Place a room: run the detector, record the result as reusable evidence,
@@ -889,7 +998,7 @@ function App() {
     const dimStrings = { width: String(placed.width), height: String(placed.height) };
     setRoomDimensions(dimStrings);
     setRoomOverlay(overlay);
-    updateScale(dimStrings, overlay);
+    updateScale(dimStrings, overlay, { pinned: true });
 
     setPerimeterVertices(null);
     setManualEntryMode(false);

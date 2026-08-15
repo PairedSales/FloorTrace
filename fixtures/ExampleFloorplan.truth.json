@@ -1,6 +1,11 @@
 {
   "_comment": "Two-floor sheet: FLOOR 2 on top, FLOOR 1 with an attached garage below. Wall faces measured from the image with scripts/tmp profiling (row/column ink runs); px/ft derived from the PRIMARY BEDROOM's 12'7\" x 13'3\" interior (196px / 12.583ft, 207px / 13.25ft). The garage is non-GLA and excluded geometrically, so FLOOR 1 stops at the house's right wall and FLOOR 2 becomes the largest floor. KITCHEN is open-plan toward the dining area (no physical wall on that side) so it is unscored; the app flags such labels with reduced confidence instead.",
   "pixelsPerFoot": 15.6,
+  "scale": {
+    "pixelsPerFoot": 15.5,
+    "tolerance": 0.04,
+    "provenance": "Median of the 12 axes implied by the six ink-measured room rects below (15.42-15.97 px/ft, 3.6% spread). Those rects are interior wall faces: PRIMARY BEDROOM's left wall ink is x=410-415 and its right wall x=612-619, giving faces 416 and 611 against the stored rect [417, 611]. The header pixelsPerFoot 15.6 above is the same PRIMARY BEDROOM read taken face-to-face inclusive (196px/12.583ft, 207px/13.25ft) and is left alone because the outerAreaSqFt/innerAreaSqFt checks are scored through it. floorplan-image.test.js's PPF = 16.0 is a loose sanity constant for sq-ft bands, not a third truth claim."
+  },
   "boundary": {
     "outerBbox": [29, 15, 620, 415],
     "outerPolygon": [[30, 16], [619, 16], [619, 414], [30, 414]],

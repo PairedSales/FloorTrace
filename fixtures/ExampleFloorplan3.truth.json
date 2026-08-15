@@ -1,4 +1,5 @@
 {
+  "_scaleComment": "No `scale` block: this plan's interior partitions are 8px lines inside 42-55px structural walls, and reading a room's two faces off the ink is ambiguous enough that any number authored here would be a guess. The scale benchmark scores this fixture on self-consistency (how many rooms the selector accepts and how far apart they are), not on absolute accuracy.",
   "boundary": {
     "outerBbox": [210, 13, 1063, 1585],
     "floors": [
