@@ -262,7 +262,11 @@ const LeftPanel = ({
         )}
       </section>
 
-      {perimeterTraces.length > 1 && (
+      {/* Shown for a single traced floor too: this section carries the
+          per-trace confidence line, and a doubtful outline must stay marked
+          as doubtful after its toast has gone. */}
+      {(perimeterTraces.length > 1
+        || perimeterTraces.some((t) => t.vertices?.length >= 3)) && (
         <>
           <div className="panel-divider mx-3" />
 
