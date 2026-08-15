@@ -27,6 +27,11 @@ dist-ssr
 # Claude Code local settings
 .claude/settings.local.json
 
+# Claude Code worktrees. Each is a full checkout of this repo living inside it;
+# git must never see them as content. Also excluded in .git/info/exclude on the
+# machine they were created on, but that is not portable — this is.
+.claude/worktrees/
+
 # Tesseract training data downloaded by Node benchmark runs
 eng.traineddata
 

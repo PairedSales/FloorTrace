@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - master
+  # Run the checks on the PR too. Triggering on push-to-master alone made this
+  # a deploy gate rather than a merge gate: a failing lint/test/benchmark
+  # blocked the deploy but not the merge, so master could carry a regression
+  # while the only symptom was a site that quietly stopped updating.
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:  # Allows manual trigger from Actions tab
 
 permissions:
@@ -43,18 +50,30 @@ jobs:
       - name: Detection benchmark
         run: npm run bench:detection
 
+      # The scale selector governs every reported area, and nothing else in CI
+      # exercises it: bench:detection scores room rectangles, not the one
+      # px/ft the project settles on from them.
+      - name: Scale benchmark
+        run: npm run bench:scale
+
       - name: Build
         run: npm run build
 
+      # Pages steps are for the real deploy only. On a pull_request the job
+      # exists to run the checks above; configuring Pages from a PR would at
+      # best waste a step and at worst publish unmerged code.
       - name: Setup Pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
   deploy:
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
