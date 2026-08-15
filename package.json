@@ -12,7 +12,8 @@
     "bench:detection": "node scripts/detectionBenchmark.mjs",
     "bench:scale": "node scripts/scaleBenchmark.mjs",
     "bench:ocr": "node scripts/ocrBenchmark.mjs",
-    "probe:exterior": "node scripts/syntheticProbe.mjs"
+    "probe:exterior": "node scripts/syntheticProbe.mjs",
+    "probe:memory": "node --expose-gc scripts/memoryProbe.mjs"
   },
   "dependencies": {
     "@paddlejs-models/ocr": "^1.2.4",

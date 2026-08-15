@@ -40,12 +40,42 @@ export const getCachedAnalysis = (cacheKey, maxDimension, analyzeOptions, comput
 let searchKey = null;
 let searchCache = null;
 
+// One image deep is not a size. A rung holds a page-sized label array plus its
+// mask and the memo holds every rung of every policy of every wall network, so
+// a sheet carrying several plans retained over 100 MB in a worker that is also
+// holding the decoded image. Past this budget the memo stops storing and drops
+// what it has: a cold re-trace (~1s) instead of tens of megabytes held for as
+// long as the image is open. Sized from the fixtures so a single-plan page
+// keeps its memo and a multi-plan sheet does not.
+const SEARCH_BUDGET_BYTES = 32 * 1024 * 1024;
+
+class SearchCache extends Map {
+  constructor() {
+    super();
+    this.bytes = 0;
+    this.overBudget = false;
+  }
+
+  // Charged by the search as it allocates what this cache would hold.
+  retain(bytes) {
+    if (this.overBudget) return;
+    this.bytes += bytes;
+    if (this.bytes < SEARCH_BUDGET_BYTES) return;
+    this.overBudget = true;
+    this.clear();
+  }
+
+  set(key, value) {
+    return this.overBudget ? this : super.set(key, value);
+  }
+}
+
 export const getSearchCache = (cacheKey, maxDimension, analyzeOptions) => {
   if (!cacheKey) return new Map();
   const key = keyFor(cacheKey, maxDimension, analyzeOptions);
   if (key !== searchKey) {
     searchKey = key;
-    searchCache = new Map();
+    searchCache = new SearchCache();
   }
   return searchCache;
 };
