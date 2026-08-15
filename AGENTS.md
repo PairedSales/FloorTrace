@@ -84,7 +84,9 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
 
 ### Build
 
-`vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and manually splits `tesseract.js` and `konva`/`react-konva` into their own chunks (both are large and not needed on first paint before an image is loaded).
+`vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
+
+**Splitting is not lazying.** The konva chunk existed for a long time while `App.jsx → Canvas.jsx → react-konva` kept it in the entry's *static* module graph, so `index.html` modulepreloaded it and the browser fetched and compiled all 320 kB before the app could run. What actually defers it is `Canvas.jsx`, which lazy-loads the whole `<Stage>` subtree (`CanvasStage.jsx`) behind `React.lazy`. React and `commonjsHelpers` are pinned to their own chunks because, left unassigned, rollup folds the dependency shared by konva and the entry into the konva chunk, and the entry then statically imports konva to reach it. Check `dist/index.html` for a konva modulepreload after any `manualChunks` change — that link is the regression signal.
 
 ## Conventions
 
