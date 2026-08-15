@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "bench:detection": "node scripts/detectionBenchmark.mjs",
+    "bench:scale": "node scripts/scaleBenchmark.mjs",
     "bench:ocr": "node scripts/ocrBenchmark.mjs",
     "probe:exterior": "node scripts/syntheticProbe.mjs"
   },

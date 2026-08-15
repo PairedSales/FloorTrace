@@ -139,6 +139,50 @@ describe('room detection on ExampleFloorplan.png', () => {
     });
   }
 
+  // Nothing in the suite used to hand `constraints` to the tracer, so the whole
+  // known-inside path — 22% of a candidate's score, and an error-severity
+  // warning for a room the outline excludes — shipped untested. It stopped
+  // being a theoretical gap when a scan began measuring every label instead of
+  // the one room the user clicked.
+  describe('with the measured rooms fed back as known-inside evidence', () => {
+    const asConstraint = (click, dims) => {
+      const room = detectRoomFromClickCore(image, { x: click[0], y: click[1] }, {
+        labelDims: { width: dims[0], height: dims[1] },
+      });
+      return { name: 'room', rect: room.rect };
+    };
+
+    it('traces the same two floors it traces without them', () => {
+      const rooms = [
+        asConstraint([512, 128], [12.58, 13.25]),
+        asConstraint([513, 585], [10.0, 9.25]),
+        asConstraint([495, 753], [14.83, 14.08]),
+      ];
+      const withRooms = traceFloorplanBoundaryCore(image, { constraints: { rooms } });
+      expect(withRooms.floors.length).toBe(2);
+      expect(bboxIou(bboxOf(withRooms.floors[1].outer.overlay), [29, 491, 620, 878]))
+        .toBeGreaterThan(0.9);
+      expect(withRooms.excludedGarages).toBe(1);
+    });
+
+    // Asserting the garage as known-inside is factually wrong input — it is the
+    // region the same trace is carving out — but it does not currently move the
+    // answer, because candidates are scored on a mask that still contains the
+    // garage and the carve happens afterwards in buildFloor. Pinned rather than
+    // assumed: if constraint scoring ever moves to after the carve, this room
+    // starts contradicting the exclusion and this test is where it shows up.
+    // App.jsx's boundaryConstraints drops it by keyword regardless.
+    it('is unmoved by the garage being asserted inside, carve or no carve', () => {
+      const rooms = [asConstraint([778, 672], [20.58, 9.5])];
+      const withGarage = traceFloorplanBoundaryCore(image, { constraints: { rooms } });
+      expect(withGarage.excludedGarages).toBe(1);
+      expect(bboxIou(bboxOf(withGarage.floors[1].outer.overlay), [29, 491, 620, 878]))
+        .toBeGreaterThan(0.9);
+      expect((withGarage.floors[1].warnings ?? []).some((w) => w.code === 'room-outside'))
+        .toBe(false);
+    });
+  });
+
   it('flags the open-plan KITCHEN label with reduced confidence', () => {
     const room = detectRoomFromClickCore(image, { x: 250, y: 573 }, {
       labelDims: { width: 10.08, height: 10.33 },

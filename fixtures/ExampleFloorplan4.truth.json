@@ -1,4 +1,5 @@
 {
+  "_scaleComment": "No `scale` block: at ~7px glyph height the label set this plan yields is not stable between runs (see docs/ocr-performance.md), so the input to a scale measurement varies and absolute truth authored against one run would not hold for the next. The scale benchmark scores this fixture on self-consistency, not on absolute accuracy.",
   "boundary": {
     "outerBbox": [94, 161, 812, 736],
     "floors": [[94, 161, 812, 736]],

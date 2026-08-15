@@ -1,4 +1,9 @@
 {
+  "scale": {
+    "pixelsPerFoot": 17.86,
+    "tolerance": 0.04,
+    "provenance": "Median of the 8 axes implied by the four ink-measured room rects below (17.60-18.62 px/ft, 5.8% spread). All four plans on this sheet are drawn at one scale, which is why a single project scale is the right model for a multi-floor page."
+  },
   "boundary": {
     "outerBbox": [
       512,

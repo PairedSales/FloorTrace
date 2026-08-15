@@ -35,6 +35,15 @@ const scaleQualitySchema = z.object({
   disagreement: z.number().optional(),
   adopted: z.boolean().optional(),
   roomCount: z.number().optional(),
+  // 'auto' (measured from every label) or 'manual' (the user pinned a room).
+  // It selects which wording the Area panel uses, so a reopened project that
+  // dropped it would describe an automatic scale in the manual flow's words.
+  source: z.string().nullable().optional(),
+  rejected: z.array(z.object({
+    name: z.string().nullable().optional(),
+    reason: z.string(),
+    pixelsPerFoot: z.number().nullable().optional(),
+  })).optional(),
 }).nullable().optional();
 
 const calibrationSchema = z.object({

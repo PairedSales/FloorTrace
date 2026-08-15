@@ -1,5 +1,11 @@
 {
   "pixelsPerFoot": 17.45,
+  "scale": {
+    "pixelsPerFoot": 17.45,
+    "tolerance": 0.04,
+    "knownBias": "the detected room rectangles overshoot this plan's interior by ~5% (right/bottom edges land inside the wall body), so every room reads high together and no amount of pooling can remove a common-mode bias. Fix the rectangle, not the selector.",
+    "provenance": "Confirmed against the ink, not derived from the room rects below. OWNER'S SUITE's walls are x=117-123 and x=341-349, y=117-123 and y=422-428, so its interior is 217px wide by 297px tall against a stated 12'-4\" x 17'-0\": 17.60 and 17.47 px/ft. The room `rect`s in this file are NOT interior faces -- they were pinned to what the detector returns, and imply 17.94-18.49 px/ft, 5.8% above the drawing. Derive scale truth here from this block, never from those rects."
+  },
   "boundary": {
     "outerBbox": [115, 75, 820, 1188],
     "floors": [[115, 75, 820, 1188]],

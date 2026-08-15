@@ -171,6 +171,23 @@ const pickFields = (state, fields) => {
   return obj;
 };
 
+// Rooms replace, never duplicate: re-measuring a label supersedes the earlier
+// reading of it, and a room placed by hand supersedes whatever sat at the same
+// origin. Shared by addRoom and addRooms so a batch and a single click cannot
+// disagree about what counts as the same room.
+const mergeRooms = (existing, incoming) => {
+  let kept = existing;
+  for (const room of incoming) {
+    const key = room.labelId ?? null;
+    kept = key
+      ? kept.filter((r) => r.labelId !== key)
+      : kept.filter((r) => !(
+        Math.abs(r.rect.left - room.rect.left) < 4 && Math.abs(r.rect.top - room.rect.top) < 4
+      ));
+  }
+  return [...kept, ...incoming];
+};
+
 // ──── store ──────────────────────────────────────────────────────────────────
 
 const useAppStore = create(subscribeWithSelector((set, get) => ({
@@ -295,13 +312,18 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
    */
   addRoom: (room) => set((state) => {
     if (!room?.rect) return {};
-    const key = room.labelId ?? null;
-    const rest = key
-      ? state.rooms.filter((r) => r.labelId !== key)
-      : state.rooms.filter((r) => !(
-        Math.abs(r.rect.left - room.rect.left) < 4 && Math.abs(r.rect.top - room.rect.top) < 4
-      ));
-    return { rooms: [...rest, room] };
+    return { rooms: mergeRooms(state.rooms, [room]) };
+  }),
+  /**
+   * Record a whole scan's worth of rooms at once. The automatic scale measures
+   * every label on the page, and applying those one at a time notified every
+   * subscriber once per room and left the tracer briefly reading a half-built
+   * evidence set.
+   */
+  addRooms: (rooms) => set((state) => {
+    const incoming = (rooms ?? []).filter((room) => room?.rect);
+    if (!incoming.length) return {};
+    return { rooms: mergeRooms(state.rooms, incoming) };
   }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
