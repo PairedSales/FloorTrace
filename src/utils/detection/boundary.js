@@ -431,9 +431,20 @@ export const traceBoundary = (analysis, options = {}) => {
   // building, whatever the ink under it does. That is the whole point — the
   // page-scope merge and reject rules below are exactly what fails on the
   // plans a user reaches for this tool on.
+  // Every memo below is per image, so anything that changes *what the search
+  // computes* has to be in the key. This is derived once and threaded through
+  // all three, because the two halves had already drifted: the nets key
+  // carried `maxCloseRadius` while the candidates key did not, so two traces
+  // of one image at different radii shared a candidate set built for the
+  // first — `generateCandidates` derives `maxRadius`, and therefore the whole
+  // closing ladder, from exactly that option. No caller varies it today, so
+  // this was latent rather than live, but `options.boundary` is spread in
+  // wholesale from the caller and `pipeline.js` already treats those options
+  // as key material for the room-clamp analysis cache.
+  const searchScope = `${maxFloors}|${options.maxCloseRadius ?? ''}`;
   const nets = brush
     ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
-    : memo(cache, `nets|${maxFloors}|${options.maxCloseRadius ?? ''}`, () =>
+    : memo(cache, `nets|${searchScope}`, () =>
       partitionWallNetworks(
         options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
       ));
@@ -475,7 +486,10 @@ export const traceBoundary = (analysis, options = {}) => {
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
     if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    const detected = detectFloorNet(net, analysis, options, constraints, cache, netIndex)
+    // The net key carries the search scope, so `gen|` and `ev|` inherit it.
+    const detected = detectFloorNet(
+      net, analysis, options, constraints, cache, `${searchScope}|${netIndex}`,
+    )
       ?? (brush ? freehandFloorNet(net, analysis, options) : null);
     if (!detected) continue;
     searches.push(detected.search);
