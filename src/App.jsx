@@ -932,7 +932,7 @@ function App() {
     };
     let detected = null;
 
-    setIsProcessing(true, 'Finding room\\u2026');
+    setIsProcessing(true, 'Finding room…');
     const startImage = image;
     try {
       detected = await detectRoomFromClick(image, point, {
@@ -961,7 +961,7 @@ function App() {
       // A failed room detection used to fall through to a hardcoded 200x200
       // box and calibrate the whole project from it, without a word.
       notify(
-        'Could not find the room outline \\u2014 drag the overlay to match the room, '
+        'Could not find the room outline — drag the overlay to match the room, '
         + 'then check the area.',
         { type: 'warning', duration: 6000 },
       );
