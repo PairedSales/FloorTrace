@@ -28,6 +28,16 @@ function getDB() {
       reject(event.target.error);
     };
   });
+  // Memoise the *connection*, not a failure. A rejected promise cached here
+  // was permanent: every later `getDB` returned the same rejection, so one
+  // transient open failure — a version-change block from another tab, a
+  // storage hiccup, a private-mode quirk — downgraded the rest of the session
+  // to the synchronous localStorage fallback, which cannot hold a multi-MB
+  // image and silently costs the user their draft. Dropping the handle on
+  // rejection makes the next write retry instead.
+  dbPromise.catch(() => {
+    dbPromise = null;
+  });
   return dbPromise;
 }
 
