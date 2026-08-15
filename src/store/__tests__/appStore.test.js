@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore, { selectPerimeterOverlay, AUTOSAVE_FIELDS } from '../appStore';
 import * as undoManager from '../undoManager';
-import { calculateArea } from '../../utils/areaCalculator';
+import { calculateArea, holeRings } from '../../utils/areaCalculator';
 
 const SCALE = { x: 1, y: 1 };
 
@@ -18,6 +18,16 @@ const courtyard = [
   { x: 60, y: 60 },
   { x: 40, y: 60 },
 ];
+// A 10 x 10 light well the user punched by hand: 100 px².
+const lightWell = [
+  { x: 10, y: 10 },
+  { x: 20, y: 10 },
+  { x: 20, y: 20 },
+  { x: 10, y: 20 },
+];
+const autoHole = { id: 'hole-auto-0', ring: courtyard, source: 'auto' };
+const userHole = { id: 'hole-user-0', ring: lightWell, source: 'user' };
+
 // One corner dragged out, the way handleVertexDragEnd hands back a new array.
 const moved = [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
@@ -53,14 +63,38 @@ describe('setPerimeterOverlay', () => {
     expect(calculateArea(t.vertices, SCALE)).toBe(11000);
   });
 
-  it('clears holes when they are explicitly supplied as empty', () => {
-    seedTracedFloor();
+  // The semantic change the void tool turns on: supplying holes replaces what
+  // the detector found, and only that. A void the user punched is their
+  // assertion about the building — the wall-mode toggle reaches this path in
+  // one click and must not silently take it back.
+  it('clears auto holes and keeps user holes when holes are supplied as empty', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
 
     useAppStore.getState().setPerimeterOverlay({ vertices: moved, holes: [] });
 
     const t = activeTrace();
-    expect(t.holes).toEqual([]);
-    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(11000);
+    expect(t.holes).toEqual([userHole]);
+    // 11000 px² of outline, minus only the 100 px² the user punched.
+    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(10900);
+  });
+
+  it('replaces the detector voids on a re-trace and keeps the hand-punched one', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
+
+    const reTraced = { id: 'hole-auto-0', ring: lightWell, source: 'auto' };
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [reTraced] });
+
+    const t = activeTrace();
+    expect(t.holes).toEqual([userHole, reTraced]);
+    expect(t.holes.filter((h) => h.source === 'auto')).toHaveLength(1);
+  });
+
+  it('drops an untagged hole on a re-trace — only a user tag survives', () => {
+    seedTracedFloor();
+
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
+
+    expect(activeTrace().holes).toEqual([]);
   });
 
   it('clears holes when the overlay is cleared entirely', () => {
@@ -84,6 +118,64 @@ describe('setPerimeterOverlay', () => {
     const t = activeTrace();
     expect(t.quality).toBeNull();
     expect(t.holes).toHaveLength(1);
+  });
+});
+
+// One normalizer absorbs the two hole shapes, so a v1 `.floorplan` written
+// before provenance existed keeps loading and still has its voids subtracted.
+describe('holeRings', () => {
+  it('accepts both a bare ring and a tagged one', () => {
+    expect(holeRings([courtyard, userHole])).toEqual([courtyard, lightWell]);
+  });
+
+  it('is what makes the area agree across the two shapes', () => {
+    expect(calculateArea(outer, SCALE, [courtyard])).toBe(9600);
+    expect(calculateArea(outer, SCALE, [autoHole])).toBe(9600);
+  });
+
+  it('survives holes being absent or malformed', () => {
+    expect(holeRings(null)).toEqual([]);
+    expect(calculateArea(outer, SCALE, [null, {}, courtyard])).toBe(9600);
+  });
+});
+
+describe('addHole / removeHole', () => {
+  beforeEach(() => {
+    useAppStore.getState().resetOverlays();
+  });
+
+  const traceId = () => useAppStore.getState().activeTraceId;
+
+  it('tags a hand-punched void as the user\'s and appends it', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole] });
+    useAppStore.getState().addHole(traceId(), lightWell);
+
+    const t = activeTrace();
+    expect(t.holes).toHaveLength(2);
+    expect(t.holes[1]).toMatchObject({ ring: lightWell, source: 'user' });
+    expect(t.holes[1].id).toEqual(expect.any(String));
+    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(9500);
+  });
+
+  it('refuses a ring with fewer than three corners', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
+    useAppStore.getState().addHole(traceId(), [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
+
+    expect(activeTrace().holes).toEqual([]);
+  });
+
+  it('removes by id and leaves the others alone', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'hole-user-0');
+
+    expect(activeTrace().holes).toEqual([autoHole]);
+  });
+
+  it('removes an untagged ring by its positional key', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [courtyard, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'ring-0');
+
+    expect(activeTrace().holes).toEqual([userHole]);
   });
 });
 

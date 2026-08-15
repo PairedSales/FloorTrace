@@ -1,4 +1,4 @@
-import { Ruler, Pentagon, Eraser, Crop, RotateCw, Compass, Spline } from 'lucide-react';
+import { Ruler, Pentagon, Eraser, Crop, RotateCw, Compass, Spline, SquareDashedBottom } from 'lucide-react';
 
 const ToolsPanel = ({
   lineToolActive,
@@ -13,6 +13,8 @@ const ToolsPanel = ({
   onAngleToolToggle,
   onOutlineByVertex,
   outlineByVertexActive,
+  voidToolActive,
+  onVoidToolToggle,
   onRotateCanvas,
   measurementLines,
   customShapes,
@@ -140,6 +142,23 @@ const ToolsPanel = ({
             <Eraser className="w-4 h-4" />
             Eraser
           </button>
+
+          {/* Punch a void out of a trace: drag a rectangle, or click corner by
+              corner and close on the first one. */}
+          {hasArea && (
+            <button
+              onClick={onVoidToolToggle}
+              className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+                voidToolActive
+                  ? 'bg-accent/15 text-accent border border-accent/30'
+                  : 'bg-chrome-900/50 text-slate-400 border border-chrome-700 hover:text-slate-200 hover:border-chrome-600'
+              }`}
+              title="Punch a void (courtyard, light well) out of a perimeter"
+            >
+              <SquareDashedBottom className="w-4 h-4" />
+              Void
+            </button>
+          )}
         </div>
       </section>
     </div>

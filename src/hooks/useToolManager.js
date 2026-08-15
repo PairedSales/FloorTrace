@@ -26,6 +26,7 @@ export function useToolManager() {
   const cropToolActive   = useAppStore((s) => s.cropToolActive);
   const angleToolActive   = useAppStore((s) => s.angleToolActive);
   const drawModeActive   = useAppStore((s) => s.drawModeActive);
+  const voidToolActive   = useAppStore((s) => s.voidToolActive);
 
   const setLineToolActive         = useAppStore((s) => s.setLineToolActive);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -35,6 +36,7 @@ export function useToolManager() {
   const setCropToolActive         = useAppStore((s) => s.setCropToolActive);
   const setAngleToolActive         = useAppStore((s) => s.setAngleToolActive);
   const setDrawModeActive         = useAppStore((s) => s.setDrawModeActive);
+  const setVoidToolActive         = useAppStore((s) => s.setVoidToolActive);
   const setMeasurementLines       = useAppStore((s) => s.setMeasurementLines);
   const setCustomShapes           = useAppStore((s) => s.setCustomShapes);
 
@@ -43,7 +45,7 @@ export function useToolManager() {
    * Saves an undo point first so tool activations are undoable.
    */
   const deactivateAll = useCallback(() => {
-    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive) {
+    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive || voidToolActive) {
       undoManager.save();
     }
     setLineToolActive(false);
@@ -54,11 +56,13 @@ export function useToolManager() {
     setCropToolActive(false);
     setAngleToolActive(false);
     setDrawModeActive(false);
+    setVoidToolActive(false);
   }, [
     lineToolActive,
     drawAreaActive,
     eraserToolActive,
     cropToolActive,
+    voidToolActive,
     setAngleToolActive,
     setCropToolActive,
     setCurrentCustomShape,
@@ -67,6 +71,7 @@ export function useToolManager() {
     setDrawModeActive,
     setEraserToolActive,
     setLineToolActive,
+    setVoidToolActive,
   ]);
 
   // ── individual toggles ────────────────────────────────────────────────────
@@ -113,6 +118,16 @@ export function useToolManager() {
     setCropToolActive(true);
   }, [cropToolActive, deactivateAll, setCropToolActive]);
 
+  const handleVoidToolToggle = useCallback(() => {
+    if (voidToolActive) {
+      undoManager.save();
+      setVoidToolActive(false);
+      return;
+    }
+    deactivateAll();
+    setVoidToolActive(true);
+  }, [voidToolActive, deactivateAll, setVoidToolActive]);
+
   const handleAngleToolToggle = useCallback(() => {
     if (angleToolActive) {
       setAngleToolActive(false);
@@ -152,5 +167,6 @@ export function useToolManager() {
     handleAngleToolToggle,
     handleDrawModeToggle,
     handleClearTools,
+    handleVoidToolToggle,
   };
 }

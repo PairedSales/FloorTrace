@@ -18,6 +18,7 @@ export function useCameraController({
   eraserToolActive,
   drawModeActive,
   cropToolActive,
+  voidToolActive,
   traceInteractionMode,
   draggingRoom = false,
   draggingRoomCorner = null,
@@ -112,6 +113,7 @@ export function useCameraController({
     eraserToolActive,
     drawModeActive,
     cropToolActive,
+    voidToolActive,
     traceInteractionMode,
     viewportSyncTokenRef,
   });

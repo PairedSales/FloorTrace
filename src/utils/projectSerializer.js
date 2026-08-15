@@ -83,12 +83,24 @@ const traceQualitySchema = z.object({
   })).optional(),
 }).nullable().optional();
 
+// A hole is a bare ring or a tagged ring. Both shapes parse so a v1 file
+// written before provenance existed still opens; new files round-trip the tag,
+// which is what keeps a hand-punched void alive across a re-trace.
+const holeSchema = z.union([
+  z.array(vertexSchema),
+  z.object({
+    id: z.string().optional(),
+    ring: z.array(vertexSchema),
+    source: z.string().optional(),
+  }).catchall(z.any()),
+]);
+
 const perimeterTraceSchema = z.object({
   id: z.string(),
   name: z.string(),
   vertices: z.array(vertexSchema),
   // Enclosed voids (courtyards, light wells) subtracted from the trace's area.
-  holes: z.array(z.array(vertexSchema)).optional(),
+  holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
   closed: z.boolean(),

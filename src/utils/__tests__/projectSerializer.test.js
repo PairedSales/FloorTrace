@@ -256,6 +256,54 @@ describe('projectSerializer', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // hole provenance
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('trace holes', () => {
+    const ring = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
+
+    const withHoles = (holes) => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].holes = holes;
+      return serializeSketch(storeState);
+    };
+
+    it('round-trips a mixed set of tagged and bare holes', () => {
+      const holes = [
+        { id: 'hole-auto-0', ring: ring(4), source: 'auto' },
+        { id: 'hole-user-0', ring: ring(6), source: 'user' },
+        ring(8),
+      ];
+      const project = withHoles(holes);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes).toEqual(holes);
+    });
+
+    // The tag is what keeps a hand-punched void alive across a re-trace, so
+    // losing it in the file would make reopening a project quietly destructive.
+    it('keeps the source tag rather than stripping it to a bare ring', () => {
+      const project = withHoles([{ id: 'h1', ring: ring(4), source: 'user' }]);
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes[0].source).toBe('user');
+    });
+
+    // A file written before provenance existed carries bare rings.
+    it('accepts a v1 file whose holes are bare rings', () => {
+      const project = withHoles([ring(4), ring(6)]);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].holes).toEqual([ring(4), ring(6)]);
+    });
+
+    it('still rejects a hole that is neither shape', () => {
+      const project = withHoles([{ id: 'h1', source: 'user' }]); // no ring
+      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // importProject
   // ──────────────────────────────────────────────────────────────────────────
   describe('importProject', () => {

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice } from './floorManager';
-import { calculateArea } from '../utils/areaCalculator';
+import { calculateArea, holeKey } from '../utils/areaCalculator';
 
 /**
  * Default values for all working state fields (the state that participates in
@@ -65,6 +65,7 @@ const workingStateDefaults = () => ({
   eraserToolActive: false,
   eraserBrushSize: 60,
   cropToolActive: false,
+  voidToolActive: false,
   // Draw mode: rough brush strokes over the exterior walls, which the tracer
   // then reads as a corridor constraint. Scratch input, not document content —
   // undoable and restored with a draft, but never written to a .floorplan.
@@ -156,7 +157,7 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
 const EXCLUDED_PERSISTENT_FIELDS = [
   'isProcessing', 'processingMessage', 'traceInteractionMode',
   'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
-  'cropToolActive', 'eraserBrushSize',
+  'cropToolActive', 'eraserBrushSize', 'voidToolActive',
   'drawModeActive', 'drawBrushSize', 'drawStrokes',
   'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
   'canvasRotation',   // written to globalSettings
@@ -200,6 +201,13 @@ const mergeRooms = (existing, incoming) => {
   }
   return [...kept, ...incoming];
 };
+
+// Replacing a trace's holes replaces what the detector found. A void the user
+// punched is their assertion about the building and outlives a re-trace — the
+// interior/exterior wall toggle reaches both merge sites in one click and does
+// not look destructive.
+export const mergeHoles = (existing, incoming) =>
+  [...(existing ?? []).filter((h) => h?.source === 'user'), ...(incoming ?? [])];
 
 // ──── store ──────────────────────────────────────────────────────────────────
 
@@ -257,7 +265,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
           // rings a vertex edit did not touch, so an update that omits them
           // keeps them. Defaulting them to [] silently deleted every courtyard
           // on the first corner nudge and added the void back into the area.
-          holes: v ? ('holes' in v ? (v.holes ?? []) : (t.holes ?? [])) : [],
+          // Supplying them replaces only what the detector found — see mergeHoles.
+          holes: v ? ('holes' in v ? mergeHoles(t.holes, v.holes) : (t.holes ?? [])) : [],
           // Editing a trace by hand makes it the user's geometry, so an
           // auto-detection's confidence no longer describes it.
           quality: v && 'quality' in v ? v.quality : null,
@@ -369,6 +378,33 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
+  setVoidToolActive: (v) => set({ voidToolActive: v }),
+  /**
+   * Punch a void out of a trace by hand. Tagged `source: 'user'` so a later
+   * re-trace keeps it; callers save the undo point before calling.
+   */
+  addHole: (traceId, ring) => set((state) => {
+    if (!ring || ring.length < 3) return {};
+    const hole = {
+      id: `hole-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      ring,
+      source: 'user',
+    };
+    return {
+      perimeterTraces: (state.perimeterTraces || []).map((t) => (
+        t.id === traceId ? { ...t, holes: [...(t.holes ?? []), hole] } : t
+      )),
+      isDirty: true,
+    };
+  }),
+  removeHole: (traceId, holeId) => set((state) => ({
+    perimeterTraces: (state.perimeterTraces || []).map((t) => (
+      t.id === traceId
+        ? { ...t, holes: (t.holes ?? []).filter((h, i) => holeKey(h, i) !== holeId) }
+        : t
+    )),
+    isDirty: true,
+  })),
   setDrawModeActive: (v) => set({ drawModeActive: v }),
   setDrawBrushSize: (v) => set({ drawBrushSize: v }),
   setDrawStrokes: (v) => set({ drawStrokes: v }),

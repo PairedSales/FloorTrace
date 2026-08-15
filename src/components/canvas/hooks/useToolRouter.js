@@ -60,6 +60,12 @@ export function useToolRouter({
   onFinishDrawMode,
   onDrawModeToggle,
 
+  // ── void tool ────────────────────────────────────────────────────────────
+  voidToolActive,
+  voidTool,
+  onVoidToolToggle,
+  // ── end void tool ────────────────────────────────────────────────────────
+
   // Callbacks from Zustand/App
   onRoomOverlayUpdate,
   onSaveUndoPoint,
@@ -78,6 +84,11 @@ export function useToolRouter({
   const [draggingAngle, setDraggingAngle] = useState(false);
 
   const [currentMousePos, setCurrentMousePos] = useState(null);
+
+  // ── void tool ──────────────────────────────────────────────────────────────
+  // { traceId, holeId } of the void ring under the cursor's last click.
+  const [selectedHole, setSelectedHole] = useState(null);
+  // ── end void tool ──────────────────────────────────────────────────────────
 
   // Local drag state to bypass Zustand at 60fps
   const [localRoomOverlay, setLocalRoomOverlay] = useState(null);
@@ -159,7 +170,16 @@ export function useToolRouter({
       crop.handleCropMouseDown(stage);
       return;
     }
-  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop]);
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    if (voidToolActive) {
+      e.evt.preventDefault();
+      voidTool.handleVoidMouseDown(stage);
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
+  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop,
+    voidToolActive, voidTool]);
 
   // Stage Mouse Move
   const handleStageMouseMove = useCallback((e) => {
@@ -217,6 +237,15 @@ export function useToolRouter({
       crop.handleCropMouseMove(stage);
       return;
     }
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    // Unconditional while the tool is on: the rubber band between placed
+    // corners has to follow the cursor with no button held.
+    if (voidToolActive) {
+      voidTool.handleVoidMouseMove(stage);
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
 
     // Detect if mouse moved enough to trigger a drag rather than a click
     if (dragStartPosRef.current && !isDraggingRef.current) {
@@ -320,6 +349,8 @@ export function useToolRouter({
     draggingVertex,
     getCanvasCoords,
     stageRef,
+    voidToolActive,
+    voidTool,
   ]);
 
   // Stage Mouse Up
@@ -364,6 +395,15 @@ export function useToolRouter({
       crop.handleCropMouseUp(crop.cropSelection);
       return;
     }
+
+    // ── void tool ────────────────────────────────────────────────────────────
+    // Both gestures land here: a press that travelled commits a rectangle, a
+    // press that did not places the next polygon corner.
+    if (voidTool.isVoidingRef.current) {
+      voidTool.handleVoidMouseUp();
+      return;
+    }
+    // ── end void tool ────────────────────────────────────────────────────────
 
     // End room overlay dragging
     if (draggingRoom && localRoomOverlay) {
@@ -412,7 +452,7 @@ export function useToolRouter({
     } else {
       dragStartPosRef.current = null;
     }
-  }, [drawTool, eraser, crop, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
+  }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
 
   // Window mouseUp listener (handles commits when mouse is released outside canvas bounds)
   useEffect(() => {
@@ -446,10 +486,15 @@ export function useToolRouter({
       if (crop.isCroppingRef.current) {
         crop.handleCropMouseUp(crop.cropSelection);
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      if (voidTool.isVoidingRef.current) {
+        voidTool.handleVoidMouseUp();
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
     };
     window.addEventListener('mouseup', handleWindowMouseUp);
     return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [drawTool, eraser, crop, scaleRef, stageRef, viewportSyncTokenRef]);
+  }, [drawTool, eraser, crop, voidTool, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Stage Clicks
   const handleStageClick = useCallback((e) => {
@@ -462,12 +507,14 @@ export function useToolRouter({
     }
 
     const target = e.target;
-    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')) {
+    if (target?.hasName?.('measurement-line') || target?.hasName?.('custom-shape')
+      || target?.hasName?.('void-hole')) {
       return;
     }
 
     setSelectedMeasurementLineIndex(null);
     setSelectedCustomShapeIndex(null);
+    setSelectedHole(null); // void tool
     
     const needsSingleClickHandling = 
       (manualEntryMode && onCanvasClick) ||
@@ -678,6 +725,17 @@ export function useToolRouter({
         return;
       }
 
+      // ── void tool ──────────────────────────────────────────────────────────
+      // Ordering against the other Delete cases is the integrator's call; this
+      // block is self-contained and returns.
+      if (selectedHole) {
+        onSaveUndoPoint?.();
+        useAppStore.getState().removeHole(selectedHole.traceId, selectedHole.holeId);
+        setSelectedHole(null);
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
+
       if (selectedCustomShapeIndex !== null && onCustomShapesChange) {
         onCustomShapesChange(customShapes.filter((_, index) => index !== selectedCustomShapeIndex));
         setSelectedCustomShapeIndex(null);
@@ -692,6 +750,14 @@ export function useToolRouter({
         if (!drawTool.cancelDraw()) onDrawModeToggle?.();
         return;
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      // Same two-stage shape as draw mode: drop the shape in progress first, so
+      // a mis-started void does not cost the tool.
+      if (voidToolActive) {
+        if (!voidTool.cancelVoid()) onVoidToolToggle?.();
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
       if (eraserToolActive) {
         eraser.cancelErase();
       } else if (cropToolActive) {
@@ -713,6 +779,12 @@ export function useToolRouter({
         onFinishDrawMode?.();
         return;
       }
+      // ── void tool ──────────────────────────────────────────────────────────
+      if (voidToolActive) {
+        voidTool.closeVoidPolygon();
+        return;
+      }
+      // ── end void tool ──────────────────────────────────────────────────────
       if (perimeterVertices && perimeterVertices.length > 2) {
         if (hasSelfIntersection(perimeterVertices, true)) {
           toast.error('Cannot close perimeter: would cause self-intersection.');
@@ -753,6 +825,11 @@ export function useToolRouter({
     onFinishDrawMode,
     setSelectedCustomShapeIndex,
     setSelectedMeasurementLineIndex,
+    voidToolActive,
+    voidTool,
+    onVoidToolToggle,
+    selectedHole,
+    onSaveUndoPoint,
   ]);
 
   useEffect(() => {
@@ -830,5 +907,9 @@ export function useToolRouter({
     handleRoomMouseDown,
     handleRoomCornerMouseDown,
     rightClickPannedRef,
+    // ── void tool ────────────────────────────────────────────────────────────
+    selectedHole,
+    setSelectedHole,
+    // ── end void tool ────────────────────────────────────────────────────────
   };
 }

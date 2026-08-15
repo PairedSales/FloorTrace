@@ -12,6 +12,18 @@ export const signedArea = (vertices) => {
   return sum / 2;
 };
 
+// A hole is a bare ring or a tagged ring `{ id, ring, source }`. Every consumer
+// of a trace's holes goes through here so the two shapes never diverge
+// downstream — and so a v1 `.floorplan` written before the tag keeps loading.
+// Index-preserving on purpose: callers zip the result back against `holes`.
+export const holeRings = (holes) =>
+  (holes ?? []).map((h) => (Array.isArray(h) ? h : h?.ring));
+
+// Stable identity for a hole, so selection and removal agree about which ring
+// is which even for the untagged rings an old project file carries.
+export const holeKey = (hole, index) =>
+  (!Array.isArray(hole) && hole?.id) ? hole.id : `ring-${index}`;
+
 // Calculate area of a polygon using the shoelace formula.
 // feetPerPixel: real-world feet represented by one image pixel { x, y }
 // holes: enclosed voids (courtyards, light wells) subtracted from the outline
@@ -21,8 +33,8 @@ export const calculateArea = (vertices, feetPerPixel, holes = null) => {
   }
 
   let area = Math.abs(signedArea(vertices));
-  for (const hole of holes ?? []) {
-    if (hole?.length >= 3) area -= Math.abs(signedArea(hole));
+  for (const ring of holeRings(holes)) {
+    if (ring?.length >= 3) area -= Math.abs(signedArea(ring));
   }
   area = Math.max(0, area);
 

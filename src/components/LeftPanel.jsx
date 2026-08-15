@@ -2,10 +2,20 @@ import { useState, useEffect } from 'react';
 import { Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
-import { calculateArea } from '../utils/areaCalculator';
+import { calculateArea, holeRings } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
 import InchesInput from './InchesInput';
 import { toast } from 'sonner';
+
+// `−2 voids (1 yours)`. A subtraction the user asserted by hand reads
+// differently from one the detector guessed, so a mixed set says which is which.
+const voidNote = (holes) => {
+  const rings = holeRings(holes).filter((r) => r?.length >= 3);
+  if (!rings.length) return '';
+  const mine = (holes ?? []).filter((h) => h?.source === 'user').length;
+  const mixed = mine > 0 && mine < rings.length;
+  return ` −${rings.length} ${rings.length === 1 ? 'void' : 'voids'}${mixed ? ` (${mine} yours)` : ''}`;
+};
 
 const LeftPanel = ({
   roomDimensions,
@@ -373,7 +383,7 @@ const LeftPanel = ({
                         <span>
                           {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
                           {trace.closed ? ' (Closed)' : ' (Drawing)'}
-                          {trace.holes?.length ? ` −${trace.holes.length} void` : ''}
+                          {voidNote(trace.holes)}
                         </span>
                         <span>
                           {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}
