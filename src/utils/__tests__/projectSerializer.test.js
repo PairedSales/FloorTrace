@@ -366,4 +366,54 @@ describe('projectSerializer', () => {
       expect(deserializeSketch(legacy).statePatch.image).toBe(IMAGE_A);
     });
   });
+
+  // A hand-set scale must survive a reopen with the evidence it rests on and
+  // the reason to doubt it. Losing either leaves a number nobody can check.
+  describe('line calibration', () => {
+    const withScaleLines = () => ({
+      ...createMockStoreState(),
+      scaleLines: [
+        { id: 'scale-1', start: { x: 10, y: 10 }, end: { x: 210, y: 10 }, feet: 20 },
+        { id: 'scale-2', start: { x: 10, y: 10 }, end: { x: 10, y: 110 }, feet: 10.4 },
+      ],
+      calibration: {
+        calibrated: true,
+        feetPerPixel: { x: 0.1, y: 0.104 },
+        source: 'line-calibration',
+        calibratedRoomId: null,
+        createdAt: 1234567890,
+        quality: {
+          level: 'note',
+          reason: 'scale-anisotropic',
+          disagreement: 0.0392,
+          adopted: true,
+          source: 'line',
+          lineCount: 2,
+          lengthPx: 100,
+          feet: 10.4,
+          axes: ['x', 'y'],
+        },
+      },
+    });
+
+    it('round-trips the lines, the source and the reason to doubt it', () => {
+      const project = serializeSketch(withScaleLines());
+      validateProjectSchema(project);
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.scaleLines).toHaveLength(2);
+      expect(statePatch.scaleLines[0].feet).toBe(20);
+      expect(statePatch.calibration.source).toBe('line-calibration');
+      expect(statePatch.calibration.quality.source).toBe('line');
+      expect(statePatch.calibration.quality.reason).toBe('scale-anisotropic');
+      expect(statePatch.calibration.quality.lineCount).toBe(2);
+      expect(statePatch.calibration.quality.axes).toEqual(['x', 'y']);
+    });
+
+    it('still parses a file that predates scale lines', () => {
+      const project = serializeSketch(createMockStoreState());
+      expect(() => validateProjectSchema(project)).not.toThrow();
+      expect(deserializeSketch(project).statePatch.scaleLines).toBeUndefined();
+    });
+  });
 });

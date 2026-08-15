@@ -57,6 +57,12 @@ const workingStateDefaults = () => ({
   angleToolState: null,
   measurementLines: [],
   currentMeasurementLine: null,
+  scaleToolActive: false,
+  // The lines the scale was asserted from, in original image px. Kept rather
+  // than just their result: a hand-set scale must stay inspectable and
+  // re-editable, and a second line has to be scored against the first.
+  scaleLines: [],
+  currentScaleLine: null,
   drawAreaActive: false,
   customShapes: [],
   currentCustomShape: null,
@@ -159,6 +165,9 @@ const EXCLUDED_PERSISTENT_FIELDS = [
   'cropToolActive', 'eraserBrushSize',
   'drawModeActive', 'drawBrushSize', 'drawStrokes',
   'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
+  // `scaleLines` is deliberately absent: it is document content, the evidence
+  // a hand-set scale rests on.
+  'scaleToolActive', 'currentScaleLine',
   'canvasRotation',   // written to globalSettings
   'viewportSyncToken',
   'isDirty', 'projectId', // written to metadata
@@ -166,6 +175,12 @@ const EXCLUDED_PERSISTENT_FIELDS = [
 export const PERSISTENT_FLOOR_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_PERSISTENT_FIELDS.includes(k)
 );
+
+// Who may write the calibration scale. An allowlist rather than one string
+// equality so `source` can be real provenance instead of a constant that was
+// written everywhere and read nowhere; the guard's purpose — no accidental
+// scale writes from unrelated setters — is unchanged.
+export const CALIBRATION_SOURCES = new Set(['room-calibration', 'line-calibration']);
 
 // ──── helpers ────────────────────────────────────────────────────────────────
 
@@ -281,7 +296,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
   applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration', quality = null) => {
-    if (mutationSource !== 'room-calibration') {
+    if (!CALIBRATION_SOURCES.has(mutationSource)) {
       throw new Error(
         "Only explicit room calibration may modify calibration scale"
       );
@@ -306,7 +321,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       calibration: {
         calibrated: true,
         feetPerPixel: targetScale,
-        source: 'room-calibration',
+        source: mutationSource,
         calibratedRoomId: roomId,
         createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
@@ -353,6 +368,26 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setAngleToolState: (v) => set({ angleToolState: v }),
   setMeasurementLines: (v) => set({ measurementLines: v }),
   setCurrentMeasurementLine: (v) => set({ currentMeasurementLine: v }),
+  setScaleToolActive: (v) => set({ scaleToolActive: v }),
+  setScaleLines: (v) => set({ scaleLines: v }),
+  setCurrentScaleLine: (v) => set({ currentScaleLine: v }),
+  addScaleLine: (line) => set((state) => (
+    line?.start && line?.end ? { scaleLines: [...state.scaleLines, line] } : {}
+  )),
+  removeScaleLine: (id) => set((state) => ({
+    scaleLines: state.scaleLines.filter((l) => l.id !== id),
+  })),
+  // Clearing the lines must retire the scale they asserted: a calibration
+  // whose evidence is gone is the green-but-wrong failure this codebase keeps
+  // re-learning. Gated on the source so a room calibration cannot be clobbered.
+  clearLineCalibration: () => set((state) => ({
+    scaleLines: [],
+    currentScaleLine: null,
+    calibration: state.calibration?.source === 'line-calibration'
+      ? workingStateDefaults().calibration
+      : state.calibration,
+    isDirty: true,
+  })),
   setDrawAreaActive: (v) => set({ drawAreaActive: v }),
   setCustomShapes: (v) => set({ customShapes: v }),
   setCurrentCustomShape: (v) => set({ currentCustomShape: v }),

@@ -135,6 +135,53 @@ const autoScaleSummary = (quality) => {
 // scan's. Disjoint from the reasons autoScaleSummary knows.
 const ROOM_REASONS = new Set(['room-vs-auto', 'room-vs-project', 'room-internal']);
 
+// A scale the user asserted by drawing a line. Unlike every other source this
+// has a clean case worth stating: a hand-set scale that looks identical to an
+// OCR-set one is the same class of failure as a doubtful trace that looks green.
+const lineScaleSummary = (quality) => {
+  const pct = percentApart(quality.disagreement ?? 0);
+
+  if (quality.reason === 'line-vs-rooms') {
+    const areaPct = Math.round((Math.exp(2 * (quality.disagreement ?? 0)) - 1) * 100);
+    return {
+      level: quality.level === 'check' ? 'check' : 'note',
+      short: `Scale set by hand, areas ~${areaPct}% different`,
+      detail: `The line you drew implies a scale about ${pct}% from the rooms the app `
+        + `measured itself, which moves every area by roughly ${areaPct}%. Your line is `
+        + 'in use. Clear it to go back to the measured average.',
+    };
+  }
+
+  if (quality.reason === 'scale-anisotropic') {
+    return {
+      level: 'note',
+      short: `Across and down differ by ~${pct}%`,
+      detail: `Your two lines say the drawing is about ${pct}% more stretched across than `
+        + 'down. Both are in use, so areas are unaffected — only side lengths follow the '
+        + 'direction they run.',
+    };
+  }
+
+  if (quality.reason === 'short-line') {
+    return {
+      level: 'note',
+      short: 'Scale set by hand from a short line',
+      detail: `The line is only ${quality.lengthPx} px long, so a pixel of click error is `
+        + `about ${pct}%. Draw it along the longest wall you can identify, or zoom in first.`,
+    };
+  }
+
+  const from = quality.lineCount === 2
+    ? 'two lines you drew, one across and one down'
+    : `a ${Number((quality.feet ?? 0).toFixed(2))} ft line you drew`;
+  return {
+    level: 'note',
+    short: 'Scale set by hand',
+    detail: `The scale comes from ${from}`
+      + (quality.lineCount === 2 ? '.' : ', applied to both directions.'),
+  };
+};
+
 export const scaleQualitySummary = (quality) => {
   if (!quality) return null;
   // Reason before source: a room the project outvoted leaves the pooled scale
@@ -142,6 +189,13 @@ export const scaleQualitySummary = (quality) => {
   // was not used — not where the surviving scale came from.
   if (quality.source === 'auto' && !ROOM_REASONS.has(quality.reason)) {
     return autoScaleSummary(quality);
+  }
+  // Before the early return below, deliberately: a clean line calibration has
+  // no `reason`, so placed after it this branch would render nothing — and
+  // that panel line is the only durable statement of where the number came
+  // from once the toast has gone.
+  if (quality.source === 'line') {
+    return lineScaleSummary(quality);
   }
   if (quality.level === 'ok' || !quality.reason) return null;
   const pct = percentApart(quality.disagreement ?? 0);

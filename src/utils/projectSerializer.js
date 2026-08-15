@@ -39,6 +39,13 @@ const scaleQualitySchema = z.object({
   // It selects which wording the Area panel uses, so a reopened project that
   // dropped it would describe an automatic scale in the manual flow's words.
   source: z.string().nullable().optional(),
+  // A line calibration's own evidence: which lines set it, how long the
+  // weakest was, and whether it holds one scalar or two. Dropped on reopen,
+  // a hand-set scale would describe itself in the automatic flow's words.
+  lineCount: z.number().optional(),
+  lengthPx: z.number().optional(),
+  feet: z.number().nullable().optional(),
+  axes: z.array(z.string()).optional(),
   rejected: z.array(z.object({
     name: z.string().nullable().optional(),
     reason: z.string(),
@@ -113,6 +120,15 @@ const measurementLineSchema = z.object({
   end: vertexSchema,
 });
 
+// A line the user drew and stated the true length of, in original image px.
+// `feet` is null between placing the line and typing its length.
+const scaleLineSchema = z.object({
+  id: z.string().optional(),
+  start: vertexSchema,
+  end: vertexSchema,
+  feet: z.number().nullable().optional(),
+});
+
 const customShapeSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
@@ -167,6 +183,7 @@ const floorStateSchema = z.object({
   ocrFailed: z.boolean().optional(),
   unit: z.string().optional(),
   measurementLines: z.array(measurementLineSchema).optional(),
+  scaleLines: z.array(scaleLineSchema).optional(),
   customShapes: z.array(customShapeSchema).optional(),
   tracedBoundaries: z.any().optional(),
   zoomScale: z.number().nullable().optional(),

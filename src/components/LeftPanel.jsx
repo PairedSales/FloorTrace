@@ -5,6 +5,7 @@ import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitCon
 import { calculateArea } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
 import InchesInput from './InchesInput';
+import ScaleSection from './ScaleSection';
 import { toast } from 'sonner';
 
 const LeftPanel = ({
@@ -201,6 +202,10 @@ const LeftPanel = ({
             </div>
           )}
         </section>
+
+        {/* Scale — the length input for a hand-drawn scale line. Renders
+            nothing until the Scale tool is on or a line scale is in force. */}
+        <ScaleSection unit={unit} />
 
         <div className="panel-divider mx-3" />
 

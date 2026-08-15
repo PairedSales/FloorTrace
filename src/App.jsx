@@ -154,6 +154,7 @@ function App() {
   const drawModeActive = useAppStore((s) => s.drawModeActive);
   const drawBrushSize = useAppStore((s) => s.drawBrushSize);
   const drawStrokes = useAppStore((s) => s.drawStrokes);
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
 
   // Floor management
   const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
@@ -233,6 +234,7 @@ function App() {
     handleCropToolToggle,
     handleAngleToolToggle,
     handleDrawModeToggle,
+    handleScaleToolToggle,
     handleClearTools,
   } = useToolManager();
 
@@ -326,8 +328,19 @@ function App() {
       toast.dismiss('angle-toast');
     }
 
+    // 8. Scale Tool
+    if (scaleToolActive) {
+      toast.info('Click both ends of a length you know, then type it in the Scale panel. Esc to cancel.', {
+        id: 'scale-tool-toast',
+        duration: Infinity,
+      });
+    } else {
+      toast.dismiss('scale-tool-toast');
+    }
+
     // Cleanup all toasts on unmount
     return () => {
+      toast.dismiss('scale-tool-toast');
       toast.dismiss('perimeter-vertices-toast');
       toast.dismiss('manual-entry-toast');
       toast.dismiss('line-tool-toast');
@@ -345,7 +358,8 @@ function App() {
     currentCustomShape?.vertices?.length,
     eraserToolActive,
     cropToolActive,
-    angleToolActive
+    angleToolActive,
+    scaleToolActive
   ]);
 
 
@@ -724,6 +738,10 @@ function App() {
     // Room rectangles are in image pixels, so a crop moves every one of them
     // and an erase can remove the wall a room was measured against.
     setRooms([]);
+    // `scaleLines` and `calibration` deliberately survive: the crop tool keeps
+    // the canvas at full size and redraws the selection in place, and neither
+    // it nor the eraser resamples, so image-pixel coordinates — and therefore
+    // feet-per-pixel — are invariant across both. Do not add a defensive reset.
   }, [setImage, setTracedBoundaries, setRooms]);
 
   const handleAddMeasurementLine = useCallback((line) => {
@@ -1230,6 +1248,8 @@ function App() {
               onCropToolToggle={handleCropToolToggle}
               angleToolActive={angleToolActive}
               onAngleToolToggle={handleAngleToolToggle}
+              scaleToolActive={scaleToolActive}
+              onScaleToolToggle={handleScaleToolToggle}
               onOutlineByVertex={handleDrawExterior}
               outlineByVertexActive={perimeterVertices !== null}
               onRotateCanvas={handleRotateCanvas}
