@@ -282,15 +282,49 @@ export const candidateConfidence = (scored, ctx) => {
   return { confidence: Math.max(0.05, Math.min(0.98, confidence)), warnings };
 };
 
-// Best candidate, with the runners-up kept for diagnostics. Ties break toward
-// the cheaper hypothesis: less closing, then less bridging.
+// Scores closer than this say nothing about which hypothesis is better.
+const SCORE_EPSILON = 0.015;
+
+// How much of the drawing a hypothesis refuses to believe. `structural`
+// discards drawn linework (candidates.js): right for a dimension string welded
+// to a wall by its own extension lines, wrong for a porch whose railings are
+// the only thing holding its outline. Within the noise band that is the same
+// kind of cost as a wider closing radius, so it breaks the same way — and only
+// there. A structural hypothesis that scores clearly better still wins.
+const invention = (c) => (c.variant === 'structural' ? 1 : 0);
+
+const cheaper = (a, b) =>
+  invention(a) - invention(b)
+  || a.radius - b.radius
+  || a.bridgedSpan - b.bridgedSpan
+  || b.score - a.score
+  || a.variant.localeCompare(b.variant)
+  || a.policy.localeCompare(b.policy);
+
+/**
+ * Best candidate, with the runners-up kept for diagnostics. Ties break toward
+ * the cheaper hypothesis: less invented evidence, then less closing, then less
+ * bridging.
+ *
+ * Scored against the leader rather than pairwise. "within epsilon of each
+ * other" is not a transitive relation, so as a sort comparator it was not an
+ * ordering at all: three candidates a≈b, b≈c, a<c made the winner a function
+ * of the order they happened to be pushed in, and reversing the input array
+ * alone changed which footprint the tracer returned.
+ */
 export const pickCandidate = (scored) => {
   const usable = scored.filter(Boolean);
   if (!usable.length) return null;
-  const ranked = [...usable].sort((a, b) => {
-    if (Math.abs(b.score - a.score) > 0.015) return b.score - a.score;
-    if (a.radius !== b.radius) return a.radius - b.radius;
-    return a.bridgedSpan - b.bridgedSpan;
-  });
-  return { best: ranked[0], ranked };
+  const byScore = [...usable].sort((a, b) =>
+    b.score - a.score
+    || a.radius - b.radius
+    || a.bridgedSpan - b.bridgedSpan
+    || a.variant.localeCompare(b.variant)
+    || a.policy.localeCompare(b.policy));
+  const lead = byScore[0].score;
+  const best = byScore
+    .filter((c) => lead - c.score <= SCORE_EPSILON)
+    .reduce((won, c) => (cheaper(c, won) < 0 ? c : won));
+  const ranked = best === byScore[0] ? byScore : [best, ...byScore.filter((c) => c !== best)];
+  return { best, ranked };
 };
