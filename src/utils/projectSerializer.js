@@ -106,6 +106,12 @@ const holeSchema = z.union([
     id: z.string().optional(),
     ring: z.array(vertexSchema),
     source: z.string().optional(),
+    // Set when a re-trace moved the outline out from under this void. Declared
+    // rather than left to the catchall because area depends on it: a stale void
+    // is drawn but not subtracted, and losing the flag on reopen would silently
+    // start subtracting a hole that is not inside the building.
+    stale: z.boolean().optional(),
+    staleReason: z.string().nullable().optional(),
   }).catchall(z.any()),
 ]);
 
@@ -125,6 +131,9 @@ const perimeterTraceSchema = z.object({
   // derived from that type or was chosen and must be preserved.
   type: z.string().optional(),
   colorSource: z.string().optional(),
+  // Whether `name` was generated from the type or typed by the user. A user
+  // name outranks a later type change, so it has to survive the round trip.
+  nameSource: z.string().optional(),
 }).catchall(z.any());
 
 const roomSchema = z.object({
@@ -434,6 +443,7 @@ export function deserializeSketch(project) {
         locked: false,
         type: DEFAULT_TRACE_TYPE,
         colorSource: 'type',
+        nameSource: 'auto',
         color: traceTypeColor(DEFAULT_TRACE_TYPE),
       }
     ];

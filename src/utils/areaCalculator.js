@@ -32,6 +32,12 @@ export const holeKey = (hole, index) =>
 export const mergeHoles = (existing, incoming) =>
   [...(existing ?? []).filter((h) => h?.source === 'user'), ...(incoming ?? [])];
 
+// A void marked stale by `markStaleHoles` sits outside the outline after a
+// re-trace moved it. It stays on the trace and stays drawn — it is the user's
+// assertion — but subtracting a hole that is not inside the building would
+// report an area that is simply wrong, so area alone skips it.
+export const isSubtracted = (hole) => !(hole && !Array.isArray(hole) && hole.stale);
+
 // Calculate area of a polygon using the shoelace formula.
 // feetPerPixel: real-world feet represented by one image pixel { x, y }
 // holes: enclosed voids (courtyards, light wells) subtracted from the outline
@@ -41,7 +47,7 @@ export const calculateArea = (vertices, feetPerPixel, holes = null) => {
   }
 
   let area = Math.abs(signedArea(vertices));
-  for (const ring of holeRings(holes)) {
+  for (const ring of holeRings((holes ?? []).filter(isSubtracted))) {
     if (ring?.length >= 3) area -= Math.abs(signedArea(ring));
   }
   area = Math.max(0, area);

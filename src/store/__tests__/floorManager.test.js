@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
 import * as undoManager from '../undoManager';
-import { DEFAULT_TRACE_TYPE, traceTypeColor } from '../../utils/traceTypes';
+import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from '../../utils/traceTypes';
 
 const square = (n) => [
   { x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n },
@@ -273,5 +273,54 @@ describe('trace naming', () => {
     openProjectWith(['Basement', '4th Floor']);
     useAppStore.getState().addPerimeterTrace();
     expect(traces()[2].name).toBe('5th Floor');
+  });
+
+  // A garage used to arrive called "3rd Floor" and stay that way until renamed.
+  it('names an auto-named trace for its type when the type changes', () => {
+    useAppStore.getState().setImage('data:image/png;base64,AAAA');
+    useAppStore.getState().addPerimeterTrace();
+    expect(traces()[1].name).toBe('2nd Floor');
+
+    useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'garage');
+    expect(traces()[1].name).toBe('Garage');
+
+    useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'below-grade');
+    expect(traces()[1].name).toBe('Basement');
+
+    // Back to GLA and it rejoins the storey numbering.
+    useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'gla');
+    expect(traces()[1].name).toBe('2nd Floor');
+  });
+
+  // The guarantee that makes the rename safe to do automatically.
+  it('never overwrites a name the user typed', () => {
+    useAppStore.getState().setImage('data:image/png;base64,AAAA');
+    const id = traces()[0].id;
+    useAppStore.getState().renamePerimeterTrace(id, 'Guest Wing');
+    expect(traces()[0].nameSource).toBe('user');
+
+    useAppStore.getState().setPerimeterTraceType(id, 'garage');
+
+    expect(traces()[0].name).toBe('Guest Wing');
+    expect(traces()[0].type).toBe('garage');
+  });
+
+  it('numbers a second trace of the same type rather than colliding', () => {
+    useAppStore.getState().setImage('data:image/png;base64,AAAA');
+    useAppStore.getState().addPerimeterTrace();
+    useAppStore.getState().setPerimeterTraceType(traces()[0].id, 'garage');
+    useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'garage');
+
+    expect(traces().map((t) => t.name)).toEqual(['Garage', 'Garage 2']);
+  });
+
+  // Inferred from the name, not defaulted: a project saved before nameSource
+  // existed must not have its renames treated as auto-generated.
+  it('infers nameSource from the name for a project saved before it existed', () => {
+    openProjectWith(['2nd Floor', 'Guest Wing']);
+    const normalized = normalizeTraces(traces());
+
+    expect(normalized[0].nameSource).toBe('auto');
+    expect(normalized[1].nameSource).toBe('user');
   });
 });

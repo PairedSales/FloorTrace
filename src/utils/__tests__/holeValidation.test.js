@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { validateHoleRing } from '../geometryValidation';
+import { markStaleHoles, validateHoleRing } from '../geometryValidation';
+import { calculateArea } from '../areaCalculator';
 
 const square = (x1, y1, x2, y2) => [
   { x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 },
@@ -101,5 +102,60 @@ describe('validateHoleRing', () => {
     const res = validateHoleRing(square(20, 20, 40, 40), [], []);
     expect(res.ok).toBe(false);
     expect(res.reason).toMatch(/no closed outline/i);
+  });
+});
+
+// A re-trace keeps the user's voids but can move the outline out from under
+// them. Marked, not dropped — and not subtracted while marked.
+describe('markStaleHoles', () => {
+  const userHole = (ring, extra = {}) => ({ id: 'h1', ring, source: 'user', ...extra });
+  const autoHole = (ring) => ({ id: 'a1', ring, source: 'auto' });
+  const SCALE = { x: 1, y: 1 };
+
+  it('marks a user void the new outline no longer contains', () => {
+    const holes = [userHole(square(20, 20, 40, 40))];
+    const shrunk = square(0, 0, 10, 10);
+
+    const marked = markStaleHoles(holes, shrunk);
+
+    expect(marked[0].stale).toBe(true);
+    expect(marked[0].staleReason).toMatch(/inside the outline/i);
+    // Kept, not dropped: it is still the user's assertion.
+    expect(marked[0].ring).toEqual(square(20, 20, 40, 40));
+  });
+
+  it('leaves a void the outline still contains alone, by reference', () => {
+    const holes = [userHole(square(20, 20, 40, 40))];
+    expect(markStaleHoles(holes, OUTER)).toBe(holes);
+  });
+
+  it('clears the mark when the outline moves back over it', () => {
+    const stale = [userHole(square(20, 20, 40, 40), { stale: true, staleReason: 'x' })];
+
+    const marked = markStaleHoles(stale, OUTER);
+
+    expect(marked[0].stale).toBeUndefined();
+    expect(marked[0].staleReason).toBeUndefined();
+  });
+
+  it('does not check auto voids — they came from this very outline', () => {
+    const holes = [autoHole(square(20, 20, 40, 40))];
+    expect(markStaleHoles(holes, square(0, 0, 10, 10))).toBe(holes);
+  });
+
+  // The reason this is correctness and not cosmetics: subtracting a void that
+  // is not inside the building reports an area that is simply wrong.
+  it('stops a stale void being subtracted from the area', () => {
+    const ring = square(20, 20, 40, 40); // 400 px²
+    const live = [userHole(ring)];
+    expect(calculateArea(OUTER, SCALE, live)).toBe(9600);
+
+    const marked = markStaleHoles(live, OUTER.slice());
+    expect(calculateArea(OUTER, SCALE, marked)).toBe(9600); // still inside
+
+    const stale = markStaleHoles(live, square(0, 0, 100, 15));
+    expect(stale[0].stale).toBe(true);
+    // The void is outside the 100x15 outline, so it is not deducted from it.
+    expect(calculateArea(square(0, 0, 100, 15), SCALE, stale)).toBe(1500);
   });
 });

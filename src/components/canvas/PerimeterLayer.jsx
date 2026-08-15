@@ -421,13 +421,20 @@ const PerimeterLayer = ({
     return holeRings(holes).flatMap((ring, i) => {
       if (!ring || ring.length < 3) return [];
       const id = holeKey(holes[i], i);
+      const hole = holes[i];
+      // A void the outline moved out from under: still drawn, because it is the
+      // user's, but in the invalid colour and no longer subtracted, so it can
+      // never read as a silently-applied subtraction that is not happening.
+      const stale = !!(hole && !Array.isArray(hole) && hole.stale);
       return [{
         key: `hole-${trace.id}-${id}`,
         traceId: trace.id,
         holeId: id,
         ring,
+        stale,
+        staleReason: stale ? hole.staleReason : null,
         points: ring.flatMap((v) => [v.x, v.y]),
-        color: trace.color || '#BD93F9',
+        color: stale ? '#FF5555' : (trace.color || '#BD93F9'),
         selected: selectedHole?.traceId === trace.id && selectedHole?.holeId === id,
       }];
     });
@@ -499,7 +506,10 @@ const PerimeterLayer = ({
         const holeArea = calculateArea(hole.ring, feetPerPixel);
         if (!(holeArea > 0)) return null;
         const { value: areaText, suffix: areaSuffix } = formatArea(holeArea, unit);
-        const labelText = `Void −${areaText} ${areaSuffix}`;
+        // A stale void is not subtracted, so it must not claim a minus sign.
+        const labelText = hole.stale
+          ? `Void outside outline · ${areaText} ${areaSuffix}`
+          : `Void −${areaText} ${areaSuffix}`;
         const fontSize = 10 / scale;
         const labelWidth = measureSideLenWidth(labelText, fontSize) + 10 / scale;
         const labelHeight = fontSize * 1.5 + 3 / scale;
