@@ -13,8 +13,10 @@
     "excludeRegions": [[448, 77, 56, 19], [420, 122, 111, 13], [252, 1004, 83, 24], [504, 1133, 58, 18]]
   },
   "rooms": [
-    { "name": "OWNER'S SUITE", "click": [232, 250], "labelBbox": [167, 276, 114, 19], "dims": [12.333, 17.0], "rect": [117, 115, 345, 420], "minIou": 0.7 },
-    { "name": "BEDROOM 2", "click": [700, 1040], "labelBbox": [629, 1069, 142, 18], "dims": [12.0, 12.083], "rect": [595, 955, 812, 1178], "minIou": 0.7 }
+    { "name": "OWNER'S SUITE", "click": [232, 250], "labelBbox": [167, 276, 114, 19], "dims": [12.333, 17.0], "rect": [124, 125, 341, 422], "minIou": 0.7,
+      "note": "Interior wall faces measured from the image by row/column ink profiling: left wall 115-123, top wall band 114-124, right wall from 341, bottom wall from 422. 217px / 12.333ft = 17.60 and 297px / 17.0ft = 17.47, against the header's 17.45. Was [117, 115, 345, 420], which sat inside all four wall bodies and implied 18.49 / 17.94." },
+    { "name": "BEDROOM 2", "click": [700, 1040], "labelBbox": [629, 1069, 142, 18], "dims": [12.0, 12.083], "rect": [596, 961, 805, 1172], "minIou": 0.7,
+      "note": "Same walls the previous box picked, moved to their interior faces: left wall 585-595, top band 954-960 (partial - the room opens to the hall over the rest of that side), right wall from 805, bottom wall from 1172. 209px / 12.0ft = 17.42 and 211px / 12.083ft = 17.46. The detector currently stops the top side at the thin 934-936 line instead of the 954-960 band, ~24px high; the tolerance is left loose for it." }
   ],
   "ocr": [
     { "name": "PATIO", "w": 14.0, "h": 7.0 },

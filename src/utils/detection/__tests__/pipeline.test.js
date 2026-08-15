@@ -434,6 +434,19 @@ describe('detectRoomFromClickCore', () => {
     expect(x1).toBeGreaterThanOrEqual(295); // stayed right of the shared wall
   });
 
+  // Every wall here is 8px on its centreline, so the interior faces are exact:
+  // shell 54..545 x 54..345, shared wall body 296..303. Asserted to the pixel
+  // deliberately — the smear trigger used to fire late on the door-gapped
+  // shared wall and leave the edge a few px inside the wall body, which reads
+  // as a room slightly too big and a room-derived scale slightly too high on
+  // every plan at once.
+  it('seats every edge on the wall face, not inside the wall body', () => {
+    const left = detectRoomFromClickCore(twoRooms(), { x: 170, y: 200 });
+    const right = detectRoomFromClickCore(twoRooms(), { x: 450, y: 200 });
+    expect(bboxOf(left)).toEqual([54, 54, 296, 346]);
+    expect(bboxOf(right)).toEqual([304, 54, 546, 346]);
+  });
+
   it('passes thin fixture lines and stops at the thick wall', () => {
     const img = createImage(600, 400);
     wall(img, 50, 50, 550, 50, 8);
