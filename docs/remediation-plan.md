@@ -63,6 +63,10 @@ one at a time** — do not fall back to concurrent agents in one tree.
 - The agent commits its own work; the orchestrator merges. Agents never merge,
   rebase, push, or open a PR.
 - `git add` explicit paths. Never `git add -A` or `git add .`.
+- Integrate a finished wave onto its own branch (`claude/remediation-wave-a`
+  and so on) and open a PR against `master`. **Never push directly to
+  `master`** — a ruleset requires the `build` check there, so a direct push
+  either fails or defeats the gate it exists to enforce.
 
 ### What each agent reports back
 
@@ -127,7 +131,7 @@ npm run dev                 # Vite dev server (manual UI verification)
 | `npm run lint` | 0 errors, 2 warnings (both pre-existing `react-hooks/exhaustive-deps`) |
 | `npm run bench:detection` | **45/45 checks passed** |
 | `npm run bench:scale` | **14/14 checks passed** |
-| Search-cache retention, ExampleFloorplan5 | ~112 MB (see T-MEM) |
+| Search-cache retention, ExampleFloorplan5 | ~112 MB (measured by Task B2's probe) |
 
 ### Non-negotiable rules
 

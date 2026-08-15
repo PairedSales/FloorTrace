@@ -14,6 +14,14 @@ export default defineConfig({
     // Nested git worktrees carry their own copies of the suite; collecting them
     // makes a stale worktree fail master's tests. eslint ignores .claude too.
     exclude: [...configDefaults.exclude, '**/.claude/**'],
+    // These tests run the real CV pipeline over fixture PNGs, so they are
+    // seconds each, not milliseconds. The slowest is ~3.2s locally against
+    // vitest's 5000ms default — enough headroom to pass here and to time out
+    // on a slower CI runner, which is exactly what happened on master
+    // (run 31852340215: floorplan-image.test.js timed out and blocked a
+    // deploy). Raised rather than set per-test so a new fixture test does not
+    // have to rediscover this.
+    testTimeout: 20000,
   },
   build: {
     rollupOptions: {
