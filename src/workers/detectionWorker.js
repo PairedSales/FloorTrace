@@ -5,16 +5,25 @@ import { hashDataUrl } from '../utils/hash';
 // Decoded image data is reused across requests for the same image: a room
 // click and a perimeter trace on one floorplan used to decode, binarize and
 // analyse it from scratch every time.
-let lastImageKey = null;
+let lastImageUrl = null;
+let lastCacheKey = null;
 let lastImageData = null;
+let decodeCount = 0;
 
-const imageBitmapToImageData = async (imageDataUrl, key) => {
-  if (key && key === lastImageKey && lastImageData) return lastImageData;
+const imageBitmapToImageData = async (imageDataUrl) => {
+  // Identity is the data URL itself, not its hash — same as the OCR memo, and
+  // for the same reason. `hashDataUrl` folds an 8 KB prefix into 32 bits, so it
+  // can hand two images one key, and the eraser and crop tools emit same-length
+  // URLs from one canvas. Returning the previous image's pixels here would be a
+  // wrong answer with nothing to look wrong about.
+  if (imageDataUrl === lastImageUrl && lastImageData) {
+    return { imageData: lastImageData, cacheKey: lastCacheKey };
+  }
   // Everything the detection memo holds is keyed by image, so a new one makes
   // all of it unreadable dead weight — tens of MB of page-sized label arrays,
   // previously kept until the *next* trace of the new image happened to evict
   // it, or forever if the user only ran OCR.
-  if (lastImageKey && lastImageKey !== key) clearDetectionCache();
+  if (lastImageUrl) clearDetectionCache();
   const response = await fetch(imageDataUrl);
   const blob = await response.blob();
   const bitmap = await createImageBitmap(blob);
@@ -23,9 +32,13 @@ const imageBitmapToImageData = async (imageDataUrl, key) => {
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  lastImageKey = key;
+  lastImageUrl = imageDataUrl;
+  // The memo key has to be stable across requests for one image (that sharing
+  // is what makes N room clicks cost one trace) and distinct across images. The
+  // decode counter supplies the second half, which the hash alone cannot.
+  lastCacheKey = `${hashDataUrl(imageDataUrl)}#${++decodeCount}`;
   lastImageData = imageData;
-  return imageData;
+  return { imageData, cacheKey: lastCacheKey };
 };
 
 // Only these fields cross back to the main thread. The previous blanket
@@ -58,8 +71,7 @@ self.onmessage = async (event) => {
       throw new Error('Detection worker requires an image data URL.');
     }
 
-    const cacheKey = hashDataUrl(payload.image);
-    const imageData = await imageBitmapToImageData(payload.image, cacheKey);
+    const { imageData, cacheKey } = await imageBitmapToImageData(payload.image);
     const options = { ...payload.options, cacheKey };
     let data = null;
 
