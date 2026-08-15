@@ -11,6 +11,11 @@ let cvResolved = null;
 export const loadOpenCv = (timeoutMs = 2000) => {
   if (!cvPromise) {
     cvPromise = (async () => {
+      // Read here, not at the call sites: `ocrBenchmark.mjs` runs a full
+      // warm-up scan that primes this singleton before the first measured
+      // fixture, so a flag checked anywhere later is already too late. Exists
+      // so "what does cv.CLAHE + medianBlur actually buy?" is one bench run.
+      if (globalThis.process?.env?.FLOORTRACE_NO_OPENCV === '1') return null;
       const mod = await import('@techstark/opencv-js');
       let cv = mod.default ?? mod;
       if (cv && typeof cv.then === 'function') cv = await cv;

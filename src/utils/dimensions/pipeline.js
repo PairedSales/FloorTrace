@@ -22,7 +22,8 @@
  *
  * The `env` adapter supplies platform specifics so the same pipeline runs in
  * the browser and in Node benchmarks:
- *   env.toOcrInput(imageDataLike) -> value accepted by tesseract.js
+ *   env.toOcrInput(gray)          -> value accepted by tesseract.js, from a
+ *                                    `{data: Uint8Array, width, height}` gray
  *   env.refineRois(tiles)         -> optional PaddleOCR hook
  *   env.budgetMs                  -> wall-clock budget (default 2600)
  */
@@ -30,7 +31,7 @@
 import { parseDimensionLine, inferDominantFormat, formatDimensionText } from './parse.js';
 import { matchExteriorFeature } from './exteriorLabels.js';
 import {
-  toGray, grayToImageDataLike, clahe, unsharp, binarizeInk,
+  toGray, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray,
   isolateCenterBand, trimFlankRails, dashLineMask, otsu, inkOtsu
 } from './raster.js';
@@ -38,9 +39,13 @@ import { findTextRegions } from './regions.js';
 import {
   recognizeSparse, recognizeLine, lineText, ocrConcurrency, prewarmOcrPool
 } from './ocrTesseract.js';
-import { loadOpenCv, openCvIfReady, enhanceGrayWithCv, estimateSpeckle } from './opencvBridge.js';
+import { loadOpenCv, enhanceGrayWithCv, estimateSpeckle } from './opencvBridge.js';
 
 const DEFAULT_BUDGET_MS = 2600;
+// How long the first scan of a session will wait for the OpenCV chunk before
+// falling back to the JS CLAHE. Zero on every later scan — the module is a
+// resolved singleton by then.
+const CV_WAIT_MS = 1500;
 const MAX_OCR_DIM = 2600;      // full-page OCR working size cap
 const UPSCALE_BELOW = 1800;    // upscale small scans: tiny glyphs kill OCR
 const UPSCALE_TO = 2000;       // …to about this many px on the long edge
@@ -361,7 +366,9 @@ export const detectDimensionsCore = async (imageData, env) => {
   const timings = {};
 
   // ---- Phase 1: preprocess -------------------------------------------------
-  loadOpenCv(); // non-blocking warm-up; used this call if already resolved
+  // Started here, awaited just before the CLAHE step so the download overlaps
+  // the grayscale/binarize work below.
+  const cvReady = loadOpenCv();
 
   const fullGray = toGray(imageData);
   const maxDim = Math.max(fullGray.width, fullGray.height);
@@ -378,7 +385,20 @@ export const detectDimensionsCore = async (imageData, env) => {
   // normalising at native resolution and enlarging afterwards costs six
   // detections. Bilinear zoom is what creates the local contrast gradients
   // this pass exists to flatten, so it has to come second.
-  const cv = openCvIfReady();
+  // Awaited, not peeked. `openCvIfReady()` here could never see the module on
+  // the first scan of a session: a dynamic `import()` cannot settle before the
+  // synchronous code that follows it in the same job, so scan 1 always took the
+  // JS `clahe()` fallback and scans 2..N took cv.CLAHE + optional medianBlur —
+  // the same plan preprocessed two different ways depending on when it was
+  // dropped, with the branch decided by download latency. Measured over the
+  // seven fixtures, the OpenCV path is worth one detection and two fewer false
+  // positives (FLOORTRACE_NO_OPENCV=1 reproduces the comparison), so this waits
+  // for it — but only to a bounded deadline, so a cold 3.9 MB chunk on a slow
+  // connection degrades to the JS path instead of holding the scan open.
+  const cv = await Promise.race([
+    cvReady,
+    new Promise((resolve) => { setTimeout(() => resolve(null), CV_WAIT_MS); }),
+  ]);
   let enhanced = cv ? enhanceGrayWithCv(cv, baseGray, { denoise: speckle > 0.12 }) : null;
   if (!enhanced) enhanced = clahe(baseGray);
   enhanced = unsharp(enhanced, 1.1);
@@ -418,7 +438,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   // Phase 4 is the concurrent one; boot its worker pool now so the boots run
   // under the sparse pass rather than under the reads they're meant to speed up.
   prewarmOcrPool();
-  const pass1Promise = recognizeSparse(env.toOcrInput(grayToImageDataLike(pass1Input)));
+  const pass1Promise = recognizeSparse(env.toOcrInput(pass1Input));
 
   const analysisScale = Math.min(1, ANALYSIS_DIM / Math.max(enhanced.width, enhanced.height));
   const analysisInk = analysisScale === 1
@@ -771,7 +791,7 @@ export const detectDimensionsCore = async (imageData, env) => {
       let read = null;
       try {
         read = await recognizeLine(
-          env.toOcrInput(grayToImageDataLike(variant)),
+          env.toOcrInput(variant),
           { mode }
         );
       } catch {
