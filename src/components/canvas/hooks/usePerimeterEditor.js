@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
 import { hasSelfIntersection, validateVertexMove } from '../../../utils/geometryValidation';
 import { pointToLineDistance } from '../canvasUtils';
@@ -19,6 +19,15 @@ export function usePerimeterEditor({
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggedVertexCoords, setDraggedVertexCoords] = useState(null);
   const [localPerimeterVertices, setLocalPerimeterVertices] = useState(null);
+
+  // Click-to-select, so Delete has something to act on. It is an index into one
+  // vertex array, so any change of that array's identity — an edit, a delete, a
+  // trace switch, a re-trace — makes the held index meaningless.
+  const [selectedVertexIndex, setSelectedVertexIndex] = useState(null);
+  const vertices = perimeterOverlay?.vertices;
+  useEffect(() => {
+    setSelectedVertexIndex(null);
+  }, [vertices]);
 
   const lastDraggedVertexRef = useRef(null);
   const lastDragStartPosRef = useRef(null);
@@ -148,6 +157,8 @@ export function usePerimeterEditor({
   return {
     draggingVertex,
     draggedVertexCoords,
+    selectedVertexIndex,
+    setSelectedVertexIndex,
     localPerimeterVertices,
     setLocalPerimeterVertices,
     activePerimeterOverlay,

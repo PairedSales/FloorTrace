@@ -302,6 +302,8 @@ const PerimeterLayer = ({
   detectedDimensions,
   unit,
   draggingVertex,
+  selectedVertexIndex = null,
+  onVertexSelect,
   onVertexDragStart,
   onVertexDragMove,
   onVertexDragEnd,
@@ -472,11 +474,18 @@ const PerimeterLayer = ({
           key={`active-vertex-${activeTrace.id}-${i}`}
           x={vertex.x}
           y={vertex.y}
-          radius={5 / scale}
+          radius={(selectedVertexIndex === i ? 7 : 5) / scale}
           fill={activeTrace.color || '#BD93F9'}
-          stroke="#fff"
-          strokeWidth={1.5 / scale}
+          stroke={selectedVertexIndex === i ? '#8BE9FD' : '#fff'}
+          strokeWidth={(selectedVertexIndex === i ? 2.5 : 1.5) / scale}
           draggable
+          onClick={(e) => {
+            // Konva fires click for every button, and right-click already means
+            // delete on this handle.
+            if (e.evt && e.evt.button !== 0) return;
+            e.cancelBubble = true;
+            onVertexSelect?.(i);
+          }}
           onDragStart={() => handleDragStart(i)}
           onDragMove={(e) => handleDragMove(i, e)}
           onDragEnd={(e) => handleDragEnd(i, e)}

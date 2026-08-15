@@ -814,15 +814,21 @@ function App() {
     }
   }, [setPerimeterOverlay, setPerimeterVertices]);
 
-  // Delete a specific perimeter vertex by index (right-click on vertex)
+  // Delete a specific perimeter vertex by index (right-click, or Delete on a
+  // selected vertex). The floor of three needs a voice: with a visible
+  // selection and a Delete key, a silent no-op reads as a broken keybinding.
   const handleDeletePerimeterVertex = useCallback((index) => {
     const overlay = selectPerimeterOverlay(useAppStore.getState());
-    if (!overlay?.vertices || overlay.vertices.length <= 3) return;
+    if (!overlay?.vertices) return;
+    if (overlay.vertices.length <= 3) {
+      notify('A perimeter needs at least three points.', { type: 'warning' });
+      return;
+    }
     updatePerimeterVertices(
       overlay.vertices.filter((_, i) => i !== index),
       true
     );
-  }, [updatePerimeterVertices]);
+  }, [updatePerimeterVertices, notify]);
 
   // Auto-trace exterior boundary after a room overlay is placed.
   const autoTraceExterior = useCallback(
@@ -1095,6 +1101,15 @@ function App() {
     onSaveProject: handleSaveProject,
     activeBrush,
     onRotateCanvas: handleRotateCanvas,
+    onFitToWindow: handleFitToWindow,
+    hasArea: area > 0,
+    onLineToolToggle: handleLineToolToggle,
+    onDrawAreaToggle: handleDrawAreaToggle,
+    onAngleToolToggle: handleAngleToolToggle,
+    onOutlineByVertex: handleDrawExterior,
+    onCropToolToggle: handleCropToolToggle,
+    onEraserToolToggle: handleEraserToolToggle,
+    onDrawExterior: handleDrawMode,
   });
 
   // Desktop UI
