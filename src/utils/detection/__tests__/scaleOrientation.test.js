@@ -187,8 +187,11 @@ describe('decideProjectScale', () => {
 });
 
 describe('room scale from a transposed label', () => {
-  // 400x300 px room, labelled 12 x 16 — the 16 runs across the page, so the
-  // label reads the other way round from how the room is drawn.
+  // Walls on a 400x300 centreline path at thickness 8, so the interior the
+  // room detector should report is 392x292 — a rect that measured 400x300
+  // would be sitting on the wall centrelines, not on their faces.
+  // Labelled 12 x 16: the 16 runs across the page, so the label reads the
+  // other way round from how the room is drawn.
   const room = () => {
     const img = createImage(600, 500);
     wall(img, 50, 50, 450, 50, 8);
@@ -206,8 +209,8 @@ describe('room scale from a transposed label', () => {
     const ppf = detected.pixelsPerFoot;
     // Not exactly equal: the rect is whole working-scale pixels.
     expect(scaleIsotropy(1 / ppf.x, 1 / ppf.y).ok).toBe(true);
-    expect(detected.overlay.x2 - detected.overlay.x1).toBeCloseTo(400, -1);
-    expect(detected.overlay.y2 - detected.overlay.y1).toBeCloseTo(300, -1);
+    expect(detected.overlay.x2 - detected.overlay.x1).toBeCloseTo(392, -1);
+    expect(detected.overlay.y2 - detected.overlay.y1).toBeCloseTo(292, -1);
   });
 
   it('agrees with the same label written the other way round', () => {

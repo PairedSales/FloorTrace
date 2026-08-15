@@ -5,7 +5,8 @@
 // Thin high-coverage lines (counters, window glass, closet fronts) are kept
 // as alternative stop candidates instead of hard stops; when the parsed label
 // dimensions are known, a small combinatorial search picks the per-side
-// candidates whose rectangle best matches the label's aspect ratio.
+// candidates whose rectangle best matches the label's aspect ratio. The chosen
+// edges are then seated on the wall faces they were only predicting.
 
 import { satSum } from './raster.js';
 import { orientDimsToBox } from './validate.js';
@@ -409,6 +410,103 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       }
     }
   }
+
+  // Phase D: seat each edge on the wall's interior face. `edgeFromHit` puts it
+  // `band - 1` px past the trigger, which assumes the smear trips exactly a
+  // band early — but it trips only once coverage across the *current* span
+  // crosses, and that span is still partial during lockstep growth, so a side
+  // dented by a door trips late and the edge lands inside the wall body. Every
+  // room came out a little large and every room-derived scale a little high.
+  // The final span is known here, so measure the face rather than predict it.
+  // All four sides measure against the same box, so the result cannot depend
+  // on the order they are seated in.
+  const box = {
+    left: Math.min(chosen.left.edge, chosen.right.edge),
+    right: Math.max(chosen.left.edge, chosen.right.edge),
+    top: Math.min(chosen.top.edge, chosen.bottom.edge),
+    bottom: Math.max(chosen.top.edge, chosen.bottom.edge),
+  };
+  Object.assign(rect, box);
+
+  // Unsmeared, so the reading is the wall itself and not its ±band halo. The
+  // floor is low deliberately: a wall with a door in it is well short of solid.
+  const RAW_COV = 0.35;
+  const coverageIn = (mask) => (side, pos) => {
+    let n = 0;
+    if (side.axis === 'x') {
+      if (pos < 0 || pos >= width) return 0;
+      for (let y = rect.top; y <= rect.bottom; y += 1) n += mask[y * width + pos];
+      return n / (rect.bottom - rect.top + 1);
+    }
+    if (pos < 0 || pos >= height) return 0;
+    const row = pos * width;
+    for (let x = rect.left; x <= rect.right; x += 1) n += mask[row + x];
+    return n / (rect.right - rect.left + 1);
+  };
+  const rawCoverage = coverageIn(analysis.wallMask);
+  const inkCoverage = coverageIn(analysis.cleaned);
+
+  // The edge can sit short of the face, inside the body, or clear of the wall
+  // altogether, so look both ways. The run is judged against the strongest
+  // reading in that window rather than a flat threshold: a closet partition or
+  // door frame butted against a wall covers part of the same span, and a flat
+  // threshold walked straight through it into the room.
+  const seekFace = (side, edge, click) => {
+    const out = band + 2;
+    const back = wallThickness + band;
+    const at = (d) => rawCoverage(side, edge + side.dir * d);
+    let floor = 0;
+    for (let d = -back; d <= out; d += 1) floor = Math.max(floor, at(d));
+    if (floor < RAW_COV) return edge;
+    floor = Math.max(RAW_COV, floor * 0.6);
+
+    // Nearest qualifying line to the edge, not the strongest in the window:
+    // the wall growth stopped at is the one being seated.
+    let found = null;
+    for (let r = 0; r <= Math.max(out, back) && found === null; r += 1) {
+      if (r <= out && at(r) >= floor) found = r;
+      else if (r > 0 && r <= back && at(-r) >= floor) found = -r;
+    }
+    if (found === null) return edge;
+    let pos = edge + side.dir * found;
+
+    // Hatched and double-drawn walls dip inside their own body, so a dip is
+    // only the end of the run if the run does not pick up again within a
+    // wall's thickness.
+    const gap = Math.max(2, wallThickness);
+    const maxBack = Math.max(4, wallThickness * 2 + band);
+    for (let moved = 0; moved < maxBack;) {
+      let step = 0;
+      for (let g = 1; g <= gap && moved + g <= maxBack; g += 1) {
+        if (rawCoverage(side, pos - side.dir * g) >= floor) {
+          step = g;
+          break;
+        }
+      }
+      if (!step) break;
+      pos -= side.dir * step;
+      moved += step;
+    }
+
+    // `wallMask` carries a one-pixel halo — the tolerant dilate long-run
+    // extraction needs — so its inner face sits a pixel inside the drawn wall.
+    // Give that pixel back where the ink agrees it is blank: shrinking a room
+    // by a pixel on every side is ~1% of a 200px room, and it is systematic.
+    let face = pos - side.dir;
+    if (inkCoverage(side, face + side.dir) < floor) face += side.dir;
+    if (side.dir > 0 ? face < click : face > click) return edge;
+    return Math.max(0, Math.min(limitFor(side), face));
+  };
+
+  for (const side of SIDES) {
+    const c = chosen[side.key];
+    // A clamp is the footprint edge and a virtual side is the label's, not a
+    // wall face; neither came through `edgeFromHit` and neither has ink to seek.
+    if (c.kind === 'clamp' || c.kind === 'virtual') continue;
+    const edge = seekFace(side, c.edge, side.axis === 'x' ? px : py);
+    if (edge !== c.edge) chosen[side.key] = { ...c, edge };
+  }
+
   const finalRect = {
     left: Math.min(chosen.left.edge, chosen.right.edge),
     right: Math.max(chosen.left.edge, chosen.right.edge),
