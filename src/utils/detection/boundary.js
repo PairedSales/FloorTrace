@@ -245,7 +245,11 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     scoreNew();
   }
 
-  const picked = pickCandidate(scored);
+  // `inclusive` callers want the widest reading of the drawing, not the best
+  // reading of the living area, so the one hypothesis that *discards* drawn
+  // linework is withheld from them — see detectRoomFromClickCore.
+  const pool = options.inclusive ? scored.filter((c) => c && c.variant !== 'structural') : scored;
+  const picked = pickCandidate(pool.length ? pool : scored);
   if (!picked) return null;
 
   const { best, ranked } = picked;
@@ -259,7 +263,13 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   // rather than silently dropped.
   let thinStructure = null;
   if (best.variant === 'structural') {
-    const widest = ranked.find((c) => c.variant === 'all');
+    // Widest by area, not first in rank order: the excluded region is the
+    // difference against the most inclusive hypothesis, and rank order says
+    // nothing about which `all` candidate that is.
+    const widest = ranked.reduce(
+      (wide, c) => (c.variant === 'all' && (!wide || c.entry.area > wide.entry.area) ? c : wide),
+      null,
+    );
     if (widest && widest.entry.area > 1.02 * best.entry.area) {
       const mask = new Uint8Array(widest.entry.mask.length);
       let size = 0;

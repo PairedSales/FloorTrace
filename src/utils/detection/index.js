@@ -101,6 +101,10 @@ export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
     .filter(Boolean);
 };
 
+// The detection memo lives in the worker's module scope, so terminating the
+// worker is what frees it. Calling clearDetectionCache() here would clear the
+// main thread's own (permanently empty) copy of that module state and look
+// like a cleanup that was never happening.
 export const terminateDetectionWorker = () => {
   if (!detectionWorker) return;
   detectionWorker.terminate();

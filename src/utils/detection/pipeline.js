@@ -210,8 +210,17 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // The boundary pass supplies the footprint clamp so room growth can never
   // escape the building. Detection still works (unclamped) if it fails.
   // On multi-floor pages, clamp to the floor under the click so rooms outside
-  // the largest footprint aren't rejected. Garage carving is off here:
-  // clicking a garage label must still detect the garage room.
+  // the largest footprint aren't rejected.
+  //
+  // A clamp is a rail, not a definition of living area, and its two failure
+  // modes are not symmetric: too tight and the click falls outside, so the
+  // room is never detected at all and nothing says why; too loose and growth
+  // is bounded by wall coverage instead, which is what the unclamped path
+  // already does. So it asks for the widest hypothesis rather than the
+  // best-scoring one. `autoGarage: false` was half of that intent — it stops
+  // the non-GLA carve, but it cannot hand back a bay the winning candidate
+  // never enclosed, which is how "clicking a garage label must still detect
+  // the garage room" failed whenever the structural hypothesis won.
   //
   // The search cache is what makes this affordable: this trace and the
   // perimeter trace that follows a room placement climb the same closing
@@ -226,6 +235,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     () => traceBoundary(analysis, {
       ...options.boundary,
       autoGarage: false,
+      inclusive: true,
       searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
     }),
   );

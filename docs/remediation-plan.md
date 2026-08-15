@@ -218,7 +218,7 @@ Integrated on `claude/remediation-wave-a`. Gate at that tip: lint 0 errors /
 | ID | Task | Files | Status |
 |---|---|---|---|
 | **A1** | Preserve perimeter holes across an edit | `src/store/appStore.js`, new test | ✅ `b7e8e91` |
-| **A2** | Make candidate selection a total order | `src/utils/detection/scoring.js`, new test | ⛔ escalated — see below |
+| **A2** | Make candidate selection a total order | `src/utils/detection/{scoring,boundary,pipeline}.js`, new test | ✅ `0ec3c7a` after re-scoping — see below |
 | **A3** | Report OCR failure as failure; show trace quality for one floor | `src/utils/DimensionsOCR.js`, `src/components/LeftPanel.jsx` | ✅ `388af3b` |
 | **A4** | User-facing text and input fixes | `src/App.jsx`, `src/hooks/useKeyboardShortcuts.js`, `src/utils/boundaryQuality.js` | ✅ `39b990d` |
 
@@ -233,13 +233,64 @@ winner is the *lower*-scoring candidate (0.9598 over 0.9704), so every
 principled total order flips it and loses EF1's `GARAGE` check. Re-scoped to
 include adjudicating which candidate is actually correct.
 
-Two further findings from A2, not yet fixed:
+**Re-scoped and landed as `0ec3c7a`.** The adjudication: `structural` is not a
+smaller building, it is the house **plus two ~9px × 330px fingers** tracing
+around the garage along its top and bottom walls. `all` is correct, on three
+grounds none of which is a benchmark number — `candidates.js:221-229` states the
+contract outright ("wrong for a porch whose railings are the only thing holding
+its outline"); five existing tests encode it and all five fail when `structural`
+wins; and `probe:exterior`'s `garage door 5px` scenario drops 98.5% → 61.0%
+bboxIoU under a naive total order.
 
-- `src/utils/detection/boundary.js:262` — `ranked.find((c) => c.variant === 'all')`
-  is named `widest` and compared on `entry.area`, but returns the first in
-  **rank** order. A second, independent order-dependence.
-- `src/utils/detection/pipeline.js:213` — the comment promises `autoGarage: false`
-  guarantees a clicked garage is still detected. It does not.
+**The real defect it found, and did not fix.** `support.mean` is
+`∫level ds / ∮ds`, normalised by the candidate's *own* perimeter. Excising a
+region along drawn wall removes one weakly-drawn edge and adds *twice* the
+well-drawn cut line — so **amputation raises `support.mean` unconditionally,
+for any excised region of any size, whenever the removed edge is below the
+current mean**. Its intended counterweight `coverage` counts *ink pixels*, and
+the garage's own walls stay inside the fingers, so losing a 47,000 px bay (~17%
+of the floor) cost coverage 0.003. `seal` is 1.000 either way. **No term in
+`scoreCandidate` is sensitive to enclosed area disappearing relative to a
+sibling hypothesis.** Fixing that means choosing a scoring formulation validated
+only against the benchmark — the trap this document warns about — so it was left
+as a finding. It deserves its own task.
+
+What landed instead is a tie-break, not a tuned constant: `SCORE_EPSILON` stays
+0.015, no weight changed, and `invention(c) = c.variant === 'structural' ? 1 : 0`
+ranks ahead of closing radius **only inside the existing noise band**. The tier
+is measured against the leader (`lead - score <= SCORE_EPSILON`) rather than
+pairwise, which is what makes it transitive by construction. A `structural`
+hypothesis that scores clearly better still wins, and still does — the three
+`dim string` probe scenarios keep `[thin-structure-excluded]` at IoU 99.7%,
+byte-identical.
+
+**Two detection checks moved, both verified by the orchestrator:**
+
+| | before | after | |
+|---|---|---|---|
+| EF4 outer bbox IoU | 90.6% | **92.4%** | real gain — truth's left edge is 94, old code returned 109 and raised a spurious `thin-structure-excluded` |
+| EF6 outer polygon IoU | 100.0% | **99.9%** | real loss — EF6's outer polygon truth is independently authored (round hand-measured coordinates), unlike its room rects |
+
+`bench:scale`, `probe:exterior` and `probe:exterior draw` byte-identical.
+Accepted: EF4's gain plus a genuine order-dependence fix outweighs EF6's 0.1pp.
+
+Also fixed: `boundary.js:262`'s `ranked.find((c) => c.variant === 'all')` —
+named `widest`, compared on `entry.area`, but returning the first in *rank*
+order (a second, independent order-dependence; byte-identical on its own). And
+`pipeline.js:213`'s comment promised `autoGarage: false` guarantees a clicked
+garage is still detected — unkeepable, since it stops the carve but cannot
+return a bay the winning candidate never enclosed.
+
+Still open from A2:
+
+- **The `structural` rescue is ungated** (`boundary.js:230-233`) — it runs
+  unconditionally whenever a structural mask exists, while `span` immediately
+  below it *is* gated. `candidates.js:227-229` describes the gate that should
+  exist. Needs a new threshold.
+- **The structural-with-garage footprint is geometrically degenerate** — two
+  wall-width fingers, cleaned up only when they fall under `buildFloor`'s 3%
+  filament-shave budget. Latent now, reachable whenever `structural` wins by
+  more than the epsilon on a plan with a thin-line-bounded bay.
 
 A3 also found that this document's own acceptance test for it is wrong: deleting
 `public/tesseract/eng.traineddata.gz` produces an **unsettled promise and a hang**,
@@ -250,10 +301,42 @@ un-timeout-ed anywhere on that path.
 
 ### Wave B — after A (2 agents, parallel)
 
-| ID | Task | Depends on | Files |
-|---|---|---|---|
-| **B1** | One definition of "this room is non-GLA" | A4 (`App.jsx`) | `src/utils/dimensions/exteriorLabels.js`, `src/utils/detection/scale.js`, `src/App.jsx` |
-| **B2** | Bound what the boundary search retains | A2 (deterministic pick) | `src/utils/detection/{cache,candidates,raster,index}.js`, `src/workers/detectionWorker.js`, `scripts/`, `package.json` |
+Integrated on `claude/remediation-wave-b`. Gate at that tip: lint 0 errors /
+2 warnings, `npm test` **313 passed / 16 files**, `bench:detection` **45/45 and
+byte-identical to the §1 baseline**, `bench:scale` **14/14**, peak search-cache
+retention **114.1 MB → 51.9 MB**.
+
+| ID | Task | Depends on | Files | Status |
+|---|---|---|---|---|
+| **B1** | One definition of "this room is non-GLA" | A4 (`App.jsx`) | `src/utils/dimensions/exteriorLabels.js`, `src/utils/detection/scale.js`, `src/App.jsx` | ✅ `88cc8de` |
+| **B2** | Bound what the boundary search retains | A2 (deterministic pick) | `src/utils/detection/{cache,candidates,raster,index}.js`, `src/workers/detectionWorker.js`, `scripts/`, `package.json` | ✅ `0b138cc` |
+
+**B1 met its own escalate condition and committed anyway**; the orchestrator
+adjudicated and upheld it. ExampleFloorplan1's consensus error moves
++3.1% → +3.6% because GARAGE is now correctly dropped. That regression is an
+artifact of the ~3% common-mode rectangle overshoot described in §0: overlaying
+B1 onto the wall-face-seating branch gives **15.60 px/ft / +0.6% both with and
+without the garage** — a perfect no-op. B1 also found the same centroid test a
+second time in `scale.js`'s `labelSqFt` cross-check and fixed both.
+
+**B2 deviated from the brief in three places, each measured.** The budget is
+**32 MB, not 48** (at 48, EF3's 42.9 MB memo stays under and EF3 still retains
+75.4 MB; 32 trips exactly the three heavy sheets and leaves the four normal ones
+memoised). `Int16Array`, not `Uint16Array`, because `scoring.js:104` tests
+`labels[...] >= 0`, which is unconditionally true for an unsigned array. And
+B2b's `clearDetectionCache()` was wired into the **worker only** — nothing on the
+main thread ever calls the pipeline cores, so the main-thread copy of `cache.js`
+module state is permanently empty and a call in `terminateDetectionWorker` would
+be a no-op twice over. A comment at `src/utils/detection/index.js:104` records
+this so it is not re-added.
+
+**Follow-up B2 surfaced and did not fix:** with the search memo forced entirely
+off, the fixtures still retain 11.6–32.5 MB. That is `getCachedAnalysis`'s LRU
+(`src/utils/detection/cache.js:10`, `MAX_ENTRIES = 4`), holding several
+page-sized masks per image for up to four images with no size bound. It is now
+the dominant retention, and it is why EF1 (50.3 MB) and EF7 (51.9 MB) sit just
+above 50 even though their search memos are only 28.5 and 21.0 MB. Worth its own
+task.
 
 ### Wave C — after B (2 agents, parallel)
 

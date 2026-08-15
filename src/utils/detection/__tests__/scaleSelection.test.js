@@ -26,6 +26,13 @@ const room = (name, x, y, confidence, labelDims = null, rect = null) => {
 describe('selectProjectScale on real fixture rooms', () => {
   // ExampleFloorplan: six well-drawn rooms at ~15.5-16.5 px/ft plus an
   // open-plan KITCHEN that ran into the dining area and reads +107%.
+  //
+  // GARAGE is dropped on its own label text, so five rooms vote and the answer
+  // is 16.05 rather than the 15.97 the garage used to pull it to. That is 0.5pp
+  // further from this fixture's 15.5 truth, and it is not the garage having
+  // been a good ruler: every rect on this plan reads ~3% high together, and the
+  // garage's happened to be one of the lower reads. The truth's own provenance
+  // median is 15.492 with the garage and 15.492 without it.
   it('settles on the scale the well-drawn rooms agree about', () => {
     const result = selectProjectScale([
       room('BEDROOM (top-left)', 16.13, 15.97, 0.98),
@@ -36,10 +43,14 @@ describe('selectProjectScale on real fixture rooms', () => {
       room('FAMILY ROOM', 16.52, 16.05, 0.98),
       room('KITCHEN (open-plan)', 32.04, 35.62, 0.70),
     ]);
-    expect(result.pixelsPerFoot).toBeCloseTo(15.97, 2);
+    expect(result.pixelsPerFoot).toBeCloseTo(16.05, 2);
     expect(result.level).toBe('ok');
     expect(result.reason).toBe('auto-consensus');
-    expect(result.roomCount).toBe(6);
+    expect(result.roomCount).toBe(5);
+    // No exterior label boxes were supplied: the room's own text is enough.
+    expect(result.rejected).toContainEqual(
+      expect.objectContaining({ name: 'GARAGE', reason: 'non-gla' }),
+    );
   });
 
   // The same KITCHEN clears the confidence gate at 0.70, so the gate alone is

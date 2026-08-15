@@ -23,6 +23,7 @@ import {
   robustScale, orientDimsToBox, decideProjectScale, PLAN_SPREAD_TOLERANCE,
 } from './utils/detection/validate';
 import { ringSetArea } from './utils/detection/polygon';
+import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary, scaleQualitySummary } from './utils/boundaryQuality';
 import useAppStore, { selectCombinedArea, selectPerimeterOverlay, otherRoomScaleSamples } from './store/appStore';
@@ -49,11 +50,6 @@ const boundaryConstraints = () => {
   const overlapsNonGla = (bbox) => nonGla.some((n) =>
     bbox.x < n.x + n.width && n.x < bbox.x + bbox.width
     && bbox.y < n.y + n.height && n.y < bbox.y + bbox.height);
-  const centreInNonGla = (rect) => nonGla.some((n) => {
-    const cx = (rect.left + rect.right) / 2;
-    const cy = (rect.top + rect.bottom) / 2;
-    return cx >= n.x && cx <= n.x + n.width && cy >= n.y && cy <= n.y + n.height;
-  });
   return {
     // A garage is inside the drawing but is exactly what the tracer is being
     // asked to carve out, so asserting it as known-inside is wrong input even
@@ -62,7 +58,7 @@ const boundaryConstraints = () => {
     // below have always followed; `rooms` only escaped it while it held the one
     // room the user had clicked.
     rooms: state.rooms
-      .filter((r) => r.rect && !centreInNonGla(r.rect))
+      .filter((r) => r.rect && !roomIsNonGla(r, nonGla))
       .map((r) => ({ name: r.name ?? null, rect: r.rect })),
     interiorPoints: state.detectedDimensions
       .filter((d) => d.bbox && !overlapsNonGla(d.bbox))

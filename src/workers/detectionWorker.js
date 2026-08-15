@@ -1,4 +1,5 @@
 import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../utils/detection/pipeline';
+import { clearDetectionCache } from '../utils/detection/cache';
 import { hashDataUrl } from '../utils/hash';
 
 // Decoded image data is reused across requests for the same image: a room
@@ -9,6 +10,11 @@ let lastImageData = null;
 
 const imageBitmapToImageData = async (imageDataUrl, key) => {
   if (key && key === lastImageKey && lastImageData) return lastImageData;
+  // Everything the detection memo holds is keyed by image, so a new one makes
+  // all of it unreadable dead weight — tens of MB of page-sized label arrays,
+  // previously kept until the *next* trace of the new image happened to evict
+  // it, or forever if the user only ran OCR.
+  if (lastImageKey && lastImageKey !== key) clearDetectionCache();
   const response = await fetch(imageDataUrl);
   const blob = await response.blob();
   const bitmap = await createImageBitmap(blob);
