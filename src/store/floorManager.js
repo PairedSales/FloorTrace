@@ -5,6 +5,9 @@ import {
   normalizeTraceType,
   traceTypeColor,
 } from '../utils/traceTypes';
+// From areaCalculator, not appStore: appStore already imports createFloorSlice
+// from here, so sourcing it there made a cycle that only worked by hoisting.
+import { mergeHoles } from '../utils/areaCalculator';
 
 /**
  * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
@@ -185,6 +188,9 @@ export function createFloorSlice(set, get) {
         traces = current.map((t, i) => ({
           ...t,
           ...normalized[i],
+          // Spreading `normalized[i]` would replace the holes wholesale, and a
+          // void the user punched is not the detector's to discard.
+          holes: mergeHoles(t.holes, normalized[i].holes),
           closed: true,
         }));
       } else {
@@ -193,6 +199,10 @@ export function createFloorSlice(set, get) {
           id: `trace-${stamp}-${i}`,
           name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
           ...floor,
+          // No identity to carry across a floor-count change, so the voids ride
+          // along by position — the common case is a floor gained or lost below
+          // the one that was punched.
+          holes: mergeHoles(current[i]?.holes, floor.holes),
           closed: true,
           visible: true,
           locked: false,

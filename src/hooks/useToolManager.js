@@ -27,6 +27,7 @@ export function useToolManager() {
   const angleToolActive   = useAppStore((s) => s.angleToolActive);
   const drawModeActive   = useAppStore((s) => s.drawModeActive);
   const scaleToolActive  = useAppStore((s) => s.scaleToolActive);
+  const voidToolActive   = useAppStore((s) => s.voidToolActive);
 
   const setLineToolActive         = useAppStore((s) => s.setLineToolActive);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -36,6 +37,7 @@ export function useToolManager() {
   const setCropToolActive         = useAppStore((s) => s.setCropToolActive);
   const setAngleToolActive         = useAppStore((s) => s.setAngleToolActive);
   const setDrawModeActive         = useAppStore((s) => s.setDrawModeActive);
+  const setVoidToolActive         = useAppStore((s) => s.setVoidToolActive);
   const setMeasurementLines       = useAppStore((s) => s.setMeasurementLines);
   const setCustomShapes           = useAppStore((s) => s.setCustomShapes);
   const setScaleToolActive        = useAppStore((s) => s.setScaleToolActive);
@@ -46,7 +48,8 @@ export function useToolManager() {
    * Saves an undo point first so tool activations are undoable.
    */
   const deactivateAll = useCallback(() => {
-    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive || scaleToolActive) {
+    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive
+        || scaleToolActive || voidToolActive) {
       undoManager.save();
     }
     setLineToolActive(false);
@@ -59,12 +62,14 @@ export function useToolManager() {
     setDrawModeActive(false);
     setScaleToolActive(false);
     setCurrentScaleLine(null);
+    setVoidToolActive(false);
   }, [
     lineToolActive,
     drawAreaActive,
     eraserToolActive,
     cropToolActive,
     scaleToolActive,
+    voidToolActive,
     setAngleToolActive,
     setCropToolActive,
     setCurrentCustomShape,
@@ -75,6 +80,7 @@ export function useToolManager() {
     setEraserToolActive,
     setLineToolActive,
     setScaleToolActive,
+    setVoidToolActive,
   ]);
 
   // ── individual toggles ────────────────────────────────────────────────────
@@ -132,6 +138,16 @@ export function useToolManager() {
     setScaleToolActive(true);
   }, [scaleToolActive, deactivateAll, setScaleToolActive, setCurrentScaleLine]);
 
+  const handleVoidToolToggle = useCallback(() => {
+    if (voidToolActive) {
+      undoManager.save();
+      setVoidToolActive(false);
+      return;
+    }
+    deactivateAll();
+    setVoidToolActive(true);
+  }, [voidToolActive, deactivateAll, setVoidToolActive]);
+
   const handleAngleToolToggle = useCallback(() => {
     if (angleToolActive) {
       setAngleToolActive(false);
@@ -172,5 +188,6 @@ export function useToolManager() {
     handleDrawModeToggle,
     handleScaleToolToggle,
     handleClearTools,
+    handleVoidToolToggle,
   };
 }

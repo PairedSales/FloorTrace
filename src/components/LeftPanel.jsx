@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair } from 'lucide-react';
 import useAppStore, { selectAreaByType } from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
-import { calculateArea } from '../utils/areaCalculator';
+import { calculateArea, holeRings } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
 import { resolveAnchor } from '../utils/warningAnchors';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
@@ -112,6 +112,16 @@ const TraceQuality = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWa
       )}
     </div>
   );
+};
+
+// `−2 voids (1 yours)`. A subtraction the user asserted by hand reads
+// differently from one the detector guessed, so a mixed set says which is which.
+const voidNote = (holes) => {
+  const rings = holeRings(holes).filter((r) => r?.length >= 3);
+  if (!rings.length) return '';
+  const mine = (holes ?? []).filter((h) => h?.source === 'user').length;
+  const mixed = mine > 0 && mine < rings.length;
+  return ` −${rings.length} ${rings.length === 1 ? 'void' : 'voids'}${mixed ? ` (${mine} yours)` : ''}`;
 };
 
 const LeftPanel = ({
@@ -543,7 +553,7 @@ const LeftPanel = ({
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPerimeterTraceType(trace.id, e.target.value)}
                           title="Area type"
-                          className="shrink-0 max-w-[76px] cursor-pointer rounded border border-chrome-700 bg-chrome-900 py-px pl-1 pr-0.5 text-[9px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                          className="shrink-0 max-w-[62px] cursor-pointer rounded border border-chrome-700 bg-chrome-900 py-px pl-1 pr-0.5 text-[9px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-accent/50"
                         >
                           {TRACE_TYPES.map((t) => (
                             <option key={t.id} value={t.id}>{t.label}</option>
@@ -553,7 +563,7 @@ const LeftPanel = ({
                         <span>
                           {trace.vertices ? `${trace.vertices.length} pts` : '0 pts'}
                           {trace.closed ? ' (Closed)' : ' (Drawing)'}
-                          {trace.holes?.length ? ` −${trace.holes.length} void` : ''}
+                          {voidNote(trace.holes)}
                         </span>
                         <span>
                           {traceArea > 0 ? `${tAreaText} ${tAreaSuffix}` : '—'}

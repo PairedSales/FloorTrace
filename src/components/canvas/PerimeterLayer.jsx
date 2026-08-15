@@ -5,7 +5,7 @@ import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../util
 import {
   measureSideLenWidth, pointToLineDistance, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
 } from './canvasUtils';
-import { calculateArea, getCentroid } from '../../utils/areaCalculator';
+import { calculateArea, getCentroid, holeRings, holeKey } from '../../utils/areaCalculator';
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
@@ -309,6 +309,10 @@ const PerimeterLayer = ({
   onVertexDragEnd,
   onDeletePerimeterVertex,
   isSelfIntersecting = false,
+  voidToolActive = false,
+  voidCandidate = null,
+  selectedHole = null,
+  onHoleSelect,
 }) => {
   const activeTrace = (perimeterTraces || []).find((t) => t.id === activeTraceId);
   const targetVertices = activeTrace?.vertices;
@@ -407,32 +411,30 @@ const PerimeterLayer = ({
     [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
-  // Enclosed voids (courtyards, light wells) are drawn as dashed inner rings
-  // and are already subtracted from the trace's area.
-  const holeRings = (perimeterTraces || []).flatMap((trace) =>
-    (trace.visible ? (trace.holes ?? []) : []).map((hole, i) => ({
-      key: `hole-${trace.id}-${i}`,
-      points: hole.flatMap((v) => [v.x, v.y]),
-      color: trace.color || '#BD93F9',
-    })));
+  // Enclosed voids (courtyards, light wells, and anything punched by hand) are
+  // drawn as dashed inner rings and are already subtracted from the trace's
+  // area. Shapes go through the shared `holeRings` normalizer so a tagged hole
+  // and a v1 file's bare ring cannot render differently.
+  const holeShapes = (perimeterTraces || []).flatMap((trace) => {
+    if (!trace.visible) return [];
+    const holes = trace.holes ?? [];
+    return holeRings(holes).flatMap((ring, i) => {
+      if (!ring || ring.length < 3) return [];
+      const id = holeKey(holes[i], i);
+      return [{
+        key: `hole-${trace.id}-${id}`,
+        traceId: trace.id,
+        holeId: id,
+        ring,
+        points: ring.flatMap((v) => [v.x, v.y]),
+        color: trace.color || '#BD93F9',
+        selected: selectedHole?.traceId === trace.id && selectedHole?.holeId === id,
+      }];
+    });
+  });
 
   return (
     <>
-      {/* 0. Render enclosed voids */}
-      {holeRings.map((ring) => (
-        <Line
-          key={ring.key}
-          points={ring.points}
-          stroke={ring.color}
-          strokeWidth={1.5 / scale}
-          dash={[6 / scale, 4 / scale]}
-          closed={true}
-          fill="rgba(40, 42, 54, 0.55)"
-          listening={false}
-          perfectDrawEnabled={false}
-        />
-      ))}
-
       {/* 1. Render all visible inactive traces first */}
       {(perimeterTraces || []).map((trace) => {
         if (!trace.visible || trace.id === activeTraceId) return null;
@@ -466,6 +468,103 @@ const PerimeterLayer = ({
           listening={false}
           perfectDrawEnabled={false}
         />
+      )}
+
+      {/* 2b. Render enclosed voids. After the outlines, not before: both fills
+              are translucent and covered their own voids, so a subtraction read
+              as slightly-darker floor. */}
+      {holeShapes.map((hole) => (
+        <Line
+          key={hole.key}
+          name="void-hole"
+          points={hole.points}
+          stroke={hole.selected ? '#FF79C6' : hole.color}
+          strokeWidth={(hole.selected ? 3 : 1.5) / scale}
+          dash={[6 / scale, 4 / scale]}
+          closed={true}
+          fill="rgba(40, 42, 54, 0.55)"
+          listening={voidToolActive}
+          onClick={voidToolActive ? (e) => {
+            e.cancelBubble = true;
+            onHoleSelect?.({ traceId: hole.traceId, holeId: hole.holeId });
+          } : undefined}
+          perfectDrawEnabled={false}
+        />
+      ))}
+
+      {/* 2c. What each void takes off the total. The badge shows net square
+              footage, which on its own never accounts for the difference. */}
+      {feetPerPixel && holeShapes.map((hole) => {
+        const centroid = getCentroid(hole.ring);
+        const holeArea = calculateArea(hole.ring, feetPerPixel);
+        if (!(holeArea > 0)) return null;
+        const { value: areaText, suffix: areaSuffix } = formatArea(holeArea, unit);
+        const labelText = `Void −${areaText} ${areaSuffix}`;
+        const fontSize = 10 / scale;
+        const labelWidth = measureSideLenWidth(labelText, fontSize) + 10 / scale;
+        const labelHeight = fontSize * 1.5 + 3 / scale;
+
+        return (
+          <Group key={`void-label-${hole.key}`} x={centroid.x} y={centroid.y} listening={false}>
+            <Rect
+              width={labelWidth}
+              height={labelHeight}
+              offsetX={labelWidth / 2}
+              offsetY={labelHeight / 2}
+              rotation={-canvasRotation}
+              fill="rgba(40, 42, 54, 0.92)"
+              stroke={hole.color}
+              strokeWidth={1 / scale}
+              cornerRadius={labelHeight / 2}
+              perfectDrawEnabled={false}
+            />
+            <Text
+              width={labelWidth}
+              height={labelHeight}
+              offsetX={labelWidth / 2}
+              offsetY={labelHeight / 2}
+              rotation={-canvasRotation}
+              text={labelText}
+              fontSize={fontSize}
+              fill="#ffffff"
+              fontFamily={SIDE_LEN_FONT_FAMILY}
+              fontStyle="600"
+              align="center"
+              verticalAlign="middle"
+            />
+          </Group>
+        );
+      })}
+
+      {/* 2d. The void being drawn, in the invalid colour when the candidate
+              already fails validation — so the rejection is visible before the
+              mouse comes up. */}
+      {voidCandidate?.ring?.length >= 2 && (
+        <>
+          <Line
+            points={voidCandidate.ring.flatMap((v) => [v.x, v.y])}
+            stroke={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+            strokeWidth={2 / scale}
+            dash={[6 / scale, 4 / scale]}
+            closed={voidCandidate.ring.length >= 3}
+            fill={voidCandidate.ring.length >= 3
+              ? (voidCandidate.valid ? 'rgba(40, 42, 54, 0.45)' : 'rgba(255, 85, 85, 0.18)')
+              : undefined}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          {!voidCandidate.closed && voidCandidate.ring.map((v, i) => (
+            <Circle
+              key={`void-corner-${i}`}
+              x={v.x}
+              y={v.y}
+              radius={3.5 / scale}
+              fill={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+              listening={false}
+              perfectDrawEnabled={false}
+            />
+          ))}
+        </>
       )}
 
       {/* 3. Render active trace draggable vertex handles */}

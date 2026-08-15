@@ -149,6 +149,7 @@ function App() {
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const voidToolActive = useAppStore((s) => s.voidToolActive);
   const angleToolActive = useAppStore((s) => s.angleToolActive);
   const angleToolState = useAppStore((s) => s.angleToolState);
   const drawModeActive = useAppStore((s) => s.drawModeActive);
@@ -236,6 +237,7 @@ function App() {
     handleDrawModeToggle,
     handleScaleToolToggle,
     handleClearTools,
+    handleVoidToolToggle,
   } = useToolManager();
 
   // Declared after handlePasteImage / handleFileOpen (see below) so the
@@ -570,7 +572,14 @@ function App() {
     const source = boundaryResult?.quality?.source ?? 'auto';
     const shaped = floors.map((boundary) => ({
       vertices: boundary.polygon.map((point) => ({ x: point.x, y: point.y })),
-      holes: boundary.holes.map((hole) => hole.map((point) => ({ x: point.x, y: point.y }))),
+      // The one boundary where pipeline holes become trace holes, and so the
+      // one place the provenance tag is applied — the detector itself keeps
+      // emitting bare rings.
+      holes: boundary.holes.map((hole, i) => ({
+        id: `hole-auto-${i}`,
+        ring: hole.map((point) => ({ x: point.x, y: point.y })),
+        source: 'auto',
+      })),
       quality: {
         source,
         confidence: boundary.confidence,
@@ -1216,6 +1225,8 @@ function App() {
             drawStrokes={drawStrokes}
             onDrawModeToggle={handleDrawModeToggle}
             onFinishDrawMode={handleFinishDrawMode}
+            voidToolActive={voidToolActive}
+            onVoidToolToggle={handleVoidToolToggle}
           />
         </div>
 
@@ -1274,6 +1285,8 @@ function App() {
               currentCustomShape={currentCustomShape}
               onClearTools={handleClearTools}
               hasArea={area > 0}
+              voidToolActive={voidToolActive}
+              onVoidToolToggle={handleVoidToolToggle}
             />
           )}
         </div>

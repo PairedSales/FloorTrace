@@ -17,6 +17,7 @@ import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
 import { useEraserTool } from '../hooks/useEraserTool';
 import { useCropTool } from '../hooks/useCropTool';
 import { useDrawTool } from '../hooks/useDrawTool';
+import { useVoidTool } from '../hooks/useVoidTool';
 import { getUnitStyleFromDimensions } from '../utils/unitConverter';
 import { resolveRoomScale } from '../utils/detection/validate';
 
@@ -81,6 +82,8 @@ const CanvasStage = React.memo(({
   drawStrokes,
   onDrawModeToggle,
   onFinishDrawMode,
+  voidToolActive,
+  onVoidToolToggle,
 }) => {
   const stageRef = useRef(null);
   const renderCountRef = useRef(0);
@@ -145,6 +148,7 @@ const CanvasStage = React.memo(({
     eraserToolActive,
     drawModeActive,
     cropToolActive,
+    voidToolActive,
     traceInteractionMode,
     draggingRoom: routerRef.current?.draggingRoom ?? false,
     draggingRoomCorner: routerRef.current?.draggingRoomCorner ?? null,
@@ -186,6 +190,13 @@ const CanvasStage = React.memo(({
     onImageUpdate,
     onCropToolToggle,
     getCanvasCoords,
+  });
+
+  // ── 4b. Void Tool ──────────────────────────────────────────────────────────
+  const voidTool = useVoidTool({
+    voidToolActive,
+    getCanvasCoords,
+    scaleRef: camera.scaleRef,
   });
 
   // ── 5. Measurement System ──────────────────────────────────────────────────
@@ -276,6 +287,11 @@ const CanvasStage = React.memo(({
     drawTool,
     onDrawModeToggle,
     onFinishDrawMode,
+
+    // Void
+    voidToolActive,
+    voidTool,
+    onVoidToolToggle,
 
     // Callbacks
     onRoomOverlayUpdate,
@@ -515,7 +531,7 @@ const CanvasStage = React.memo(({
           onMouseUp={router.handleStageMouseUp}
           onDblClick={router.handleStageDoubleClick}
           onDblTap={router.handleStageDoubleClick}
-          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : cropToolActive ? 'crosshair' : 'default' }}
+          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : (cropToolActive || voidToolActive) ? 'crosshair' : 'default' }}
         >
           {camera.isImageReady && (
             <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
@@ -551,6 +567,10 @@ const CanvasStage = React.memo(({
               onVertexDragEnd={perimeter.handleVertexDragEnd}
               onDeletePerimeterVertex={handleDeletePerimeterVertex}
               isSelfIntersecting={perimeter.isSelfIntersecting}
+              voidToolActive={voidToolActive}
+              voidCandidate={voidTool.candidate}
+              selectedHole={router.selectedHole}
+              onHoleSelect={router.setSelectedHole}
             />
 
             <WarningHighlightLayer anchor={warningAnchor} scale={camera.scale} />
