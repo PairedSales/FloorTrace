@@ -7,6 +7,7 @@ import {
   sanitizeData,
   importProject,
 } from '../projectSerializer';
+import { hashDataUrl } from '../hash';
 
 // Mock storeState
 const createMockStoreState = () => ({
@@ -278,6 +279,91 @@ describe('projectSerializer', () => {
       const project = serializeSketch(storeState);
       project.version = 99; // Far in the future
       expect(() => validateProjectVersion(project)).toThrow(/Incompatible project version/);
+    });
+  });
+
+  // `hashDataUrl` samples only the first 8 KB plus the total length, so two
+  // images that share a prefix and a length collide *deterministically* -- no
+  // birthday luck required. The crop and eraser tools emit exactly that shape:
+  // same-length data URLs from one canvas at one size. These are the cases
+  // where the saved file used to come back holding someone else's floorplan.
+  describe('image identity in the saved file', () => {
+    const PREFIX = 'data:image/png;base64,' + 'A'.repeat(9000);
+    // Same first 8 KB, same total length, different pixels.
+    const IMAGE_A = `${PREFIX}AAAAdiffer-A`;
+    const IMAGE_B = `${PREFIX}AAAAdiffer-B`;
+
+    it('the two fixtures really do collide, or these tests prove nothing', () => {
+      expect(IMAGE_A.length).toBe(IMAGE_B.length);
+      expect(IMAGE_A).not.toBe(IMAGE_B);
+      expect(hashDataUrl(IMAGE_A)).toBe(hashDataUrl(IMAGE_B));
+    });
+
+    it('keeps the active image when the history pool holds a colliding one', () => {
+      const storeState = { ...createMockStoreState(), image: IMAGE_A };
+      // B was interned first, so it occupies the base slot A would hash to.
+      const historyState = {
+        undoStack: [{ __imageRef: hashDataUrl(IMAGE_B), roomOverlay: null }],
+        redoStack: [],
+        imagePool: [[hashDataUrl(IMAGE_B), IMAGE_B]],
+      };
+
+      const project = serializeSketch(storeState, historyState);
+      const restored = deserializeSketch(project);
+
+      expect(restored.statePatch.image).toBe(IMAGE_A);
+      // ...and B is still intact under its own key, so the snapshot that
+      // references it still resolves to B rather than to A.
+      const poolAfter = Object.fromEntries(restored.historyPatch.imagePool);
+      expect(poolAfter[hashDataUrl(IMAGE_B)]).toBe(IMAGE_B);
+      expect(project.images[project.floors[0].state.imageRef]).toBe(IMAGE_A);
+    });
+
+    it('does not repoint a snapshot when the active image collides with it', () => {
+      const storeState = { ...createMockStoreState(), image: IMAGE_A };
+      const refB = hashDataUrl(IMAGE_B);
+      const historyState = {
+        undoStack: [{ __imageRef: refB, roomOverlay: { x1: 1, y1: 1, x2: 2, y2: 2 } }],
+        redoStack: [],
+        imagePool: [[refB, IMAGE_B]],
+      };
+
+      const project = serializeSketch(storeState, historyState);
+
+      // The snapshot's key must still resolve to the image it was taken with.
+      expect(project.images[refB]).toBe(IMAGE_B);
+      expect(project.floors[0].state.imageRef).not.toBe(refB);
+      expect(Object.keys(project.images)).toHaveLength(2);
+    });
+
+    it('still de-duplicates when the active image is already interned', () => {
+      const storeState = { ...createMockStoreState(), image: IMAGE_A };
+      const refA = hashDataUrl(IMAGE_A);
+      const historyState = {
+        undoStack: [{ __imageRef: refA, roomOverlay: null }],
+        redoStack: [],
+        imagePool: [[refA, IMAGE_A]],
+      };
+
+      const project = serializeSketch(storeState, historyState);
+
+      expect(Object.keys(project.images)).toHaveLength(1);
+      expect(project.floors[0].state.imageRef).toBe(refA);
+      expect(deserializeSketch(project).statePatch.image).toBe(IMAGE_A);
+    });
+
+    it('reads a file written before the fix unchanged', () => {
+      // Legacy shape: one image under its raw hash, which is still a valid key.
+      const legacy = {
+        fileType: 'floorplan',
+        version: 1,
+        metadata: { projectId: 'legacy', projectName: 'x', createdAt: '', updatedAt: '' },
+        globalSettings: { canvasRotation: 0 },
+        floors: [{ id: 'floor-1', name: '1st', state: { imageRef: hashDataUrl(IMAGE_A) } }],
+        activeFloorId: 'floor-1',
+        images: { [hashDataUrl(IMAGE_A)]: IMAGE_A },
+      };
+      expect(deserializeSketch(legacy).statePatch.image).toBe(IMAGE_A);
     });
   });
 });

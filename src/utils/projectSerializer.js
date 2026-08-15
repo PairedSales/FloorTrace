@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { hashDataUrl } from './hash';
+import { internKey } from './hash';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // Floor state fields written to a project file. Derived from the store's one
@@ -284,11 +284,38 @@ export function serializeSketch(storeState, historyState = null) {
     activeFloorState[key] = storeState[key];
   }
 
+  // The history pool goes in first, with its keys preserved exactly: they were
+  // minted by undoManager's `internKey`, and every snapshot's `__imageRef`
+  // points at them. Rewriting one would silently repoint a snapshot.
+  if (historyState && historyState.imagePool) {
+    for (const [key, dataUrl] of historyState.imagePool) {
+      images[key] = dataUrl;
+    }
+  }
+
+  // `internKey`, not `hashDataUrl`. This key is what `deserializeSketch`
+  // resolves back into `image`, so it has to be an identity, not a bucket --
+  // the rule hash.js states and undoManager already follows.
+  //
+  // The old code minted a raw `hashDataUrl` into this same namespace without
+  // looking at what was already there, and it corrupted in both directions.
+  // `hashDataUrl` folds an 8 KB prefix plus the length into 32 bits, and the
+  // crop and eraser tools emit same-length data URLs from one canvas, so a
+  // collision between two real images of one project is reachable rather than
+  // theoretical. With the active image A hashing to a slot the pool already
+  // held for a different image B, the pool merge overwrote A and the reopened
+  // project showed B as the floorplan; and where A had been interned at a
+  // probed slot, writing A to the base slot clobbered B and every snapshot
+  // referencing it restored the wrong drawing. Either way the file stayed
+  // schema-valid and nothing looked wrong.
+  //
+  // When the active image is already in the pool -- the usual case -- this
+  // returns that key and the assignment is a no-op, so de-duplication is
+  // unchanged.
   let imageRef = null;
   if (activeFloorState.image) {
-    const hash = hashDataUrl(activeFloorState.image);
-    images[hash] = activeFloorState.image;
-    imageRef = hash;
+    imageRef = internKey(activeFloorState.image, (key) => images[key]);
+    images[imageRef] = activeFloorState.image;
   }
   delete activeFloorState.image;
 
@@ -309,13 +336,6 @@ export function serializeSketch(storeState, historyState = null) {
     undoStack: historyState.undoStack || [],
     redoStack: historyState.redoStack || [],
   } : undefined;
-
-  // Add all history images to top-level pool
-  if (historyState && historyState.imagePool) {
-    for (const [hash, dataUrl] of historyState.imagePool) {
-      images[hash] = dataUrl;
-    }
-  }
 
   return {
     fileType: 'floorplan',
