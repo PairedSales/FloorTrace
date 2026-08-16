@@ -165,7 +165,7 @@ const MeasurementDock = ({
   ocrFailed,
   useInteriorWalls,
   onInteriorWallToggle,
-  perimeterOverlay,
+  canSwitchWallFace,
   onDimensionFocus,
   onDimensionBlur,
   onScaleTool,
@@ -461,11 +461,15 @@ const MeasurementDock = ({
         <div id="dock-report">
           <Card
             title="Area"
-            action={perimeterOverlay && (
+            action={canSwitchWallFace && (
+              // One setting for every outline on the canvas, not just the
+              // selected one — the label says so, because two outlines measured
+              // to different wall faces is an area nobody can reconcile.
               <div className="flex p-0.5 gap-0.5 bg-sunken border border-line rounded-md"
-                   role="group" aria-label="Wall face">
+                   role="group" aria-label="Wall face for all outlines">
                 <button
                   onClick={() => onInteriorWallToggle(false)}
+                  title="Measure every outline to the exterior wall face"
                   aria-pressed={!useInteriorWalls}
                   className={`unit-pill ${!useInteriorWalls ? 'unit-pill-active' : 'unit-pill-inactive'}`}
                 >
@@ -473,6 +477,7 @@ const MeasurementDock = ({
                 </button>
                 <button
                   onClick={() => onInteriorWallToggle(true)}
+                  title="Measure every outline to the interior wall face"
                   aria-pressed={useInteriorWalls}
                   className={`unit-pill ${useInteriorWalls ? 'unit-pill-active' : 'unit-pill-inactive'}`}
                 >

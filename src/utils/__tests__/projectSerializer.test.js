@@ -334,6 +334,46 @@ describe('projectSerializer', () => {
     });
   });
 
+  // The pair the exterior/interior switch switches between. It is per trace so
+  // the switch reaches outlines from every detection pass, which means a
+  // reopened project that dropped it has a switch that moves nothing.
+  describe('trace wall faces', () => {
+    const ring = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
+    const wallFaces = {
+      outer: { vertices: ring(100), holes: [{ id: 'hole-auto-0', ring: ring(9), source: 'auto' }] },
+      inner: { vertices: ring(90), holes: [] },
+    };
+
+    const withFaces = (faces) => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].wallFaces = faces;
+      return serializeSketch(storeState);
+    };
+
+    it('round-trips both faces and their voids', () => {
+      const project = withFaces(wallFaces);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].wallFaces).toEqual(wallFaces);
+    });
+
+    // A trace the user drew by hand, and every trace in a file written before
+    // the pair existed, simply has no pair.
+    it('accepts a trace with no pair at all', () => {
+      const project = withFaces(undefined);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const { statePatch } = deserializeSketch(project);
+      expect(statePatch.perimeterTraces[0].wallFaces).toBeUndefined();
+    });
+
+    it('accepts a pair with only one face', () => {
+      const project = withFaces({ outer: { vertices: ring(100), holes: [] }, inner: null });
+      expect(() => validateProjectSchema(project)).not.toThrow();
+    });
+  });
+
   // ──────────────────────────────────────────────────────────────────────────
   // importProject
   // ──────────────────────────────────────────────────────────────────────────

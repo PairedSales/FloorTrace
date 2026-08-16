@@ -95,25 +95,52 @@ export const traceFloorplanBoundary = async (image, options = {}) => {
   });
 };
 
-// Per-floor boundaries in page reading order, each with its enclosed voids and
-// the quality the detector attached to it. Falls back to the single top-level
-// boundary for results predating the floors array (old autosaves).
-export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
+const floorFace = (floor, mode) => {
+  const boundary = boundaryByMode(floor, mode);
+  if (!boundary?.polygon?.length) return null;
+  return {
+    polygon: boundary.polygon,
+    overlay: boundary.overlay,
+    holes: (mode === 'inner' ? floor.innerHoles : floor.holes) ?? [],
+  };
+};
+
+/**
+ * Per-floor boundaries in page reading order, both wall faces together, each
+ * with its enclosed voids and the quality the detector attached to it. Falls
+ * back to the single top-level boundary for results predating the floors array
+ * (old autosaves).
+ *
+ * Emitted as a pair rather than one chosen face because the exterior/interior
+ * switch is a single setting over every outline on the canvas, so each trace
+ * has to carry its own pair: `tracedBoundaries` holds only the most recent
+ * detection run, and a plan traced in several passes has outlines from earlier
+ * ones that run cannot describe.
+ */
+export const getFloorBoundaryFaces = (tracedBoundary) => {
   if (!tracedBoundary) return [];
-  const mode = useInteriorWalls ? 'inner' : 'outer';
   const floors = tracedBoundary.floors?.length ? tracedBoundary.floors : [tracedBoundary];
   return floors
     .map((floor) => {
-      const boundary = boundaryByMode(floor, mode);
-      if (!boundary?.polygon?.length) return null;
+      const outer = floorFace(floor, 'outer');
+      const inner = floorFace(floor, 'inner');
+      if (!outer && !inner) return null;
       return {
-        polygon: boundary.polygon,
-        overlay: boundary.overlay,
-        holes: (useInteriorWalls ? floor.innerHoles : floor.holes) ?? [],
+        outer,
+        inner,
         confidence: floor.confidence ?? tracedBoundary.quality?.confidence ?? null,
         warnings: floor.warnings ?? [],
       };
     })
+    .filter(Boolean);
+};
+
+export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
+  const key = useInteriorWalls ? 'inner' : 'outer';
+  return getFloorBoundaryFaces(tracedBoundary)
+    .map((floor) => (floor[key]
+      ? { ...floor[key], confidence: floor.confidence, warnings: floor.warnings }
+      : null))
     .filter(Boolean);
 };
 

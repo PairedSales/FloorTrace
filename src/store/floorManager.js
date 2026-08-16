@@ -33,6 +33,15 @@ const ordinalSuffix = (num) =>
 let traceIdCounter = 0;
 export const newTraceId = () => `trace-${Date.now()}-${(traceIdCounter += 1)}`;
 
+// A trace's stored wall-face pair is read repeatedly — every flip of the
+// exterior/interior switch — so what lands on the trace is a copy. Sharing the
+// arrays would let a later vertex drag edit the face it came from, and the
+// switch back would return geometry that had quietly moved.
+const clonePoints = (points) => (points ?? []).map((p) => ({ x: p.x, y: p.y }));
+const cloneFaceHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
+  ? clonePoints(h)
+  : { ...h, ring: clonePoints(h.ring) }));
+
 // Naming lives in traceTypes.js, which owns the taxonomy the names come from.
 const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
 
@@ -187,8 +196,15 @@ export function createFloorSlice(set, get) {
       const state = get();
       const current = state.perimeterTraces || [];
       const normalized = floors.map((floor) => (Array.isArray(floor)
-        ? { vertices: floor, holes: [], quality: null }
-        : { vertices: floor.vertices, holes: floor.holes ?? [], quality: floor.quality ?? null }));
+        ? { vertices: floor, holes: [], quality: null, wallFaces: null }
+        : {
+          vertices: floor.vertices,
+          holes: floor.holes ?? [],
+          quality: floor.quality ?? null,
+          // The detector's inner/outer pair for this floor, so the wall-face
+          // switch has something to switch to on every trace it created.
+          wallFaces: floor.wallFaces ?? null,
+        }));
 
       let traces;
       if (current.length === normalized.length) {
@@ -232,6 +248,64 @@ export function createFloorSlice(set, get) {
         traceInteractionMode: 'idle',
         perimeterVertices: null,
         isDirty: true,
+      });
+    },
+
+    /**
+     * Switch every outline to the exterior or interior wall face.
+     *
+     * The switch is one setting for the whole canvas, so it reaches every trace
+     * carrying the detector's pair — not just the active one, and not just the
+     * floors of the most recent detection run. Re-deriving it from
+     * `tracedBoundaries` could only ever move the last run's outlines, which is
+     * why a plan traced in two passes used to switch half of itself.
+     *
+     * Returns how many outlines carry the requested face, so a caller can tell
+     * "nothing to switch" from "switched". Callers own the undo snapshot.
+     */
+    setWallFaceMode: (interior) => {
+      const key = interior ? 'inner' : 'outer';
+      const traces = get().perimeterTraces || [];
+      let carried = 0;
+
+      const updated = traces.map((t) => {
+        const face = t.wallFaces?.[key];
+        if (!face?.vertices?.length) return t;
+        carried += 1;
+        const vertices = clonePoints(face.vertices);
+        return {
+          ...t,
+          vertices,
+          // The same merge a re-trace does: the detector's voids are replaced,
+          // a void the user punched outlives the switch and is re-checked
+          // against the outline that just moved under it.
+          holes: markStaleHoles(mergeHoles(t.holes, cloneFaceHoles(face.holes)), vertices),
+          closed: true,
+        };
+      });
+
+      if (carried) {
+        set({
+          perimeterTraces: updated,
+          traceInteractionMode: 'idle',
+          perimeterVertices: null,
+          isDirty: true,
+        });
+      }
+      return carried;
+    },
+
+    /**
+     * Drop every trace's wall-face pair. The pair describes ink a crop or an
+     * erase has since changed, so the switch must not be able to re-apply it —
+     * the same reason `tracedBoundaries` is dropped on the same edit. The
+     * outlines themselves stay; only the alternative face is forgotten.
+     */
+    clearWallFaces: () => {
+      const traces = get().perimeterTraces || [];
+      if (!traces.some((t) => t.wallFaces)) return;
+      set({
+        perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
       });
     },
 

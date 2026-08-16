@@ -275,6 +275,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         vertices: v?.vertices || [],
         holes: v?.holes ?? [],
         quality: v?.quality ?? null,
+        wallFaces: v?.wallFaces ?? null,
         closed: true,
         visible: true,
         locked: false,
@@ -311,6 +312,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
           // Editing a trace by hand makes it the user's geometry, so an
           // auto-detection's confidence no longer describes it.
           quality: v && 'quality' in v ? v.quality : null,
+          // The opposite rule, and for the same reason as `holes`: the wall-face
+          // pair describes the detection, not the vertices, so a corner nudge
+          // keeps it and the exterior/interior switch still works afterwards.
+          // `setPerimeterOverlay(null)` — how manual and draw modes hand the
+          // outline back to the user — is what drops it.
+          wallFaces: v ? ('wallFaces' in v ? v.wallFaces : (t.wallFaces ?? null)) : null,
           closed: true,
         };
       }
@@ -651,6 +658,17 @@ export const selectPerimeterOverlay = (state) => {
   };
   return lastOverlayResult;
 };
+
+/**
+ * Whether the exterior/interior switch has anything to switch. Offered only
+ * when an outline can actually take it — a toggle that silently does nothing is
+ * worse than one that is not there, and it used to be shown for a hand-drawn
+ * outline that had no second face. The `tracedBoundaries` arm keeps it for
+ * drafts saved before traces carried the pair themselves.
+ */
+export const selectCanSwitchWallFace = (state) =>
+  (state.perimeterTraces || []).some((t) => t.wallFaces?.outer || t.wallFaces?.inner)
+  || Boolean(state.tracedBoundaries);
 
 let lastFeetPerPixel = null;
 let lastTraces = [];

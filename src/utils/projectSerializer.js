@@ -122,6 +122,15 @@ const holeSchema = z.union([
   }).catchall(z.any()),
 ]);
 
+// The detector's two readings of one outline. Declared rather than left to the
+// catchall for the reason stated on `anchor` above: this is what the
+// exterior/interior switch switches between, and a reopened project that
+// dropped it would have a switch that moves nothing and says nothing.
+const wallFaceSchema = z.object({
+  vertices: z.array(vertexSchema),
+  holes: z.array(holeSchema).optional(),
+}).nullable().optional();
+
 const perimeterTraceSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -130,6 +139,10 @@ const perimeterTraceSchema = z.object({
   holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
+  wallFaces: z.object({
+    outer: wallFaceSchema,
+    inner: wallFaceSchema,
+  }).nullable().optional(),
   closed: z.boolean(),
   visible: z.boolean(),
   locked: z.boolean(),
