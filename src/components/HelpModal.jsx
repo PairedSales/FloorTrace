@@ -5,13 +5,13 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const mod = isMac ? '⌘' : 'Ctrl';
 
 const shortcuts = [
-  { keys: 'O', description: 'Toggle options menu' },
+  { keys: 'O', description: 'Show or hide the measurement panel' },
   { keys: 'L', description: 'Toggle show lengths' },
-  { keys: 'F', description: 'Fit image to window' },
+  { keys: 'F', description: 'Fit plan to window' },
   { keys: '[ / ]', description: 'Resize the active brush' },
   { keys: 'R', description: 'Rotate canvas 45° clockwise' },
   { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  { keys: '1 – 9', description: 'Line, Area, Angle, Outline, Crop, Eraser, Draw Exterior, Void, Scale' },
+  { keys: '1 – 9', description: 'Measure, Area, Angle, Place corners, Crop, Erase, Paint outline, Cut out, Scale' },
   { keys: 'Alt / Shift + 1 – 7', description: 'Switch perimeter trace' },
   { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },

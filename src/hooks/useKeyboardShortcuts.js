@@ -108,8 +108,11 @@ export function useKeyboardShortcuts({
         }
         if (e.key.toLowerCase() === 'o') {
           e.preventDefault();
+          // Was the options popover, which the menu bar absorbed. Kept bound to
+          // the nearest thing it meant — show/hide the side panel — rather than
+          // left toggling a store field nothing renders any more.
           const s = useAppStore.getState();
-          s.setShowPanelOptions(!s.showPanelOptions);
+          s.setDockOpen(!s.dockOpen);
           return;
         }
         if (e.key.toLowerCase() === 'l') {

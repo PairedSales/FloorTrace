@@ -168,6 +168,7 @@ const MeasurementDock = ({
   perimeterOverlay,
   onDimensionFocus,
   onDimensionBlur,
+  onScaleTool,
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
@@ -181,6 +182,7 @@ const MeasurementDock = ({
   const image = useAppStore((s) => s.image);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
+  const calibrationSource = useAppStore((s) => s.calibration?.source);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
   // Live state the warning anchors are derived from, so a crop or a re-scan
   // cannot leave a highlight pointing at the wrong part of the image.
@@ -284,6 +286,21 @@ const MeasurementDock = ({
   // than in a toast that has already gone by the time anyone asks.
   const scaleNote = scaleQualitySummary(scaleQuality);
 
+  // Where the scale came from, in the user's terms rather than the store's.
+  const fpp = feetPerPixel;
+  const pxPerFoot = calibrated && fpp?.x > 0 && fpp?.y > 0
+    ? { x: 1 / fpp.x, y: 1 / fpp.y }
+    : null;
+  const anisotropic = pxPerFoot && Math.abs(pxPerFoot.x - pxPerFoot.y) > 1e-6;
+  const measuredRooms = rooms?.length ?? 0;
+  const scaleProvenance = !pxPerFoot
+    ? 'Read the dimensions, or set it from a length you know.'
+    : calibrationSource === 'line-calibration'
+      ? 'From a line you drew.'
+      : measuredRooms > 0
+        ? `From ${measuredRooms} measured ${measuredRooms === 1 ? 'room' : 'rooms'}.`
+        : 'From the room size below.';
+
   const handleCopyArea = () => {
     if (!showBreakdown) {
       navigator.clipboard.writeText(`${areaText} ${areaSuffix}`);
@@ -351,9 +368,50 @@ const MeasurementDock = ({
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
         <StageSpine stages={stages} onSelect={jumpTo} />
 
-        {/* ── Scale ── */}
+        {/* ── Scale ──
+            The scale and where it came from, stated where it is questioned.
+            It used to appear only as `px/ft` inside ScaleSection, which renders
+            nothing at all on the normal room-label path — so the number the
+            whole measurement rests on was invisible unless you had drawn a
+            scale line by hand. */}
         <div id="dock-scale">
-          <Card title="Room size">
+          <Card
+            title="Scale"
+            action={scaleNote && (
+              <span
+                title={scaleNote.detail}
+                className={`chip cursor-help ${scaleNote.level === 'check'
+                  ? 'text-warn bg-warn/12 border-warn/35'
+                  : 'text-ok bg-ok/12 border-ok/35'}`}
+              >
+                <span className="chip-dot" />
+                {scaleNote.level === 'check' ? 'Check' : 'Agrees'}
+              </span>
+            )}
+          >
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono font-semibold tabular-nums text-[19px] text-fg">
+                {pxPerFoot
+                  ? (anisotropic
+                    ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
+                    : `1 ft = ${pxPerFoot.x.toFixed(1)} px`)
+                  : 'Not set'}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] text-fg-3">{scaleProvenance}</p>
+
+            <button
+              type="button"
+              onClick={onScaleTool}
+              className="mt-2.5 w-full h-8 rounded-md border border-line bg-panel-2
+                         text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
+                         transition-colors cursor-pointer"
+            >
+              Set from a length you know
+            </button>
+
+            <div className="mt-3 pt-3 border-t border-line-soft">
+              <h4 className="card-heading mb-2">Room size</h4>
             <div className="grid grid-cols-2 gap-2">
               {['width', 'height'].map((field) => (
                 <div key={field}>
@@ -387,14 +445,15 @@ const MeasurementDock = ({
               ))}
             </div>
 
-            {mode === 'manual' && ocrFailed && !isProcessing && (
-              <p className="mt-2.5 px-2.5 py-2 bg-warn/10 border border-warn/30 rounded-md
-                            text-[12px] text-warn font-medium">
-                Could not read any dimensions — type a room size here instead.
-              </p>
-            )}
+              {mode === 'manual' && ocrFailed && !isProcessing && (
+                <p className="mt-2.5 px-2.5 py-2 bg-warn/10 border border-warn/30 rounded-md
+                              text-[12px] text-warn font-medium">
+                  Could not read any dimensions — type a room size here instead.
+                </p>
+              )}
 
-            <ScaleSection unit={unit} />
+              <ScaleSection unit={unit} />
+            </div>
           </Card>
         </div>
 

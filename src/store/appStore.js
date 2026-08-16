@@ -234,7 +234,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  showPanelOptions: false,
   showHelpModal: false,
   // Which detection warning the user is inspecting, as {traceId, index} into
   // that trace's `quality.warnings`. Declared here rather than in the working
@@ -487,7 +486,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     isProcessing: false,
     processingMessage: '',
   }),
-  setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setFocusedWarning: (v) => set({ focusedWarning: v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),

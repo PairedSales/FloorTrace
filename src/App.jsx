@@ -1214,6 +1214,7 @@ function App() {
             perimeterOverlay={perimeterOverlay}
             onDimensionFocus={handleDimensionFocus}
             onDimensionBlur={handleDimensionBlur}
+            onScaleTool={handleScaleToolToggle}
           />
         )}
 
