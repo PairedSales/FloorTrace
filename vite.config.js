@@ -2,14 +2,17 @@ import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import os from 'node:os'
 
-// Leave one core for the vitest host process. The detection tests are
-// CPU-bound and synchronous — a single boundary trace blocks its worker for
-// 1-3 s — so with one worker per core the host gets no CPU, and the
-// worker->host `onTaskUpdate` RPC times out. That surfaces as
-// `Error: [vitest-worker]: Timeout calling "onTaskUpdate"` and a non-zero exit
-// *with every test passing*, which is what failed the build on a 4-vCPU
-// runner. Capping workers is the fix rather than trimming tests, because the
-// suite only grows.
+// Leave one core for the vitest host process.
+//
+// Vitest's worker->host RPC times out after 60 s (`DEFAULT_TIMEOUT = 6e4` in
+// its birpc setup) and reports it as
+// `Error: [vitest-worker]: Timeout calling "onTaskUpdate"` — a non-zero exit
+// *with every test passing*. The detection suites are CPU-bound and run whole
+// fixture plans, so a single file can total ~55 s and sit right at that edge;
+// contention from one-worker-per-core is what pushes it over on a 4-vCPU
+// runner. The primary fix is keeping any one test file well under the window
+// (the memo suites are split three ways for this reason); this cap removes the
+// contention that inflates their wall time.
 const cores = os.availableParallelism?.() ?? os.cpus().length
 const testWorkers = Math.max(1, cores - 1)
 

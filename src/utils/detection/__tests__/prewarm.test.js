@@ -37,17 +37,17 @@ const FIXTURES = [
   'ExampleFloorplan7.png',  // tall single plan
 ];
 
-// Anything that compares whole traces costs two-to-four full boundary searches
-// at 1-3 s each, all of it blocking the vitest worker. Running that over the
-// whole fixture set starved the reporter RPC and failed CI with every test
-// green, so it is deliberately one plan here — the two-floor sheet with the
-// attached garage, which is the most structurally involved of the set.
-//
-// The breadth guard is `npm run bench:detection`, which CI runs as its own
-// step over all seven fixtures in both the bare and constrained passes, and
-// which a pure-perf change must leave diffing empty. Duplicating that breadth
-// in the unit suite bought nothing and cost the build.
-const TRACE_FIXTURES = ['ExampleFloorplan.png'];
+// Comparing whole traces costs two-to-four full boundary searches per case, so
+// this is a subset rather than the full set — kept small so the file stays well
+// inside vitest's 60 s worker-RPC window (see searchMemoShared.js). These three
+// cover the structural variety that matters: one plan, several plans on a
+// sheet, and two floors with a carve. `npm run bench:detection` is the breadth
+// guard, over all seven fixtures in both passes, on its own CI step.
+const TRACE_FIXTURES = [
+  'ExampleFloorplan.png',
+  'ExampleFloorplan2.png',
+  'ExampleFloorplan6.png',
+];
 
 const images = {};
 
