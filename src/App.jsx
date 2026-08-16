@@ -41,6 +41,7 @@ import { useProjectIO } from './hooks/useProjectIO';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
 import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
+import { useToolLabels } from './hooks/useToolLabels';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -1076,6 +1077,13 @@ function App() {
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
   const { theme, cycleTheme } = useTheme();
+  // Names beside the rail icons. No toast on change: the rail itself is the
+  // feedback, and a notification for a change you are looking at is noise.
+  const { toolLabels, setToolLabels } = useToolLabels();
+  const handleToolLabelsToggle = useCallback(
+    () => setToolLabels(!toolLabels),
+    [toolLabels, setToolLabels],
+  );
   const dockOpen = useAppStore((s) => s.dockOpen);
   const setDockOpen = useAppStore((s) => s.setDockOpen);
   const handleDockToggle = useCallback(
@@ -1156,6 +1164,8 @@ function App() {
         onShowSideLengthsChange={handleShowSideLengthsChange}
         autoSnapEnabled={autoSnapEnabled}
         onAutoSnapChange={handleAutoSnapChange}
+        toolLabels={toolLabels}
+        onToolLabelsChange={setToolLabels}
         saveOnExit={saveOnExit}
         onSaveOnExitChange={handleSaveOnExitChangeWithToast}
         enhancedOcr={enhancedOcr}
@@ -1281,9 +1291,11 @@ function App() {
             activeTool={activeTool}
             hasArea={area > 0}
             hasToolData={hasToolData}
+            showLabels={toolLabels}
             onSelect={handleToolSelect}
             onRotate={handleRotateCanvas}
             onClearTools={handleClearTools}
+            onToggleLabels={handleToolLabelsToggle}
           />
         )}
       </div>
