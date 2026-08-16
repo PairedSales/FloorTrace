@@ -27,16 +27,19 @@ const shortcuts = [
   { keys: 'Click + Drag', description: 'Pan canvas' },
 ];
 
+// Names here must match the command bar and the tool rail. They drifted once
+// already: the shell renamed every command and this list kept describing the
+// old one.
 const tips = [
   'Click on a room to auto-detect its boundary.',
-  'Use "Find Perimeter" to auto-detect exterior walls.',
-  'If that fails, "Draw Exterior" lets you paint roughly over the walls — FloorTrace snaps the outline to them.',
-  'Drag overlay vertices to adjust detected boundaries.',
-  'Click a vertex to select it, then press Delete to remove it.',
-  'Use the Measure tool to draw measurement lines.',
-  'Use the Draw tool to create custom area polygons.',
-  'No printed dimensions? Use Scale — drag a line along a wall you know the length of and type it in.',
-  'Use Void to punch out a courtyard or light well; it is subtracted from the area and survives a re-trace.',
+  'Use "Find outline" to detect the exterior walls automatically.',
+  'If that fails, "Paint outline" lets you paint roughly over the walls — FloorTrace snaps the outline to them.',
+  'Drag outline corners to adjust what the detector found.',
+  'Click a corner to select it, then press Delete to remove it.',
+  'Measure draws a measurement line; Draw an area makes a custom polygon.',
+  'No printed dimensions? Use Scale — drag a line along a wall whose length you know and type it in.',
+  'Use Cut out to punch a courtyard or light well out of an outline; it is subtracted from the area and survives a re-trace.',
+  'The Outlines list shows how confident the detector was, and why.',
   'Drag & drop an image file onto the canvas to open it.',
 ];
 

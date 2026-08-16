@@ -52,28 +52,17 @@ export default {
         35: '0.35',
         45: '0.45',
       },
+      // Only `fade-in` survives the docked shell: `slide-in-left` belonged to
+      // the two panels that used to fly in over the canvas, `toast-in` to the
+      // floating processing overlay the status bar replaced, and `toast-out`
+      // was already unreferenced before that.
       animation: {
-        'toast-in': 'toastIn 0.3s ease-out',
-        'toast-out': 'toastOut 0.3s ease-in forwards',
         'fade-in': 'fadeIn 0.2s ease-out',
-        'slide-in-left': 'slideInLeft 0.2s ease-out',
       },
       keyframes: {
-        toastIn: {
-          '0%': { opacity: '0', transform: 'translateY(-8px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        toastOut: {
-          '0%': { opacity: '1' },
-          '100%': { opacity: '0' },
-        },
         fadeIn: {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
-        },
-        slideInLeft: {
-          '0%': { opacity: '0', transform: 'translateX(-12px)' },
-          '100%': { opacity: '1', transform: 'translateX(0)' },
         },
       },
     },
