@@ -5,6 +5,7 @@
 // footprints, and selection happens later against evidence (see scoring.js).
 
 import {
+  bridgeRuns,
   closeRect,
   floodOutside,
   labelComponents,
@@ -140,6 +141,42 @@ export const sealMetrics = (entry, wallBboxArea) => {
   const coverScore = clamp01((cover - 0.4) / 0.35);
   const solidScore = clamp01((solidity - 0.25) / 0.3);
   return { cover, solidity, seal: Math.sqrt(coverScore * solidScore) };
+};
+
+// Does this group of strokes enclose its own bounding box on its own? A
+// complete floor outline does; a piece of an outline left behind by a long
+// window span encloses at best a corner of the region it belongs to. Two
+// groups that each close by themselves are two drawings, however well their
+// walls line up on the page — which is what stops floor plans stacked on a
+// sheet and sharing a left-wall coordinate from being welded into one
+// building, and what the old "merge whenever the bounding boxes overlap" rule
+// could not express at all.
+//
+// Here rather than in boundary.js because both users of the rule need it and
+// they must not answer differently: the partitioner applies it when deciding
+// what to keep apart, and remediate.js applies the same test when a known-
+// inside constraint says a partition was wrong. Two copies would have drifted.
+export const INDEPENDENT_SEAL = 0.75;
+
+export const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
+  const compW = bbox.maxX - bbox.minX + 1;
+  const compH = bbox.maxY - bbox.minY + 1;
+  const bridged = bridgeRuns(
+    mask, width, height,
+    Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3)),
+    Math.max(8, wallThickness * 2),
+  );
+  // `bbox` is exactly `inkBounds(bridged)` for every caller: the mask's own ink
+  // box, and `bridgeRuns` only fills gaps *between* existing runs, so it cannot
+  // add ink outside them. Handing it over skips a full-page scan.
+  const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness), bbox);
+  if (!fp) return false;
+  // The two scalars sealMetrics reads. footprintEntry would build a page-sized
+  // component mask here, once per candidate net, and drop it unread.
+  const seal = sealMetrics(
+    { area: fp.largest.size, bboxArea: bboxAreaOf(fp.largest.bbox) }, bboxAreaOf(bbox),
+  );
+  return seal.seal >= INDEPENDENT_SEAL;
 };
 
 // Is this opening a window the wall spans, or the mouth of a genuine notch?

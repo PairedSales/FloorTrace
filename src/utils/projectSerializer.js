@@ -102,6 +102,18 @@ const traceQualitySchema = z.object({
     anchor: z.object({ kind: z.enum(['ring', 'rect', 'point', 'segment']) })
       .catchall(z.any()).nullable().optional(),
   })).optional(),
+  // Why this outline is not the one the first search produced: which passes
+  // ran, which was kept, and how many known-inside rooms each attempt held.
+  // Declared for the same reason `scope` and `anchor` above are — an undeclared
+  // key survives autosave and dies on a `.floorplan` round trip, so a reopened
+  // project would quietly claim the trace had never been re-searched.
+  remediation: z.object({
+    ran: z.boolean().optional(),
+    accepted: z.string().nullable().optional(),
+    passes: z.array(z.object({}).catchall(z.any())).optional(),
+    before: z.object({}).catchall(z.any()).optional(),
+    after: z.object({}).catchall(z.any()).optional(),
+  }).catchall(z.any()).nullable().optional(),
 }).nullable().optional();
 
 // A hole is a bare ring or a tagged ring. Both shapes parse so a v1 file

@@ -9,15 +9,16 @@
 // wrong. Producing one polygon from one sealing heuristic gave a wrong answer
 // no second-best and no way to be recognised as wrong.
 
-import { bridgeRuns, dilateRect, labelComponents, openRect } from './raster.js';
+import { dilateRect, labelComponents, openRect } from './raster.js';
 import { polygonArea, polygonBounds, pointInPolygon } from './polygon.js';
 import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
-  generateCandidates, footprintEntry, sealMetrics, measureFootprint,
+  generateCandidates, footprintEntry, sealMetrics, measureFootprint, netSelfSeals,
 } from './candidates.js';
 import { scoreCandidate, pickCandidate, candidateConfidence, warning, bboxRing } from './scoring.js';
 import { buildFloor } from './footprint.js';
 import { brushNetworks, strokeRegion } from './brush.js';
+import { remediateTrace, shouldRemediate } from './remediate.js';
 
 const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
@@ -25,37 +26,6 @@ const inkCount = (mask) => {
   let n = 0;
   for (let i = 0; i < mask.length; i += 1) n += mask[i];
   return n;
-};
-
-// Does this group of strokes enclose its own bounding box on its own? A
-// complete floor outline does; a piece of an outline left behind by a long
-// window span encloses at best a corner of the region it belongs to. Two
-// groups that each close by themselves are two drawings, however well their
-// walls line up on the page — which is what stops floor plans stacked on a
-// sheet and sharing a left-wall coordinate from being welded into one
-// building, and what the old "merge whenever the bounding boxes overlap" rule
-// could not express at all.
-const INDEPENDENT_SEAL = 0.75;
-
-const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
-  const compW = bbox.maxX - bbox.minX + 1;
-  const compH = bbox.maxY - bbox.minY + 1;
-  const bridged = bridgeRuns(
-    mask, width, height,
-    Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3)),
-    Math.max(8, wallThickness * 2),
-  );
-  // `bbox` is exactly `inkBounds(bridged)`: `maskFor` measured it from these
-  // very pixels, and `bridgeRuns` only fills gaps *between* existing runs, so
-  // it cannot add ink outside them. Handing it over skips a full-page scan.
-  const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness), bbox);
-  if (!fp) return false;
-  // The two scalars sealMetrics reads. footprintEntry would build a page-sized
-  // component mask here, once per candidate net, and drop it unread.
-  const seal = sealMetrics(
-    { area: fp.largest.size, bboxArea: bboxAreaOf(fp.largest.bbox) }, bboxAreaOf(bbox),
-  );
-  return seal.seal >= INDEPENDENT_SEAL;
 };
 
 const contains = (outer, inner, margin) =>
@@ -245,6 +215,16 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   const bestOf = (key) => scored.reduce(
     (best, c) => (c ? Math.max(best, key(c)) : best), 0,
   );
+  // A remediation pass asks for every hypothesis regardless of whether the base
+  // ones fell short, because the first attempt has already been judged wrong by
+  // evidence the search itself never sees (see remediate.js). Each rescue is
+  // idempotent, so the gated calls below simply become no-ops.
+  if (options.forceRescues) {
+    generated.rescue.structural();
+    generated.rescue.span();
+    generated.rescue.corridor();
+    scoreNew();
+  }
   if (generated.rescue.hasStructural) {
     generated.rescue.structural();
     scoreNew();
@@ -418,53 +398,23 @@ const floorPlausibility = (floor, net, analysis, evidence, constraints, structur
   return { structural, support: support.mean, holdsConstraint };
 };
 
-export const traceBoundary = (analysis, options = {}) => {
-  const { width, height, wallThickness } = analysis;
+/**
+ * One attempt: the wall networks it was given, turned into ordered floors with
+ * their quality.
+ *
+ * Split out of `traceBoundary` so a remediation pass can re-run exactly this
+ * with a different partition or different search options and be judged by the
+ * same code that judged the first attempt (see remediate.js). `passKey` scopes
+ * every memo the attempt touches: a pass that forces the rescue hypotheses
+ * mutates the candidate set it is handed, so sharing one memo entry across
+ * passes would let a warm cache answer a base trace with an escalated search.
+ */
+export const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) => {
+  const { wallThickness } = analysis;
   const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
   const constraints = options.constraints ?? null;
   const brush = options.brush ?? null;
   const warnings = [];
-
-  // A caller-supplied mask is not part of the cache key, so it opts out of the
-  // memo rather than risk answering for a different drawing. A brush opts out
-  // for the same reason and more strongly: its nets, evidence and candidates
-  // all vary with the stroke, which no key here carries — and a drawn trace
-  // almost always follows an auto trace of the very same image.
-  const cache = (options.mask || brush) ? null : (options.searchCache ?? null);
-  // In draw mode the brush declares the partition: one painted loop is one
-  // building, whatever the ink under it does. That is the whole point — the
-  // page-scope merge and reject rules below are exactly what fails on the
-  // plans a user reaches for this tool on.
-  // Every memo below is per image, so anything that changes *what the search
-  // computes* has to be in the key. This is derived once and threaded through
-  // all three, because the two halves had already drifted: the nets key
-  // carried `maxCloseRadius` while the candidates key did not, so two traces
-  // of one image at different radii shared a candidate set built for the
-  // first — `generateCandidates` derives `maxRadius`, and therefore the whole
-  // closing ladder, from exactly that option. No caller varies it today, so
-  // this was latent rather than live, but `options.boundary` is spread in
-  // wholesale from the caller and `pipeline.js` already treats those options
-  // as key material for the room-clamp analysis cache.
-  const searchScope = `${maxFloors}|${options.maxCloseRadius ?? ''}`;
-  const nets = brush
-    ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
-    : memo(cache, `nets|${searchScope}`, () =>
-      partitionWallNetworks(
-        options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
-      ));
-  if (!nets.length) return null;
-
-  if (brush) {
-    for (const net of nets) {
-      const sealRadius = Math.max(4, Math.round(brush.radius * 0.75));
-      net.brush = {
-        region: strokeRegion(net.corridor, width, height, sealRadius),
-        band: net.corridor,
-        // Sampled over the painted band, which always contains the ink.
-        bbox: net.corridorBbox ?? net.bbox,
-      };
-    }
-  }
 
   const floors = [];
   const searches = [];
@@ -490,9 +440,10 @@ export const traceBoundary = (analysis, options = {}) => {
     const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
     if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
 
-    // The net key carries the search scope, so `gen|` and `ev|` inherit it.
+    // The net key carries the search scope and the pass, so `gen|` and `ev|`
+    // inherit both.
     const detected = detectFloorNet(
-      net, analysis, options, constraints, cache, `${searchScope}|${netIndex}`,
+      net, analysis, options, constraints, cache, `${searchScope}|${passKey}|${netIndex}`,
     )
       ?? (brush ? freehandFloorNet(net, analysis, options) : null);
     if (!detected) continue;
@@ -635,6 +586,68 @@ export const traceBoundary = (analysis, options = {}) => {
       networks: nets.length,
     },
   };
+};
+
+export const traceBoundary = (analysis, options = {}) => {
+  const { width, height, wallThickness } = analysis;
+  const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
+  const brush = options.brush ?? null;
+
+  // A caller-supplied mask is not part of the cache key, so it opts out of the
+  // memo rather than risk answering for a different drawing. A brush opts out
+  // for the same reason and more strongly: its nets, evidence and candidates
+  // all vary with the stroke, which no key here carries — and a drawn trace
+  // almost always follows an auto trace of the very same image.
+  const cache = (options.mask || brush) ? null : (options.searchCache ?? null);
+  // In draw mode the brush declares the partition: one painted loop is one
+  // building, whatever the ink under it does. That is the whole point — the
+  // page-scope merge and reject rules in assembleFloors are exactly what fails
+  // on the plans a user reaches for this tool on.
+  // Every memo below is per image, so anything that changes *what the search
+  // computes* has to be in the key. This is derived once and threaded through
+  // all three, because the two halves had already drifted: the nets key
+  // carried `maxCloseRadius` while the candidates key did not, so two traces
+  // of one image at different radii shared a candidate set built for the
+  // first — `generateCandidates` derives `maxRadius`, and therefore the whole
+  // closing ladder, from exactly that option. No caller varies it today, so
+  // this was latent rather than live, but `options.boundary` is spread in
+  // wholesale from the caller and `pipeline.js` already treats those options
+  // as key material for the room-clamp analysis cache.
+  const searchScope = `${maxFloors}|${options.maxCloseRadius ?? ''}`;
+  const nets = brush
+    ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
+    : memo(cache, `nets|${searchScope}`, () =>
+      partitionWallNetworks(
+        options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
+      ));
+  if (!nets.length) return null;
+
+  if (brush) {
+    for (const net of nets) {
+      const sealRadius = Math.max(4, Math.round(brush.radius * 0.75));
+      net.brush = {
+        region: strokeRegion(net.corridor, width, height, sealRadius),
+        band: net.corridor,
+        // Sampled over the painted band, which always contains the ink.
+        bbox: net.corridorBbox ?? net.bbox,
+      };
+    }
+  }
+
+  const base = assembleFloors(analysis, options, nets, cache, searchScope, 'base');
+  if (!shouldRemediate(base, analysis, options)) return base;
+
+  // The first attempt is doubtful, or provably excludes something the rest of
+  // the app already located. Both are reasons to search again rather than to
+  // hand the answer over with a caveat attached — see remediate.js.
+  return remediateTrace({
+    analysis,
+    options,
+    nets,
+    base,
+    attempt: (passNets, passOptions, passKey) =>
+      assembleFloors(analysis, passOptions, passNets, cache, searchScope, passKey),
+  });
 };
 
 export { polygonArea, polygonBounds, sealMetrics };

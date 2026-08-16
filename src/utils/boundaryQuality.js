@@ -20,6 +20,13 @@ export const detailText = (warning) => {
   if (warning.code === 'room-outside' && d.name) return `the ${d.name} room falls outside the traced outline`;
   if (warning.code === 'label-outside') return `${d.count} labelled area${d.count === 1 ? '' : 's'} fall outside the traced outline`;
   if (warning.code === 'floors-rejected') return `${d.count} closed outline${d.count === 1 ? ' was' : 's were'} judged not to be buildings`;
+  // Said as what changed, not as which pass ran: the pass name means nothing to
+  // the person reading it, and the count is the reason to trust the second
+  // answer over the first.
+  if (warning.code === 'remediated') {
+    return `the first outline left ${d.of - d.heldBefore} of ${d.of} known areas outside, `
+      + `so it was traced again — this one leaves ${d.of - d.heldAfter}`;
+  }
   return warning.message;
 };
 
@@ -53,6 +60,7 @@ const WARNING_RANK = new Map([
   'drawn-freehand',
   'no-inner',
   'floors-rejected',
+  'remediated',
   'no-alternative',
 ].map((code, i) => [code, i]));
 
@@ -71,7 +79,7 @@ export const WARNING_CODES = [...WARNING_RANK.keys()];
 // the detector attaches: the `.floorplan` schema types a warning's known fields
 // and drops the rest, so a reopened project arrives without `scope`.
 export const RESULT_SCOPED_CODES = new Set([
-  'label-outside', 'floors-rejected', 'no-alternative', 'no-boundary',
+  'label-outside', 'floors-rejected', 'no-alternative', 'no-boundary', 'remediated',
 ]);
 
 const LABELS = new Map(Object.entries({
@@ -98,6 +106,7 @@ const LABELS = new Map(Object.entries({
   'no-alternative': 'Only one hypothesis',
   'brush-mismatch': 'Does not match your outline',
   'drawn-freehand': 'Freehand section',
+  remediated: 'Traced again',
 }));
 
 // A short headline for one warning. An unlisted code still gets a readable one

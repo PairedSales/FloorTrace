@@ -217,6 +217,18 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       // A label inside a deliberately excluded region (a garage, a porch) is
       // outside the outline on purpose, not evidence of a bad trace.
       exemptRegions: options.excludeRegions ?? [],
+      // The regions the carve actually removed, back in original px. The OCR
+      // list above only covers exclusions the app knew about before the trace;
+      // geometric garage detection finds its own, and without them the tracer
+      // reported the garage it had just carved as a label outside the outline.
+      carvedRegions: (boundary.floors ?? []).flatMap(
+        (floor) => (floor.excludedRegions ?? []).filter((r) => r.bbox).map((r) => ({
+          x: r.bbox.minX / scaleX,
+          y: r.bbox.minY / scaleY,
+          width: (r.bbox.maxX - r.bbox.minX + 1) / scaleX,
+          height: (r.bbox.maxY - r.bbox.minY + 1) / scaleY,
+        })),
+      ),
       userDrawn: Boolean(brush),
     },
   );
@@ -244,6 +256,11 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       floorCount: floors.length,
       candidate: boundary.debug.candidate,
       areaPx: outer ? ringSetArea(outer.polygon, mapRings(boundary.holes, scaleX, scaleY)) : 0,
+      // Present only when the first attempt was re-searched. Part of quality
+      // rather than debug: it is the record of why the outline on screen is not
+      // the one the first search produced, and the worker forwards debug
+      // through a whitelist that would have dropped it.
+      ...(boundary.remediation ? { remediation: boundary.remediation } : {}),
     },
     debug: {
       floorCount: floors.length,

@@ -21,6 +21,11 @@ const WHOLE_OUTLINE = new Set([
   'unsealed', 'self-intersecting', 'covers-page', 'tiny-floor', 'no-inner',
   'inner-not-nested', 'inner-over-inset', 'incomplete-enclosure',
   'wall-left-outside', 'annexation', 'heavy-closing', 'weak-wall-support',
+  // Only as a fallback: a re-traced outline arrives carrying the detector's own
+  // anchor on the rooms the second pass brought inside, which is far more
+  // useful and wins above. This is what a project saved before that existed
+  // shows — the outline that was kept.
+  'remediated',
 ]);
 
 const finite = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
