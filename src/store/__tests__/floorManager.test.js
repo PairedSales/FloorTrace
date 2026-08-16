@@ -200,6 +200,125 @@ describe('applyDetectedTraces and hand-punched voids', () => {
   });
 });
 
+// The exterior/interior switch is one setting for the whole canvas. It used to
+// re-apply `tracedBoundaries`, which holds only the most recent detection run —
+// so a plan traced in two passes switched the outlines of the second pass and
+// left the first pass measured to the other wall face, with nothing on screen
+// saying so.
+describe('setWallFaceMode', () => {
+  const faces = (out, inn) => ({
+    outer: { vertices: square(out), holes: [] },
+    inner: { vertices: square(inn), holes: [] },
+  });
+  const detected = (out, inn) => ({ vertices: square(out), holes: [], wallFaces: faces(out, inn) });
+
+  const seedTwoPasses = () => {
+    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
+    const first = traces()[0].id;
+    // A second pass: a fresh trace, detected on its own, as tracing a garage
+    // after the house does.
+    useAppStore.setState({
+      perimeterTraces: [
+        ...traces(),
+        {
+          id: 'second-pass',
+          name: 'Garage',
+          ...detected(50, 44),
+          closed: true,
+          visible: true,
+          locked: false,
+          type: 'garage',
+          colorSource: 'type',
+          nameSource: 'auto',
+          color: '#FFB86C',
+        },
+      ],
+      activeTraceId: 'second-pass',
+    });
+    return first;
+  };
+
+  beforeEach(() => {
+    useAppStore.getState().resetPerimeterTraces();
+  });
+
+  it('switches every outline, not just the active one', () => {
+    const firstPassId = seedTwoPasses();
+
+    expect(useAppStore.getState().setWallFaceMode(true)).toBe(2);
+
+    const after = traces();
+    expect(after.find((t) => t.id === firstPassId).vertices).toEqual(square(90));
+    expect(after.find((t) => t.id === 'second-pass').vertices).toEqual(square(44));
+
+    useAppStore.getState().setWallFaceMode(false);
+    expect(traces().find((t) => t.id === firstPassId).vertices).toEqual(square(100));
+    expect(traces().find((t) => t.id === 'second-pass').vertices).toEqual(square(50));
+  });
+
+  it('leaves an outline the user drew by hand alone', () => {
+    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
+    useAppStore.getState().addPerimeterTrace();
+    const handId = traces()[1].id;
+    useAppStore.getState().setPerimeterOverlay({ vertices: square(7) });
+
+    expect(useAppStore.getState().setWallFaceMode(true)).toBe(1);
+
+    expect(traces()[0].vertices).toEqual(square(90));
+    expect(traces().find((t) => t.id === handId).vertices).toEqual(square(7));
+  });
+
+  // The caller falls back to the legacy re-apply on 0, so "no outline carries a
+  // pair" has to be distinguishable from "switched".
+  it('reports zero when nothing carries a pair', () => {
+    useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
+
+    expect(useAppStore.getState().setWallFaceMode(true)).toBe(0);
+    expect(traces()[0].vertices).toEqual(square(10));
+  });
+
+  it('keeps a void the user punched and re-checks it against the new outline', () => {
+    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
+    const id = traces()[0].id;
+    useAppStore.getState().addHole(id, [
+      { x: 10, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }, { x: 10, y: 20 },
+    ]);
+
+    useAppStore.getState().setWallFaceMode(true);
+
+    const userHoles = traces()[0].holes.filter((h) => h.source === 'user');
+    expect(userHoles).toHaveLength(1);
+    expect(userHoles[0].stale).toBeUndefined();
+  });
+
+  // A later vertex drag must not reach back into the stored pair, or switching
+  // away and back would return geometry that had quietly moved.
+  it('hands out a copy, so editing the applied outline cannot rewrite the pair', () => {
+    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
+    useAppStore.getState().setWallFaceMode(true);
+
+    const dragged = traces()[0].vertices.map((v, i) => (i === 0 ? { x: 999, y: 999 } : v));
+    useAppStore.getState().setPerimeterOverlay({ vertices: dragged });
+    expect(traces()[0].wallFaces.inner.vertices).toEqual(square(90));
+
+    // And the pair survives the edit, so the switch still works on this outline.
+    expect(useAppStore.getState().setWallFaceMode(false)).toBe(1);
+    expect(traces()[0].vertices).toEqual(square(100));
+  });
+
+  // The pair is a cache of ink the crop/erase has changed, exactly like
+  // `tracedBoundaries`, and is dropped with it.
+  it('clearWallFaces leaves the outlines but forgets the other face', () => {
+    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
+
+    useAppStore.getState().clearWallFaces();
+
+    expect(traces()[0].vertices).toEqual(square(100));
+    expect(traces()[0].wallFaces).toBeNull();
+    expect(useAppStore.getState().setWallFaceMode(true)).toBe(0);
+  });
+});
+
 // Ids used to be `trace-${Date.now()}`, so anything minted inside one
 // millisecond collided — and `deletePerimeterTrace` filters by id, so deleting
 // one of the twins deleted both.

@@ -11,7 +11,7 @@ import HelpModal from './components/HelpModal';
 import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
-  getFloorBoundariesForMode,
+  getFloorBoundaryFaces,
   traceFloorplanBoundary,
   terminateDetectionWorker,
 } from './utils/detection';
@@ -27,7 +27,9 @@ import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary, scaleQualitySummary } from './utils/boundaryQuality';
-import useAppStore, { selectCombinedArea, selectPerimeterOverlay, otherRoomScaleSamples } from './store/appStore';
+import useAppStore, {
+  selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
+} from './store/appStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
@@ -178,6 +180,7 @@ function App() {
   const currentCustomShape = useAppStore((s) => s.currentCustomShape);
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
+  const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
@@ -192,6 +195,7 @@ function App() {
 
   // Floor management
   const addPerimeterTrace = useAppStore((s) => s.addPerimeterTrace);
+  const clearWallFaces = useAppStore((s) => s.clearWallFaces);
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
@@ -508,26 +512,39 @@ function App() {
   // detector's confidence and reasons, so a doubtful outline stays marked as
   // doubtful after it is on the canvas.
   const applyTracedBoundary = useCallback((boundaryResult, interiorMode) => {
-    const floors = getFloorBoundariesForMode(boundaryResult, interiorMode);
+    const faces = getFloorBoundaryFaces(boundaryResult);
+    const key = interiorMode ? 'inner' : 'outer';
+    const floors = faces.filter((floor) => floor[key]);
     if (!floors.length) return 0;
 
     const source = boundaryResult?.quality?.source ?? 'auto';
-    const shaped = floors.map((boundary) => ({
-      vertices: boundary.polygon.map((point) => ({ x: point.x, y: point.y })),
-      // The one boundary where pipeline holes become trace holes, and so the
-      // one place the provenance tag is applied — the detector itself keeps
-      // emitting bare rings.
-      holes: boundary.holes.map((hole, i) => ({
+    // The one boundary where pipeline holes become trace holes, and so the one
+    // place the provenance tag is applied — the detector itself keeps emitting
+    // bare rings.
+    const shapeFace = (face) => face && {
+      vertices: face.polygon.map((point) => ({ x: point.x, y: point.y })),
+      holes: face.holes.map((hole, i) => ({
         id: `hole-auto-${i}`,
         ring: hole.map((point) => ({ x: point.x, y: point.y })),
         source: 'auto',
       })),
-      quality: {
-        source,
-        confidence: boundary.confidence,
-        warnings: boundary.warnings,
-      },
-    }));
+    };
+
+    const shaped = floors.map((floor) => {
+      // Both faces ride along on the trace, so a later flip of the switch moves
+      // this outline too — even once a further detection run has replaced
+      // `tracedBoundaries` with a result that knows nothing about it.
+      const wallFaces = { outer: shapeFace(floor.outer), inner: shapeFace(floor.inner) };
+      return {
+        ...wallFaces[key],
+        wallFaces,
+        quality: {
+          source,
+          confidence: floor.confidence,
+          warnings: floor.warnings,
+        },
+      };
+    });
 
     if (shaped.length === 1) {
       setPerimeterVertices(null);
@@ -658,10 +675,16 @@ function App() {
     if (level === 'good' || level === 'fair') setDrawStrokes([]);
   }, [runTrace, setDrawModeActive, setDrawStrokes, notify]);
 
+  // One setting over every outline. Each traced outline carries the detector's
+  // own inner/outer pair, so the switch reaches outlines from earlier detection
+  // runs as well as the current one; re-applying `tracedBoundaries` is only the
+  // fallback for drafts saved before the pair was stored, and it can move
+  // nothing but the most recent run.
   const handleInteriorWallToggle = (value) => {
     undoManager.save();
     setUseInteriorWalls(value);
-    if (tracedBoundaries) {
+    const switched = useAppStore.getState().setWallFaceMode(value);
+    if (!switched && tracedBoundaries) {
       applyTracedBoundary(tracedBoundaries, value);
     }
   };
@@ -681,11 +704,13 @@ function App() {
   // Handle image update from eraser or crop tool (saves undo point before
   // changing). The cached detection result describes the *previous* image, so
   // it is dropped — kept, toggling inner/outer after a crop re-applied
-  // pre-crop geometry.
+  // pre-crop geometry. The per-trace wall-face pairs are the same cache one
+  // level down and go with it, or the switch would walk straight back into it.
   const handleImageUpdate = useCallback((newImageDataUrl) => {
     undoManager.save();
     setImage(newImageDataUrl);
     setTracedBoundaries(null);
+    clearWallFaces();
     // Room rectangles are in image pixels, so a crop moves every one of them
     // and an erase can remove the wall a room was measured against.
     setRooms([]);
@@ -693,7 +718,7 @@ function App() {
     // the canvas at full size and redraws the selection in place, and neither
     // it nor the eraser resamples, so image-pixel coordinates — and therefore
     // feet-per-pixel — are invariant across both. Do not add a defensive reset.
-  }, [setImage, setTracedBoundaries, setRooms]);
+  }, [setImage, setTracedBoundaries, setRooms, clearWallFaces]);
 
   const handleAddMeasurementLine = useCallback((line) => {
     // Clear the in-progress line before saving the snapshot so that undo restores
@@ -1211,7 +1236,7 @@ function App() {
             ocrFailed={ocrFailed}
             useInteriorWalls={useInteriorWalls}
             onInteriorWallToggle={handleInteriorWallToggle}
-            perimeterOverlay={perimeterOverlay}
+            canSwitchWallFace={canSwitchWallFace}
             onDimensionFocus={handleDimensionFocus}
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
