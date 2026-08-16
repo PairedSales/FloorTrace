@@ -242,6 +242,15 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // edit must not restore a highlight. Every reader resolves it against the
   // live traces, so a focus left on a deleted trace simply renders nothing.
   focusedWarning: null,
+  // Transient confirmation for the status bar ("Area copied"), as
+  // {text, at}. `at` is what makes two identical messages in a row two
+  // separate flashes rather than one no-op set. UI-only for the same reason
+  // as focusedWarning: undo must not replay a confirmation.
+  statusFlash: null,
+  // Whether the measurement dock is open. UI-only — a collapsed panel is a
+  // view preference, not a fact about the project, so it must not ride along
+  // in a `.floorplan` or be restored by an undo.
+  dockOpen: true,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -481,6 +490,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setShowPanelOptions: (v) => set({ showPanelOptions: v }),
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setFocusedWarning: (v) => set({ focusedWarning: v }),
+  flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
+  setDockOpen: (v) => set({ dockOpen: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

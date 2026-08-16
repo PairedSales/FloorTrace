@@ -45,7 +45,7 @@ export function useCameraController({
   const canvasRotationRef = useRef(canvasRotation);
   canvasRotationRef.current = canvasRotation;
 
-  const { handleWheel, isZoomingRef } = useCanvasZoom(
+  const { handleWheel, zoomByStep, isZoomingRef } = useCanvasZoom(
     stageRef,
     scaleRef,
     setScale,
@@ -263,6 +263,7 @@ export function useCameraController({
     fitToWindow,
     rotateCanvas,
     handleWheel,
+    zoomByStep,
     canPanCanvas,
     handleStageDragStart,
     handleStageDragEnd,

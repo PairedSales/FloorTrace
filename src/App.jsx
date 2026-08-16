@@ -1,11 +1,13 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { Toaster, toast } from 'sonner';
 import Canvas from './components/Canvas';
-import Toolbar from './components/Toolbar';
-import LeftPanel from './components/LeftPanel';
-import ToolsPanel from './components/ToolsPanel';
+import MenuBar from './components/MenuBar';
+import CommandBar from './components/CommandBar';
+import ContextBar from './components/ContextBar';
+import ToolRail from './components/ToolRail';
+import MeasurementDock from './components/MeasurementDock';
+import StatusBar from './components/StatusBar';
 import HelpModal from './components/HelpModal';
-import OptionsOverlay from './components/OptionsOverlay';
 import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
@@ -34,6 +36,38 @@ import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
 import { useOcrWarmup } from './hooks/useOcrWarmup';
+import { useTheme } from './hooks/useTheme';
+
+// What the status bar calls each mode, and the one-line reminder beside it.
+// Deliberately separate from ContextBar's copy: that bar states the whole
+// instruction, this is the glance version.
+const MODE_LABEL = {
+  select: 'Select',
+  draw: 'Paint outline',
+  vertex: 'Place corners',
+  void: 'Cut out',
+  scale: 'Set scale',
+  line: 'Measure',
+  angle: 'Measure angle',
+  area: 'Draw area',
+  crop: 'Crop',
+  eraser: 'Erase',
+  place: 'Place room',
+};
+
+const MODE_HINT = {
+  select: 'Drag a corner to adjust an outline',
+  draw: 'Paint over the exterior walls',
+  vertex: 'Click each corner of the exterior',
+  void: 'Drag over a courtyard or light well',
+  scale: 'Click both ends of a known length',
+  line: 'Click a start and an end point',
+  angle: 'Drag the arms onto two walls',
+  area: 'Click each corner of the area',
+  crop: 'Drag the region to keep',
+  eraser: 'Drag over clutter to remove it',
+  place: 'Click the room on the plan',
+};
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
@@ -144,7 +178,6 @@ function App() {
   const currentCustomShape = useAppStore((s) => s.currentCustomShape);
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
-  const showPanelOptions = useAppStore((s) => s.showPanelOptions);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
@@ -238,6 +271,7 @@ function App() {
     handleScaleToolToggle,
     handleClearTools,
     handleVoidToolToggle,
+    deactivateAll,
   } = useToolManager();
 
   // Declared after handlePasteImage / handleFileOpen (see below) so the
@@ -257,113 +291,21 @@ function App() {
     };
   }, []);
 
-  // Manage instructions toasts
-  useEffect(() => {
-    // 1. Perimeter vertex placement mode
-    if (perimeterVertices !== null && perimeterVertices.length < 3) {
-      toast.info(`Click to add perimeter vertices (${perimeterVertices.length}/3). Esc/Enter to finish.`, {
-        id: 'perimeter-vertices-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('perimeter-vertices-toast');
-    }
-
-    // 2. Manual overlay placement mode (Click on canvas to place overlays)
-    if (manualEntryMode) {
-      toast.info('Click on the canvas to place room overlay.', {
-        id: 'manual-entry-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('manual-entry-toast');
-    }
-
-    // 3. Line Tool
-    if (lineToolActive) {
-      toast.info('Click to place line endpoints. Esc to cancel.', {
-        id: 'line-tool-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('line-tool-toast');
-    }
-
-    // 4. Draw Area Tool (Custom Shapes)
-    if (drawAreaActive) {
-      const vertexCount = currentCustomShape?.vertices?.length || 0;
-      toast.info(`Click to draw custom shape vertices${vertexCount > 0 ? ` (${vertexCount})` : ''}. Enter/double-click first point to close. Esc to cancel.`, {
-        id: 'draw-area-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('draw-area-toast');
-    }
-
-    // 5. Eraser Tool
-    if (eraserToolActive) {
-      toast.info('Click and drag to erase parts of the image. Esc to cancel.', {
-        id: 'eraser-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('eraser-toast');
-    }
-
-    // 6. Crop Tool
-    if (cropToolActive) {
-      toast.info('Click and drag to select crop area. Esc to cancel.', {
-        id: 'crop-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('crop-toast');
-    }
-
-    // 7. Angle Tool
-    if (angleToolActive) {
-      toast.info('Drag the angle arms or vertices to measure angles. Esc to cancel.', {
-        id: 'angle-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('angle-toast');
-    }
-
-    // 8. Scale Tool
-    if (scaleToolActive) {
-      toast.info('Click both ends of a length you know, then type it in the Scale panel. Esc to cancel.', {
-        id: 'scale-tool-toast',
-        duration: Infinity,
-      });
-    } else {
-      toast.dismiss('scale-tool-toast');
-    }
-
-    // Cleanup all toasts on unmount
-    return () => {
-      toast.dismiss('scale-tool-toast');
-      toast.dismiss('perimeter-vertices-toast');
-      toast.dismiss('manual-entry-toast');
-      toast.dismiss('line-tool-toast');
-      toast.dismiss('draw-area-toast');
-      toast.dismiss('eraser-toast');
-      toast.dismiss('crop-toast');
-      toast.dismiss('angle-toast');
-    };
-  }, [
-    perimeterVertices,
-    perimeterVertices?.length,
-    manualEntryMode,
-    lineToolActive,
-    drawAreaActive,
-    currentCustomShape?.vertices?.length,
-    eraserToolActive,
-    cropToolActive,
-    angleToolActive,
-    scaleToolActive
-  ]);
-
+  // Mode is shown by <ContextBar>, docked under the command bar. It used to be
+  // eight `duration: Infinity` toasts — the app's only persistent mode
+  // indicator, rendered over the canvas, stacking with real notifications, and
+  // carrying the sole documentation of Esc-to-cancel.
+  const activeTool = drawModeActive ? 'draw'
+    : perimeterVertices !== null ? 'vertex'
+      : voidToolActive ? 'void'
+        : scaleToolActive ? 'scale'
+          : lineToolActive ? 'line'
+            : angleToolActive ? 'angle'
+              : drawAreaActive ? 'area'
+                : cropToolActive ? 'crop'
+                  : eraserToolActive ? 'eraser'
+                    : manualEntryMode ? 'place'
+                      : 'select';
 
   // Reset entire application
   const handleRestart = async () => {
@@ -1029,10 +971,6 @@ function App() {
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
-  const handleOptionsToggle = useCallback(() => {
-    const s = useAppStore.getState();
-    s.setShowPanelOptions(!s.showPanelOptions);
-  }, []);
   const handleHelpOpen = useCallback(() => {
     const s = useAppStore.getState();
     s.setShowHelpModal(!s.showHelpModal);
@@ -1141,37 +1079,147 @@ function App() {
     onScaleToolToggle: handleScaleToolToggle,
   });
 
-  // Desktop UI
+  // ── Shell wiring ──────────────────────────────────────────────────────────
+  const { theme, cycleTheme } = useTheme();
+  const dockOpen = useAppStore((s) => s.dockOpen);
+  const setDockOpen = useAppStore((s) => s.setDockOpen);
+  const handleDockToggle = useCallback(
+    () => setDockOpen(!useAppStore.getState().dockOpen),
+    [setDockOpen],
+  );
+
+  // Leaving a tool: drop every flag, and drop vertex-placement and room
+  // placement too — neither is a tool-manager flag, but both are modes.
+  const handleCancelTool = useCallback(() => {
+    deactivateAll();
+    setPerimeterVertices(null);
+    setManualEntryMode(false);
+  }, [deactivateAll, setPerimeterVertices, setManualEntryMode]);
+
+  // The rail speaks the same tool ids as ContextBar, and each maps to the very
+  // toggle the keyboard already binds — so the two routes into a tool cannot
+  // drift apart the way the old panel and the digit map had.
+  const handleToolSelect = useCallback((id) => {
+    switch (id) {
+      case 'select': return handleCancelTool();
+      case 'draw': return handleDrawMode();
+      case 'vertex': return handleDrawExterior();
+      case 'void': return handleVoidToolToggle();
+      case 'scale': return handleScaleToolToggle();
+      case 'line': return handleLineToolToggle();
+      case 'angle': return handleAngleToolToggle();
+      case 'area': return handleDrawAreaToggle();
+      case 'crop': return handleCropToolToggle();
+      case 'eraser': return handleEraserToolToggle();
+      default: return undefined;
+    }
+  }, [handleCancelTool, handleDrawMode, handleDrawExterior, handleVoidToolToggle,
+    handleScaleToolToggle, handleLineToolToggle, handleAngleToolToggle,
+    handleDrawAreaToggle, handleCropToolToggle, handleEraserToolToggle]);
+
+  const handleZoom = useCallback((direction) => {
+    canvasRef.current?.zoomByStep(direction);
+  }, []);
+
+  const contextCount = activeTool === 'vertex'
+    ? (perimeterVertices?.length ?? 0)
+    : activeTool === 'area'
+      ? (currentCustomShape?.vertices?.length ?? 0)
+      : 0;
+  const contextBrush = activeTool === 'draw' ? drawBrushSize
+    : activeTool === 'eraser' ? eraserBrushSize : 0;
+  const onContextBrushChange = activeTool === 'draw' ? setDrawBrushSize : setEraserBrushSize;
+  const contextDone = activeTool === 'draw' ? handleFinishDrawMode
+    : activeTool === 'vertex' ? handleClosePerimeter : null;
+
+  const hasToolData = measurementLines?.length > 0 || customShapes?.length > 0
+    || !!currentMeasurementLine || !!currentCustomShape;
+
+  // Desktop UI - five bands: menu, commands, tool context, body, status.
   return (
     <div
       id="app-container"
-      className="flex flex-col h-screen bg-chrome-900"
+      className="flex flex-col h-screen bg-shell"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <Toolbar
+      <MenuBar
+        image={image}
+        onFileOpen={handleFileOpen}
+        onPasteImage={handlePasteImage}
+        onSaveProject={handleSaveProject}
+        onSaveProjectAs={handleSaveProjectAs}
+        onRestart={handleRestart}
+        onHelpOpen={handleHelpOpen}
+        onFitToWindow={handleFitToWindow}
+        onTracePerimeter={handleTracePerimeter}
+        onDrawExterior={() => handleDrawMode()}
+        onOutlineByVertex={handleDrawExterior}
+        onFindRoomSize={handleFindRoomSize}
+        onAddFloor={addPerimeterTrace}
+        showSideLengths={showSideLengths}
+        onShowSideLengthsChange={handleShowSideLengthsChange}
+        autoSnapEnabled={autoSnapEnabled}
+        onAutoSnapChange={handleAutoSnapChange}
+        saveOnExit={saveOnExit}
+        onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+        enhancedOcr={enhancedOcr}
+        onEnhancedOcrChange={handleEnhancedOcrChange}
+        theme={theme}
+        onCycleTheme={cycleTheme}
+        dockOpen={dockOpen}
+        onDockToggle={handleDockToggle}
+      />
+
+      <CommandBar
         image={image}
         isProcessing={isProcessing}
         onFileOpen={handleFileOpen}
         onSaveProject={handleSaveProjectNormal}
-        onSaveProjectAs={handleSaveProjectAs}
         onTracePerimeter={handleTracePerimeter}
         onFitToWindow={handleFitToWindow}
-        onRestart={handleRestart}
-        showPanelOptions={showPanelOptions}
-        onOptionsToggle={handleOptionsToggle}
         onDrawExterior={() => handleDrawMode()}
         drawModeActive={drawModeActive}
         onFinishDrawMode={handleFinishDrawMode}
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
-        onHelpOpen={handleHelpOpen}
         onAddFloor={addPerimeterTrace}
         floorCount={perimeterTraces.length}
+        dockOpen={dockOpen}
+        onDockToggle={handleDockToggle}
       />
 
-      <div className="relative flex flex-1 overflow-hidden min-h-0 canvas-grid-bg">
-        <div className="absolute inset-0 z-0 min-h-0">
+      <ContextBar
+        active={activeTool === 'select' ? null : activeTool}
+        count={contextCount}
+        brushSize={contextBrush}
+        onBrushSizeChange={onContextBrushChange}
+        onCancel={handleCancelTool}
+        onDone={contextDone}
+      />
+
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {dockOpen && (
+          <MeasurementDock
+            roomDimensions={roomDimensions}
+            onDimensionsChange={handleDimensionsChange}
+            area={area}
+            mode={mode}
+            unit={unit}
+            onUnitChange={handleUnitChange}
+            isProcessing={isProcessing}
+            ocrFailed={ocrFailed}
+            useInteriorWalls={useInteriorWalls}
+            onInteriorWallToggle={handleInteriorWallToggle}
+            perimeterOverlay={perimeterOverlay}
+            onDimensionFocus={handleDimensionFocus}
+            onDimensionBlur={handleDimensionBlur}
+          />
+        )}
+
+        {/* The plan owns everything between the two docks. Nothing floats over
+            it any more - the old panels sat on its top-left corner. */}
+        <div className="relative flex-1 min-w-0 canvas-grid-bg">
           <Canvas
             ref={canvasRef}
             image={image}
@@ -1232,83 +1280,27 @@ function App() {
           />
         </div>
 
-        <LeftPanel
-          roomDimensions={roomDimensions}
-          onDimensionsChange={handleDimensionsChange}
-          area={area}
-          mode={mode}
-          unit={unit}
-          onUnitChange={handleUnitChange}
-          isProcessing={isProcessing}
-          ocrFailed={ocrFailed}
-          useInteriorWalls={useInteriorWalls}
-          onInteriorWallToggle={handleInteriorWallToggle}
-          perimeterOverlay={perimeterOverlay}
-          onDimensionFocus={handleDimensionFocus}
-          onDimensionBlur={handleDimensionBlur}
-        />
-
-        {showPanelOptions && (
-          <OptionsOverlay
-            showSideLengths={showSideLengths}
-            onShowSideLengthsChange={handleShowSideLengthsChange}
-            autoSnapEnabled={autoSnapEnabled}
-            onAutoSnapChange={handleAutoSnapChange}
-            perimeterOverlay={perimeterOverlay}
-            saveOnExit={saveOnExit}
-            onSaveOnExitChange={handleSaveOnExitChangeWithToast}
-            enhancedOcr={enhancedOcr}
-            onEnhancedOcrChange={handleEnhancedOcrChange}
+        {image && (
+          <ToolRail
+            activeTool={activeTool}
+            hasArea={area > 0}
+            hasToolData={hasToolData}
+            onSelect={handleToolSelect}
+            onRotate={handleRotateCanvas}
+            onClearTools={handleClearTools}
           />
         )}
-
-        {/* Right-side overlay panels — stacked vertically */}
-        <div className="relative z-10 flex shrink-0 flex-col self-start">
-          {image && (
-            <ToolsPanel
-              lineToolActive={lineToolActive}
-              onLineToolToggle={handleLineToolToggle}
-              drawAreaActive={drawAreaActive}
-              onDrawAreaToggle={handleDrawAreaToggle}
-              eraserToolActive={eraserToolActive}
-              onEraserToolToggle={handleEraserToolToggle}
-              cropToolActive={cropToolActive}
-              onCropToolToggle={handleCropToolToggle}
-              angleToolActive={angleToolActive}
-              onAngleToolToggle={handleAngleToolToggle}
-              scaleToolActive={scaleToolActive}
-              onScaleToolToggle={handleScaleToolToggle}
-              onOutlineByVertex={handleDrawExterior}
-              outlineByVertexActive={perimeterVertices !== null}
-              onRotateCanvas={handleRotateCanvas}
-              measurementLines={measurementLines}
-              customShapes={customShapes}
-              currentMeasurementLine={currentMeasurementLine}
-              currentCustomShape={currentCustomShape}
-              onClearTools={handleClearTools}
-              hasArea={area > 0}
-              voidToolActive={voidToolActive}
-              onVoidToolToggle={handleVoidToolToggle}
-            />
-          )}
-        </div>
-
-        {/* Unified Toasts Container - Positioned within the content area, below toolbar */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
-          {/* Processing Message */}
-          {isProcessing && (
-            <div className="pointer-events-auto bg-chrome-800 border border-chrome-700 rounded-lg px-5 py-3 shadow-xl flex items-center gap-3 animate-toast-in select-none">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent/30 border-t-accent"></div>
-              <span className="text-sm text-slate-200 font-medium">{processingMessage || 'Working…'}</span>
-            </div>
-          )}
-        </div>
-
-        {showHelpModal && (
-          <HelpModal onClose={handleHelpClose} />
-        )}
-
       </div>
+
+      <StatusBar
+        mode={MODE_LABEL[activeTool] ?? 'Select'}
+        hint={MODE_HINT[activeTool] ?? null}
+        hasImage={!!image}
+        onZoomIn={() => handleZoom(1)}
+        onZoomOut={() => handleZoom(-1)}
+      />
+
+      {showHelpModal && <HelpModal onClose={handleHelpClose} />}
 
       <input
         ref={fileInputRef}
@@ -1317,23 +1309,26 @@ function App() {
         onChange={handleFileUpload}
         className="hidden"
       />
-      <Toaster 
-        position="top-center" 
-        theme="dark"
+
+      {/* Only real notifications now - every "you are in X mode" message moved
+          to the context bar, and every low-stakes confirmation to the status
+          bar. What is left is what actually deserves to interrupt. */}
+      <Toaster
+        position="top-center"
         closeButton
-        style={{ top: '56px' }}
+        style={{ top: '86px' }}
         toastOptions={{
           classNames: {
-            toast: 'group !bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] rounded-lg shadow-xl font-medium text-xs font-sans select-none flex items-center gap-2 p-3 !w-fit !max-w-md',
-            title: '!text-[#F8F8F2]',
-            description: '!text-[#6272A4]',
-            success: '!text-[#50FA7B] !border-[#50FA7B]/30',
-            error: '!text-[#FF5555] !border-[#FF5555]/30',
-            info: '!text-[#8BE9FD] !border-[#8BE9FD]/30',
-            warning: '!text-[#FFB86C] !border-[#FFB86C]/30',
-            actionButton: '!bg-[#BD93F9] !text-[#282A36] !font-semibold hover:!bg-[#A97EF0]',
-            cancelButton: '!bg-[#44475A] !text-[#F8F8F2] hover:!bg-[#6272A4]',
-            closeButton: '!bg-[#282A36] !border-[#44475A] !text-[#F8F8F2] hover:!bg-[#44475A]',
+            toast: 'group !bg-raised !border-line !text-fg rounded-lg shadow-xl font-medium text-[12.5px] font-sans select-none flex items-center gap-2 p-3 !w-fit !max-w-md',
+            title: '!text-fg',
+            description: '!text-fg-3',
+            success: '!text-ok',
+            error: '!text-crit',
+            info: '!text-accent',
+            warning: '!text-warn',
+            actionButton: '!bg-accent !text-accent-ink !font-semibold',
+            cancelButton: '!bg-sunken !text-fg',
+            closeButton: '!bg-raised !border-line !text-fg',
           }
         }}
       />

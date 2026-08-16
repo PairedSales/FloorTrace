@@ -119,5 +119,42 @@ export function useCanvasZoom(stageRef, scaleRef, setScale, viewportSyncTokenRef
     }, 100);
   }, [stageRef, scaleRef, setScale, viewportSyncTokenRef]);
 
-  return { handleWheel, isZoomingRef };
+  // Same transform as the wheel, anchored to the viewport centre instead of the
+  // pointer — there is no pointer when the zoom comes from a button or a key.
+  // Applied synchronously: a single discrete step has no coalescing to do, and
+  // the debounce above exists only to stop a wheel spin from tearing.
+  const zoomByStep = useCallback((direction) => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const oldScale = scaleRef.current;
+    const centre = { x: stage.width() / 2, y: stage.height() / 2 };
+    const anchor = {
+      x: (centre.x - stage.x()) / oldScale,
+      y: (centre.y - stage.y()) / oldScale,
+    };
+
+    const scaleBy = 1.25;
+    const next = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
+    const clampedScale = Math.max(0.1, Math.min(20, next));
+    const newPos = {
+      x: centre.x - anchor.x * clampedScale,
+      y: centre.y - anchor.y * clampedScale,
+    };
+
+    scaleRef.current = clampedScale;
+    targetPosRef.current = newPos;
+    stage.scale({ x: clampedScale, y: clampedScale });
+    stage.position(newPos);
+    stage.batchDraw();
+    setScale(clampedScale);
+
+    const token = Math.random();
+    if (viewportSyncTokenRef) {
+      viewportSyncTokenRef.current = token;
+    }
+    useAppStore.getState().setViewportTransform(clampedScale, newPos, token);
+  }, [stageRef, scaleRef, setScale, viewportSyncTokenRef]);
+
+  return { handleWheel, zoomByStep, isZoomingRef };
 }

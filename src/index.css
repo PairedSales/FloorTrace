@@ -15,74 +15,170 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ────────────────────────────────────────────────────────
+   Space-separated RGB channels, not hex: tailwind maps them through
+   `rgb(var(--x) / <alpha-value>)` so every existing opacity modifier
+   (`bg-accent/15`, `border-line/60`) keeps working.
+
+   Light is the base declaration and dark is the override, so a token can
+   never exist in only one theme — the failure that makes a control vanish
+   in whichever theme its author was not looking at.
+
+   Canvas *overlay* colours are deliberately absent. They sit on the user's
+   floorplan rather than on chrome, they are persisted in `.floorplan`
+   projects via traceTypes.js, and theming them would change saved work. */
 @layer base {
+  :root {
+    --shell:      231 234 238;
+    --panel:      247 248 250;
+    --panel-2:    255 255 255;
+    --raised:     255 255 255;
+    --sunken:     237 239 243;
+    --line:       211 216 223;
+    --line-soft:  226 230 235;
+
+    /* the work surface the plan sits on — never a hard white slab */
+    --surface:    201 208 216;
+
+    --fg:         23 28 34;
+    --fg-2:       69 79 90;
+    --fg-3:       98 108 121;
+    --fg-dim:     102 112 128;
+
+    --accent:     46 107 230;
+    --accent-ink: 255 255 255;
+
+    --ok:         21 115 71;
+    --warn:       166 82 0;
+    --crit:       180 35 24;
+
+    --sheet-shadow: 0 10px 34px -8px rgb(16 22 30 / .42), 0 2px 6px rgb(16 22 30 / .20);
+    color-scheme: light;
+  }
+
+  :root[data-theme='dark'] {
+    --shell:      18 22 27;
+    --panel:      26 31 38;
+    --panel-2:    30 36 44;
+    --raised:     38 46 56;
+    --sunken:     20 25 32;
+    --line:       46 55 66;
+    --line-soft:  36 44 53;
+
+    --surface:    38 45 54;
+
+    --fg:         237 241 245;
+    --fg-2:       180 191 203;
+    --fg-3:       139 151 165;
+    --fg-dim:     147 158 171;
+
+    --accent:     91 155 255;
+    --accent-ink: 11 17 25;
+
+    --ok:         74 222 128;
+    --warn:       251 191 87;
+    --crit:       255 122 112;
+
+    --sheet-shadow: 0 14px 40px -10px rgb(0 0 0 / .72), 0 2px 8px rgb(0 0 0 / .50);
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-chrome-900 text-slate-100 antialiased;
+    @apply bg-shell text-fg antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
   ::selection {
-    @apply bg-accent/30 text-white;
+    @apply bg-accent/30 text-fg;
   }
 
-  /* Dark scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 9px;
+    height: 9px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-chrome-900;
+    @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-chrome-600 rounded-full;
+    @apply bg-line rounded-full border-2 border-solid border-transparent bg-clip-content;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-400;
+    @apply bg-fg-dim bg-clip-content;
+  }
+
+  /* One visible focus treatment for the whole app. The old UI had focus rings
+     on some controls and nothing on others, which is worse than none. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-1 ring-offset-panel-2 rounded-sm;
   }
 }
 
 @layer components {
+  /* The work surface behind the plan. Themed, so the viewport is no longer a
+     15.8:1 white slab butted against dark chrome. */
   .canvas-grid-bg {
-    background-color: #ffffff;
+    @apply bg-surface;
   }
 
-  /* Panel section divider */
   .panel-divider {
-    @apply border-t border-chrome-700/60 my-1;
+    @apply border-t border-line-soft my-1;
   }
 
-  /* Toolbar button base */
+  /* Command-bar button. 32px tall — Windows command bars want 32, the old
+     toolbar shipped 28. */
   .toolbar-btn {
-    @apply flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
-           transition-all duration-200 cursor-pointer select-none whitespace-nowrap
-           text-slate-300 hover:text-white hover:bg-chrome-700/70
-           focus:outline-none focus-visible:ring-1 focus-visible:ring-accent;
+    @apply inline-flex h-8 items-center gap-1.5 px-2.5 text-[12.5px] font-medium rounded-md
+           transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
+           text-fg-2 hover:text-fg hover:bg-sunken;
   }
   .toolbar-btn:disabled {
-    @apply opacity-35 cursor-not-allowed hover:bg-transparent hover:text-slate-300;
+    @apply opacity-40 cursor-default hover:bg-transparent hover:text-fg-2;
   }
   .toolbar-btn-active {
-    @apply bg-accent/15 text-accent hover:bg-accent/25 hover:text-accent;
+    @apply bg-accent/12 text-accent hover:bg-accent/20 hover:text-accent;
   }
 
-  /* Panel input */
+  /* Primary command — the one verb the current stage is about. */
+  .toolbar-btn-primary {
+    @apply bg-accent text-accent-ink font-semibold hover:bg-accent hover:text-accent-ink
+           hover:brightness-110;
+  }
+
   .panel-input {
-    @apply w-full px-2.5 py-1.5 text-sm font-mono rounded-md text-center
-           bg-chrome-900/80 border border-chrome-700 text-slate-100
-           placeholder-slate-500
-           focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent
+    @apply w-full px-2.5 py-1.5 text-[13px] font-mono rounded-md text-center
+           bg-panel-2 border border-line text-fg
+           placeholder-fg-dim
+           focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent
            transition-colors duration-150 select-text;
   }
 
-  /* Toggle pill buttons */
+  /* Segmented control option. 26px — nothing in the shell goes below that. */
   .unit-pill {
-    @apply px-2.5 py-1 text-[11px] font-medium rounded-md
-           transition-colors duration-200 cursor-pointer select-none;
+    @apply h-[26px] px-2.5 text-[12px] font-medium rounded
+           transition-colors duration-150 cursor-pointer select-none;
   }
   .unit-pill-active {
-    @apply bg-accent text-white;
+    @apply bg-panel-2 text-fg font-semibold shadow-sm;
   }
   .unit-pill-inactive {
-    @apply bg-chrome-900/60 text-slate-400 hover:text-slate-200 hover:bg-chrome-700/50;
+    @apply text-fg-2 hover:text-fg;
+  }
+
+  /* Section heading shared by every dock card. */
+  .card-heading {
+    @apply text-[11px] font-bold uppercase tracking-[.07em] text-fg-3;
+  }
+
+  .dock-card {
+    @apply bg-panel-2 border border-line rounded-md shadow-sm;
+  }
+
+  /* Status chip — state is readable as form and colour, not colour alone. */
+  .chip {
+    @apply inline-flex items-center gap-1.5 h-5 px-2 rounded-full
+           text-[11px] font-semibold whitespace-nowrap border;
+  }
+  .chip-dot {
+    @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
   }
 }

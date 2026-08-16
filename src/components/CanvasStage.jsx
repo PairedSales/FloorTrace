@@ -338,6 +338,7 @@ const CanvasStage = React.memo(({
     apiRef.current = {
       fitToWindow: () => camera.fitToWindow(),
       rotateCanvas: (direction) => camera.rotateCanvas(direction),
+      zoomByStep: (direction) => camera.zoomByStep(direction),
     };
     return () => {
       apiRef.current = null;
