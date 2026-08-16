@@ -377,6 +377,20 @@ export function useToolRouter({
     voidTool,
   ]);
 
+  // A press that never moved is not a correction, and committing one is not
+  // free: the commit pins the project scale to this one room. Since the scale
+  // is now set from every measured room and the winner is drawn as the overlay,
+  // a stray click on that box used to replace a consensus of five rooms with
+  // one — silently, and with the undo point already cancelled below.
+  const commitRoomDrag = useCallback((overlay) => {
+    const start = lastRoomDragStartRef.current;
+    const moved = !start
+      || start.x1 !== overlay.x1 || start.y1 !== overlay.y1
+      || start.x2 !== overlay.x2 || start.y2 !== overlay.y2;
+    if (moved) onRoomOverlayUpdate?.(overlay, false);
+    else onCancelUndoSave?.();
+  }, [onRoomOverlayUpdate, onCancelUndoSave]);
+
   // Stage Mouse Up
   const handleStageMouseUp = useCallback(() => {
     // End right-click pan dragging
@@ -431,18 +445,7 @@ export function useToolRouter({
 
     // End room overlay dragging
     if (draggingRoom && localRoomOverlay) {
-      onRoomOverlayUpdate?.(localRoomOverlay, false);
-      if (lastRoomDragStartRef.current) {
-        const changed = 
-          lastRoomDragStartRef.current.x1 !== localRoomOverlay.x1 ||
-          lastRoomDragStartRef.current.y1 !== localRoomOverlay.y1 ||
-          lastRoomDragStartRef.current.x2 !== localRoomOverlay.x2 ||
-          lastRoomDragStartRef.current.y2 !== localRoomOverlay.y2;
-        
-        if (!changed) {
-          onCancelUndoSave?.();
-        }
-      }
+      commitRoomDrag(localRoomOverlay);
       setDraggingRoom(false);
       setRoomStart(null);
       setLocalRoomOverlay(null);
@@ -451,18 +454,7 @@ export function useToolRouter({
 
     // End room corner resizing
     if (draggingRoomCorner && localRoomOverlay) {
-      onRoomOverlayUpdate?.(localRoomOverlay, false);
-      if (lastRoomDragStartRef.current) {
-        const changed = 
-          lastRoomDragStartRef.current.x1 !== localRoomOverlay.x1 ||
-          lastRoomDragStartRef.current.y1 !== localRoomOverlay.y1 ||
-          lastRoomDragStartRef.current.x2 !== localRoomOverlay.x2 ||
-          lastRoomDragStartRef.current.y2 !== localRoomOverlay.y2;
-        
-        if (!changed) {
-          onCancelUndoSave?.();
-        }
-      }
+      commitRoomDrag(localRoomOverlay);
       setDraggingRoomCorner(null);
       setLocalRoomOverlay(null);
       lastRoomDragStartRef.current = null;
@@ -476,7 +468,7 @@ export function useToolRouter({
     } else {
       dragStartPosRef.current = null;
     }
-  }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
+  }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, commitRoomDrag, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Window mouseUp listener (handles commits when mouse is released outside canvas bounds)
   useEffect(() => {

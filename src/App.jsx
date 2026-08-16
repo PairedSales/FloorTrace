@@ -26,6 +26,7 @@ import {
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
+import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
@@ -396,9 +397,10 @@ function App() {
           // not a separate event the user needs to weigh.
           flash(`Read ${count} dimension${count === 1 ? '' : 's'}.${unitNote}`);
           // Everything from here is automatic: every label is measured, the
-          // rooms that agree set the scale, and the exterior is traced. The
-          // pills stay on screen, so clicking one still pins the scale to that
-          // room when the user can see the app chose badly.
+          // rooms that agree set the scale, the room the scale came from is
+          // placed as the overlay, and the exterior is traced. The pills stay
+          // lit only when that fails — with an overlay on screen, dragging it
+          // is how the user overrules a room the app chose badly.
           await afterScanRef.current?.(dimensions);
         }
       } catch (error) {
@@ -837,6 +839,39 @@ function App() {
     [runTrace],
   );
 
+  // Leave the automatic path in the state a placed room leaves behind: the
+  // overlay on the room the scale came from, its label in the Room size fields,
+  // and the pills gone. Without it a plan the app had already measured still
+  // showed every pill lit and a Room size card reading 0.0 ft — the screen said
+  // "pick a room" about a decision that had been made.
+  //
+  // Deliberately no updateScale call. The scale in force is the median over
+  // every measured room; re-deriving it from this one rectangle would pin it to
+  // that room and switch the footprint cross-check off, which is exactly what
+  // dragging the overlay is *supposed* to do and must stay the user's choice.
+  const showAutoScaleRoom = useCallback((decision) => {
+    const room = representativeRoom(decision);
+    if (!room || !(room.labelDims?.width > 0) || !(room.labelDims?.height > 0)) return false;
+    const { left, right, top, bottom } = room.rect;
+    if (!(right > left) || !(bottom > top)) return false;
+    setRoomOverlay({
+      x1: left,
+      y1: top,
+      x2: right,
+      y2: bottom,
+      polygon: [
+        { x: left, y: top }, { x: right, y: top },
+        { x: right, y: bottom }, { x: left, y: bottom },
+      ],
+      confidence: room.confidence ?? null,
+    });
+    const placed = orientDimsToBox(
+      room.labelDims.width, room.labelDims.height, right - left, bottom - top,
+    );
+    setRoomDimensions({ width: String(placed.width), height: String(placed.height) });
+    return true;
+  }, [setRoomOverlay, setRoomDimensions]);
+
   /**
    * The automatic path, run once a scan has found labels: measure every one of
    * them, calibrate from the rooms that agree, trace the exterior with those
@@ -866,11 +901,20 @@ function App() {
       return;
     }
 
+    // Before the trace, not after: the tracer reads `detectedDimensions` for its
+    // interior points, so the labels stay in the store either way, but the user
+    // sees which room was chosen while the exterior is still being traced.
+    if (showAutoScaleRoom(decision)) {
+      setManualEntryMode(false);
+      setMode('normal');
+    }
+
     // The footprint cross-check runs inside runTrace now, so it lands here too
     // — and equally on every later re-trace, which used to leave the verdict
     // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
-  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing]);
+  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom,
+    setManualEntryMode, setMode]);
 
   useEffect(() => {
     afterScanRef.current = runAutoScale;
