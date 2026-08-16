@@ -872,6 +872,10 @@ export function useToolRouter({
         // Without this, Esc left the user in overlay-placement mode with only
         // the standing toast to say so.
         useAppStore.getState().setManualEntryMode(false);
+      } else if (useAppStore.getState().mode === 'manual') {
+        // Leaving the room picker. `mode` is the only thing that renders the
+        // pills, so nothing else here can put them away.
+        useAppStore.getState().setMode('normal');
       } else if (selectedVertexIndex !== null) {
         setSelectedVertexIndex?.(null);
       }

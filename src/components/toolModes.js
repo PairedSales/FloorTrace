@@ -1,6 +1,6 @@
 import {
   Brush, Spline, SquareDashedBottom, Scaling, Ruler, Compass,
-  Pentagon, Crop, Eraser, MousePointer2,
+  Pentagon, Crop, Eraser, MousePointer2, MousePointerClick,
 } from 'lucide-react';
 
 // What each tool mode is called, what it asks the user to do, and how it
@@ -66,6 +66,14 @@ export const TOOL_MODES = {
     icon: MousePointer2,
     name: 'Placing the room',
     hint: 'Click the room on the plan to place the overlay.',
+  },
+  // Not a tool flag: this one is on whenever the read labels are on screen as
+  // pills, which is the state the automatic scale leaves behind only when it
+  // could not choose, or that "Select room" returns to deliberately.
+  pick: {
+    icon: MousePointerClick,
+    name: 'Choosing a room',
+    hint: 'Click a dimension label to measure that room and take the scale from it.',
   },
 };
 
