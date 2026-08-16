@@ -230,12 +230,28 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
 
   const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
   const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
-  const barrier = bridgeRuns(
-    analysis.thickMask, width, height,
-    Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
-    Math.max(8, wallThickness * 2),
-  );
-  const cavities = openCavities(footprint, barrier, width, height);
+
+  // `barrier` and `cavities` are page-sized — a door-bridged wall barrier plus
+  // a full-page component labelling — and everything that reads them is gated:
+  // the label-vote loop needs `excludeRegions`, `findGarageCavities` needs
+  // `autoGarage`, and the flood block below needs the label loop to have
+  // resolved something. `findShadedPockets` reads neither.
+  //
+  // The room-clamp trace passes `autoGarage: false` and no excludeRegions, so
+  // on the automatic path this was computed in full and thrown away on every
+  // clamped floor — profiled at ~15% of step 4, of which bridgeRuns is ~64%.
+  const wantsCavities = (options.excludeRegions?.length ?? 0) > 0
+    || options.autoGarage !== false;
+  const barrier = wantsCavities
+    ? bridgeRuns(
+      analysis.thickMask, width, height,
+      Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
+      Math.max(8, wallThickness * 2),
+    )
+    : null;
+  const cavities = wantsCavities
+    ? openCavities(footprint, barrier, width, height)
+    : { labels: null, components: [] };
   const resolved = [];
   const unresolved = [];
   const garageCavityIds = new Set();

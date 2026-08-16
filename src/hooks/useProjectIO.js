@@ -2,6 +2,8 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
+import { prewarmDetection } from '../utils/detection';
+import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { confirmToast } from '../utils/confirmToast';
 import { notify, flash } from '../utils/notify';
 
@@ -60,12 +62,19 @@ export function useProjectIO(handleManualMode, fileInputRef) {
 
           flash('Project loaded');
         } else {
+          // Before the load, not after: the base64 round-trip and the decode
+          // inside `loadImageFromFile` are part of the ingest cost.
+          perfResetRun();
+          perfMark(MARKS.imageSet);
           // Load and validate first — a failed load must leave the current project intact
           const { dataUrl, mimeType } = await loadImageFromFile(file);
           resetOverlays();
           undoManager.clear();
           setImage(dataUrl);
           setImageMimeType(mimeType);
+          // Not awaited: it runs in the detection worker while the scan below
+          // holds the main thread and the Tesseract pool.
+          prewarmDetection(dataUrl);
           await handleManualMode(dataUrl, true); // Automatically enter manual mode
         }
       } catch (error) {

@@ -3,6 +3,7 @@ import { detectRoomsFromLabels } from '../utils/detection';
 import { selectProjectScale } from '../utils/detection/scale.js';
 import { isUserAsserted } from '../utils/detection/validate.js';
 import { notify, flash } from '../utils/notify';
+import { perfMark, MARKS } from '../utils/perfMarks';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 
@@ -79,6 +80,8 @@ export function useAutoScale() {
     } catch (error) {
       console.error('Automatic scale measurement failed:', error);
       return null;
+    } finally {
+      perfMark(MARKS.measureEnd);
     }
     // The image changed under us (a crop, a new file) while the batch ran.
     if (useAppStore.getState().image !== image) return null;

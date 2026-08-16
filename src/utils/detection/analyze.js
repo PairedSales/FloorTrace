@@ -77,10 +77,13 @@ export const analyzeFloorplan = (imageData, options = {}) => {
   // filter because they touch nothing.
   const minRun = options.minRunLength ?? Math.max(12, Math.round(longest * 0.018));
   const tolerant = dilateRect(cleaned, width, height, 1);
-  const strokes = keepLongRuns(tolerant, width, height, minRun, 'h');
-  orMasks(strokes, keepLongRuns(tolerant, width, height, minRun, 'v'));
-  orMasks(strokes, keepLongRuns(tolerant, width, height, minRun, 'd'));
-  orMasks(strokes, keepLongRuns(tolerant, width, height, minRun, 'a'));
+  // All four directions accumulate into one mask — `keepLongRuns` only sets
+  // bits, so this is the same union the three OR passes produced, without the
+  // three extra page-sized allocations.
+  const strokes = new Uint8Array(tolerant.length);
+  for (const direction of ['h', 'v', 'd', 'a']) {
+    keepLongRuns(tolerant, width, height, minRun, direction, strokes);
+  }
   // Restrict run hits back to real ink (+1px halo from the tolerant dilate).
   for (let i = 0; i < strokes.length; i += 1) {
     if (strokes[i] && !tolerant[i]) strokes[i] = 0;

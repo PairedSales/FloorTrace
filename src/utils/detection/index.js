@@ -1,4 +1,5 @@
 import { boundaryByMode } from './pipeline';
+import { perfRecordWorker } from '../perfMarks';
 
 let detectionWorker = null;
 let nextRequestId = 1;
@@ -10,6 +11,7 @@ const ensureWorker = () => {
   detectionWorker = new Worker(new URL('../../workers/detectionWorker.js', import.meta.url), { type: 'module' });
   detectionWorker.onmessage = (event) => {
     const { id, ok, data, error } = event.data ?? {};
+    perfRecordWorker(event.data);
     const request = pending.get(id);
     if (!request) return;
     pending.delete(id);
@@ -61,6 +63,26 @@ const runWorkerRequest = (
 export const computeWallSnapSegments = async (image) => {
   if (!image) return null;
   return runWorkerRequest('wallSnapSegments', { image }, 60_000);
+};
+
+/**
+ * Start the analysis and the room-clamp ladder now, so the scan pays for them
+ * instead of the user. Fire-and-forget by design — nothing waits on it, and a
+ * failure costs only the speed-up.
+ *
+ * Gated on core count: the OCR pool is `min(4, cores/2)`, so on a 4-core
+ * machine a third compute thread would contend with two Tesseract workers and
+ * the main thread. The scan's own budget is wall clock (it drops ROIs when it
+ * overruns), which means losing that race would cost detections rather than
+ * just time — so this only runs where there is genuine headroom.
+ *
+ * The long timeout is deliberate: a tripped timeout terminates the worker, and
+ * this request is queued ahead of the real ones.
+ */
+export const prewarmDetection = (image) => {
+  if (!image) return;
+  if ((globalThis.navigator?.hardwareConcurrency ?? 0) < 8) return;
+  runWorkerRequest('warmDetection', { image }, 120_000).catch(() => {});
 };
 
 export const detectRoomFromClick = async (image, clickPoint, options = {}) => {

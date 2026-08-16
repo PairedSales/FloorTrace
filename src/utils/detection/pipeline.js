@@ -11,11 +11,12 @@
 
 import { analyzeFloorplan } from './analyze.js';
 import { traceBoundary } from './boundary.js';
+import { extractWallSegments } from './wallEvidence.js';
 import { growRoomRect } from './room.js';
 import { buildSat } from './raster.js';
 import { polygonBounds, mapPolygonToOriginal, ringSetArea } from './polygon.js';
 import { validateBoundaryResult } from './validate.js';
-import { getCachedAnalysis, getSearchCache } from './cache.js';
+import { getCachedAnalysis, getSearchCache, searchCacheStats } from './cache.js';
 import { rasterizeBrush } from './brush.js';
 import { RESULT_SCOPED_CODES } from '../boundaryQuality.js';
 
@@ -273,9 +274,55 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       sealSearches: boundary.debug.sealSearches,
       alternatives: boundary.debug.alternatives,
       networks: boundary.debug.networks,
+      searchMemo: searchCacheStats(),
       elapsedMs: Date.now() - t0,
     },
   };
+};
+
+// The clamp trace behind a room click, as one function so the prewarm below and
+// `detectRoomFromClickCore` cannot drift apart. Sharing this exact call is what
+// makes the prewarm free of behaviour risk: the two do not merely compute the
+// same thing, they resolve to the same memo entry.
+//
+// That is also why no option is added for the prewarm's benefit (`remediate`
+// included). `options.boundary` is part of the memo key, so a prewarm that
+// passed anything extra would key differently, miss, and buy nothing.
+const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis(
+  options.cacheKey
+    ? `${options.cacheKey}::roomclamp::${JSON.stringify(options.boundary ?? null)}`
+    : null,
+  maxDimension, options.analyze,
+  () => traceBoundary(analysis, {
+    ...options.boundary,
+    autoGarage: false,
+    inclusive: true,
+    searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
+  }),
+);
+
+/**
+ * Run the analysis and the room-clamp trace for their side effect on the memo,
+ * and return nothing but a receipt.
+ *
+ * The detection worker is idle for the whole OCR scan (2-4 s) and then does
+ * this work serially afterwards, where it lands squarely on the clock: the
+ * first measured label pays analyze + a complete closing-ladder search. Neither
+ * depends on anything OCR produces — `boundary.js` is explicit that constraints
+ * only reach scoring and excludeRegions only reach buildFloor — so both can run
+ * during the scan instead.
+ *
+ * Correctness is structural rather than measured: steps 4 and 5 call exactly
+ * the code they called before and simply find the memo populated.
+ */
+export const prewarmDetectionCore = (imageData, options = {}) => {
+  const maxDimension = options.preprocess?.maxDimension ?? 1400;
+  const analysis = getCachedAnalysis(
+    options.cacheKey, maxDimension, options.analyze,
+    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+  );
+  roomClampBoundary(analysis, maxDimension, options);
+  return { warmed: true };
 };
 
 // One SAT per clamped floor, not per click: every room placed on a floorplan
@@ -327,18 +374,7 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // ladder, and the ladder is ~84% of a trace. The boundary options join the
   // memo key — keyed on the image alone, a second call with different options
   // was silently answered with the first call's geometry.
-  const boundary = getCachedAnalysis(
-    options.cacheKey
-      ? `${options.cacheKey}::roomclamp::${JSON.stringify(options.boundary ?? null)}`
-      : null,
-    maxDimension, options.analyze,
-    () => traceBoundary(analysis, {
-      ...options.boundary,
-      autoGarage: false,
-      inclusive: true,
-      searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
-    }),
-  );
+  const boundary = roomClampBoundary(analysis, maxDimension, options);
   let footprintInfo = null;
   if (boundary) {
     const px = Math.min(analysis.width - 1, Math.max(0, Math.round(workPoint.x)));
@@ -419,6 +455,35 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
       hasFootprint: Boolean(footprintInfo),
       elapsedMs: Date.now() - t0,
     },
+  };
+};
+
+// The snap engine's vectorisation, taken off the SAME memoised analysis the
+// room and boundary stages use.
+//
+// `wallSnapEngine.wallSnapSegments` ran its own
+// `binarizeToWorkingScale(imageData, 1400)` — bit-identical to the first step
+// of `analyzeFloorplan`, and thrown away afterwards. Since `useSnappingSystem`
+// already fires this request the moment the image is set (auto-snap is on by
+// default), that duplicated slice was the only thing standing between the app
+// and a free analysis prewarm: this request now runs during the OCR scan and
+// leaves the analysis in the memo, so step 4's first label no longer pays for
+// it. The segments are unchanged — same `ink`, same extractor.
+//
+// `maxDimension` is pinned to 1400 rather than read from `options.preprocess`
+// for two reasons: the segments are *defined* at that scale
+// (wallSnapEngine.WORKING_MAX_DIMENSION), and the memo key has to be the one
+// the room/boundary calls default to or the sharing silently stops.
+export const wallSnapSegmentsCore = (imageData, options = {}) => {
+  const analysis = getCachedAnalysis(
+    options.cacheKey, 1400, options.analyze,
+    () => analyzeFloorplan(imageData, { maxDimension: 1400, ...options.analyze }),
+  );
+  const { vertical, horizontal } = extractWallSegments(
+    analysis.ink, analysis.width, analysis.height,
+  );
+  return {
+    vertical, horizontal, scaleX: analysis.scaleX, scaleY: analysis.scaleY,
   };
 };
 
