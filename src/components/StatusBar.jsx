@@ -1,6 +1,29 @@
 import { useState, useEffect } from 'react';
-import { Check, Loader2, Minus, Plus } from 'lucide-react';
+import { Check, Loader2, Minus, Plus, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
+
+// What the draft store is actually doing, said in the user's terms. The cell
+// used to render a hardcoded "Saved" — the one claim in the shell that was
+// never checked against anything, and the wrong one to get wrong in an app
+// whose work exists only in this browser.
+const DRAFT_CELL = {
+  saved: {
+    Icon: Check, tone: 'text-ok', label: 'Draft saved',
+    title: 'Your work is kept in this browser. Export an image, or save a project file, to keep it anywhere else.',
+  },
+  pending: {
+    Icon: RefreshCw, tone: 'text-fg-3', label: 'Saving draft…',
+    title: 'Writing the latest changes to this browser’s storage.',
+  },
+  error: {
+    Icon: AlertTriangle, tone: 'text-crit', label: 'Draft not saved',
+    title: 'This browser refused to store the draft. Export an image, or save a project file, before you close the tab.',
+  },
+  off: {
+    Icon: CloudOff, tone: 'text-warn', label: 'Not kept',
+    title: '“Save work on exit” is off, so nothing is stored. Export an image, or save a project file, before you close the tab.',
+  },
+};
 
 const Cell = ({ children, className = '' }) => (
   <span className={`inline-flex items-center gap-1.5 h-[25px] px-2.5 whitespace-nowrap shrink-0
@@ -20,11 +43,12 @@ const Cell = ({ children, className = '' }) => (
  * every mousemove — a 60 Hz re-render of the whole shell to display a number
  * nobody is reading while they drag.
  */
-const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage }) => {
+const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
   const zoomScale = useAppStore((s) => s.zoomScale);
   const calibration = useAppStore((s) => s.calibration);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
+  const draftState = useAppStore((s) => s.draftState);
 
   // Low-stakes confirmations land here rather than as a toast over the plan.
   const flash = useAppStore((s) => s.statusFlash);
@@ -100,10 +124,28 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage }) => {
         </button>
       </Cell>
 
-      <Cell className="text-fg-3">
-        <Check className="w-3 h-3 text-ok" aria-hidden="true" />
-        Saved
-      </Cell>
+      {hasImage && (() => {
+        const { Icon, tone, label, title } = DRAFT_CELL[draftState] ?? DRAFT_CELL.off;
+        return (
+          <Cell className="text-fg-3">
+            {/* Clickable, because every one of these states resolves the same
+                way: take the work out of the browser. */}
+            <button
+              type="button"
+              onClick={onExport}
+              title={`${title} Click to export.`}
+              className="inline-flex items-center gap-1.5 hover:text-fg
+                         transition-colors cursor-pointer"
+            >
+              <Icon
+                className={`w-3 h-3 ${tone} ${draftState === 'pending' ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
+              {label}
+            </button>
+          </Cell>
+        );
+      })()}
     </footer>
   );
 };

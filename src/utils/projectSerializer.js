@@ -411,7 +411,10 @@ export function serializeSketch(storeState, historyState = null) {
     version: 1,
     metadata: {
       projectId: storeState.projectId || `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-      projectName: 'Untitled Project',
+      // Mirrored from the floor state so the header of the file names the
+      // subject too — this is the field a file browser or a future index would
+      // read, and "Untitled Project" was written into every file ever saved.
+      projectName: (storeState.projectName || '').trim() || 'Untitled Project',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
@@ -471,8 +474,15 @@ export function deserializeSketch(project) {
 
   const activeTraceId = state.activeTraceId || perimeterTraces[0].id;
 
+  // A file written before the subject line existed carries it only in metadata,
+  // where the writer always put the same placeholder — so that placeholder is
+  // read back as "unnamed" rather than adopted as the subject.
+  const metaName = project.metadata.projectName === 'Untitled Project'
+    ? '' : (project.metadata.projectName ?? '');
+
   const statePatch = {
     ...state,
+    projectName: state.projectName ?? metaName,
     perimeterTraces,
     activeTraceId,
     traceInteractionMode: 'idle',
@@ -513,8 +523,13 @@ export async function exportProject(storeState, historyState, isSaveAs = false) 
   // nobody reads it in an editor.
   const jsonString = JSON.stringify(project);
 
-  const timestamp = new Date().toISOString().split('T')[0];
-  const defaultFilename = `Sketch ${timestamp}.floorplan`;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // Local date, not `toISOString`: UTC stamps yesterday on any evening west of
+  // Greenwich, which on a dated file is wrong in the least visible way.
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const named = (storeState.projectName || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const defaultFilename = `${named || 'Sketch'} ${timestamp}.floorplan`;
 
   // Native showSaveFilePicker flow if Save As is requested and supported
   if (isSaveAs && 'showSaveFilePicker' in window) {

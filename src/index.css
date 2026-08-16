@@ -154,6 +154,15 @@
            hover:brightness-110;
   }
 
+  /* A command that has become worth doing. Outlined rather than filled so it
+     cannot compete with the filled primary: Export is the end of the job, not
+     the current step, and two solid accent buttons in one row make the row
+     say nothing. */
+  .toolbar-btn-ready {
+    @apply border border-accent/55 text-accent font-semibold
+           hover:bg-accent/12 hover:text-accent;
+  }
+
   .panel-input {
     @apply w-full px-2.5 py-1.5 text-[13px] font-mono rounded-md text-center
            bg-panel-2 border border-line text-fg

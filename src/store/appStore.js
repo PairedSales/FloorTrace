@@ -94,6 +94,10 @@ const workingStateDefaults = () => ({
   stageY: 0,
   canvasRotation: 0,    // global rotation alignment
   viewportSyncToken: null,
+  // What this measurement is of — the subject line an exported exhibit carries
+  // into a workfile. Document content, not a preference: a page of square
+  // footage that does not say which property it belongs to is not filing.
+  projectName: '',
   // Project tracking states
   isDirty: false,
   projectId: null,
@@ -250,6 +254,13 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // view preference, not a fact about the project, so it must not ride along
   // in a `.floorplan` or be restored by an undo.
   dockOpen: true,
+  // Whether the export dialog is up. UI-only for the same reason.
+  showExportDialog: false,
+  // What the autosaved draft is actually doing right now: 'off' | 'pending' |
+  // 'saved' | 'error'. Reported rather than assumed — the status bar used to
+  // read a hardcoded "Saved", which was the one claim in the shell that was
+  // true by coincidence and never checked.
+  draftState: 'off',
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -497,6 +508,11 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setFocusedWarning: (v) => set({ focusedWarning: v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
   setDockOpen: (v) => set({ dockOpen: v }),
+  setShowExportDialog: (v) => set({ showExportDialog: v }),
+  setDraftState: (v) => set({ draftState: v }),
+  // Dirty like any other document edit: the subject line is what a saved
+  // project is filed under, so losing it is losing work.
+  setProjectName: (v) => set({ projectName: v, isDirty: true }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

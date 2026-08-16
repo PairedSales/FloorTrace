@@ -8,6 +8,7 @@ import ToolRail from './components/ToolRail';
 import MeasurementDock from './components/MeasurementDock';
 import StatusBar from './components/StatusBar';
 import HelpModal from './components/HelpModal';
+import ExportDialog from './components/ExportDialog';
 import { confirmToast } from './utils/confirmToast';
 import {
   detectRoomFromClick,
@@ -36,6 +37,7 @@ import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
+import { useExhibitExport } from './hooks/useExhibitExport';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
 import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
@@ -182,6 +184,7 @@ function App() {
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
   const showHelpModal = useAppStore((s) => s.showHelpModal);
+  const showExportDialog = useAppStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
@@ -473,6 +476,8 @@ function App() {
     handleSaveProjectNormal,
     handleSaveProjectAs,
   } = useProjectIO(notify, handleManualMode, fileInputRef);
+
+  const { openExport, closeExport, copyExhibitNow } = useExhibitExport(notify);
 
   const {
     handlePasteImage,
@@ -1089,6 +1094,8 @@ function App() {
     onPaste: handlePasteImage,
     onFileOpen: handleFileOpen,
     onSaveProject: handleSaveProject,
+    onExport: openExport,
+    onCopyExhibit: copyExhibitNow,
     activeBrush,
     onRotateCanvas: handleRotateCanvas,
     onFitToWindow: handleFitToWindow,
@@ -1174,6 +1181,8 @@ function App() {
         onPasteImage={handlePasteImage}
         onSaveProject={handleSaveProject}
         onSaveProjectAs={handleSaveProjectAs}
+        onExport={openExport}
+        onCopyExhibit={copyExhibitNow}
         onRestart={handleRestart}
         onHelpOpen={handleHelpOpen}
         onFitToWindow={handleFitToWindow}
@@ -1200,7 +1209,8 @@ function App() {
         image={image}
         isProcessing={isProcessing}
         onFileOpen={handleFileOpen}
-        onSaveProject={handleSaveProjectNormal}
+        onExport={openExport}
+        hasArea={area > 0}
         onTracePerimeter={handleTracePerimeter}
         onFitToWindow={handleFitToWindow}
         onDrawExterior={() => handleDrawMode()}
@@ -1240,6 +1250,7 @@ function App() {
             onDimensionFocus={handleDimensionFocus}
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
+            onExport={openExport}
           />
         )}
 
@@ -1324,9 +1335,18 @@ function App() {
         hasImage={!!image}
         onZoomIn={() => handleZoom(1)}
         onZoomOut={() => handleZoom(-1)}
+        onExport={openExport}
       />
 
       {showHelpModal && <HelpModal onClose={handleHelpClose} />}
+
+      {showExportDialog && (
+        <ExportDialog
+          onClose={closeExport}
+          onSaveProject={handleSaveProjectNormal}
+          notify={notify}
+        />
+      )}
 
       <input
         ref={fileInputRef}
