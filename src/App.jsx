@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
-import { Toaster, toast } from 'sonner';
+import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
 import MenuBar from './components/MenuBar';
 import CommandBar from './components/CommandBar';
@@ -8,7 +8,9 @@ import ToolRail from './components/ToolRail';
 import MeasurementDock from './components/MeasurementDock';
 import StatusBar from './components/StatusBar';
 import HelpModal from './components/HelpModal';
+import ConfirmDialog from './components/ConfirmDialog';
 import { confirmToast } from './utils/confirmToast';
+import { notify, flash, DURATION } from './utils/notify';
 import {
   detectRoomFromClick,
   getFloorBoundaryFaces,
@@ -26,7 +28,7 @@ import {
 import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
-import { qualitySummary, scaleQualitySummary } from './utils/boundaryQuality';
+import { qualitySummary } from './utils/boundaryQuality';
 import useAppStore, {
   selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
@@ -233,32 +235,11 @@ function App() {
   const dimensionWarnTimerRef = useRef(null); // Holds the scale warning until typing settles
   const dimensionBlurTimerRef = useRef(null); // Survives focus moving between sub-fields
 
-  // Central toast helper. Prefer an explicit type so severity isn't guessed
-  // from wording: notify('Saved', { type: 'success' }).
-  // Back-compat: a bare number is still treated as the duration, and when no
-  // type is given the severity is inferred from the message text.
-  const notify = useCallback((message, options = {}) => {
-    const opts = typeof options === 'number' ? { duration: options } : options;
-    const { duration = 3000, id } = opts;
-    const toastOpts = id ? { duration, id } : { duration };
-
-    let type = opts.type;
-    if (!type) {
-      const msg = message.toLowerCase();
-      if (msg.includes('error') || msg.includes('fail') || msg.includes('unable')) type = 'error';
-      else if (msg.includes('success') || msg.includes('detected') || msg.includes('loaded')) type = 'success';
-      else type = 'default';
-    }
-
-    const emit = { success: toast.success, error: toast.error, warning: toast.warning, info: toast.info }[type] || toast;
-    emit(message, toastOpts);
-  }, []);
-
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
-  const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave(notify);
-  const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr(notify);
-  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale(notify);
+  const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave();
+  const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr();
+  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
   // The scan runs before the exterior trace is even defined in this file, and
   // the automatic path needs both. A ref rather than a reordering: moving
   // handleManualMode below the tracer would drag handleFindRoomSize and its
@@ -322,7 +303,7 @@ function App() {
     clearAutosavedDraft();
     undoManager.clear();
     useAppStore.getState().restart();
-    notify('Project reset.', { type: 'success' });
+    flash('Project closed');
   };
 
   // OCR found nothing usable: drop a placeholder overlay in the middle of the
@@ -368,7 +349,7 @@ function App() {
       }
       
       if (!imgSrc) {
-        notify('Please load an image first.', { type: 'error' });
+        notify('Open a floorplan first.', { type: 'error', id: 'no-image' });
         return;
       }
       
@@ -390,23 +371,26 @@ function App() {
 
         if (dimensions.length === 0) {
           setOcrFailed(true);
-          notify('No dimensions found — enter room size manually.', { type: 'warning' });
+          notify('No printed dimensions found — type a room size, or set the scale from a known length.', { type: 'warning', id: 'scan' });
           placeCentredOverlay(imgSrc);
         } else {
           setOcrFailed(false);
           const count = dimensions.length;
-          notify(`Detected ${count} dimension${count === 1 ? '' : 's'}.`, { type: 'success' });
           // Auto-switch unit based on detected format. The parser's vocabulary
           // is {inches, decimal, meters} and the UI's is {inches, decimal,
           // metric}; without the mapping a metric plan set a unit no formatter
           // recognised.
           const uiUnit = detectedFormat === 'meters' ? 'metric' : detectedFormat;
+          let unitNote = '';
           if (uiUnit && unit !== uiUnit) {
             setUnit(uiUnit);
             const label = uiUnit === 'inches' ? 'feet-inches'
               : uiUnit === 'metric' ? 'meters' : 'decimal feet';
-            notify(`Switched to ${label} mode based on detected dimensions.`, { type: 'info' });
+            unitNote = ` Switched to ${label}.`;
           }
+          // One message, not two: the unit change is a consequence of the scan,
+          // not a separate event the user needs to weigh.
+          flash(`Read ${count} dimension${count === 1 ? '' : 's'}.${unitNote}`);
           // Everything from here is automatic: every label is measured, the
           // rooms that agree set the scale, and the exterior is traced. The
           // pills stay on screen, so clicking one still pins the scale to that
@@ -416,7 +400,7 @@ function App() {
       } catch (error) {
         console.error('Error detecting dimensions:', error);
         setOcrFailed(true);
-        notify('Could not scan dimensions — enter room size manually.', { type: 'error' });
+        notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
         placeCentredOverlay(imgSrc);
       } finally {
         setIsProcessing(false);
@@ -427,7 +411,7 @@ function App() {
         releaseOcrWorkersWhenIdle(60000);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, notify, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -472,13 +456,13 @@ function App() {
     handleSaveProject,
     handleSaveProjectNormal,
     handleSaveProjectAs,
-  } = useProjectIO(notify, handleManualMode, fileInputRef);
+  } = useProjectIO(handleManualMode, fileInputRef);
 
   const {
     handlePasteImage,
     handleDragOver,
     handleDrop,
-  } = useDragAndDrop(notify, handleManualMode, checkUnsavedChanges);
+  } = useDragAndDrop(handleManualMode, checkUnsavedChanges);
 
   // Vertex-by-vertex outline placement. Draw mode is the default fallback now,
   // but placing exact corners is still the right tool when the plan is clean
@@ -488,22 +472,19 @@ function App() {
     setDrawModeActive(false);
     setPerimeterOverlay(null);
     setPerimeterVertices([]); // activate manual vertex placement
-    notify('Click to place the exterior outline. Esc/Enter to finish.', { type: 'info' });
-  }, [setDrawModeActive, setPerimeterOverlay, setPerimeterVertices, notify]);
+  }, [setDrawModeActive, setPerimeterOverlay, setPerimeterVertices]);
 
   // Draw mode: paint roughly over the exterior walls and let the tracer read
   // the strokes as a corridor. This is the fallback whenever auto-detection
   // fails, so it is entered from the failure path as well as from the toolbar.
-  const handleDrawMode = useCallback(({ message, keepStrokes = false } = {}) => {
+  const handleDrawMode = useCallback(({ keepStrokes = false } = {}) => {
     undoManager.save();
     setPerimeterVertices(null);
     setPerimeterOverlay(null);
     if (!keepStrokes) setDrawStrokes([]);
     // Always enters; the toggle would turn it back off when already on.
     if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
-    notify(message ?? 'Paint over the exterior walls. [ and ] resize the brush, Enter when done.',
-      { type: 'info', duration: 7000 });
-  }, [setPerimeterVertices, setPerimeterOverlay, setDrawStrokes, handleDrawModeToggle, notify]);
+  }, [setPerimeterVertices, setPerimeterOverlay, setDrawStrokes, handleDrawModeToggle]);
 
   // Apply detected boundaries to perimeter traces. Returns the number of
   // floors applied (0 = nothing usable). A single floor updates the active
@@ -567,34 +548,38 @@ function App() {
     // A drawn trace that went wrong is corrected by painting again, not by
     // switching to a different tool, so the offer differs from the auto path's.
     const drawAction = drawn
-      ? { label: 'Redraw', onClick: () => handleDrawMode({ keepStrokes: true,
-        message: 'Add or adjust strokes, then press Enter.' }) }
+      ? { label: 'Redraw', onClick: () => handleDrawMode({ keepStrokes: true }) }
       : { label: 'Draw mode', onClick: () => handleDrawMode() };
 
     if (!floorCount) {
-      toast.error(quality.reason
-        ? `No usable perimeter — ${quality.reason}.`
-        : 'No usable perimeter detected.', { duration: 8000, action: drawAction });
+      notify(quality.reason
+        ? `No usable outline — ${quality.reason}.`
+        : 'No usable outline found.',
+      { type: 'error', id: 'trace-result', action: drawAction });
       return;
     }
 
-    const noun = drawn ? 'Exterior traced from your outline' : 'Perimeter detected';
+    const noun = drawn ? 'Outline traced from your painting' : 'Outline found';
     const what = floorCount > 1
-      ? `${drawn ? 'Traced' : 'Detected'} ${floorCount} floors (${mode} wall mode)`
-      : `${noun} (${mode} wall mode)`;
+      ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels (${mode} wall face)`
+      : `${noun} (${mode} wall face)`;
 
+    // A clean trace is visible on the canvas the instant it lands, and its
+    // confidence is on the outline row — so it acknowledges rather than
+    // interrupts. Only a result worth checking earns the stack.
     if (quality.level === 'good') {
-      notify(`${what}.${excludedNote}`, { type: 'success', duration: 2500 });
+      flash(`${what}.${excludedNote}`);
       return;
     }
     const confidenceNote = quality.percent === null ? '' : ` (${quality.percent}% confidence)`;
     const reason = quality.reason ? ` — ${quality.reason}` : '';
-    const emit = quality.level === 'fair' ? toast.warning : toast.error;
-    emit(`${what}${confidenceNote}: check it${reason}.`, {
-      duration: 10000,
+    notify(`${what}${confidenceNote}: check it${reason}.`, {
+      type: quality.level === 'fair' ? 'warning' : 'error',
+      id: 'trace-result',
+      duration: DURATION.LONG,
       action: drawAction,
     });
-  }, [useInteriorWalls, handleDrawMode, notify]);
+  }, [useInteriorWalls, handleDrawMode]);
 
   // Returns the quality level of the applied trace, so the caller can decide
   // whether to fall back. `brush` carries draw mode's strokes (original image
@@ -626,9 +611,10 @@ function App() {
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
         console.error('Perimeter detection failed:', error);
-        toast.error('Perimeter detection failed.', {
-          duration: 8000,
-          action: { label: 'Draw mode', onClick: () => handleDrawMode() },
+        notify('Could not trace this plan.', {
+          type: 'error',
+          id: 'trace-result',
+          action: { label: 'Paint it instead', onClick: () => handleDrawMode() },
         });
       }
       return 'failed';
@@ -660,7 +646,7 @@ function App() {
     const strokes = state.drawStrokes;
     if (!strokes.length) {
       setDrawModeActive(false);
-      notify('Nothing painted — draw mode closed.', { type: 'info' });
+      flash('Nothing painted');
       return;
     }
     undoManager.save();
@@ -673,7 +659,7 @@ function App() {
     // to add one more pass is the natural correction, and discarding them
     // would make the user paint the whole outline again.
     if (level === 'good' || level === 'fair') setDrawStrokes([]);
-  }, [runTrace, setDrawModeActive, setDrawStrokes, notify]);
+  }, [runTrace, setDrawModeActive, setDrawStrokes]);
 
   // One setting over every outline. Each traced outline carries the detector's
   // own inner/outer pair, so the switch reaches outlines from earlier detection
@@ -698,8 +684,7 @@ function App() {
 
   const handleRotateCanvas = useCallback((direction) => {
     canvasRef.current?.rotateCanvas(direction);
-    notify(`Canvas rotated ${direction === 'clockwise' ? 'clockwise' : 'counterclockwise'}`);
-  }, [notify]);
+  }, []);
 
   // Handle image update from eraser or crop tool (saves undo point before
   // changing). The cached detection result describes the *previous* image, so
@@ -764,21 +749,15 @@ function App() {
     // Say it out loud only when the answer changed or is in doubt; the Area
     // panel carries the same verdict for as long as the scale is in force,
     // because that is where the question is actually asked.
-    const summary = scaleQualitySummary(resolved.quality);
-    if (summary && summary.level === 'check' && options.announce !== false) {
-      notify(summary.detail, {
-        type: 'warning',
-        duration: 8000,
-        // One id: the blur check and the typing backstop can both land on the
-        // same mismatch, and it is one problem, not two.
-        id: 'room-scale-disagreement',
-      });
-    }
+    // Deliberately silent. The Scale card carries this verdict with its own
+    // chip for as long as the scale is in force, which is where the question
+    // is actually asked — a toast said it once and then left the doubt
+    // invisible.
 
     if (resolved.changed) {
       applyRoomCalibration(resolved.scale, null, 'room-calibration', resolved.quality);
     }
-  }, [applyRoomCalibration, notify]);
+  }, [applyRoomCalibration]);
 
   // Update room overlay position. Pinned: dragging the overlay is the user
   // correcting the room the app got wrong, and unpinned it was outvoted by the
@@ -815,14 +794,14 @@ function App() {
     const overlay = selectPerimeterOverlay(useAppStore.getState());
     if (!overlay?.vertices) return;
     if (overlay.vertices.length <= 3) {
-      notify('A perimeter needs at least three points.', { type: 'warning' });
+      notify('An outline needs at least three corners.', { type: 'warning', id: 'min-vertices' });
       return;
     }
     updatePerimeterVertices(
       overlay.vertices.filter((_, i) => i !== index),
       true
     );
-  }, [updatePerimeterVertices, notify]);
+  }, [updatePerimeterVertices]);
 
   // Auto-trace exterior boundary after a room overlay is placed.
   const autoTraceExterior = useCallback(
@@ -913,9 +892,9 @@ function App() {
       // A failed room detection used to fall through to a hardcoded 200x200
       // box and calibrate the whole project from it, without a word.
       notify(
-        'Could not find the room outline — drag the overlay to match the room, '
+        'Could not find that room’s outline — drag the overlay to match it, '
         + 'then check the area.',
-        { type: 'warning', duration: 6000 },
+        { type: 'warning', id: 'room-detect' },
       );
     } else {
       useAppStore.getState().addRoom({
@@ -935,8 +914,8 @@ function App() {
       if (detected.confidence < 0.5) {
         notify(
           'This room’s outline is uncertain, and the scale comes from it — '
-          + 'check the overlay against the room before trusting the area.',
-          { type: 'warning', duration: 8000 },
+          + 'check the overlay before trusting the area.',
+          { type: 'warning', id: 'room-detect' },
         );
       }
     }
@@ -963,7 +942,7 @@ function App() {
     setDetectedDimensions([]);
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
     setPerimeterVertices, setManualEntryMode, setMode, setDetectedDimensions,
-    autoTraceExterior, notify]);
+    autoTraceExterior]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback((dimension) => {
@@ -986,13 +965,13 @@ function App() {
     const width = parseFloat(roomDimensions.width);
     const height = parseFloat(roomDimensions.height);
     if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      notify('Please enter valid room dimensions first.', { type: 'error' });
+      notify('Enter a room width and height first.', { type: 'error', id: 'no-dims' });
       return;
     }
 
     undoManager.save();
     placeRoom({ point: clickPoint, dims: { width, height } });
-  }, [manualEntryMode, roomDimensions, placeRoom, notify]);
+  }, [manualEntryMode, roomDimensions, placeRoom]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -1023,28 +1002,19 @@ function App() {
   const handleUnitChange = useCallback((u) => {
     undoManager.save();
     setUnit(u);
-    const unitNames = {
-      decimal: 'Decimal Feet',
-      inches: 'Feet & Inches',
-      metric: 'Meters'
-    };
-    notify(`Unit format changed to ${unitNames[u] || u}`);
-  }, [setUnit, notify]);
+  }, [setUnit]);
 
   const handleShowSideLengthsChange = useCallback((value) => {
     setShowSideLengths(value);
-    notify(value ? 'Side lengths enabled' : 'Side lengths disabled');
-  }, [setShowSideLengths, notify]);
+  }, [setShowSideLengths]);
 
   const handleAutoSnapChange = useCallback((value) => {
     setAutoSnapEnabled(value);
-    notify(value ? 'Auto-snap enabled' : 'Auto-snap disabled');
-  }, [setAutoSnapEnabled, notify]);
+  }, [setAutoSnapEnabled]);
 
   const handleSaveOnExitChangeWithToast = useCallback((value) => {
     handleSaveOnExitChange(value);
-    notify(value ? 'Autosave on exit enabled' : 'Autosave on exit disabled');
-  }, [handleSaveOnExitChange, notify]);
+  }, [handleSaveOnExitChange]);
 
   // Focus moving between the feet and inches sub-fields is one edit, not two:
   // cancelling the pending clear is what makes "still editing" true for the
@@ -1328,6 +1298,8 @@ function App() {
 
       {showHelpModal && <HelpModal onClose={handleHelpClose} />}
 
+      <ConfirmDialog />
+
       <input
         ref={fileInputRef}
         type="file"
@@ -1339,8 +1311,12 @@ function App() {
       {/* Only real notifications now - every "you are in X mode" message moved
           to the context bar, and every low-stakes confirmation to the status
           bar. What is left is what actually deserves to interrupt. */}
+      {/* Two slots, not sonner's default three. A burst that cannot be read is
+          worse than a burst that is truncated, and with every toast now carrying
+          a stable id the same condition updates in place instead of stacking. */}
       <Toaster
         position="top-center"
+        visibleToasts={2}
         closeButton
         style={{ top: '86px' }}
         toastOptions={{

@@ -112,6 +112,7 @@ const CanvasStage = React.memo(({
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
   const focusedWarning = useAppStore((s) => s.focusedWarning);
+  const errorAnchor = useAppStore((s) => s.errorAnchor);
 
   // Shared refs to break mutual dependencies between hooks
   const cameraRef = useRef(null);
@@ -442,6 +443,9 @@ const CanvasStage = React.memo(({
   // rather than read from anything stored — see utils/warningAnchors.js. A
   // focus left on a deleted trace or a re-traced outline resolves to nothing.
   const warningAnchor = useMemo(() => {
+    // A refusal the user just triggered outranks a warning they clicked
+    // earlier: it describes the edit in front of them.
+    if (errorAnchor) return errorAnchor;
     if (!focusedWarning) return null;
     const trace = (perimeterTraces || []).find((t) => t.id === focusedWarning.traceId);
     const warning = trace?.quality?.warnings?.[focusedWarning.index];
@@ -449,7 +453,7 @@ const CanvasStage = React.memo(({
     return resolveAnchor(warning, {
       trace, traces: perimeterTraces, rooms, detectedDimensions,
     });
-  }, [focusedWarning, perimeterTraces, rooms, detectedDimensions]);
+  }, [errorAnchor, focusedWarning, perimeterTraces, rooms, detectedDimensions]);
 
   // Highlight always; move the camera only when the anchor is not already on
   // screen with ~15% padding, and never zoom *in* — the user has framed the

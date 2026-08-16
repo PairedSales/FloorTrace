@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { toast } from 'sonner';
-import { hasSelfIntersection, validateVertexMove } from '../../../utils/geometryValidation';
+import { notifyAt } from '../../../utils/notify';
+import { hasSelfIntersection, findSelfIntersection, validateVertexMove } from '../../../utils/geometryValidation';
 import { pointToLineDistance } from '../canvasUtils';
 
 export function usePerimeterEditor({
@@ -89,8 +89,10 @@ export function usePerimeterEditor({
     let newVertices = [...perimeterOverlay.vertices];
     newVertices[index] = finalPoint;
 
-    if (hasSelfIntersection(newVertices, true)) {
-      toast.error('Invalid edit: perimeter cannot self-intersect. Changes reverted.');
+    const crossing = findSelfIntersection(newVertices, true);
+    if (crossing) {
+      notifyAt('That would make the outline cross itself — the move was undone.',
+        { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
       onCancelUndoSave?.();
     } else {
       onPerimeterUpdate(newVertices, false);
@@ -146,8 +148,10 @@ export function usePerimeterEditor({
     const newVertices = [...vertices];
     newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
 
-    if (hasSelfIntersection(newVertices, true)) {
-      toast.error('Cannot add vertex: would cause perimeter to self-intersect.');
+    const crossing = findSelfIntersection(newVertices, true);
+    if (crossing) {
+      notifyAt('A corner there would make the outline cross itself.',
+        { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
       return;
     }
 

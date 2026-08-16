@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { warmupNeuralOcr } from '../utils/DimensionsOCR';
+import { notify, flash } from '../utils/notify';
 
 const ENHANCED_OCR_KEY = 'floortrace:enhancedOcr';
 
@@ -13,7 +14,7 @@ const ENHANCED_OCR_KEY = 'floortrace:enhancedOcr';
  *
  * @returns {{ enhancedOcr: boolean, handleEnhancedOcrChange: (enabled: boolean) => void }}
  */
-export function useEnhancedOcr(notify) {
+export function useEnhancedOcr() {
   const [enhancedOcr, setEnhancedOcr] = useState(() => {
     try {
       return localStorage.getItem(ENHANCED_OCR_KEY) === 'true';
@@ -25,12 +26,12 @@ export function useEnhancedOcr(notify) {
   const warmup = useCallback(() => {
     warmupNeuralOcr().then((api) => {
       if (api) {
-        notify('Enhanced OCR ready.', { type: 'success' });
+        flash('Enhanced OCR ready');
       } else {
-        notify('Enhanced OCR could not be initialized — scans will use standard OCR.', { type: 'error' });
+        notify('Enhanced OCR could not start — scans will use standard OCR.', { type: 'error', id: 'enhanced-ocr' });
       }
     });
-  }, [notify]);
+  }, []);
 
   // If enabled from a previous session, warm during the first idle moment so
   // the shader-compile stall lands before the user starts working.
@@ -51,10 +52,10 @@ export function useEnhancedOcr(notify) {
       // persistence is best-effort
     }
     if (enabled) {
-      notify('Preparing enhanced OCR — the app may pause for ~10 seconds.', { type: 'info' });
+      notify('Preparing enhanced OCR — the app may pause for ~10 seconds.', { type: 'info', id: 'enhanced-ocr' });
       warmup();
     }
-  }, [notify, warmup]);
+  }, [warmup]);
 
   return { enhancedOcr, handleEnhancedOcrChange };
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { toast } from 'sonner';
+import { flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
@@ -94,7 +94,10 @@ export function useKeyboardShortcuts({
       // Escape drops the warning highlight. Deliberately does not consume the
       // event: anything else listening for Escape must still see it. Sits after
       // the guard so an open help modal swallows the key instead.
-      if (e.key === 'Escape') useAppStore.getState().setFocusedWarning(null);
+      if (e.key === 'Escape') {
+        useAppStore.getState().setFocusedWarning(null);
+        useAppStore.getState().setErrorAnchor(null);
+      }
 
       // Brush size shortcuts (no modifier keys required)
       if (!e.ctrlKey && !e.metaKey) {
@@ -153,7 +156,7 @@ export function useKeyboardShortcuts({
           const tool = toolDigits.find((t) => t.digit === digit);
           if (!tool) return;
           if (!tool.available) {
-            if (tool.unavailable) toast.info(tool.unavailable);
+            if (tool.unavailable) flash(tool.unavailable);
             return;
           }
           tool.toggle?.();
