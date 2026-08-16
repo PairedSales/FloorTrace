@@ -41,6 +41,24 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 
 `src/App.jsx` wires the store to components and owns cross-cutting workflow logic (mode transitions between `normal`/`manual`, calibration math from room dimensions + overlay, toast notifications). Most reusable interaction logic is factored into `src/hooks/*` (autosave, keyboard shortcuts, tool manager, project import/export, drag-and-drop) — new cross-component behavior should generally go in a hook, not directly in `App.jsx`.
 
+### Two shells over one workflow
+
+`useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
+
+`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the five desktop bands, or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and three sheets over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
+
+The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
+
+**Touch on the canvas is not free.** Every drag-based tool (brush, eraser, crop, void rectangle, room overlay) was wired to `mousedown`/`mousemove`, and no browser synthesises those during a touch drag — so all of them were dead on a phone. `useToolRouter` now exposes `handleStageTouch{Start,Move,End}` that route into the same `dispatchPointerDown` a mouse does; one finger is a pointer, two are the camera (`usePinchZoom`, wired in `useCameraController`). Three rules that are load-bearing:
+
+- **`e.evt.button !== 0` rejects touch.** A `TouchEvent` has no `button`, so the strict test silently killed double-tap vertex insertion and every room-overlay drag. The guard is `button != null && button !== 0`.
+- **A gesture that grows a second finger commits, it does not cancel.** The ink already painted is real work; discarding it because the user then reached to zoom costs a whole stroke.
+- **Hit area and drawn size are different numbers.** Vertex handles, room corners, protractor handles and OCR pills keep their drawn radius and get a `hitFunc` sized in `/scale` so the target is a constant ~44 screen px at any zoom. Inflating what is *drawn* buries the outline the handles annotate.
+
+Right-click has no touch equivalent, so deleting a vertex is a 500 ms press-and-hold (cancelled by movement or release) in `PerimeterLayer`, and rotate-the-other-way becomes a second button in the tool sheet.
+
+**Verifying mobile in the Browser pane:** the pane does not composite, so `document.hidden` is true — `requestAnimationFrame`, `ResizeObserver` and `MediaQueryList` change events all stop firing. That makes the Konva stage stick at its 800×600 default, the hit graph never paint (so nothing on the canvas is tappable), and the shell never switch breakpoints. None of it is a bug. Shim `requestAnimationFrame` with `setTimeout`, dispatch a `resize` event to drive the camera's `measure()`, and nudge a store field `App` subscribes to so `useSyncExternalStore` re-reads the query.
+
 ### Two independent, worker-backed CV pipelines
 
 Both pipelines take a raw image and run expensive per-pixel work off the main thread, with an emphasis on real inner/outer wall geometry rather than fixed-size placeholders.

@@ -6,6 +6,29 @@ import {
   measureSideLenWidth, pointToLineDistance, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
 } from './canvasUtils';
 import { calculateArea, getCentroid, holeRings, holeKey } from '../../utils/areaCalculator';
+import { useIsTouch } from '../../hooks/useViewport';
+
+/* ── touch ────────────────────────────────────────────────────────────────
+   A vertex handle is 5 px of drawn radius. That is a fine mouse target and an
+   impossible finger one — the contact patch is ~9 mm, so on a phone the corner
+   the user is trying to nudge is entirely under their own fingertip.
+
+   Two separate numbers, because they answer different questions: the drawn
+   radius is "can I see which corner this is" and the hit radius is "can I
+   grab it". Inflating the drawn one to 22 px would bury the outline it is
+   supposed to annotate under a row of dots. */
+const TOUCH_HIT_RADIUS = 22;
+const LONG_PRESS_MS = 500;
+// A press that wanders this far (screen px) was a drag attempt, not a hold.
+const LONG_PRESS_SLOP = 10;
+
+/** Enlarge a circular handle's hit region without touching what is drawn. */
+const circleHit = (radius) => (ctx, shape) => {
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.fillStrokeShape(shape);
+};
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
@@ -317,6 +340,7 @@ const PerimeterLayer = ({
   const activeTrace = (perimeterTraces || []).find((t) => t.id === activeTraceId);
   const targetVertices = activeTrace?.vertices;
 
+  const isTouch = useIsTouch();
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
   const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
@@ -354,7 +378,50 @@ const PerimeterLayer = ({
     };
   }, []);
 
+  // ── long press ───────────────────────────────────────────────────────────
+  // Right-click deletes a vertex, and touch has no right-click. A press-and-
+  // hold is the touch idiom for "the other action on this thing", so it maps
+  // to the same handler. Cancelled by movement (that press was a drag) and by
+  // release (that press was a selection), which is what keeps it from firing
+  // on the way to nudging a corner.
+  const pressRef = useRef(null);
+
+  const cancelLongPress = () => {
+    if (pressRef.current?.timer) clearTimeout(pressRef.current.timer);
+    pressRef.current = null;
+  };
+
+  const startLongPress = (index, e) => {
+    const touch = e.evt?.touches?.[0];
+    if (!touch) return;
+    cancelLongPress();
+    const origin = { x: touch.clientX, y: touch.clientY };
+    pressRef.current = {
+      origin,
+      timer: setTimeout(() => {
+        pressRef.current = null;
+        // Confirmation is the deletion being undoable and the outline visibly
+        // changing; a dialog on a hold gesture teaches the user to fear it.
+        navigator.vibrate?.(18);
+        onDeletePerimeterVertex?.(index);
+      }, LONG_PRESS_MS),
+    };
+  };
+
+  const moveLongPress = (e) => {
+    const press = pressRef.current;
+    const touch = e.evt?.touches?.[0];
+    if (!press || !touch) return;
+    if (Math.hypot(touch.clientX - press.origin.x, touch.clientY - press.origin.y) > LONG_PRESS_SLOP) {
+      cancelLongPress();
+    }
+  };
+
+  useEffect(() => cancelLongPress, []);
+  // ── end long press ───────────────────────────────────────────────────────
+
   const handleDragStart = (index) => {
+    cancelLongPress();
     draggingVertexIndexRef.current = index;
     onVertexDragStart?.(index);
   };
@@ -495,6 +562,10 @@ const PerimeterLayer = ({
             e.cancelBubble = true;
             onHoleSelect?.({ traceId: hole.traceId, holeId: hole.holeId });
           } : undefined}
+          onTap={voidToolActive ? (e) => {
+            e.cancelBubble = true;
+            onHoleSelect?.({ traceId: hole.traceId, holeId: hole.holeId });
+          } : undefined}
           perfectDrawEnabled={false}
         />
       ))}
@@ -583,21 +654,35 @@ const PerimeterLayer = ({
           key={`active-vertex-${activeTrace.id}-${i}`}
           x={vertex.x}
           y={vertex.y}
-          radius={(selectedVertexIndex === i ? 7 : 5) / scale}
+          radius={((selectedVertexIndex === i ? 7 : 5) + (isTouch ? 2.5 : 0)) / scale}
           fill={activeTrace.color || '#BD93F9'}
           stroke={selectedVertexIndex === i ? '#8BE9FD' : '#fff'}
           strokeWidth={(selectedVertexIndex === i ? 2.5 : 1.5) / scale}
           draggable
+          // The grabbable region, separate from the drawn one. `/scale` keeps
+          // it a constant *screen* size, so a corner is no harder to hit when
+          // the plan is zoomed out — which is exactly when it is smallest.
+          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
           onClick={(e) => {
             // Konva fires click for every button, and right-click already means
             // delete on this handle.
-            if (e.evt && e.evt.button !== 0) return;
+            if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+            e.cancelBubble = true;
+            onVertexSelect?.(i);
+          }}
+          onTap={(e) => {
             e.cancelBubble = true;
             onVertexSelect?.(i);
           }}
           onDragStart={() => handleDragStart(i)}
           onDragMove={(e) => handleDragMove(i, e)}
           onDragEnd={(e) => handleDragEnd(i, e)}
+          // Deliberately allowed to bubble, matching what `mousedown` does on
+          // the same handle: the stage still needs the event to start a pinch
+          // whose first finger happened to land on a corner.
+          onTouchStart={(e) => startLongPress(i, e)}
+          onTouchMove={moveLongPress}
+          onTouchEnd={cancelLongPress}
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;

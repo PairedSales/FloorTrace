@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { decimalToFeetInches } from '../utils/unitConverter';
+import { useIsTouch } from '../hooks/useViewport';
 
 const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
+  const isTouch = useIsTouch();
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
   const [inchesPrompt, setInchesPrompt] = useState(false);
@@ -79,16 +81,22 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
 
   return (
     <div
-      className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line text-[13px] font-mono
-                 focus-within:ring-2 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text"
+      className={`relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line font-mono
+                 focus-within:ring-2 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text
+                 ${isTouch ? 'min-h-[44px] text-[15px]' : 'text-[13px]'}`}
+      // The whole box is the target, not just the two number fields. Each is
+      // `1ch` wide when empty — 9 px, which a fingertip cannot land on — and the
+      // guard used to be `e.target === e.currentTarget`, so a tap that hit the
+      // inner row or the ′ / ″ glyphs (most of the box) focused nothing at all.
+      // Taps that land on an input are left alone so the caret still goes where
+      // it was put.
       onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          const rect = e.currentTarget.getBoundingClientRect();
-          if (e.clientX < rect.left + rect.width / 2) {
-            feetRef.current?.focus();
-          } else {
-            inchesRef.current?.focus();
-          }
+        if (e.target === feetRef.current || e.target === inchesRef.current) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (e.clientX < rect.left + rect.width / 2) {
+          feetRef.current?.focus();
+        } else {
+          inchesRef.current?.focus();
         }
       }}
     >
@@ -103,7 +111,9 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
           onBlur={handleFieldBlur('feet')}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
           className="text-center outline-none bg-transparent text-fg placeholder-fg-dim select-text"
-          style={{ width: `${Math.max((feet || '0').length, 1)}ch` }}
+          // Two characters minimum on touch. The field grows with its content
+          // either way; this only stops an empty one collapsing to a slit.
+          style={{ width: `${Math.max((feet || '0').length, isTouch ? 2 : 1)}ch` }}
           placeholder="0"
         />
         <span className="text-fg-3 mr-1">&prime;</span>
@@ -116,7 +126,7 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
           onBlur={handleFieldBlur('inches')}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
           className="text-center outline-none bg-transparent text-fg placeholder-fg-dim select-text"
-          style={{ width: `${Math.max((inches || '0').length, 1)}ch` }}
+          style={{ width: `${Math.max((inches || '0').length, isTouch ? 2 : 1)}ch` }}
           placeholder="0"
         />
         <span className="text-fg-3">&Prime;</span>

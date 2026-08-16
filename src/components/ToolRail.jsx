@@ -1,8 +1,6 @@
 import { Fragment } from 'react';
-import {
-  MousePointer2, Ruler, Pentagon, Compass, Spline, SquareDashedBottom,
-  Crop, Eraser, Scaling, RotateCw, Brush, Trash2, Tags,
-} from 'lucide-react';
+import { Trash2, Tags } from 'lucide-react';
+import { TOOL_GROUPS } from './toolCatalog';
 
 /**
  * The tool rail. Three rules the old ToolsPanel broke:
@@ -23,55 +21,6 @@ import {
  * MODE_LABEL; `label` stays the fuller phrase, and stays the accessible name
  * in both densities so a screen reader never hears less than it used to.
  */
-const TOOL_GROUPS = [
-  {
-    id: 'edit',
-    title: 'Edit',
-    tools: [
-      { id: 'select',  digit: null, icon: MousePointer2,      short: 'Select', label: 'Select & adjust',
-        hint: 'Drag corners, voids and shapes' },
-    ],
-  },
-  {
-    id: 'outline',
-    title: 'Outline',
-    tools: [
-      { id: 'draw',    digit: '7',  icon: Brush,              short: 'Paint outline', label: 'Paint the outline',
-        hint: 'Paint over the exterior walls and let FloorTrace read them' },
-      { id: 'vertex',  digit: '4',  icon: Spline,             short: 'Place corners', label: 'Place corners',
-        hint: 'Place the exterior outline corner by corner' },
-      { id: 'void',    digit: '8',  icon: SquareDashedBottom, short: 'Cut out', label: 'Cut out a void',
-        hint: 'Punch a courtyard or light well out of an outline',
-        needsArea: 'Cutting a void needs a traced outline first.' },
-    ],
-  },
-  {
-    id: 'measure',
-    title: 'Measure',
-    tools: [
-      { id: 'scale',   digit: '9',  icon: Scaling,            short: 'Set scale', label: 'Set the scale',
-        hint: 'Set the scale from a length you know' },
-      { id: 'line',    digit: '1',  icon: Ruler,              short: 'Measure', label: 'Measure a length',
-        needsArea: 'Measuring needs a traced outline first.' },
-      { id: 'angle',   digit: '3',  icon: Compass,            short: 'Angle', label: 'Measure an angle',
-        needsArea: 'Measuring needs a traced outline first.' },
-      { id: 'area',    digit: '2',  icon: Pentagon,           short: 'Area', label: 'Draw an area',
-        needsArea: 'Drawing an area needs a traced outline first.' },
-    ],
-  },
-  {
-    id: 'image',
-    title: 'Plan image',
-    tools: [
-      { id: 'crop',    digit: '5',  icon: Crop,               short: 'Crop', label: 'Crop the plan' },
-      { id: 'eraser',  digit: '6',  icon: Eraser,             short: 'Erase', label: 'Erase clutter',
-        hint: 'Remove legends or notes that confuse detection' },
-      { id: 'rotate',  digit: null, icon: RotateCw,           short: 'Rotate', label: 'Rotate 45°',
-        hint: 'Right-click to rotate the other way' },
-    ],
-  },
-];
-
 const TOOLTIP = `pointer-events-none absolute right-[calc(100%+8px)] top-1/2 -translate-y-1/2 z-50
                  whitespace-nowrap rounded-md border border-line bg-raised px-2.5 py-1.5
                  text-[12px] text-fg shadow-xl opacity-0

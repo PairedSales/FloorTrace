@@ -170,6 +170,12 @@ const MeasurementDock = ({
   onDimensionBlur,
   onScaleTool,
   onExport,
+  // Rendered inside the mobile bottom sheet rather than docked beside the
+  // canvas. Everything below this line — the area maths, the breakdown, the
+  // outline list, the detector's warnings and their canvas anchors — is the
+  // same code on both, which is the point: a second mobile-only measurement
+  // panel is a second place for the numbers to disagree.
+  mobile = false,
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
@@ -347,11 +353,17 @@ const MeasurementDock = ({
 
   return (
     <aside
-      className="flex w-[320px] shrink-0 flex-col min-h-0 bg-panel border-r border-line select-none"
+      className={mobile
+        ? 'flex w-full flex-col bg-panel select-none'
+        : 'flex w-[320px] shrink-0 flex-col min-h-0 bg-panel border-r border-line select-none'}
       aria-label="Measurement"
     >
+      {/* The sheet supplies the "Measurement" title on mobile, so repeating it
+          here would give the panel two headings. */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-line-soft shrink-0">
-        <h2 className="card-heading flex-1">Measurement</h2>
+        <h2 className={mobile ? 'text-[12.5px] text-fg-3 flex-1' : 'card-heading flex-1'}>
+          {mobile ? 'Units' : 'Measurement'}
+        </h2>
         <div className="flex p-0.5 gap-0.5 bg-sunken border border-line rounded-md" role="group" aria-label="Units">
           {[['decimal', 'ft'], ['inches', 'ft-in'], ['metric', 'm']].map(([id, label]) => (
             <button
@@ -366,7 +378,15 @@ const MeasurementDock = ({
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
+      {/* One scroll container, not two: on mobile the sheet already scrolls,
+          and nesting a second one means a flick either moves the wrong thing
+          or nothing at all depending on where the finger landed. */}
+      <div
+        ref={scrollRef}
+        className={mobile
+          ? 'p-3 pb-6 flex flex-col gap-3'
+          : 'flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3'}
+      >
         <StageSpine stages={stages} onSelect={jumpTo} />
 
         {/* ── Scale ──

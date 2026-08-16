@@ -4,7 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg">
     <link rel="apple-touch-icon" sizes="180x180" href="/logo.svg">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover hands the notch and the home-indicator strip to the
+         page, which is what makes env(safe-area-inset-*) resolve to anything
+         other than 0. The shell pads itself with those insets; without the
+         flag the bottom bar sits under the indicator. Pinch-zoom is left
+         enabled deliberately — the canvas suppresses it locally with
+         touch-action, so the app never needs to take it away globally. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FloorTrace" />
+    <!-- Matches --shell in each theme, so the browser chrome does not frame the
+         app in a colour the app never uses. -->
+    <meta name="theme-color" content="#e7eaee" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161b" media="(prefers-color-scheme: dark)" />
     <title>FloorTrace</title>
 <!-- Fira Sans/Code are self-hosted via @fontsource; see src/index.css. -->
   </head>

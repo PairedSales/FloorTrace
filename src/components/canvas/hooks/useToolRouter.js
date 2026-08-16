@@ -147,22 +147,12 @@ export function useToolRouter({
     }
   }, [cropToolActive, crop, lineToolActive, currentMeasurementLine, onMeasurementLineUpdate]);
 
-  // Stage Mouse Down
-  const handleStageMouseDown = useCallback((e) => {
-    // Right click panning
-    if (e.evt && e.evt.button === 2) {
-      isRightClickDraggingRef.current = true;
-      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
-      rightClickPannedRef.current = false;
-      return;
-    }
-
-    // Only handle left mouse button
-    if (e.evt && e.evt.button !== 0) return;
-
-    const stage = e.target.getStage();
-    if (!stage) return;
-
+  // Which tool claims a press, independent of what pressed. Extracted from
+  // handleStageMouseDown so a finger reaches exactly the same code a mouse
+  // does: the drag-based tools (brush, eraser, crop, void rectangle) were
+  // wired to `mousedown`/`mousemove`, and a browser synthesises neither during
+  // a touch drag — so on a phone every one of them was a dead button.
+  const dispatchPointerDown = useCallback((e, stage) => {
     if (drawModeActive) {
       e.cancelBubble = true;
       e.evt.preventDefault();
@@ -193,6 +183,25 @@ export function useToolRouter({
     // ── end void tool ────────────────────────────────────────────────────────
   }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop,
     voidToolActive, voidTool]);
+
+  // Stage Mouse Down
+  const handleStageMouseDown = useCallback((e) => {
+    // Right click panning
+    if (e.evt && e.evt.button === 2) {
+      isRightClickDraggingRef.current = true;
+      lastRightClickPointerPosRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+      rightClickPannedRef.current = false;
+      return;
+    }
+
+    // Only handle left mouse button
+    if (e.evt && e.evt.button !== 0) return;
+
+    const stage = e.target.getStage();
+    if (!stage) return;
+
+    dispatchPointerDown(e, stage);
+  }, [dispatchPointerDown]);
 
   // Stage Mouse Move
   const handleStageMouseMove = useCallback((e) => {
@@ -478,6 +487,42 @@ export function useToolRouter({
     }
   }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, onCancelUndoSave, scaleRef, stageRef, viewportSyncTokenRef, onRoomOverlayUpdate]);
 
+  // ── touch ─────────────────────────────────────────────────────────────────
+  // One finger is a pointer; two are the camera. The split is here rather than
+  // inside each tool because it has to hold for every tool at once: a pinch
+  // must zoom the plan whether or not a brush is currently painting on it.
+  //
+  // A gesture that grows a second finger is *committed*, not cancelled. The
+  // ink already painted, the rectangle already dragged and the overlay already
+  // moved are all real work the user did with the first finger; discarding
+  // them because they then reached to zoom is the more surprising of the two
+  // behaviours, and for the brush it would cost a whole stroke.
+  const multiTouch = (e) => (e.evt?.touches?.length ?? 1) > 1;
+
+  const handleStageTouchStart = useCallback((e) => {
+    if (multiTouch(e)) {
+      handleStageMouseUp();
+      return;
+    }
+    const stage = e.target.getStage();
+    if (!stage) return;
+    dispatchPointerDown(e, stage);
+  }, [dispatchPointerDown, handleStageMouseUp]);
+
+  const handleStageTouchMove = useCallback((e) => {
+    if (multiTouch(e)) return;
+    handleStageMouseMove(e);
+  }, [handleStageMouseMove]);
+
+  const handleStageTouchEnd = useCallback((e) => {
+    // `touches` on touchend is what is *still* down. A pinch releasing one
+    // finger leaves one, and ending the (nonexistent) tool gesture there would
+    // commit whatever the remaining finger is over.
+    if ((e?.evt?.touches?.length ?? 0) > 0) return;
+    handleStageMouseUp();
+  }, [handleStageMouseUp]);
+  // ── end touch ─────────────────────────────────────────────────────────────
+
   // Window mouseUp listener (handles commits when mouse is released outside canvas bounds)
   useEffect(() => {
     const handleWindowMouseUp = () => {
@@ -516,8 +561,23 @@ export function useToolRouter({
       }
       // ── end void tool ──────────────────────────────────────────────────────
     };
+    // touchend/touchcancel for the same reason mouseup is here: a finger that
+    // leaves the canvas mid-stroke (over the sheet, or off the screen edge)
+    // otherwise leaves `isDrawingRef` true and the next tap continues the old
+    // stroke from wherever it lands. touchcancel is what a system gesture —
+    // notification shade, app switcher — delivers instead of touchend.
+    const handleWindowTouchEnd = (e) => {
+      if ((e?.touches?.length ?? 0) > 0) return;
+      handleWindowMouseUp();
+    };
     window.addEventListener('mouseup', handleWindowMouseUp);
-    return () => window.removeEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('touchend', handleWindowTouchEnd);
+    window.addEventListener('touchcancel', handleWindowTouchEnd);
+    return () => {
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('touchend', handleWindowTouchEnd);
+      window.removeEventListener('touchcancel', handleWindowTouchEnd);
+    };
   }, [drawTool, eraser, crop, voidTool, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Stage Clicks
@@ -717,7 +777,10 @@ export function useToolRouter({
 
   // Stage Double Clicks
   const handleStageDoubleClick = useCallback((e) => {
-    if (e.evt && e.evt.button !== 0) return;
+    // A TouchEvent has no `button`, so the plain `!== 0` test rejected every
+    // double-tap — which is the only way to insert a perimeter vertex, and on
+    // touch it silently did nothing.
+    if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
 
     const storeCurrentLine = useAppStore.getState().currentMeasurementLine;
     if (lineToolActive && storeCurrentLine && storeCurrentLine.start) {
@@ -962,8 +1025,13 @@ export function useToolRouter({
 
   const handleRoomMouseDown = useCallback((e) => {
     if (!roomOverlay) return;
-    if (e.evt && e.evt.button !== 0) return;
-    
+    // `button != null` rather than `!== 0`: on touch this arrives as a
+    // TouchEvent whose `button` is undefined, and the strict test meant the
+    // room overlay — the control the whole scale rests on — could not be
+    // dragged or resized with a finger at all.
+    if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+    if ((e.evt?.touches?.length ?? 1) > 1) return;
+
     e.cancelBubble = true;
     e.evt.preventDefault();
     
@@ -986,8 +1054,9 @@ export function useToolRouter({
 
   const handleRoomCornerMouseDown = useCallback((corner, e) => {
     if (!roomOverlay) return;
-    if (e.evt && e.evt.button !== 0) return;
-    
+    if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+    if ((e.evt?.touches?.length ?? 1) > 1) return;
+
     e.cancelBubble = true;
     e.evt.preventDefault();
     
@@ -1025,6 +1094,9 @@ export function useToolRouter({
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,
+    handleStageTouchStart,
+    handleStageTouchMove,
+    handleStageTouchEnd,
     handleStageClick,
     handleStageDoubleClick,
     handleStageContextMenu,

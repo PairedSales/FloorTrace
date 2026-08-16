@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
+import { useIsTouch, useIsMobile } from '../hooks/useViewport';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const mod = isMac ? '⌘' : 'Ctrl';
@@ -31,6 +32,18 @@ const shortcuts = [
   { keys: 'Click + Drag', description: 'Pan canvas' },
 ];
 
+// The same section, for a device with no keyboard. Not a translation of the
+// list above — most of those rows have no touch equivalent at all, and the
+// three gestures that matter are ones the desktop never has to teach.
+const gestures = [
+  { keys: 'Drag', description: 'Pan the plan' },
+  { keys: 'Pinch', description: 'Zoom in and out' },
+  { keys: 'Tap', description: 'Place a corner, a measure point or a room' },
+  { keys: 'Double-tap', description: 'Add a corner to an outline you have traced' },
+  { keys: 'Press & hold', description: 'Delete an outline corner' },
+  { keys: 'Two fingers', description: 'Zoom while a brush tool is active' },
+];
+
 // Names here must match the command bar and the tool rail. They drifted once
 // already: the shell renamed every command and this list kept describing the
 // old one.
@@ -50,7 +63,21 @@ const tips = [
     + 'needed if you mean to come back and edit the trace.',
 ];
 
+const touchTips = [
+  'Photograph the plan straight from the menu — the whole sheet, square on, in good light.',
+  'Tap “Read dimensions” first. It reads the printed room sizes and sets the scale from them.',
+  'Tap a room on the plan to detect its walls and pin the scale to that room.',
+  'If auto-detection cannot read the plan, use Paint outline: drag roughly over the exterior walls and FloorTrace snaps to them.',
+  'Drag an outline corner to adjust it; press and hold one to delete it.',
+  'Zoom in before adjusting corners — the whole plan on one screen is smaller than a fingertip.',
+  'The number at the bottom right is the area. Tap it for the scale, the breakdown and anything the detector was unsure about.',
+  'Export gives you one image with the plan and every number on it — that is what goes in a workfile.',
+];
+
 const HelpModal = ({ onClose }) => {
+  const isTouch = useIsTouch();
+  const isMobile = useIsMobile();
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
@@ -61,36 +88,56 @@ const HelpModal = ({ onClose }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const rows = isTouch ? gestures : shortcuts;
+  const rowsTitle = isTouch ? 'Gestures' : 'Keyboard Shortcuts';
+  const shownTips = isTouch ? touchTips : tips;
+
   return (
     <div
-      className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 pointer-events-auto"
+      // `fixed`, not `absolute`: the shell is a static flex column, so an
+      // absolute child was already resolving against the viewport — this just
+      // says so, and keeps the sheet out of the mobile shell's overflow clip.
+      className={`fixed inset-0 z-50 flex bg-black/50 pointer-events-auto
+                  ${isMobile ? 'items-end' : 'items-center justify-center'}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-panel border border-line rounded-xl shadow-2xl w-[360px] max-h-[80vh] overflow-y-auto animate-fade-in">
+      <div
+        className={`bg-panel border border-line shadow-2xl overflow-y-auto overscroll-contain
+                    animate-fade-in
+          ${isMobile
+            ? 'w-full max-h-[88%] rounded-t-2xl pb-safe'
+            : 'rounded-xl w-[360px] max-h-[80vh]'}`}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
-          <h2 className="text-sm font-semibold text-fg">Help</h2>
+        <div className="sticky top-0 flex items-center justify-between px-4 py-3 border-b border-line bg-panel">
+          <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-sm'}`}>
+            How it works
+          </h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-fg-3 hover:text-white hover:bg-line/70 transition-colors cursor-pointer"
+            className={`rounded-md text-fg-3 hover:text-white hover:bg-line/70 transition-colors
+                        cursor-pointer ${isMobile ? 'tap-target -mr-2' : 'p-1'}`}
             title="Close"
+            aria-label="Close"
           >
-            <X className="w-4 h-4" />
+            <X className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} />
           </button>
         </div>
 
-        {/* Keyboard Shortcuts */}
         <section className="px-4 py-3">
           <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
-            Keyboard Shortcuts
+            {rowsTitle}
           </h3>
           <div className="space-y-1.5">
-            {shortcuts.map((s) => (
-              <div key={s.keys} className="flex items-center justify-between">
-                <span className="text-[11px] text-fg-3">{s.description}</span>
-                <kbd className="text-[10px] font-mono text-fg-2 bg-panel-2/80 border border-line rounded px-1.5 py-0.5">
+            {rows.map((s) => (
+              <div key={s.keys} className="flex items-center justify-between gap-3">
+                <span className={`text-fg-3 ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}>
+                  {s.description}
+                </span>
+                <kbd className={`shrink-0 font-mono text-fg-2 bg-panel-2/80 border border-line
+                                 rounded px-1.5 py-0.5 ${isMobile ? 'text-[12px]' : 'text-[10px]'}`}>
                   {s.keys}
                 </kbd>
               </div>
@@ -106,8 +153,12 @@ const HelpModal = ({ onClose }) => {
             Tips
           </h3>
           <ul className="space-y-1.5">
-            {tips.map((tip) => (
-              <li key={tip} className="text-[11px] text-fg-3 leading-relaxed flex gap-1.5">
+            {shownTips.map((tip) => (
+              <li
+                key={tip}
+                className={`text-fg-3 leading-relaxed flex gap-1.5
+                            ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}
+              >
                 <span className="text-accent shrink-0">•</span>
                 {tip}
               </li>

@@ -96,6 +96,32 @@
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
+  /* Mobile browsers rubber-band the *page* when a gesture reaches the end of a
+     scrollable child — on a full-bleed canvas app that reads as the whole UI
+     coming unstuck. Set on html/body rather than on the shell div because the
+     chain starts at the document. */
+  html, body {
+    overscroll-behavior: none;
+  }
+
+  /* The 300 ms grey flash Android draws over every tap target. The app has real
+     :active and aria-pressed states; the overlay only ever fires late and on
+     the wrong element (the flash lands on a parent when a child is tapped). */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* iOS zooms the page when a focused input's text is under 16px. Every input
+     in this app is 12.5-13px by design, which on a phone means every tap into
+     the subject line or a room dimension left the user zoomed in with no way
+     back. Only on coarse pointers: the desktop density is not up for
+     negotiation. */
+  @media (pointer: coarse) {
+    input, select, textarea {
+      font-size: max(16px, 1em);
+    }
+  }
+
   ::selection {
     @apply bg-accent/30 text-fg;
   }
@@ -199,5 +225,102 @@
   }
   .chip-dot {
     @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
+  }
+
+  /* ── mobile shell ──────────────────────────────────────────────────────────
+     Only reached by the mobile tree. Nothing here is a media query, because the
+     desktop shell must not depend on a breakpoint to keep the layout it has. */
+
+  /* 100vh on a phone is the viewport with the browser's own bars *hidden* — so
+     a `h-screen` app is always taller than its window, and the bottom bar sits
+     under the URL bar until the user scrolls. dvh tracks the live height. */
+  .h-app {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .px-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  .mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* The canvas owns every gesture that starts on it: no page pan, no page
+     pinch, no double-tap zoom, no iOS text selection from a long press. This
+     is what makes a two-finger pinch reach the stage instead of the browser. */
+  .canvas-touch {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Comfortable target, stated once. 44 px is the floor Apple and Google both
+     land on, and the number every mobile control here is measured against. */
+  .tap-target {
+    @apply inline-flex items-center justify-center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Density switch for desktop components rendered inside the mobile sheet.
+     `MeasurementDock` is 750 lines of correct logic wearing an 11 px desktop
+     type scale; re-authoring it for touch would fork the warnings panel, the
+     area breakdown and the outline list. Instead the same tree is re-sized
+     from the outside — one scope, no JSX churn, and desktop is untouched
+     because nothing there carries this class. */
+  .touch-dense .unit-pill {
+    @apply h-9 px-3.5 text-[13px];
+  }
+  .touch-dense .panel-input {
+    @apply py-2.5 text-[15px];
+  }
+  .touch-dense .chip {
+    @apply h-6 px-2.5 text-[12px];
+  }
+  .touch-dense .card-heading {
+    @apply text-[12px];
+  }
+  /* The trace list's delete button is `opacity-0 group-hover:opacity-100` —
+     permanently invisible where there is no hover. */
+  .touch-dense .group button.opacity-0 {
+    @apply opacity-100;
+  }
+  /* `:where()` keeps these at one class of specificity so a component that
+     states its own height still wins. Written as `.touch-dense button` they
+     scored (0,1,1) and silently capped every explicitly-sized control in the
+     subtree — the tool sheet's 52 px rows came out 34. */
+  .touch-dense :where(select, button) {
+    min-height: 34px;
+  }
+  /* Text fields only. The outline-name field is a borderless 20 px line in a
+     row of icon buttons, and a checkbox given the same floor would grow into a
+     40 px square in the export options. */
+  .touch-dense :where(input[type="text"]) {
+    min-height: 40px;
+  }
+  /* …but not the ones that are icons in a row, which have their own sizing and
+     would blow the row height out. */
+  .touch-dense button.chip,
+  .touch-dense .unit-pill {
+    min-height: 0;
+  }
+
+  /* Bottom-sheet grab handle. */
+  .sheet-grip {
+    @apply mx-auto w-10 h-1 rounded-full bg-line;
+  }
+
+  /* A row in a mobile sheet: full width, one tap target tall, and a hit area
+     that reaches the edges of the sheet rather than the edges of the label. */
+  .sheet-row {
+    @apply flex w-full items-center gap-3 px-4 text-left text-[15px] text-fg-2
+           transition-colors active:bg-sunken disabled:opacity-40;
+    min-height: 52px;
+  }
+  .sheet-row-danger {
+    @apply text-crit active:bg-crit/10;
   }
 }

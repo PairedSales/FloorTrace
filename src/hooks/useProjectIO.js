@@ -28,9 +28,14 @@ export function useProjectIO(handleManualMode, fileInputRef) {
   }, [fileInputRef]);
 
   const handleFileUpload = useCallback(async (event) => {
-    const file = event.target.files[0];
+    // The element that fired, not the one ref: there is a second, camera-only
+    // input on mobile, and clearing the wrong one leaves a retaken photo of the
+    // same scene looking to the browser like no change at all.
+    const input = event.target;
+    const file = input.files[0];
     if (file) {
       if (!(await checkUnsavedChanges())) {
+        input.value = '';
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -69,6 +74,7 @@ export function useProjectIO(handleManualMode, fileInputRef) {
       } finally {
         setIsProcessing(false);
         // Reset file input so the same file can be selected again
+        input.value = '';
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }

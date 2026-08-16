@@ -2,6 +2,19 @@ import React, { useRef, useEffect } from 'react';
 import { Group, Line, Circle, Arc, Rect, Text } from 'react-konva';
 import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen, findVertexNeighbors } from '../../utils/angleMath';
 import { measureSideLenWidth, CANVAS_FONT_FAMILY } from './canvasUtils';
+import { useIsTouch } from '../../hooks/useViewport';
+
+// The protractor's three handles are 5-6 px of drawn radius, and two of them
+// sit on the arms where they overlap the very walls the user is aiming at.
+// Same split as the perimeter vertices: what is drawn stays readable, what is
+// grabbable is a fingertip wide.
+const TOUCH_HIT_RADIUS = 22;
+const circleHit = (radius) => (ctx, shape) => {
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.fillStrokeShape(shape);
+};
 
 /**
  * AngleOverlay renders the interactive protractor overlay for angle measurement.
@@ -20,6 +33,7 @@ const AngleOverlay = ({
   findVertexSnapPoint,
   onDragStateChange, // Notify parent when dragging to disable stage pan
 }) => {
+  const isTouch = useIsTouch();
   const groupRef = useRef(null);
   const line1Ref = useRef(null);
   const line2Ref = useRef(null);
@@ -428,6 +442,7 @@ const AngleOverlay = ({
       <Circle
         ref={arm1HandleRef}
         radius={5 / scale}
+        hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
         fill="#8BE9FD"
         stroke="#ffffff"
         strokeWidth={1.5 / scale}
@@ -441,6 +456,7 @@ const AngleOverlay = ({
       <Circle
         ref={arm2HandleRef}
         radius={5 / scale}
+        hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
         fill="#8BE9FD"
         stroke="#ffffff"
         strokeWidth={1.5 / scale}
@@ -454,6 +470,7 @@ const AngleOverlay = ({
       <Circle
         ref={centerHandleRef}
         radius={6 / scale}
+        hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
         fill="#FF79C6"
         stroke="#ffffff"
         strokeWidth={1.5 / scale}
