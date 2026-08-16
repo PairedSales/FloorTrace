@@ -3,7 +3,7 @@
 // `npm run bench:scale`), hard-coded so the selector's arithmetic is pinned
 // without decoding a PNG.
 import { describe, expect, it } from 'vitest';
-import { selectProjectScale, MIN_CONSENSUS_ROOMS } from '../scale.js';
+import { selectProjectScale, representativeRoom, MIN_CONSENSUS_ROOMS } from '../scale.js';
 
 let nextRect = 0;
 // Rooms only need a rect here so the non-GLA test has somewhere to put them;
@@ -178,5 +178,57 @@ describe('selectProjectScale when it cannot be sure', () => {
     const result = selectProjectScale([]);
     expect(result.pixelsPerFoot).toBeNull();
     expect(result.roomCount).toBe(0);
+  });
+});
+
+// Which room gets the overlay the automatic path leaves on screen. It is the
+// one the user drags to overrule the consensus, so it has to be the app's best
+// rectangle rather than whichever room OCR happened to return first.
+describe('representativeRoom', () => {
+  it('picks the room that agrees with the adopted scale, not the loudest one', () => {
+    // ExampleFloorplan6 again: LIVING ROOM is the largest and most confident-
+    // looking read on the page and is 13% wrong. Drawing the overlay on it
+    // would put the box on the room the median exists to outvote.
+    const decision = selectProjectScale([
+      room('BEDROOM 1 (left)', 14.44, 14.25, 0.95),
+      room('BEDROOM 2 (left)', 14.16, 14.40, 0.98),
+      room('BEDROOM 1 (right)', 13.97, 14.50, 0.98),
+      room('BEDROOM 2 (right)', 14.72, 12.60, 0.73),
+      room('LIVING ROOM (left)', 16.36, 16.32, 0.84),
+    ]);
+    expect(representativeRoom(decision).name).toBe('BEDROOM 1 (left)');
+  });
+
+  it('prefers a room kept on both axes over a nearer one kept on one', () => {
+    // A's x sits exactly on the answer and its y is 67% out — a rectangle that
+    // leaked on one axis. Ranking by distance alone would hand it the overlay.
+    const decision = selectProjectScale([
+      room('A (one axis leaked)', 15.0, 25.0, 0.9),
+      room('B', 15.2, 15.1, 0.9),
+      room('C', 14.9, 15.05, 0.9),
+    ]);
+    expect(decision.contributors.find((c) => c.name.startsWith('A')).axes).toEqual(['x']);
+    expect(representativeRoom(decision).name).toBe('C');
+  });
+
+  // The overlay is built from these two fields alone, so the contributor
+  // projection dropping either would silently stop placing it.
+  it('hands back the rectangle and the label the overlay is drawn from', () => {
+    const decision = selectProjectScale([
+      room('BEDROOM', 15.5, 15.4, 0.95, { width: 12, height: 11 },
+        { left: 10, right: 196, top: 20, bottom: 189 }),
+      room('KITCHEN', 15.6, 15.45, 0.95, { width: 10, height: 9 }),
+      room('DEN', 15.45, 15.5, 0.95, { width: 9, height: 9 }),
+    ]);
+    const chosen = representativeRoom(decision);
+    expect(chosen.rect).toEqual({ left: expect.any(Number), right: expect.any(Number),
+      top: expect.any(Number), bottom: expect.any(Number) });
+    expect(chosen.labelDims.width).toBeGreaterThan(0);
+    expect(chosen.labelDims.height).toBeGreaterThan(0);
+  });
+
+  it('has no room to show when no scale was set', () => {
+    expect(representativeRoom(selectProjectScale([]))).toBeNull();
+    expect(representativeRoom(null)).toBeNull();
   });
 });

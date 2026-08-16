@@ -183,3 +183,39 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     rejected,
   };
 };
+
+/**
+ * Which measured room to show as the placed overlay once the scale is set.
+ *
+ * The scale is a median over several rooms, so no single rectangle *is* it. The
+ * one put on screen is the room that agrees with the answer best: both axes
+ * inside the keep window first, then closest to the adopted scale. Taking the
+ * first or the largest contributor instead would draw the box on a room the
+ * median had half-rejected, and the overlay is what the user drags to overrule
+ * the consensus — it has to be the app's best rectangle, not an arbitrary one.
+ *
+ * @param {object} decision the return of selectProjectScale
+ * @returns {object|null} one entry of decision.contributors
+ */
+export const representativeRoom = (decision) => {
+  const scale = decision?.pixelsPerFoot;
+  if (!(scale > 0)) return null;
+  const ranked = (decision.contributors ?? [])
+    .filter((c) => c?.rect && c.pixelsPerFoot?.x > 0 && c.pixelsPerFoot?.y > 0)
+    .map((c) => {
+      // Only the axes that voted: a room kept on one axis is measuring the
+      // drawing on that axis alone, and folding in the axis the window threw
+      // away would rank it by the number that disqualified it.
+      const axes = c.axes?.length ? c.axes : ['x', 'y'];
+      const implied = Math.exp(
+        axes.reduce((sum, axis) => sum + Math.log(c.pixelsPerFoot[axis]), 0) / axes.length,
+      );
+      return { room: c, axes: axes.length, distance: Math.abs(Math.log(implied / scale)) };
+    })
+    .sort((a, b) => (
+      b.axes - a.axes
+      || a.distance - b.distance
+      || (b.room.confidence ?? 0) - (a.room.confidence ?? 0)
+    ));
+  return ranked[0]?.room ?? null;
+};

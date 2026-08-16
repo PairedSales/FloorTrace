@@ -27,6 +27,7 @@ import {
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
+import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
@@ -62,6 +63,7 @@ const MODE_LABEL = {
   crop: 'Crop',
   eraser: 'Erase',
   place: 'Place room',
+  pick: 'Select room',
 };
 
 const MODE_HINT = {
@@ -76,6 +78,7 @@ const MODE_HINT = {
   crop: 'Drag the region to keep',
   eraser: 'Drag over clutter to remove it',
   place: 'Click the room on the plan',
+  pick: 'Click a dimension label to use that room',
 };
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
@@ -301,7 +304,11 @@ function App() {
                 : cropToolActive ? 'crop'
                   : eraserToolActive ? 'eraser'
                     : manualEntryMode ? 'place'
-                      : 'select';
+                      // Pills on screen is a mode, even though no tool flag
+                      // says so: `mode` is what renders them and what a click
+                      // on one acts through.
+                      : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
+                        : 'select';
 
   // Reset entire application
   const handleRestart = async () => {
@@ -403,9 +410,10 @@ function App() {
           // not a separate event the user needs to weigh.
           flash(`Read ${count} dimension${count === 1 ? '' : 's'}.${unitNote}`);
           // Everything from here is automatic: every label is measured, the
-          // rooms that agree set the scale, and the exterior is traced. The
-          // pills stay on screen, so clicking one still pins the scale to that
-          // room when the user can see the app chose badly.
+          // rooms that agree set the scale, the room the scale came from is
+          // placed as the overlay, and the exterior is traced. The pills stay
+          // lit only when that fails — with an overlay on screen, dragging it
+          // is how the user overrules a room the app chose badly.
           await afterScanRef.current?.(dimensions);
         }
       } catch (error) {
@@ -844,6 +852,39 @@ function App() {
     [runTrace],
   );
 
+  // Leave the automatic path in the state a placed room leaves behind: the
+  // overlay on the room the scale came from, its label in the Room size fields,
+  // and the pills gone. Without it a plan the app had already measured still
+  // showed every pill lit and a Room size card reading 0.0 ft — the screen said
+  // "pick a room" about a decision that had been made.
+  //
+  // Deliberately no updateScale call. The scale in force is the median over
+  // every measured room; re-deriving it from this one rectangle would pin it to
+  // that room and switch the footprint cross-check off, which is exactly what
+  // dragging the overlay is *supposed* to do and must stay the user's choice.
+  const showAutoScaleRoom = useCallback((decision) => {
+    const room = representativeRoom(decision);
+    if (!room || !(room.labelDims?.width > 0) || !(room.labelDims?.height > 0)) return false;
+    const { left, right, top, bottom } = room.rect;
+    if (!(right > left) || !(bottom > top)) return false;
+    setRoomOverlay({
+      x1: left,
+      y1: top,
+      x2: right,
+      y2: bottom,
+      polygon: [
+        { x: left, y: top }, { x: right, y: top },
+        { x: right, y: bottom }, { x: left, y: bottom },
+      ],
+      confidence: room.confidence ?? null,
+    });
+    const placed = orientDimsToBox(
+      room.labelDims.width, room.labelDims.height, right - left, bottom - top,
+    );
+    setRoomDimensions({ width: String(placed.width), height: String(placed.height) });
+    return true;
+  }, [setRoomOverlay, setRoomDimensions]);
+
   /**
    * The automatic path, run once a scan has found labels: measure every one of
    * them, calibrate from the rooms that agree, trace the exterior with those
@@ -873,11 +914,20 @@ function App() {
       return;
     }
 
+    // Before the trace, not after: the tracer reads `detectedDimensions` for its
+    // interior points, so the labels stay in the store either way, but the user
+    // sees which room was chosen while the exterior is still being traced.
+    if (showAutoScaleRoom(decision)) {
+      setManualEntryMode(false);
+      setMode('normal');
+    }
+
     // The footprint cross-check runs inside runTrace now, so it lands here too
     // — and equally on every later re-trace, which used to leave the verdict
     // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
-  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing]);
+  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom,
+    setManualEntryMode, setMode]);
 
   useEffect(() => {
     afterScanRef.current = runAutoScale;
@@ -970,14 +1020,14 @@ function App() {
     setManualEntryMode(false);
     setMode('normal');
 
-    // Trace the exterior with the label set still in hand: it used to be
-    // cleared one statement earlier, so the tracer ran blind to every room
-    // size the OCR pass had just found.
+    // The labels are kept, not cleared. `setMode('normal')` above is what puts
+    // the pills away; clearing the array as well made "Select room" a one-shot
+    // — the second wrong guess had nothing left to pick from — and threw away
+    // the tracer's interior points, the warning anchors and the exhibit's unit
+    // style along with it.
     await autoTraceExterior();
-    setDetectedDimensions([]);
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
-    setPerimeterVertices, setManualEntryMode, setMode, setDetectedDimensions,
-    autoTraceExterior]);
+    setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback((dimension) => {
@@ -1127,13 +1177,33 @@ function App() {
     [setDockOpen],
   );
 
-  // Leaving a tool: drop every flag, and drop vertex-placement and room
-  // placement too — neither is a tool-manager flag, but both are modes.
+  // Leaving a tool: drop every flag, and drop vertex-placement, room placement
+  // and the room picker too — none is a tool-manager flag, but all three are
+  // modes, and the rail's Select button means "no mode" rather than "no flag".
   const handleCancelTool = useCallback(() => {
     deactivateAll();
     setPerimeterVertices(null);
     setManualEntryMode(false);
-  }, [deactivateAll, setPerimeterVertices, setManualEntryMode]);
+    // Only when the picker is the mode being shown: cancelling the eraser must
+    // not also put away pills the user opened before reaching for it.
+    if (activeTool === 'pick') setMode('normal');
+  }, [activeTool, deactivateAll, setPerimeterVertices, setManualEntryMode, setMode]);
+
+  // Put the read labels back on screen so the user can pick the room the
+  // automatic selection got wrong. Deliberately not a re-scan: OCR is the
+  // expensive half of a scan and the labels are already in the store, so this
+  // only changes `mode` — which is the single thing that renders the pills.
+  // Re-scanning would also re-run the automatic choice, i.e. undo the correction
+  // the user opened this to make.
+  const handleSelectRoom = useCallback(() => {
+    if (activeTool === 'pick') {
+      setMode('normal');
+      return;
+    }
+    if (!useAppStore.getState().detectedDimensions.length) return;
+    handleCancelTool();
+    setMode('manual');
+  }, [activeTool, handleCancelTool, setMode]);
 
   // The rail speaks the same tool ids as ContextBar, and each maps to the very
   // toggle the keyboard already binds — so the two routes into a tool cannot
@@ -1335,6 +1405,8 @@ function App() {
         onDrawExterior={() => handleDrawMode()}
         onOutlineByVertex={handleDrawExterior}
         onFindRoomSize={handleFindRoomSize}
+        onSelectRoom={handleSelectRoom}
+        canSelectRoom={detectedDimensions.length > 0}
         onAddFloor={addPerimeterTrace}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={handleShowSideLengthsChange}
@@ -1365,6 +1437,9 @@ function App() {
         onFinishDrawMode={handleFinishDrawMode}
         perimeterOverlay={perimeterOverlay}
         onFindRoomSize={handleFindRoomSize}
+        onSelectRoom={handleSelectRoom}
+        canSelectRoom={detectedDimensions.length > 0}
+        selectingRoom={activeTool === 'pick'}
         onAddFloor={addPerimeterTrace}
         floorCount={perimeterTraces.length}
         dockOpen={dockOpen}

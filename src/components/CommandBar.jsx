@@ -10,6 +10,7 @@ import {
   PanelLeft,
   Check,
   Brush,
+  MousePointerClick,
 } from 'lucide-react';
 import useUndoHistory from '../hooks/useUndoHistory';
 import * as undoManager from '../store/undoManager';
@@ -36,6 +37,9 @@ const CommandBar = ({
   onFinishDrawMode,
   perimeterOverlay,
   onFindRoomSize,
+  onSelectRoom,
+  canSelectRoom,
+  selectingRoom,
   onAddFloor,
   floorCount,
   dockOpen,
@@ -87,6 +91,23 @@ const CommandBar = ({
       >
         <ScanText className="w-[15px] h-[15px]" aria-hidden="true" />
         <span>Read dimensions</span>
+      </button>
+
+      {/* The way out when the automatic choice is wrong: it puts the labels
+          already read back on screen as pills, without reading them again.
+          Disabled rather than hidden, per the rule above — and there is
+          nothing to pick from until a scan has found something. */}
+      <button
+        onClick={onSelectRoom}
+        disabled={!canSelectRoom || isProcessing}
+        aria-pressed={selectingRoom}
+        className={`toolbar-btn ${selectingRoom ? 'toolbar-btn-active' : ''}`}
+        title={canSelectRoom
+          ? 'Show the dimension labels and pick the room to scale from'
+          : 'Read the dimensions first — there are no labels to pick from'}
+      >
+        <MousePointerClick className="w-[15px] h-[15px]" aria-hidden="true" />
+        <span>Select room</span>
       </button>
 
       {/* Draw mode doubles as its own commit: while painting, the same slot

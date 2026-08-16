@@ -82,6 +82,8 @@ const MenuBar = ({
   onDrawExterior,
   onOutlineByVertex,
   onFindRoomSize,
+  onSelectRoom,
+  canSelectRoom,
   onAddFloor,
   showSideLengths,
   onShowSideLengthsChange,
@@ -184,6 +186,7 @@ const MenuBar = ({
 
       <Menu id="trace" label="Trace" open={openId === 'trace'} onOpen={open} onClose={close}>
         <MenuItem label="Read dimensions" disabled={!image} onSelect={onFindRoomSize} close={close} />
+        <MenuItem label="Select room to scale from" disabled={!canSelectRoom} onSelect={onSelectRoom} close={close} />
         <Sep />
         <MenuItem label="Find outline automatically" disabled={!image} onSelect={onTracePerimeter} close={close} />
         <MenuItem label="Paint the outline" keys="7" disabled={!image} onSelect={onDrawExterior} close={close} />
