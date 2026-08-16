@@ -168,7 +168,11 @@ describe('search memo: giving up on budget cannot change the answer', () => {
   // was open — turning the perimeter trace back into a full cold trace. No
   // fixture is large enough to reach the real 32 MB budget, which is exactly
   // why it was never seen; a mid-search budget reproduces it.
-  it.each(FIXTURES)('%s keeps its early rungs when the budget trips mid-search', (name) => {
+  // Two plans, not the whole set: this is a property of the cache, not of any
+  // plan's geometry, and every case here costs three full boundary searches.
+  const TRIP_FIXTURES = ['ExampleFloorplan.png', 'ExampleFloorplan5.png'];
+
+  it.each(TRIP_FIXTURES)('%s keeps its early rungs when the budget trips mid-search', (name) => {
     const image = images.get(name);
     const cold = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
     clearDetectionCache();

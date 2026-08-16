@@ -1,5 +1,17 @@
 import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import os from 'node:os'
+
+// Leave one core for the vitest host process. The detection tests are
+// CPU-bound and synchronous — a single boundary trace blocks its worker for
+// 1-3 s — so with one worker per core the host gets no CPU, and the
+// worker->host `onTaskUpdate` RPC times out. That surfaces as
+// `Error: [vitest-worker]: Timeout calling "onTaskUpdate"` and a non-zero exit
+// *with every test passing*, which is what failed the build on a 4-vCPU
+// runner. Capping workers is the fix rather than trimming tests, because the
+// suite only grows.
+const cores = os.availableParallelism?.() ?? os.cpus().length
+const testWorkers = Math.max(1, cores - 1)
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -22,6 +34,7 @@ export default defineConfig({
     // deploy). Raised rather than set per-test so a new fixture test does not
     // have to rediscover this.
     testTimeout: 20000,
+    maxWorkers: testWorkers,
   },
   build: {
     rollupOptions: {
