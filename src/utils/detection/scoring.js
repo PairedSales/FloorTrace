@@ -27,8 +27,11 @@ export const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) =
   return { polygon: fitted.polygon, ring, skew: fitted.skew };
 };
 
-// Fraction of a rectangle's area covered by the footprint mask.
-const rectCoverage = (mask, width, height, rect) => {
+// Fraction of a rectangle's area covered by the footprint mask. Exported
+// because remediate.js has to ask the same question of a finished floor that
+// this asks of a candidate, and two samplers would eventually disagree about
+// whether a room is inside.
+export const rectCoverage = (mask, width, height, rect) => {
   const x0 = Math.max(0, Math.round(rect.left));
   const x1 = Math.min(width - 1, Math.round(rect.right));
   const y0 = Math.max(0, Math.round(rect.top));
@@ -223,6 +226,7 @@ const WARNING_TEXT = {
   'no-alternative': 'only one usable hypothesis was found',
   'brush-mismatch': 'the traced outline does not match the area you outlined',
   'drawn-freehand': 'no wall was found under part of the outline, so your stroke was used instead',
+  remediated: 'the first outline left known rooms outside, so it was traced again',
 };
 
 // `anchor` is where on the image the warning is about, in WORKING-RASTER px.

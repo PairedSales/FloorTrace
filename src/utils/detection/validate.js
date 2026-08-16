@@ -47,6 +47,25 @@ const sampledOverlap = (a, b) => {
 };
 
 /**
+ * How much a result's confidence is discounted for the known-inside points it
+ * leaves outside.
+ *
+ * Exported because remediate.js has to adjudicate its attempts on the number
+ * the user will actually be shown, and that number is the detector's own
+ * confidence times this. Comparing attempts on the undiscounted one made a
+ * footprint holding every labelled room lose to one holding half of them: the
+ * miss is invisible inside the network that caused it, since a label belonging
+ * to a dismembered neighbouring fragment is filtered out of that network's own
+ * constraints before scoring ever sees it.
+ */
+export const constraintFactor = (missed, total, drawn = false) => {
+  if (!total || !missed) return 1;
+  return drawn
+    ? Math.max(0.85, 1 - 0.3 * (missed / total))
+    : Math.max(0.35, 1 - missed / total);
+};
+
+/**
  * @param {object} result mapped boundary result (original px)
  * @param {object} context { imageWidth, imageHeight, labels: [{x,y,keyword}] }
  * @returns {{ warnings: Array, confidence: number }} confidence is a multiplier
@@ -121,12 +140,26 @@ export const validateBoundaryResult = (result, context = {}) => {
   // building. A footprint that excludes one omitted a labelled region.
   const labels = context.labels ?? [];
   if (labels.length) {
+    // Two kinds of exemption, deliberately not one list.
+    //
+    // `exemptRegions` are label bboxes as OCR supplies them — a glyph box a few
+    // characters wide, standing for an area of unknown extent — so a label
+    // *near* one is the label *of* it and a neighbourhood is allowed.
+    //
+    // `carvedRegions` are the areas the tracer actually removed, geometric
+    // garage detection included. They are the real extent, so containment is
+    // the whole test: padding them by their own size would exempt a genuine
+    // miss two rooms away. Without this the tracer reported the very garage it
+    // had just carved out as a labelled area falling outside the outline, and
+    // halved its own confidence in a correct trace for it.
     const exempt = context.exemptRegions ?? [];
+    const carved = context.carvedRegions ?? [];
     const nearExcluded = (label) => exempt.some((r) => {
       const pad = Math.max(r.width, r.height) * 2;
       return label.x >= r.x - pad && label.x <= r.x + r.width + pad
         && label.y >= r.y - pad && label.y <= r.y + r.height + pad;
-    });
+    }) || carved.some((r) => label.x >= r.x && label.x <= r.x + r.width
+      && label.y >= r.y && label.y <= r.y + r.height);
     const outside = labels.filter((label) => !nearExcluded(label) && !result.floors.some((floor) =>
       floor.outer?.polygon
       && pointInPolygon(label, floor.outer.polygon, floor.holes ?? [])));
@@ -144,9 +177,7 @@ export const validateBoundaryResult = (result, context = {}) => {
         // are indistinguishable by name, and these are already original px.
         points: outside.slice(0, 8).map(({ x, y }) => ({ x, y })),
       }, drawn ? 'warn' : 'error'));
-      factor *= drawn
-        ? Math.max(0.85, 1 - 0.3 * (outside.length / labels.length))
-        : Math.max(0.35, 1 - outside.length / labels.length);
+      factor *= constraintFactor(outside.length, labels.length, drawn);
     }
   }
 

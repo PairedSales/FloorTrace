@@ -20,7 +20,8 @@ FloorTrace is a single-page React app with all image processing in-browser. The 
 5. App stores room overlay, calculates scale from user dimensions.
 6. User runs perimeter trace (also triggered automatically after a room is placed), with the rooms placed so far and the parsed dimension labels passed in as constraints.
 7. Worker generates several candidate footprints per wall network, scores them against wall evidence and those constraints, and returns the winner with `quality: {confidence, warnings[]}` alongside the inner and outer polygons and any enclosed voids.
-8. App chooses active boundary based on wall mode toggle, computes area, and reports the trace at its measured confidence — a doubtful outline is announced as one to check, with a one-click **Draw Exterior** fallback.
+8. If that winner is doubtful, or leaves a constrained room outside itself, the worker searches again (`remediate.js`) and keeps whichever attempt holds more of what is known without trusting itself less.
+9. App chooses active boundary based on wall mode toggle, computes area, and reports the trace at its measured confidence — a doubtful outline is announced as one to check, with a one-click **Draw Exterior** fallback.
 
 ## Quality Model
 
@@ -28,7 +29,8 @@ Exterior detection is a hypothesise-and-score search, not a single heuristic, so
 
 - **Candidates** come from two evidence variants (every stroke / only structural strokes) crossed with three connectivity policies (welding that refuses notch mouths, no welding, wall-line spanning), plus every rung of the closing ladder.
 - **Scoring** measures seal, wall support along the outline, coverage of the wall that was actually drawn, economy of invented closing, completeness relative to what the same evidence could enclose, and agreement with known rooms and labels.
-- **Confidence and warnings** travel with the result into the store, onto each perimeter trace, and into the UI. Codes include `unsealed`, `weak-wall-support`, `bridged-opening`, `heavy-closing`, `annexation`, `wall-left-outside`, `incomplete-enclosure`, `label-outside`, `room-outside`, `self-intersecting`, `floors-overlap`, `no-inner`, `thin-structure-excluded`.
+- **Confidence and warnings** travel with the result into the store, onto each perimeter trace, and into the UI. Codes include `unsealed`, `weak-wall-support`, `bridged-opening`, `heavy-closing`, `annexation`, `wall-left-outside`, `incomplete-enclosure`, `label-outside`, `room-outside`, `self-intersecting`, `floors-overlap`, `no-inner`, `thin-structure-excluded`, `remediated`.
+- **Doubt is acted on, not just reported.** A footprint that excludes a room the app already located is provably wrong, so it is re-searched rather than handed over with a caveat (`remediate.js`). Two passes: `join` re-runs the wall networks surrounding a stranded room as one building, for the case where the page was partitioned into pieces of one drawing; `escalate` forces every rescue hypothesis and doubles the closing ladder over the same partition. Each attempt is scored by the same code that scored the first, and replaces it only when it holds no fewer known-inside rooms **and** more confidence once the misses it still has are charged for — so remediation can improve an answer and cannot silently make one worse. Two outlines that each enclose their own extent are never welded together, which is the same rule the partitioner uses and is what keeps a multi-plan sheet four plans.
 - **Failure is visible.** A trace that cannot be produced returns a `no-boundary` reason rather than nothing, and neither case fires a success toast.
 
 ## Wall Mode Model

@@ -218,6 +218,37 @@ const run = () => {
       }
     }
 
+    // The same trace as the app actually runs it: after a scan the store holds
+    // every parsed dimension label, and every one of them is handed to the
+    // tracer as a point known to be inside the building. That changes which
+    // candidate wins, and it is what arms second-chance tracing (remediate.js),
+    // so a benchmark that never supplies them was not measuring the app's path.
+    // Scored against the same truth, and reported separately, so a difference
+    // between the two runs is visible rather than averaged away.
+    const labelPoints = (truth?.rooms ?? [])
+      .filter((room) => Array.isArray(room.click))
+      .map((room) => ({ x: room.click[0], y: room.click[1], name: room.name ?? null }));
+    if (truth?.boundary && labelPoints.length) {
+      const c0 = Date.now();
+      const constrained = traceFloorplanBoundaryCore(imageData, {
+        ...boundaryOpts,
+        constraints: { rooms: [], interiorPoints: labelPoints },
+      });
+      const remediation = constrained?.quality?.remediation;
+      out.push(`   constrained (${labelPoints.length} known rooms): ${Date.now() - c0}ms`
+        + (remediation
+          ? `  retried [${remediation.passes.map((p) => p.pass).join(', ')}] -> `
+            + `${remediation.accepted ?? 'kept first'} `
+            + `(held ${remediation.before.held}->${remediation.after.held}/${remediation.after.of})`
+          : '  no retry needed'));
+      const cScore = scoreBoundary(constrained, truth.boundary, ppf);
+      out.push(...cScore.lines.map((l) => l.replace(/^   /, '   c ')));
+      for (const ok of cScore.checks) {
+        totalChecks += 1;
+        if (ok) totalPass += 1;
+      }
+    }
+
     // Rooms are placed in order and each one feeds the next, exactly as the
     // app does it (App.jsx roomScaleHint): scoring every room against a blank
     // project measured a flow the user never has after the first click.

@@ -524,6 +524,14 @@ function App() {
           source,
           confidence: floor.confidence,
           warnings: floor.warnings,
+          // Page-level, so every floor of a re-searched sheet carries the same
+          // record — the same way the `remediated` warning is result-scoped.
+          // Kept because it is the only durable answer to "why is this outline
+          // not the one the first search produced", and a reopened project
+          // otherwise shows the result with the reason gone.
+          ...(boundaryResult?.quality?.remediation
+            ? { remediation: boundaryResult.quality.remediation }
+            : {}),
         },
       };
     });
@@ -564,17 +572,31 @@ function App() {
     const what = floorCount > 1
       ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels (${mode} wall face)`
       : `${noun} (${mode} wall face)`;
+    // The outline on screen is not the one the first search produced, and the
+    // area moved with it. By the routing rule that is a toast and not a flash
+    // even when the result is clean: the user must know it, and cannot see it —
+    // a re-traced outline looks exactly like a first-time one.
+    const retry = traced?.quality?.remediation;
+    const recovered = retry?.accepted ? retry.after.held - retry.before.held : 0;
+    const retryNote = recovered > 0
+      ? ` First pass left ${recovered} known room${recovered === 1 ? '' : 's'} out, so it was traced again.`
+      : '';
 
     // A clean trace is visible on the canvas the instant it lands, and its
     // confidence is on the outline row — so it acknowledges rather than
     // interrupts. Only a result worth checking earns the stack.
     if (quality.level === 'good') {
-      flash(`${what}.${excludedNote}`);
+      if (retryNote) {
+        notify(`${what}.${excludedNote}${retryNote}`,
+          { type: 'success', id: 'trace-result', duration: DURATION.NORMAL });
+      } else {
+        flash(`${what}.${excludedNote}`);
+      }
       return;
     }
     const confidenceNote = quality.percent === null ? '' : ` (${quality.percent}% confidence)`;
     const reason = quality.reason ? ` — ${quality.reason}` : '';
-    notify(`${what}${confidenceNote}: check it${reason}.`, {
+    notify(`${what}${confidenceNote}: check it${reason}.${retryNote}`, {
       type: quality.level === 'fair' ? 'warning' : 'error',
       id: 'trace-result',
       duration: DURATION.LONG,

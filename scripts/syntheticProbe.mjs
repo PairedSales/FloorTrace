@@ -7,10 +7,11 @@ import { traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
 import { polygonArea } from '../src/utils/detection/polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
-  garageHouse, nestedFloorsPlan, mixedThicknessHouse,
+  garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, twoPlansSheet,
   createImage, outerFaceRect, strokeAround,
   polygonIou, bboxIou, bboxOf, areaError,
 } from '../src/utils/detection/__tests__/synthetic.js';
+import { pointInPolygon } from '../src/utils/detection/polygon.js';
 
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
 const signed = (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
@@ -130,6 +131,35 @@ const scenarios = {
       }),
       blankTruth,
     );
+  },
+  // Second-chance tracing: the same plan traced with and without the rooms the
+  // app has already located. `held` is what decides whether a retry is kept, so
+  // it is printed beside the geometry it bought.
+  remediate: () => {
+    const held = (traced, labels) => labels.filter((l) => (traced?.floors ?? []).some(
+      (f) => f.outer?.polygon && pointInPolygon(l, f.outer.polygon, f.holes ?? []),
+    )).length;
+    const line = (name, traced, labels, truth) => {
+      const r = traced?.quality?.remediation;
+      report(name, traced, truth,
+        `held=${held(traced, labels)}/${labels.length}`
+        + (r ? ` remediation=${r.accepted ?? 'none'}(${r.passes.map((p) => p.pass).join('>')})` : ''));
+    };
+    for (const gap of [40, 70, 100, 140, 180]) {
+      const { img, truth, labels } = windowedHouse(gap);
+      const constraints = { rooms: [], interiorPoints: labels };
+      line(`windows ${gap}px bare`, traceFloorplanBoundaryCore(img), labels, truth);
+      line(`windows ${gap}px + rooms`,
+        traceFloorplanBoundaryCore(img, { constraints }), labels, truth);
+    }
+    // The guard: two sealed plans and a stray label between them. A join here
+    // would be one building where the sheet plainly shows two.
+    const sheet = twoPlansSheet();
+    const traced = traceFloorplanBoundaryCore(sheet.img, {
+      constraints: { rooms: [], interiorPoints: sheet.labels },
+    });
+    line('two plans + stray label', traced, sheet.labels, sheet.floors[0]);
+    console.log(`   floors=${traced?.floors?.length ?? 0} (expect 2), joined=${traced?.quality?.remediation?.accepted ?? 'none'}`);
   },
   mixed: () => {
     const { img, outerTruth, innerTruth } = mixedThicknessHouse();
