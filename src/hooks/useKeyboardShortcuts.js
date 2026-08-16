@@ -13,6 +13,7 @@ const TRACE_DIGIT_COUNT = 7;
  *
  * Registers and cleans up all window-level input event listeners:
  *  - keydown: Ctrl+V (paste), Ctrl+O (file open), Ctrl+Z/Y (undo/redo),
+ *             Ctrl+E (export dialog), Ctrl+Alt+C (copy the exhibit image),
  *             [ / ] (eraser brush size), O (toggle options), L (toggle side lengths),
  *             R / Shift+R (rotate the canvas either way), F (fit to window),
  *             1…n (select a tool), Alt/Shift+1…7 (switch perimeter trace)
@@ -36,6 +37,8 @@ export function useKeyboardShortcuts({
   onPaste,
   onFileOpen,
   onSaveProject,
+  onExport,
+  onCopyExhibit,
   activeBrush,
   onRotateCanvas,
   onFitToWindow,
@@ -180,6 +183,19 @@ export function useKeyboardShortcuts({
             e.preventDefault();
             onSaveProject(e.shiftKey); // Shift key held down -> Save As
             break;
+          case 'e':
+            e.preventDefault();
+            onExport?.();
+            break;
+          case 'c':
+            // Alt is what distinguishes it: plain Ctrl+C has to keep copying
+            // the selection. Ctrl+Shift+C, the obvious pairing, is the element
+            // inspector in every Chromium browser and in Firefox.
+            if (e.altKey) {
+              e.preventDefault();
+              onCopyExhibit?.();
+            }
+            break;
           case 'z':
             e.preventDefault();
             if (e.shiftKey) {
@@ -198,7 +214,8 @@ export function useKeyboardShortcuts({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onPaste, onFileOpen, onSaveProject, activeBrush, onRotateCanvas, onFitToWindow, toolDigits]);
+  }, [onPaste, onFileOpen, onSaveProject, onExport, onCopyExhibit, activeBrush,
+    onRotateCanvas, onFitToWindow, toolDigits]);
 
   // ── mousedown: side buttons for undo/redo ─────────────────────────────────
   useEffect(() => {

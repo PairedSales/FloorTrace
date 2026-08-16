@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const mod = isMac ? '⌘' : 'Ctrl';
+const alt = isMac ? '⌥' : 'Alt';
 
 const shortcuts = [
   { keys: 'O', description: 'Show or hide the measurement panel' },
@@ -17,6 +18,9 @@ const shortcuts = [
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },
   { keys: 'Delete', description: 'Delete the selected line, shape, void or vertex' },
   { keys: 'Right-click', description: 'Delete a vertex' },
+  { keys: `${mod} + E`, description: 'Export an image for your workfile' },
+  { keys: `${mod} + ${alt} + C`, description: 'Copy that image straight to the clipboard' },
+  { keys: `${mod} + S`, description: 'Save an editable project file' },
   { keys: `${mod} + O`, description: 'Open image' },
   { keys: `${mod} + V`, description: 'Paste image from clipboard' },
   { keys: `${mod} + Z`, description: 'Undo' },
@@ -41,6 +45,9 @@ const tips = [
   'Use Cut out to punch a courtyard or light well out of an outline; it is subtracted from the area and survives a re-trace.',
   'The Outlines list shows how confident the detector was, and why.',
   'Drag & drop an image file onto the canvas to open it.',
+  'Export gives you one image with the plan, the outlines and every number on '
+    + 'it — that is the thing to put in a workfile. The .floorplan file is only '
+    + 'needed if you mean to come back and edit the trace.',
 ];
 
 const HelpModal = ({ onClose }) => {

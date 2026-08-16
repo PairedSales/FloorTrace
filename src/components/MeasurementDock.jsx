@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
 import useAppStore, { selectAreaByType } from '../store/appStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea, holeRings, isSubtracted } from '../utils/areaCalculator';
@@ -169,6 +169,7 @@ const MeasurementDock = ({
   onDimensionFocus,
   onDimensionBlur,
   onScaleTool,
+  onExport,
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
@@ -530,17 +531,34 @@ const MeasurementDock = ({
               </table>
             )}
 
+            {/* The number is read here, so the way to take it away is here.
+                Export first and copy second: a plain number pasted into a
+                report carries none of the evidence under it, and this panel is
+                the last place the two can still be told apart. */}
+            <button
+              type="button"
+              onClick={onExport}
+              disabled={!(area > 0)}
+              className="mt-3 w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-md
+                         bg-accent text-accent-ink text-[12.5px] font-semibold
+                         hover:brightness-110 transition-[filter] cursor-pointer
+                         disabled:opacity-40 disabled:cursor-default disabled:hover:brightness-100"
+            >
+              <Share className="w-3.5 h-3.5" aria-hidden="true" />
+              Export for workfile…
+            </button>
+
             <button
               type="button"
               onClick={handleCopyArea}
               disabled={!(area > 0)}
-              className="mt-3 w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-md
                          border border-line bg-panel-2 text-[12.5px] text-fg-2 font-medium
                          hover:text-fg hover:border-accent/50 transition-colors cursor-pointer
                          disabled:opacity-40 disabled:cursor-default"
             >
               <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-              {showBreakdown ? 'Copy breakdown' : 'Copy area'}
+              {showBreakdown ? 'Copy breakdown as text' : 'Copy area as text'}
             </button>
 
             {/* Report-level warning. Stated, never auto-corrected — which of the

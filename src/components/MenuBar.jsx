@@ -4,6 +4,7 @@ import FloorTraceLogo from '../assets/logo.svg';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const mod = isMac ? '⌘' : 'Ctrl';
+const alt = isMac ? '⌥' : 'Alt';
 
 const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
 const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
@@ -72,6 +73,8 @@ const MenuBar = ({
   onPasteImage,
   onSaveProject,
   onSaveProjectAs,
+  onExport,
+  onCopyExhibit,
   onRestart,
   onHelpOpen,
   onFitToWindow,
@@ -130,12 +133,19 @@ const MenuBar = ({
         FloorTrace
       </span>
 
+      {/* Export sits above the project file, and says what it is for. Almost
+          every trace is made for one appraisal and never reopened, so the
+          image of the finished measurement is the document — the `.floorplan`
+          is the copy you keep only if you mean to come back to it. */}
       <Menu id="file" label="File" open={openId === 'file'} onOpen={open} onClose={close}>
         <MenuItem label="Open plan or project…" keys={`${mod}+O`} onSelect={onFileOpen} close={close} />
         <MenuItem label="Paste plan from clipboard" keys={`${mod}+V`} onSelect={onPasteImage} close={close} />
         <Sep />
-        <MenuItem label="Save project" keys={`${mod}+S`} disabled={!image} onSelect={() => onSaveProject(false)} close={close} />
-        <MenuItem label="Save project as…" keys={`${mod}+Shift+S`} disabled={!image} onSelect={onSaveProjectAs} close={close} />
+        <MenuItem label="Export for workfile…" keys={`${mod}+E`} disabled={!image} onSelect={onExport} close={close} />
+        <MenuItem label="Copy measurement image" keys={`${mod}+${alt}+C`} disabled={!image} onSelect={onCopyExhibit} close={close} />
+        <Sep />
+        <MenuItem label="Save editable project" keys={`${mod}+S`} disabled={!image} onSelect={() => onSaveProject(false)} close={close} />
+        <MenuItem label="Save editable project as…" keys={`${mod}+Shift+S`} disabled={!image} onSelect={onSaveProjectAs} close={close} />
         <Sep />
         <MenuItem label="Close project" danger disabled={!image} onSelect={onRestart} close={close} />
       </Menu>

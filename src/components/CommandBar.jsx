@@ -1,6 +1,6 @@
 import {
   FolderOpen,
-  Save,
+  Share,
   ScanSearch,
   Maximize,
   ScanText,
@@ -27,7 +27,8 @@ const CommandBar = ({
   image,
   isProcessing,
   onFileOpen,
-  onSaveProject,
+  onExport,
+  hasArea,
   onTracePerimeter,
   onFitToWindow,
   onDrawExterior,
@@ -53,16 +54,6 @@ const CommandBar = ({
       >
         <FolderOpen className="w-[15px] h-[15px]" aria-hidden="true" />
         <span>Open</span>
-      </button>
-
-      <button
-        onClick={onSaveProject}
-        disabled={!image}
-        className="toolbar-btn"
-        title="Save project (Ctrl+S)"
-      >
-        <Save className="w-[15px] h-[15px]" aria-hidden="true" />
-        <span>Save</span>
       </button>
 
       <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
@@ -140,6 +131,22 @@ const CommandBar = ({
       >
         <Layers className="w-[15px] h-[15px]" aria-hidden="true" />
         <span>Add level</span>
+      </button>
+
+      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+
+      {/* The last step of the job, and the only one most sessions ever need to
+          reach twice. It stays put and stays enabled from the moment a plan is
+          open — it earns emphasis once there is an area to export, rather than
+          appearing at that moment and moving everything beside it. */}
+      <button
+        onClick={onExport}
+        disabled={!image || isProcessing}
+        className={`toolbar-btn ${hasArea ? 'toolbar-btn-ready' : ''}`}
+        title="Export an image of the plan and its measurements (Ctrl+E)"
+      >
+        <Share className="w-[15px] h-[15px]" aria-hidden="true" />
+        <span>Export</span>
       </button>
 
       <div className="flex-1 min-w-[12px]" />

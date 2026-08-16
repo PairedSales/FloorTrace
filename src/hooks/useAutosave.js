@@ -89,8 +89,13 @@ export function useAutosave() {
       // falls back to localStorage, and recording a write that did not happen
       // would skip the image on every later write.
       writtenImageRef.current = image;
+      useAppStore.getState().setDraftState('saved');
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
+      // Both channels, by the routing rule: the status bar carries it for as
+      // long as it stays true, and the toast fires once because a storage
+      // refusal is the one autosave event the user has to act on.
+      useAppStore.getState().setDraftState('error');
       notify('Autosave is unavailable — storage is full or blocked.', { type: 'warning', id: 'autosave' });
     }
   }, []);
@@ -99,14 +104,30 @@ export function useAutosave() {
     setSaveOnExit(enabled);
     localStorage.setItem(SAVE_ON_EXIT_KEY, String(enabled));
     if (!enabled) {
+      useAppStore.getState().setDraftState('off');
       removeDraft(LOCAL_DRAFT_STORAGE_KEY);
+      return;
     }
-  }, []);
+    // Writes now rather than waiting for the next edit. Switching it on and
+    // seeing "Saving draft…" sit there until you happen to touch something is
+    // the status bar telling the truth about the wrong thing.
+    const state = useAppStore.getState();
+    if (state._hasRestoredState && state.image) {
+      state.setDraftState('pending');
+      saveAutosavedDraft(state.getAutosaveState());
+    } else {
+      state.setDraftState('saved');
+    }
+  }, [saveAutosavedDraft]);
 
   // ── Restore draft on startup ──────────────────────────────────────────────
   useEffect(() => {
     const restoreAutosavedDraft = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
+      // Stated once at startup so the status bar is right before the first
+      // edit: with autosave on and a restored draft, what is on disk already is
+      // the current work; with it off, nothing is being kept at all.
+      useAppStore.getState().setDraftState(saveOnExitEnabled ? 'saved' : 'off');
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
         const savedData = saveOnExitEnabled ? await getDraft(LOCAL_DRAFT_STORAGE_KEY) : null;
@@ -178,6 +199,11 @@ export function useAutosave() {
         // mints a fresh `Math.random()` token per call, so even a camera update
         // landing on identical scale and position always gets here.
         if (onlyCameraMoved(slice, prevSlice)) return;
+
+        // After the camera gate, not before it: a pan schedules no write, and
+        // reporting "saving" for one would leave the status bar spinning for
+        // the rest of the session.
+        state.setDraftState('pending');
 
         // Debounce: wait 2 seconds of inactivity before writing the draft.
         // This write, not the unload handler below, is what actually protects

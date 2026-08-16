@@ -241,6 +241,33 @@ describe('projectSerializer', () => {
   // ──────────────────────────────────────────────────────────────────────────
   // Schema Validation
   // ──────────────────────────────────────────────────────────────────────────
+  // The subject line is what the saved file is filed under and what the
+  // exported exhibit is titled with, so it has to survive the round trip — the
+  // asymmetry this module has been bitten by before (autosaved but not
+  // exported) would lose it on every reopen.
+  describe('the subject line', () => {
+    it('round-trips, and reaches the file header too', () => {
+      const project = serializeSketch(createMockStoreState(), null);
+      expect(project.metadata.projectName).toBe('My Test Project');
+      expect(deserializeSketch(project).statePatch.projectName).toBe('My Test Project');
+    });
+
+    it('reads a file written before it existed as unnamed', () => {
+      const project = serializeSketch({ ...createMockStoreState(), projectName: '' }, null);
+      expect(project.metadata.projectName).toBe('Untitled Project');
+      // Simulating the older writer, which put the placeholder in metadata and
+      // nothing in the floor state.
+      delete project.floors[0].state.projectName;
+      expect(deserializeSketch(project).statePatch.projectName).toBe('');
+    });
+
+    it('recovers a name an older file only recorded in metadata', () => {
+      const project = serializeSketch(createMockStoreState(), null);
+      delete project.floors[0].state.projectName;
+      expect(deserializeSketch(project).statePatch.projectName).toBe('My Test Project');
+    });
+  });
+
   describe('validateProjectSchema', () => {
     it('passes for a valid project format', () => {
       const storeState = createMockStoreState();
