@@ -261,6 +261,15 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // read a hardcoded "Saved", which was the one claim in the shell that was
   // true by coincidence and never checked.
   draftState: 'off',
+  // Pending destructive confirmation, as {message, detail, confirmLabel,
+  // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
+  // promise-returning function callable from non-React code while a real
+  // dialog does the rendering.
+  confirmRequest: null,
+  // A transient canvas highlight for an error that has a place on the plan —
+  // a self-intersection knows which two edges cross. Same anchor shape as
+  // `focusedWarning` resolves to, so WarningHighlightLayer renders both.
+  errorAnchor: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -513,6 +522,21 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // Dirty like any other document edit: the subject line is what a saved
   // project is filed under, so losing it is losing work.
   setProjectName: (v) => set({ projectName: v, isDirty: true }),
+  setErrorAnchor: (v) => set({ errorAnchor: v }),
+  requestConfirm: (req) => {
+    // A second request while one is open would strand the first promise, so
+    // the incumbent is answered `false` — the safe default — before it is
+    // replaced.
+    const pending = get().confirmRequest;
+    if (pending) pending.resolve(false);
+    set({ confirmRequest: req });
+  },
+  resolveConfirm: (value) => {
+    const pending = get().confirmRequest;
+    if (!pending) return;
+    set({ confirmRequest: null });
+    pending.resolve(value);
+  },
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

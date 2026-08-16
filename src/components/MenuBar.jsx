@@ -87,6 +87,8 @@ const MenuBar = ({
   onShowSideLengthsChange,
   autoSnapEnabled,
   onAutoSnapChange,
+  toolLabels,
+  onToolLabelsChange,
   saveOnExit,
   onSaveOnExitChange,
   enhancedOcr,
@@ -153,6 +155,11 @@ const MenuBar = ({
         <MenuItem
           label={`${dockOpen ? 'Hide' : 'Show'} measurement panel`}
           onSelect={onDockToggle}
+          close={close}
+        />
+        <MenuItem
+          label={`${toolLabels ? '✓ ' : ''}Show tool labels`}
+          onSelect={() => onToolLabelsChange(!toolLabels)}
           close={close}
         />
         <Sep />

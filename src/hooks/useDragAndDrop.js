@@ -2,8 +2,9 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile, loadImageFromClipboard } from '../utils/imageLoader';
+import { notify, flash } from '../utils/notify';
 
-export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
+export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
   const setImage = useAppStore((s) => s.setImage);
   const setImageMimeType = useAppStore((s) => s.setImageMimeType);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
@@ -24,9 +25,9 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       }
     } catch (error) {
       console.error('Error pasting image:', error);
-      notify('Failed to paste image. Make sure an image is copied to your clipboard.', { type: 'error' });
+      notify('Nothing to paste — copy an image first.', { type: 'error', id: 'paste' });
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, setImageMimeType, notify]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, setImageMimeType]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -59,7 +60,7 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
         useAppStore.getState().loadProject(statePatch);
         undoManager.setHistoryState(historyPatch);
 
-        notify('Project loaded.', { type: 'success' });
+        flash('Project loaded');
       } else {
         // Load and validate first — a failed load must leave the current project intact
         const { dataUrl, mimeType } = await loadImageFromFile(file);
@@ -71,11 +72,11 @@ export function useDragAndDrop(notify, handleManualMode, checkUnsavedChanges) {
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);
-      notify(`Failed to load file: ${error.message}`, { type: 'error' });
+      notify(`Could not open that file — ${error.message}`, { type: 'error', id: 'file-open' });
     } finally {
       setIsProcessing(false);
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage, setImageMimeType]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setIsProcessing, setImage, setImageMimeType]);
 
   return {
     handlePasteImage,

@@ -366,6 +366,81 @@ export const nestedFloorsPlan = () => {
   };
 };
 
+// Text-like ink standing in for a room label, so a constraint point sits on
+// ink the way an OCR label centre always does.
+const glyphs = (img, cx, cy, count = 5) => {
+  for (let g = 0; g < count; g += 1) {
+    const x = cx - count * 6 + g * 12;
+    fillRect(img, x, cy - 6, x + 7, cy + 6);
+  }
+};
+
+/**
+ * A house whose exterior wall is interrupted by window openings of `gap` px on
+ * every side, with an interior partition and a labelled room either side of it.
+ *
+ * Past a certain opening width the strict wall mask no longer holds the outline
+ * together and `partitionWallNetworks` reads one building as several — corner
+ * fragments plus whatever still encloses itself. The traced outline then covers
+ * part of the plan and reports high confidence for it, because the label it
+ * stranded belongs to a network the winning one never scored against. This is
+ * the failure remediation exists for, and no closing radius reaches it.
+ */
+export const windowedHouse = (gap) => {
+  const img = createImage(900, 700);
+  const t = 9;
+  const runs = (a, b, n) => {
+    const out = [];
+    const seg = ((b - a) - (n - 1) * gap) / n;
+    let x = a;
+    for (let i = 0; i < n; i += 1) {
+      out.push([Math.round(x), Math.round(x + seg)]);
+      x += seg + gap;
+    }
+    return out;
+  };
+  for (const [a, b] of runs(120, 780, 3)) {
+    wall(img, a, 100, b, 100, t);
+    wall(img, a, 560, b, 560, t);
+  }
+  for (const [a, b] of runs(100, 560, 3)) {
+    wall(img, 120, a, 120, b, t);
+    wall(img, 780, a, 780, b, t);
+  }
+  wall(img, 450, 100, 450, 560, 5);
+  glyphs(img, 270, 326);
+  glyphs(img, 590, 326);
+  return {
+    img,
+    truth: outerFaceRect(120, 100, 780, 560, t),
+    labels: [{ x: 270, y: 326, name: 'KITCHEN' }, { x: 590, y: 326, name: 'LIVING ROOM' }],
+  };
+};
+
+// Two complete, separately sealed plans side by side, each with a labelled
+// room, and one stray label in the gutter between them. Remediation must not
+// weld them into one building to satisfy the stray: two outlines that each
+// enclose their own extent are two drawings, whatever a label between them
+// says.
+export const twoPlansSheet = () => {
+  const img = createImage(1100, 560);
+  const t = 8;
+  wallRect(img, 60, 60, 460, 480, t);
+  wallRect(img, 640, 60, 1040, 480, t);
+  glyphs(img, 260, 270);
+  glyphs(img, 840, 270);
+  glyphs(img, 550, 270);
+  return {
+    img,
+    floors: [outerFaceRect(60, 60, 460, 480, t), outerFaceRect(640, 60, 1040, 480, t)],
+    labels: [
+      { x: 260, y: 270, name: 'LEFT ROOM' },
+      { x: 840, y: 270, name: 'RIGHT ROOM' },
+      { x: 550, y: 270, name: 'STRAY' },
+    ],
+  };
+};
+
 // Mixed wall thickness: 16px top/bottom, 4px left/right. The interior envelope
 // must inset each edge by its own wall, not by one global scalar.
 export const mixedThicknessHouse = () => {

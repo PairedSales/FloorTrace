@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Copy, Download, Loader2, FileJson, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
+import { notify, flash } from '../utils/notify';
 import { readExportOptions, writeExportOptions } from '../utils/exhibit/options';
 
 /**
@@ -32,10 +33,9 @@ const Toggle = ({ checked, onChange, label, hint, disabled }) => (
   </label>
 );
 
-const ExportDialog = ({ onClose, onSaveProject, notify }) => {
+const ExportDialog = ({ onClose, onSaveProject }) => {
   const projectName = useAppStore((s) => s.projectName);
   const setProjectName = useAppStore((s) => s.setProjectName);
-  const flashStatus = useAppStore((s) => s.flashStatus);
   const measurementLines = useAppStore((s) => s.measurementLines);
   const customShapes = useAppStore((s) => s.customShapes);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
@@ -159,7 +159,7 @@ const ExportDialog = ({ onClose, onSaveProject, notify }) => {
       await fn();
     } catch (err) {
       console.error('Export failed:', err);
-      notify(err.message || 'The export failed.', { type: 'error' });
+      notify(err.message || 'The export failed.', { type: 'error', id: 'export' });
     } finally {
       setBusy(null);
     }
@@ -168,7 +168,7 @@ const ExportDialog = ({ onClose, onSaveProject, notify }) => {
   const handleCopy = () => withBusy('copy', async () => {
     const { copyExhibit } = await import('../utils/exhibit');
     await copyExhibit(result.canvas);
-    flashStatus('Measurement image copied to the clipboard');
+    flash('Measurement image copied to the clipboard');
     onClose();
   });
 
@@ -176,7 +176,7 @@ const ExportDialog = ({ onClose, onSaveProject, notify }) => {
     const { saveExhibit, exhibitFilename } = await import('../utils/exhibit');
     const saved = await saveExhibit(result.canvas, exhibitFilename(result.model));
     if (saved) {
-      flashStatus('Measurement image saved');
+      flash('Measurement image saved');
       onClose();
     }
   });

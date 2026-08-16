@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { shallow } from 'zustand/shallow';
+import { notify, flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import { AUTOSAVE_FIELDS } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
@@ -46,7 +47,7 @@ const onlyCameraMoved = (slice, prevSlice) => {
  *
  * @returns {{ saveOnExit: boolean, handleSaveOnExitChange: (enabled: boolean) => void }}
  */
-export function useAutosave(notify) {
+export function useAutosave() {
   const setHasRestoredState = useAppStore((s) => s.setHasRestoredState);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
 
@@ -91,13 +92,13 @@ export function useAutosave(notify) {
       useAppStore.getState().setDraftState('saved');
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
-      // The status bar carries this for as long as it is true; the toast is
-      // still worth firing once, because a storage refusal is the one autosave
-      // event the user has to act on.
+      // Both channels, by the routing rule: the status bar carries it for as
+      // long as it stays true, and the toast fires once because a storage
+      // refusal is the one autosave event the user has to act on.
       useAppStore.getState().setDraftState('error');
-      if (notify) notify('Autosave unavailable (storage full or blocked).', { type: 'warning' });
+      notify('Autosave is unavailable — storage is full or blocked.', { type: 'warning', id: 'autosave' });
     }
-  }, [notify]);
+  }, []);
 
   const handleSaveOnExitChange = useCallback((enabled) => {
     setSaveOnExit(enabled);
@@ -149,7 +150,7 @@ export function useAutosave(notify) {
               undoManager.clear();
             }
             setHasRestoredState(true);
-            if (notify) notify('Autosaved project restored.', { type: 'info' });
+            flash('Autosaved project restored');
             return;
           }
         }
@@ -163,7 +164,7 @@ export function useAutosave(notify) {
     };
 
     restoreAutosavedDraft();
-  }, [setHasRestoredState, setUseInteriorWalls, notify]);
+  }, [setHasRestoredState, setUseInteriorWalls]);
 
   // Persist wall mode preference independently so it survives when no image
   // draft is present.

@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import { detectRoomsFromLabels } from '../utils/detection';
 import { selectProjectScale } from '../utils/detection/scale.js';
 import { isUserAsserted } from '../utils/detection/validate.js';
+import { notify, flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 
@@ -23,7 +24,7 @@ import * as undoManager from '../store/undoManager';
  *   reviewAgainstFootprint: (footprintAreaPx: number) => void,
  * }}
  */
-export function useAutoScale(notify) {
+export function useAutoScale() {
   // Kept so the verdict can be revisited once the perimeter exists without
   // measuring anything again — selectProjectScale is pure.
   const lastRunRef = useRef(null);
@@ -109,28 +110,27 @@ export function useAutoScale(notify) {
       const held = useAppStore.getState().calibration.feetPerPixel;
       const heldScale = Math.sqrt(Math.abs((held?.x ?? 0) * (held?.y ?? 0)));
       const gap = heldScale > 0 ? Math.abs(Math.log(decision.feetPerPixel / heldScale)) : 0;
-      if (notify) {
+      // A real disagreement is the app overruling a measurement in favour of
+      // the user's number — they have to know. Agreement is just reassurance,
+      // so it acknowledges instead of interrupting.
+      if (gap > 0.03) {
         notify(
-          'Kept the scale you set by hand.'
-          + (gap > 0.03
-            ? ` The ${decision.roomCount} room${decision.roomCount === 1 ? '' : 's'} measured `
-              + `on this page imply one about ${Math.round((Math.exp(gap) - 1) * 100)}% different.`
-            : ' The rooms measured on this page agree with it.'),
-          { type: gap > 0.03 ? 'warning' : 'info', duration: 8000, id: 'auto-scale' },
+          `Kept the scale you set by hand. The ${decision.roomCount} room`
+          + `${decision.roomCount === 1 ? '' : 's'} measured on this page imply one about `
+          + `${Math.round((Math.exp(gap) - 1) * 100)}% different.`,
+          { type: 'warning', id: 'auto-scale' },
         );
+      } else {
+        flash('Kept your scale — the rooms on this page agree with it');
       }
       return decision;
     }
 
-    if (decision.level === 'check' && notify) {
-      notify(
-        `Scale set from ${decision.roomCount} room${decision.roomCount === 1 ? '' : 's'} — `
-        + 'worth checking before you trust the area.',
-        { type: 'warning', duration: 8000, id: 'auto-scale' },
-      );
-    }
+    // A 'check' verdict is not announced here: the Scale card shows it as a
+    // chip beside the number, and keeps showing it for as long as the scale is
+    // in force. A toast said it once and then left the doubt invisible.
     return decision;
-  }, [applyDecision, notify]);
+  }, [applyDecision]);
 
   /**
    * Re-run the verdict once the perimeter is traced. The scale itself cannot

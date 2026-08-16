@@ -1,26 +1,25 @@
-import { toast } from 'sonner';
+import useAppStore from '../store/appStore';
 
-// Promise-based confirmation toast — a non-blocking, on-theme replacement for
-// window.confirm(). Resolves true when the user confirms, false when they cancel
-// or dismiss the toast (safe default for destructive actions).
+/**
+ * Promise-based confirmation for actions that discard work.
+ *
+ * The name is historical — this no longer raises a toast. It parks a request on
+ * the store, which `<ConfirmDialog>` renders as a real focus-trapped
+ * `alertdialog`. A destructive choice does not belong in the notification
+ * stack: it was dismissible by clicking away, weighted the same as
+ * "Side lengths enabled", and could be pushed out of view by unrelated chatter.
+ *
+ * Resolves true on confirm, false on cancel/Escape/backdrop — the safe default
+ * for a destructive action, as before.
+ */
 export function confirmToast(message, {
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
+  detail = null,
 } = {}) {
   return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-
-    toast.warning(message, {
-      duration: Infinity,
-      action: { label: confirmLabel, onClick: () => finish(true) },
-      cancel: { label: cancelLabel, onClick: () => finish(false) },
-      onDismiss: () => finish(false),
-      onAutoClose: () => finish(false),
+    useAppStore.getState().requestConfirm({
+      message, detail, confirmLabel, cancelLabel, resolve,
     });
   });
 }

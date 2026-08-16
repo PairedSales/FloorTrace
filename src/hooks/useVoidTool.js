@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { notify } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { getCentroid, holeRings } from '../utils/areaCalculator';
@@ -64,7 +64,7 @@ export function useVoidTool({ voidToolActive, getCanvasCoords, scaleRef }) {
   const commit = useCallback((ring) => {
     const { ok, reason, trace } = evaluate(ring);
     if (!ok) {
-      toast.error(reason);
+      notify(reason, { type: 'error', id: 'void-tool' });
       return false;
     }
     undoManager.save();
