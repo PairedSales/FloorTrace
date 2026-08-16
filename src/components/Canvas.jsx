@@ -22,6 +22,7 @@ const Canvas = React.memo(forwardRef((props, ref) => {
   useImperativeHandle(ref, () => ({
     fitToWindow: () => stageApiRef.current?.fitToWindow(),
     rotateCanvas: (direction) => stageApiRef.current?.rotateCanvas(direction),
+    zoomByStep: (direction) => stageApiRef.current?.zoomByStep(direction),
   }), []);
 
   // Warm the chunk during the first idle moment so a drop never waits on it.
@@ -37,8 +38,8 @@ const Canvas = React.memo(forwardRef((props, ref) => {
       {!image && !isProcessing && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center max-w-sm">
-            <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-slate-200/80 flex items-center justify-center">
-              <svg className="w-7 h-7 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-panel-2 border border-line flex items-center justify-center">
+              <svg className="w-7 h-7 text-fg-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M9 3v18" />
                 <path d="M15 3v18" />
@@ -46,11 +47,11 @@ const Canvas = React.memo(forwardRef((props, ref) => {
                 <path d="M3 15h18" />
               </svg>
             </div>
-            <p className="text-base font-semibold text-slate-500 mb-1">
+            <p className="text-base font-semibold text-fg mb-1">
               No floor plan loaded
             </p>
-            <p className="text-sm text-slate-400">
-              Paste an image <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-200 rounded text-slate-500">Ctrl+V</kbd> or open a file <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-200 rounded text-slate-500">Ctrl+O</kbd>
+            <p className="text-[13px] text-fg-2">
+              Paste an image <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd> or open a file <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+O</kbd>
             </p>
           </div>
         </div>

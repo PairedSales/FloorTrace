@@ -32,7 +32,7 @@ const ScaleLineRow = ({ line, unit, onCommit, onRemove }) => {
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[9px] font-mono text-slate-500 w-12 shrink-0">{px} px</span>
+      <span className="text-[9px] font-mono text-fg-3 w-12 shrink-0">{px} px</span>
       {unit === 'inches' ? (
         <InchesInput
           value={line.feet ? String(line.feet) : ''}
@@ -53,7 +53,7 @@ const ScaleLineRow = ({ line, unit, onCommit, onRemove }) => {
       <button
         type="button"
         onClick={() => onRemove(line.id)}
-        className="p-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-chrome-800 transition-colors shrink-0"
+        className="p-0.5 rounded text-fg-3 hover:text-crit hover:bg-panel transition-colors shrink-0"
         title="Remove this scale line"
       >
         <Trash2 className="w-3.5 h-3.5" />
@@ -83,13 +83,13 @@ const ScaleSection = ({ unit }) => {
       <div className="panel-divider mx-3" />
       <section className="px-3 py-3 pointer-events-auto">
         <div className="flex items-center justify-between mb-1.5">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider">
             Scale
           </h3>
           {(scaleLines.length > 0 || calibration?.source === 'line-calibration') && (
             <button
               onClick={clearAll}
-              className="text-[11px] font-semibold text-red-400 uppercase tracking-wider hover:text-red-300 cursor-pointer transition-colors duration-200"
+              className="text-[11px] font-semibold text-crit uppercase tracking-wider hover:text-crit cursor-pointer transition-colors duration-200"
               title="Remove the scale lines and the scale they set"
             >
               CLEAR
@@ -98,7 +98,7 @@ const ScaleSection = ({ unit }) => {
         </div>
 
         {scaleLines.length === 0 ? (
-          <p className="text-[11px] text-slate-500 italic py-1">
+          <p className="text-[11px] text-fg-3 italic py-1">
             Click both ends of a length you know on the canvas.
           </p>
         ) : (
@@ -116,7 +116,7 @@ const ScaleSection = ({ unit }) => {
         )}
 
         {pxPerFoot && (
-          <p className="mt-2 text-[10px] font-mono text-slate-500 text-center">
+          <p className="mt-2 text-[10px] font-mono text-fg-3 text-center">
             {anisotropic
               ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
               : `${pxPerFoot.x.toFixed(2)} px/ft`}

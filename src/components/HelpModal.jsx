@@ -5,13 +5,13 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const mod = isMac ? '⌘' : 'Ctrl';
 
 const shortcuts = [
-  { keys: 'O', description: 'Toggle options menu' },
+  { keys: 'O', description: 'Show or hide the measurement panel' },
   { keys: 'L', description: 'Toggle show lengths' },
-  { keys: 'F', description: 'Fit image to window' },
+  { keys: 'F', description: 'Fit plan to window' },
   { keys: '[ / ]', description: 'Resize the active brush' },
   { keys: 'R', description: 'Rotate canvas 45° clockwise' },
   { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  { keys: '1 – 9', description: 'Line, Area, Angle, Outline, Crop, Eraser, Draw Exterior, Void, Scale' },
+  { keys: '1 – 9', description: 'Measure, Area, Angle, Place corners, Crop, Erase, Paint outline, Cut out, Scale' },
   { keys: 'Alt / Shift + 1 – 7', description: 'Switch perimeter trace' },
   { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },
@@ -58,13 +58,13 @@ const HelpModal = ({ onClose }) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-chrome-800 border border-chrome-700 rounded-xl shadow-2xl w-[360px] max-h-[80vh] overflow-y-auto animate-fade-in">
+      <div className="bg-panel border border-line rounded-xl shadow-2xl w-[360px] max-h-[80vh] overflow-y-auto animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-chrome-700">
-          <h2 className="text-sm font-semibold text-slate-100">Help</h2>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
+          <h2 className="text-sm font-semibold text-fg">Help</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-chrome-700/70 transition-colors cursor-pointer"
+            className="p-1 rounded-md text-fg-3 hover:text-white hover:bg-line/70 transition-colors cursor-pointer"
             title="Close"
           >
             <X className="w-4 h-4" />
@@ -73,14 +73,14 @@ const HelpModal = ({ onClose }) => {
 
         {/* Keyboard Shortcuts */}
         <section className="px-4 py-3">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2">
+          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
             Keyboard Shortcuts
           </h3>
           <div className="space-y-1.5">
             {shortcuts.map((s) => (
               <div key={s.keys} className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">{s.description}</span>
-                <kbd className="text-[10px] font-mono text-slate-300 bg-chrome-900/80 border border-chrome-700 rounded px-1.5 py-0.5">
+                <span className="text-[11px] text-fg-3">{s.description}</span>
+                <kbd className="text-[10px] font-mono text-fg-2 bg-panel-2/80 border border-line rounded px-1.5 py-0.5">
                   {s.keys}
                 </kbd>
               </div>
@@ -92,12 +92,12 @@ const HelpModal = ({ onClose }) => {
 
         {/* Tips */}
         <section className="px-4 py-3">
-          <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-2">
+          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
             Tips
           </h3>
           <ul className="space-y-1.5">
             {tips.map((tip) => (
-              <li key={tip} className="text-[11px] text-slate-400 leading-relaxed flex gap-1.5">
+              <li key={tip} className="text-[11px] text-fg-3 leading-relaxed flex gap-1.5">
                 <span className="text-accent shrink-0">•</span>
                 {tip}
               </li>

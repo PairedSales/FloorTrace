@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { decimalToFeetInches } from '../utils/unitConverter';
 
-const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
+const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
   const [inchesPrompt, setInchesPrompt] = useState(false);
@@ -79,8 +79,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
 
   return (
     <div
-      className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-chrome-900/80 border border-chrome-700 text-sm font-mono
-                 focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text"
+      className="relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line text-[13px] font-mono
+                 focus-within:ring-2 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           const rect = e.currentTarget.getBoundingClientRect();
@@ -92,20 +92,21 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
         }
       }}
     >
-      <div className="flex items-center text-slate-500">
+      <div className="flex items-center text-fg-3">
         <input
           ref={feetRef}
+          id={id}
           type="text"
           value={feet}
           onChange={handleFeetChange}
           onFocus={handleFieldFocus('feet')}
           onBlur={handleFieldBlur('feet')}
           onKeyDown={(e) => handleKeyDown(e, 'feet')}
-          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600 select-text"
+          className="text-center outline-none bg-transparent text-fg placeholder-fg-dim select-text"
           style={{ width: `${Math.max((feet || '0').length, 1)}ch` }}
           placeholder="0"
         />
-        <span className="text-slate-500 mr-1">&prime;</span>
+        <span className="text-fg-3 mr-1">&prime;</span>
         <input
           ref={inchesRef}
           type="text"
@@ -114,14 +115,14 @@ const InchesInput = ({ value, onChange, onBlur, onFocus }) => {
           onFocus={handleFieldFocus('inches')}
           onBlur={handleFieldBlur('inches')}
           onKeyDown={(e) => handleKeyDown(e, 'inches')}
-          className="text-center outline-none bg-transparent text-slate-100 placeholder-slate-600 select-text"
+          className="text-center outline-none bg-transparent text-fg placeholder-fg-dim select-text"
           style={{ width: `${Math.max((inches || '0').length, 1)}ch` }}
           placeholder="0"
         />
-        <span className="text-slate-500">&Prime;</span>
+        <span className="text-fg-3">&Prime;</span>
       </div>
       {inchesPrompt && (
-        <span className="absolute -bottom-5 right-0 text-xs text-amber-400 whitespace-nowrap pointer-events-none">
+        <span className="absolute -bottom-5 right-0 text-xs text-warn whitespace-nowrap pointer-events-none">
           Inches: 0–11 only
         </span>
       )}
