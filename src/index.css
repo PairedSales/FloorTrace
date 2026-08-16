@@ -28,7 +28,13 @@
    floorplan rather than on chrome, they are persisted in `.floorplan`
    projects via traceTypes.js, and theming them would change saved work. */
 @layer base {
-  :root {
+  /* The canvas ground is white in every theme, so the ink on it cannot flip
+     either: dark-theme `--fg` on white paper is invisible. Rather than a
+     second hand-maintained palette, the light block is re-applied to the
+     canvas subtree under dark — `:root[data-theme='dark'] .canvas-grid-bg`
+     outranks `:root[data-theme='dark']`, so one declaration serves both. */
+  :root,
+  :root[data-theme='dark'] .canvas-grid-bg {
     --shell:      231 234 238;
     --panel:      247 248 250;
     --panel-2:    255 255 255;
@@ -37,8 +43,9 @@
     --line:       211 216 223;
     --line-soft:  226 230 235;
 
-    /* the work surface the plan sits on — never a hard white slab */
-    --surface:    201 208 216;
+    /* the work surface the plan sits on — white in both themes, so a plan
+       reads as ink on endless paper instead of a sheet on a slab */
+    --surface:    255 255 255;
 
     --fg:         23 28 34;
     --fg-2:       69 79 90;
@@ -65,7 +72,8 @@
     --line:       46 55 66;
     --line-soft:  36 44 53;
 
-    --surface:    38 45 54;
+    /* deliberately not darkened: the work surface is paper, not chrome */
+    --surface:    255 255 255;
 
     --fg:         237 241 245;
     --fg-2:       180 191 203;
@@ -114,8 +122,10 @@
 }
 
 @layer components {
-  /* The work surface behind the plan. Themed, so the viewport is no longer a
-     15.8:1 white slab butted against dark chrome. */
+  /* The work surface behind the plan: white under every theme, so a scanned
+     plan (which is white paper) has no visible edge and the viewport reads as
+     endless whitespace. The token pin in @layer base keeps the ink on it
+     legible when the rest of the app is dark. */
   .canvas-grid-bg {
     @apply bg-surface;
   }
