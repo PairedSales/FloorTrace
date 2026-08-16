@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
+import { useIsTouch } from '../hooks/useViewport';
 
 /**
  * The four decisions that discard work — restart, manual mode, re-scan, and
@@ -15,6 +16,7 @@ import useAppStore from '../store/appStore';
 const ConfirmDialog = () => {
   const request = useAppStore((s) => s.confirmRequest);
   const resolve = useAppStore((s) => s.resolveConfirm);
+  const isTouch = useIsTouch();
   const confirmRef = useRef(null);
   const previouslyFocused = useRef(null);
 
@@ -98,13 +100,17 @@ const ConfirmDialog = () => {
           </div>
         </div>
 
+        {/* These four dialogs are the ones that discard work, so the buttons
+            get a real touch target rather than the shell's 32 px default —
+            mis-tapping Restart because the target was 8 mm tall is the exact
+            failure a confirmation exists to prevent. */}
         <div className="flex justify-end gap-2 mt-5">
           <button
             type="button"
             onClick={() => resolve(false)}
-            className="h-8 px-3.5 rounded-md border border-line bg-panel-2 text-[12.5px]
-                       text-fg-2 font-medium hover:text-fg hover:border-accent/50
-                       transition-colors cursor-pointer"
+            className={`rounded-md border border-line bg-panel-2 text-fg-2 font-medium
+                        hover:text-fg hover:border-accent/50 transition-colors cursor-pointer
+                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-8 px-3.5 text-[12.5px]'}`}
           >
             {cancelLabel}
           </button>
@@ -112,9 +118,9 @@ const ConfirmDialog = () => {
             ref={confirmRef}
             type="button"
             onClick={() => resolve(true)}
-            className="h-8 px-3.5 rounded-md border border-crit bg-crit text-[12.5px]
-                       font-semibold text-white hover:brightness-110
-                       transition-[filter] cursor-pointer"
+            className={`rounded-md border border-crit bg-crit font-semibold text-white
+                        hover:brightness-110 transition-[filter] cursor-pointer
+                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-8 px-3.5 text-[12.5px]'}`}
           >
             {confirmLabel}
           </button>

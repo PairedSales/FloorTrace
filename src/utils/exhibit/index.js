@@ -186,6 +186,47 @@ export async function saveExhibit(canvas, filename) {
   return true;
 }
 
+/**
+ * The exhibit as a `File`, ready for the share sheet.
+ *
+ * Built ahead of the tap on purpose. `navigator.share` requires transient user
+ * activation, and encoding a full-resolution PNG takes long enough to spend it
+ * — the same trap `saveExhibit` avoids by opening the picker first. Here there
+ * is nothing to open first, so the encode has to have already happened.
+ */
+export async function exhibitFile(canvas, filename) {
+  const blob = await exhibitBlob(canvas);
+  return new File([blob], filename, { type: 'image/png' });
+}
+
+/** Whether this browser can put `file` into a share sheet. */
+export const canShareExhibit = (file) => (
+  typeof navigator !== 'undefined'
+  && typeof navigator.share === 'function'
+  && typeof navigator.canShare === 'function'
+  && !!file
+  && navigator.canShare({ files: [file] })
+);
+
+/**
+ * Hand the exhibit to the operating system's share sheet — mail, Files, a
+ * messaging app, whatever the phone has. This is the mobile counterpart of
+ * "Copy image": a phone browser will not write a PNG to the clipboard, and a
+ * download lands in a folder the user then has to go and find. Returns false
+ * when the user dismisses the sheet.
+ */
+export async function shareExhibit(file, title) {
+  try {
+    await navigator.share({ files: [file], title, text: title });
+    return true;
+  } catch (err) {
+    // Dismissing the sheet is a decision, not a failure. Safari reports it as
+    // AbortError; some Android builds report NotAllowedError for the same act.
+    if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') return false;
+    throw err;
+  }
+}
+
 export async function copyExhibit(canvas) {
   if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
     throw new Error('This browser cannot copy images to the clipboard — save the PNG instead.');

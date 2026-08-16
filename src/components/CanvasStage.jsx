@@ -340,11 +340,15 @@ const CanvasStage = React.memo(({
       fitToWindow: () => camera.fitToWindow(),
       rotateCanvas: (direction) => camera.rotateCanvas(direction),
       zoomByStep: (direction) => camera.zoomByStep(direction),
+      // Enter closes a void in progress, and a phone has no Enter. The shape
+      // lives in this hook's state, so the button that replaces the key has to
+      // reach it from here.
+      closeVoid: () => voidTool.closeVoidPolygon(),
     };
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef, camera]);
+  }, [apiRef, camera, voidTool]);
 
   // Angle tool auto-initialization at screen center
   const hasInitializedRef = useRef(false);
@@ -413,6 +417,24 @@ const CanvasStage = React.memo(({
     if (routerRef.current?.rightClickPannedRef?.current) return;
     onMeasurementLinesChange?.(nextLines);
   }, [onMeasurementLinesChange]);
+
+  // Read through the refs, which are re-synced after every render, so these
+  // three props keep a stable identity — a fresh arrow per render on the Stage
+  // is a fresh listener on every pointer event of every gesture.
+  const handleTouchStart = useCallback((e) => {
+    routerRef.current?.handleStageTouchStart(e);
+    cameraRef.current?.handlePinchStart(e);
+  }, []);
+
+  const handleTouchMove = useCallback((e) => {
+    if (cameraRef.current?.handlePinchMove(e)) return;
+    routerRef.current?.handleStageTouchMove(e);
+  }, []);
+
+  const handleTouchEnd = useCallback((e) => {
+    cameraRef.current?.handlePinchEnd(e);
+    routerRef.current?.handleStageTouchEnd(e);
+  }, []);
 
   // Compute unit labels and active feet-per-pixel ratio
   const unitStyle = useMemo(() => getUnitStyleFromDimensions(detectedDimensions, unit), [detectedDimensions, unit]);
@@ -536,6 +558,13 @@ const CanvasStage = React.memo(({
           onMouseUp={router.handleStageMouseUp}
           onDblClick={router.handleStageDoubleClick}
           onDblTap={router.handleStageDoubleClick}
+          // Touch. The router runs first on `start` so a gesture already in
+          // progress commits before the pinch takes over, and the pinch runs
+          // first on `move` so two fingers are read as the camera rather than
+          // as a very fast brush stroke.
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : (cropToolActive || voidToolActive) ? 'crosshair' : 'default' }}
         >
           {camera.isImageReady && (

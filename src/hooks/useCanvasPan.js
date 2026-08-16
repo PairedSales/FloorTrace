@@ -42,6 +42,7 @@ export function useCanvasPan({
   voidToolActive,
   traceInteractionMode,
   viewportSyncTokenRef,
+  isPinchingRef = { current: false },
 }) {
   /** Record the canvas-space point under the pointer at the start of a stage drag. */
   const handleStageDragStart = () => {
@@ -95,7 +96,9 @@ export function useCanvasPan({
     if (manualEntryMode || eraserToolActive || drawModeActive || cropToolActive) return false;
     if (voidToolActive) return false; // a void rectangle is a drag; panning would eat it
     if (traceInteractionMode === 'drawing') return false; // vertex placement mode
-    return !isZoomingRef.current;
+    // A pinch is the camera moving under two fingers; Konva's own stage drag
+    // would move it a second time from whichever finger it decided was first.
+    return !isZoomingRef.current && !isPinchingRef.current;
   }, [
     draggingRoom,
     draggingRoomCorner,
@@ -108,6 +111,7 @@ export function useCanvasPan({
     voidToolActive,
     traceInteractionMode,
     isZoomingRef,
+    isPinchingRef,
   ]);
 
   return { canPanCanvas, handleStageDragStart, handleStageDragEnd };

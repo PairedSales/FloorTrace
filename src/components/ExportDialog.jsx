@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Copy, Download, Loader2, FileJson, AlertTriangle } from 'lucide-react';
+import { X, Copy, Download, Loader2, FileJson, AlertTriangle, Share2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { notify, flash } from '../utils/notify';
 import { readExportOptions, writeExportOptions } from '../utils/exhibit/options';
+import { useIsMobile } from '../hooks/useViewport';
 
 /**
  * The end of the job. Almost nobody reopens a trace — they trace once for one
@@ -34,6 +35,7 @@ const Toggle = ({ checked, onChange, label, hint, disabled }) => (
 );
 
 const ExportDialog = ({ onClose, onSaveProject }) => {
+  const isMobile = useIsMobile();
   const projectName = useAppStore((s) => s.projectName);
   const setProjectName = useAppStore((s) => s.setProjectName);
   const measurementLines = useAppStore((s) => s.measurementLines);
@@ -44,7 +46,10 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const [result, setResult] = useState(null);   // { canvas, model, layout }
   const [rendering, setRendering] = useState(true);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(null);       // 'copy' | 'save' | null
+  const [busy, setBusy] = useState(null);       // 'copy' | 'save' | 'share' | null
+  // Encoded ahead of the tap, because `navigator.share` needs the click's user
+  // activation and a full-resolution PNG encode outlives it.
+  const [shareFile, setShareFile] = useState(null);
 
   const dialogRef = useRef(null);
   const previewBoxRef = useRef(null);
@@ -165,6 +170,34 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     }
   };
 
+  // Kept in step with the preview, so the file the share sheet hands over is
+  // always the page the user is looking at.
+  useEffect(() => {
+    if (!result?.canvas) { setShareFile(null); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { exhibitFile, exhibitFilename, canShareExhibit } = await import('../utils/exhibit');
+        const file = await exhibitFile(result.canvas, exhibitFilename(result.model));
+        if (cancelled) return;
+        setShareFile(canShareExhibit(file) ? file : null);
+      } catch {
+        // Sharing is an extra route out, never the only one — Save PNG stands.
+        if (!cancelled) setShareFile(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [result]);
+
+  const handleShare = () => withBusy('share', async () => {
+    const { shareExhibit } = await import('../utils/exhibit');
+    const shared = await shareExhibit(shareFile, projectName || 'FloorTrace measurement');
+    if (shared) {
+      flash('Measurement image shared');
+      onClose();
+    }
+  });
+
   const handleCopy = () => withBusy('copy', async () => {
     const { copyExhibit } = await import('../utils/exhibit');
     await copyExhibit(result.canvas);
@@ -186,20 +219,28 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-6"
+      className={`fixed inset-0 z-[70] flex items-center justify-center bg-black/55
+                  ${isMobile ? '' : 'p-6'}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
+      {/* Full-bleed on a phone. A centred card with a backdrop wastes the two
+          dimensions the preview most needs, and there is nothing behind it
+          worth showing through. */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Export for your workfile"
-        className="flex flex-col w-full max-w-[1040px] max-h-[90vh] bg-panel border border-line
-                   rounded-xl shadow-2xl animate-fade-in overflow-hidden"
+        className={`flex flex-col bg-panel animate-fade-in overflow-hidden
+          ${isMobile
+            ? 'w-full h-app pt-safe'
+            : 'w-full max-w-[1040px] max-h-[90vh] border border-line rounded-xl shadow-2xl'}`}
       >
         <header className="flex items-center gap-3 px-4 py-3 border-b border-line shrink-0">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[13.5px] font-semibold text-fg">Export for your workfile</h2>
+            <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-[13.5px]'}`}>
+              Export for your workfile
+            </h2>
             <p className="text-[11.5px] text-fg-3 mt-px">
               One image with the plan, the outlines and every number on it.
             </p>
@@ -209,14 +250,17 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
             onClick={onClose}
             aria-label="Close"
             title="Close"
-            className="grid place-items-center w-7 h-7 rounded-md text-fg-3
-                       hover:bg-sunken hover:text-fg transition-colors cursor-pointer"
+            className={`grid place-items-center rounded-md text-fg-3
+                        hover:bg-sunken hover:text-fg transition-colors cursor-pointer
+                        ${isMobile ? 'w-11 h-11 -mr-2' : 'w-7 h-7'}`}
           >
-            <X className="w-4 h-4" aria-hidden="true" />
+            <X className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} aria-hidden="true" />
           </button>
         </header>
 
-        <div className="flex flex-1 min-h-0">
+        {/* Side by side where there is width; stacked where there is only
+            height, with the preview taking whatever the options do not. */}
+        <div className={`flex flex-1 min-h-0 ${isMobile ? 'flex-col' : ''}`}>
           {/* preview */}
           <div
             ref={previewBoxRef}
@@ -245,7 +289,12 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           </div>
 
           {/* options */}
-          <div className="w-[286px] shrink-0 border-l border-line overflow-y-auto p-3.5">
+          <div
+            className={`shrink-0 overflow-y-auto overscroll-contain p-3.5 touch-dense
+              ${isMobile
+                ? 'border-t border-line max-h-[42%]'
+                : 'w-[286px] border-l border-line'}`}
+          >
             <label htmlFor="export-subject" className="card-heading block mb-1.5">Subject</label>
             <input
               id="export-subject"
@@ -256,8 +305,10 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
               autoComplete="off"
               // The one thing still to type on an unnamed measurement; once it
               // has a subject, the primary action is what should be under the
-              // cursor instead.
-              autoFocus={!projectName}
+              // cursor instead. Never on a phone: autofocus raises the keyboard
+              // over the preview the dialog exists to show, before the user has
+              // decided they want to type anything.
+              autoFocus={!projectName && !isMobile}
               className="w-full px-2.5 py-1.5 text-[12.5px] rounded-md bg-panel-2 border border-line
                          text-fg placeholder-fg-dim select-text
                          focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
@@ -314,49 +365,107 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           </div>
         </div>
 
-        <footer className="flex items-center gap-2 px-4 py-3 border-t border-line bg-panel-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => { onClose(); onSaveProject(); }}
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px]
-                       text-fg-3 hover:text-fg hover:bg-sunken transition-colors cursor-pointer"
-            title="Save a .floorplan file you can reopen and keep editing"
-          >
-            <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
-            Save editable project instead
-          </button>
+        {/* On a phone the share sheet leads: it is the one route that reaches
+            mail, Files and a messaging app in one tap, where the clipboard
+            usually refuses PNGs outright and a download lands somewhere the
+            user then has to go and find. Save PNG stays, demoted, and Copy
+            drops off the row entirely rather than sitting there failing. */}
+        <footer
+          className={`border-t border-line bg-panel-2 shrink-0
+            ${isMobile
+              ? 'flex flex-col gap-2 px-3 py-3 pb-safe'
+              : 'flex items-center gap-2 px-4 py-3'}`}
+        >
+          {isMobile ? (
+            <>
+              <div className="flex items-center gap-2">
+                {shareFile && (
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    disabled={!ready || !!busy}
+                    className="tap-target flex-1 gap-2 rounded-xl bg-accent text-accent-ink
+                               text-[15px] font-semibold active:brightness-110
+                               disabled:opacity-40"
+                  >
+                    {busy === 'share'
+                      ? <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />
+                      : <Share2 className="w-[18px] h-[18px]" aria-hidden="true" />}
+                    Share image
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={!ready || !!busy}
+                  className={`tap-target gap-2 rounded-xl text-[15px] font-semibold
+                              disabled:opacity-40
+                              ${shareFile
+                                ? 'px-4 border border-line bg-panel-2 text-fg-2 active:bg-sunken'
+                                : 'flex-1 bg-accent text-accent-ink active:brightness-110'}`}
+                >
+                  {busy === 'save'
+                    ? <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />
+                    : <Download className="w-[18px] h-[18px]" aria-hidden="true" />}
+                  {shareFile ? 'Save' : 'Save PNG'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => { onClose(); onSaveProject(); }}
+                className="inline-flex items-center justify-center gap-1.5 min-h-[40px] rounded-lg
+                           text-[13px] text-fg-3 active:bg-sunken active:text-fg"
+              >
+                <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
+                Save editable project instead
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => { onClose(); onSaveProject(); }}
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px]
+                           text-fg-3 hover:text-fg hover:bg-sunken transition-colors cursor-pointer"
+                title="Save a .floorplan file you can reopen and keep editing"
+              >
+                <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
+                Save editable project instead
+              </button>
 
-          <div className="flex-1" />
+              <div className="flex-1" />
 
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={!ready || !!busy}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-line
-                       bg-panel-2 text-[12.5px] font-medium text-fg-2 hover:text-fg
-                       hover:border-accent/50 transition-colors cursor-pointer
-                       disabled:opacity-40 disabled:cursor-default"
-          >
-            {busy === 'copy'
-              ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
-              : <Copy className="w-[15px] h-[15px]" aria-hidden="true" />}
-            Copy image
-          </button>
+              <button
+                type="button"
+                onClick={handleCopy}
+                disabled={!ready || !!busy}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-line
+                           bg-panel-2 text-[12.5px] font-medium text-fg-2 hover:text-fg
+                           hover:border-accent/50 transition-colors cursor-pointer
+                           disabled:opacity-40 disabled:cursor-default"
+              >
+                {busy === 'copy'
+                  ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
+                  : <Copy className="w-[15px] h-[15px]" aria-hidden="true" />}
+                Copy image
+              </button>
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!ready || !!busy}
-            autoFocus={!!projectName}
-            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-accent
-                       text-accent-ink text-[12.5px] font-semibold hover:brightness-110
-                       transition-[filter] cursor-pointer disabled:opacity-40 disabled:cursor-default"
-          >
-            {busy === 'save'
-              ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
-              : <Download className="w-[15px] h-[15px]" aria-hidden="true" />}
-            Save PNG
-          </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!ready || !!busy}
+                autoFocus={!!projectName}
+                className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-accent
+                           text-accent-ink text-[12.5px] font-semibold hover:brightness-110
+                           transition-[filter] cursor-pointer disabled:opacity-40 disabled:cursor-default"
+              >
+                {busy === 'save'
+                  ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
+                  : <Download className="w-[15px] h-[15px]" aria-hidden="true" />}
+                Save PNG
+              </button>
+            </>
+          )}
         </footer>
       </div>
     </div>

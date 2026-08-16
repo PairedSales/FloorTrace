@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import useAppStore from '../../../store/appStore';
 import { useCanvasZoom } from '../../../hooks/useCanvasZoom';
 import { useCanvasPan } from '../../../hooks/useCanvasPan';
+import { usePinchZoom } from '../../../hooks/usePinchZoom';
 
 export function useCameraController({
   image,
@@ -51,6 +52,12 @@ export function useCameraController({
     setScale,
     viewportSyncTokenRef
   );
+
+  // The touch counterpart of the wheel. Lives beside it rather than inside the
+  // tool router because it is a camera gesture, not a tool one: it must work
+  // identically whatever tool is on, including the brush tools that own every
+  // single-finger event.
+  const pinch = usePinchZoom({ stageRef, scaleRef, setScale, viewportSyncTokenRef });
 
   const fitToWindow = useCallback(() => {
     if (!imageObj || !containerRef.current) return;
@@ -116,6 +123,7 @@ export function useCameraController({
     voidToolActive,
     traceInteractionMode,
     viewportSyncTokenRef,
+    isPinchingRef: pinch.isPinchingRef,
   });
 
   // Load image
@@ -270,5 +278,11 @@ export function useCameraController({
     viewportSyncTokenRef,
     imageObj,
     isImageReady,
+    // Two-finger camera gestures. The stage wires these ahead of the tool
+    // router's touch handlers, which bail out on a second finger.
+    handlePinchStart: pinch.handleTouchStart,
+    handlePinchMove: pinch.handleTouchMove,
+    handlePinchEnd: pinch.handleTouchEnd,
+    isPinchingRef: pinch.isPinchingRef,
   };
 }

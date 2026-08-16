@@ -1,5 +1,19 @@
 import React from 'react';
 import { Rect, Line, Circle } from 'react-konva';
+import { useIsTouch } from '../../hooks/useViewport';
+
+// Same rule as the perimeter vertex handles: what is drawn stays small enough
+// to read the rectangle under it, what is grabbable is a fingertip wide. This
+// overlay is what the whole project's scale is measured from, so a corner that
+// cannot be adjusted on a phone is a scale that cannot be corrected there.
+const TOUCH_HIT_RADIUS = 24;
+
+const circleHit = (radius) => (ctx, shape) => {
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.fillStrokeShape(shape);
+};
 
 /**
  * RoomOverlayLayer renders the room detection rectangle, its corner drag handles,
@@ -11,6 +25,8 @@ const RoomOverlayLayer = ({
   onRoomMouseDown,
   onRoomCornerMouseDown,
 }) => {
+  const isTouch = useIsTouch();
+
   if (!roomOverlay) return null;
 
   return (
@@ -35,9 +51,10 @@ const RoomOverlayLayer = ({
         strokeWidth={2 / scale}
         fill="rgba(80, 250, 123, 0.15)"
         onMouseDown={onRoomMouseDown}
+        onTouchStart={onRoomMouseDown}
         perfectDrawEnabled={false}
       />
-      
+
       {/* Room Corner Handles */}
       {[
         { x: roomOverlay.x1, y: roomOverlay.y1, corner: 'tl' },
@@ -49,11 +66,13 @@ const RoomOverlayLayer = ({
           key={i}
           x={handle.x}
           y={handle.y}
-          radius={5 / scale}
+          radius={(isTouch ? 8 : 5) / scale}
           fill="#50FA7B"
           stroke="#fff"
           strokeWidth={1.5 / scale}
+          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
           onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
+          onTouchStart={(e) => onRoomCornerMouseDown(handle.corner, e)}
         />
       ))}
     </>

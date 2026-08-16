@@ -7,6 +7,7 @@ import ContextBar from './components/ContextBar';
 import ToolRail from './components/ToolRail';
 import MeasurementDock from './components/MeasurementDock';
 import StatusBar from './components/StatusBar';
+import MobileChrome from './components/mobile/MobileChrome';
 import HelpModal from './components/HelpModal';
 import ExportDialog from './components/ExportDialog';
 import ConfirmDialog from './components/ConfirmDialog';
@@ -44,6 +45,7 @@ import { useDragAndDrop } from './hooks/useDragAndDrop';
 import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
+import { useIsMobile } from './hooks/useViewport';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -234,6 +236,11 @@ function App() {
   const setDrawModeActive = useAppStore((s) => s.setDrawModeActive);
 
   const fileInputRef = useRef(null);
+  // A second input, differing only in `capture`. It cannot be the same element
+  // with a toggled attribute: the browser reads `capture` when the picker
+  // opens, and setting it on the shared input would make "Open plan" launch
+  // the camera for whoever tapped "Take a photo" first.
+  const cameraInputRef = useRef(null);
   const canvasRef = useRef(null);
   const dimensionEditActiveRef = useRef(false); // Prevents duplicate undo saves when focus moves between InchesInput sub-fields
   const dimensionWarnTimerRef = useRef(null); // Holds the scale warning until typing settles
@@ -1153,6 +1160,26 @@ function App() {
     canvasRef.current?.zoomByStep(direction);
   }, []);
 
+  // ── mobile shell ──────────────────────────────────────────────────────────
+  // Which chrome the app wears. Everything above this line is shared: the two
+  // shells are two arrangements of the same workflow, not two applications.
+  const isMobile = useIsMobile();
+
+  const handleTakePhoto = useCallback(() => cameraInputRef.current?.click(), []);
+
+  // Enter closes a shape in progress; a phone has no Enter, so both closers get
+  // a button. The area polygon is App's to close (it owns the shape list); the
+  // void lives in the canvas hook and is reached through the same imperative
+  // handle the camera controls use.
+  const handleCloseCustomShape = useCallback(() => {
+    const shape = useAppStore.getState().currentCustomShape;
+    if (!shape || shape.closed || shape.vertices.length < 3) return;
+    handleAddCustomShape({ ...shape, closed: true });
+    setCurrentCustomShape(null);
+  }, [handleAddCustomShape, setCurrentCustomShape]);
+
+  const handleCloseVoid = useCallback(() => canvasRef.current?.closeVoid(), []);
+
   const contextCount = activeTool === 'vertex'
     ? (perimeterVertices?.length ?? 0)
     : activeTool === 'area'
@@ -1167,14 +1194,132 @@ function App() {
   const hasToolData = measurementLines?.length > 0 || customShapes?.length > 0
     || !!currentMeasurementLine || !!currentCustomShape;
 
-  // Desktop UI - five bands: menu, commands, tool context, body, status.
+  // The plan view, built once and handed to whichever shell is on. Same
+  // element, same props: nothing about tracing depends on the chrome around it,
+  // and a second copy of this list is a second place for them to diverge.
+  const canvasElement = (
+    <Canvas
+      ref={canvasRef}
+      image={image}
+      roomOverlay={roomOverlay}
+      perimeterOverlay={perimeterOverlay}
+      perimeterTraces={perimeterTraces}
+      activeTraceId={activeTraceId}
+      traceInteractionMode={traceInteractionMode}
+      mode={mode}
+      onRoomOverlayUpdate={updateRoomOverlay}
+      onPerimeterUpdate={updatePerimeterVertices}
+      isProcessing={isProcessing}
+      processingMessage={processingMessage}
+      detectedDimensions={detectedDimensions}
+      onDimensionSelect={handleDimensionSelect}
+      showSideLengths={showSideLengths}
+      feetPerPixel={calibration.feetPerPixel}
+      manualEntryMode={manualEntryMode}
+      onCanvasClick={handleCanvasClick}
+      unit={unit}
+      lineToolActive={lineToolActive}
+      onLineToolToggle={handleLineToolToggle}
+      measurementLines={measurementLines}
+      currentMeasurementLine={currentMeasurementLine}
+      onMeasurementLineUpdate={setCurrentMeasurementLine}
+      onAddMeasurementLine={handleAddMeasurementLine}
+      onMeasurementLinesChange={handleMeasurementLinesChange}
+      drawAreaActive={drawAreaActive}
+      onDrawAreaToggle={handleDrawAreaToggle}
+      customShapes={customShapes}
+      currentCustomShape={currentCustomShape}
+      onCustomShapeUpdate={setCurrentCustomShape}
+      onAddCustomShape={handleAddCustomShape}
+      onCustomShapesChange={handleCustomShapesChange}
+      perimeterVertices={perimeterVertices}
+      onClosePerimeter={handleClosePerimeter}
+      autoSnapEnabled={autoSnapEnabled}
+      onDeletePerimeterVertex={handleDeletePerimeterVertex}
+      onSaveUndoPoint={handleSaveUndoPoint}
+      onCancelUndoSave={handleCancelUndoSave}
+      eraserToolActive={eraserToolActive}
+      eraserBrushSize={eraserBrushSize}
+      onEraserBrushSizeChange={setEraserBrushSize}
+      cropToolActive={cropToolActive}
+      onCropToolToggle={handleCropToolToggle}
+      onImageUpdate={handleImageUpdate}
+      angleToolActive={angleToolActive}
+      angleToolState={angleToolState}
+      onAngleToolStateChange={handleAngleToolStateChange}
+      onAngleToolToggle={handleAngleToolToggle}
+      drawModeActive={drawModeActive}
+      drawBrushSize={drawBrushSize}
+      drawStrokes={drawStrokes}
+      onDrawModeToggle={handleDrawModeToggle}
+      onFinishDrawMode={handleFinishDrawMode}
+      voidToolActive={voidToolActive}
+      onVoidToolToggle={handleVoidToolToggle}
+    />
+  );
+
+  // Two shells over one workflow. Desktop: five bands and two docks. Mobile: a
+  // top bar, the plan, and one bar under the thumb — see MobileChrome for why
+  // that is a different arrangement rather than the same one scaled down.
+  //
+  // `h-app` rather than `h-screen` on mobile: 100vh on a phone is the viewport
+  // with the browser's own bars hidden, so the bottom bar would sit under the
+  // URL bar until the page was scrolled — and this page never scrolls.
   return (
     <div
       id="app-container"
-      className="flex flex-col h-screen bg-shell"
+      className={`flex flex-col bg-shell ${isMobile ? 'h-app overflow-hidden' : 'h-screen'}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      {isMobile ? (
+        <MobileChrome
+          activeTool={activeTool}
+          hasToolData={hasToolData}
+          onMenuFileOpen={handleFileOpen}
+          onTakePhoto={handleTakePhoto}
+          onExport={openExport}
+          onCopyExhibit={copyExhibitNow}
+          onSaveProject={handleSaveProject}
+          onRestart={handleRestart}
+          onHelpOpen={handleHelpOpen}
+          onFindRoomSize={handleFindRoomSize}
+          onTracePerimeter={handleTracePerimeter}
+          onDrawExterior={() => handleDrawMode()}
+          onOutlineByVertex={handleDrawExterior}
+          onAddFloor={addPerimeterTrace}
+          onFitToWindow={handleFitToWindow}
+          onRotate={handleRotateCanvas}
+          onToolSelect={handleToolSelect}
+          onCancelTool={handleCancelTool}
+          onClearTools={handleClearTools}
+          onFinishDrawMode={handleFinishDrawMode}
+          onClosePerimeter={handleClosePerimeter}
+          onCloseCustomShape={handleCloseCustomShape}
+          onCloseVoid={handleCloseVoid}
+          roomDimensions={roomDimensions}
+          onDimensionsChange={handleDimensionsChange}
+          onDimensionFocus={handleDimensionFocus}
+          onDimensionBlur={handleDimensionBlur}
+          onUnitChange={handleUnitChange}
+          onInteriorWallToggle={handleInteriorWallToggle}
+          canSwitchWallFace={canSwitchWallFace}
+          onScaleTool={handleScaleToolToggle}
+          showSideLengths={showSideLengths}
+          onShowSideLengthsChange={handleShowSideLengthsChange}
+          autoSnapEnabled={autoSnapEnabled}
+          onAutoSnapChange={handleAutoSnapChange}
+          saveOnExit={saveOnExit}
+          onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+          enhancedOcr={enhancedOcr}
+          onEnhancedOcrChange={handleEnhancedOcrChange}
+          theme={theme}
+          onCycleTheme={cycleTheme}
+        >
+          {canvasElement}
+        </MobileChrome>
+      ) : (
+      <>
       <MenuBar
         image={image}
         onFileOpen={handleFileOpen}
@@ -1259,64 +1404,7 @@ function App() {
         {/* The plan owns everything between the two docks. Nothing floats over
             it any more - the old panels sat on its top-left corner. */}
         <div className="relative flex-1 min-w-0 canvas-grid-bg">
-          <Canvas
-            ref={canvasRef}
-            image={image}
-            roomOverlay={roomOverlay}
-            perimeterOverlay={perimeterOverlay}
-            perimeterTraces={perimeterTraces}
-            activeTraceId={activeTraceId}
-            traceInteractionMode={traceInteractionMode}
-            mode={mode}
-            onRoomOverlayUpdate={updateRoomOverlay}
-            onPerimeterUpdate={updatePerimeterVertices}
-            isProcessing={isProcessing}
-            processingMessage={processingMessage}
-            detectedDimensions={detectedDimensions}
-            onDimensionSelect={handleDimensionSelect}
-            showSideLengths={showSideLengths}
-            feetPerPixel={calibration.feetPerPixel}
-            manualEntryMode={manualEntryMode}
-            onCanvasClick={handleCanvasClick}
-            unit={unit}
-            lineToolActive={lineToolActive}
-            onLineToolToggle={handleLineToolToggle}
-            measurementLines={measurementLines}
-            currentMeasurementLine={currentMeasurementLine}
-            onMeasurementLineUpdate={setCurrentMeasurementLine}
-            onAddMeasurementLine={handleAddMeasurementLine}
-            onMeasurementLinesChange={handleMeasurementLinesChange}
-            drawAreaActive={drawAreaActive}
-            onDrawAreaToggle={handleDrawAreaToggle}
-            customShapes={customShapes}
-            currentCustomShape={currentCustomShape}
-            onCustomShapeUpdate={setCurrentCustomShape}
-            onAddCustomShape={handleAddCustomShape}
-            onCustomShapesChange={handleCustomShapesChange}
-            perimeterVertices={perimeterVertices}
-            onClosePerimeter={handleClosePerimeter}
-            autoSnapEnabled={autoSnapEnabled}
-            onDeletePerimeterVertex={handleDeletePerimeterVertex}
-            onSaveUndoPoint={handleSaveUndoPoint}
-            onCancelUndoSave={handleCancelUndoSave}
-            eraserToolActive={eraserToolActive}
-            eraserBrushSize={eraserBrushSize}
-            onEraserBrushSizeChange={setEraserBrushSize}
-            cropToolActive={cropToolActive}
-            onCropToolToggle={handleCropToolToggle}
-            onImageUpdate={handleImageUpdate}
-            angleToolActive={angleToolActive}
-            angleToolState={angleToolState}
-            onAngleToolStateChange={handleAngleToolStateChange}
-            onAngleToolToggle={handleAngleToolToggle}
-            drawModeActive={drawModeActive}
-            drawBrushSize={drawBrushSize}
-            drawStrokes={drawStrokes}
-            onDrawModeToggle={handleDrawModeToggle}
-            onFinishDrawMode={handleFinishDrawMode}
-            voidToolActive={voidToolActive}
-            onVoidToolToggle={handleVoidToolToggle}
-          />
+          {canvasElement}
         </div>
 
         {image && (
@@ -1341,6 +1429,8 @@ function App() {
         onZoomOut={() => handleZoom(-1)}
         onExport={openExport}
       />
+      </>
+      )}
 
       {showHelpModal && <HelpModal onClose={handleHelpClose} />}
 
@@ -1361,6 +1451,18 @@ function App() {
         className="hidden"
       />
 
+      {/* `capture` goes straight to the rear camera. Mounted on every platform
+          because the attribute is simply ignored where there is no camera —
+          only the mobile menu offers it, so a desktop never reaches it. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+
       {/* Only real notifications now - every "you are in X mode" message moved
           to the context bar, and every low-stakes confirmation to the status
           bar. What is left is what actually deserves to interrupt. */}
@@ -1371,7 +1473,13 @@ function App() {
         position="top-center"
         visibleToasts={2}
         closeButton
-        style={{ top: '86px' }}
+        // Clears whichever chrome is above it: three desktop bands, or one
+        // mobile bar plus whatever the notch takes.
+        style={{
+          top: isMobile
+            ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
+            : '86px',
+        }}
         toastOptions={{
           classNames: {
             toast: 'group !bg-raised !border-line !text-fg rounded-lg shadow-xl font-medium text-[12.5px] font-sans select-none flex items-center gap-2 p-3 !w-fit !max-w-md',

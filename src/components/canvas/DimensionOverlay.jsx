@@ -3,6 +3,21 @@ import { Line, Circle, Text, Rect } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions } from '../../utils/unitConverter';
 import { measureTextWidth, OCR_PILL_FONT_FAMILY, OCR_PILL_FONT_STYLE, OCR_DOT_BASE_RADIUS, OCR_DOT_MIN_RADIUS } from './canvasUtils';
+import { useIsTouch } from '../../hooks/useViewport';
+
+// A pill is ~19 screen px tall at every zoom, because its type is sized in
+// `/scale`. Wide enough for a finger, less than half as tall as one — and
+// tapping a pill is how a room gets placed and the scale gets pinned to it, so
+// a miss is the most expensive miss in the app. The drawn pill stays as it is;
+// only the hit box grows, and only vertically, where it is actually short.
+const TOUCH_PILL_HEIGHT = 44;
+const pillHit = (w, h, minH) => (ctx, shape) => {
+  const height = Math.max(h, minH);
+  ctx.beginPath();
+  ctx.rect(0, (h - height) / 2, w, height);
+  ctx.closePath();
+  ctx.fillStrokeShape(shape);
+};
 
 /**
  * DimensionOverlay renders OCR-detected dimension pills, anchor dots, and connector
@@ -17,6 +32,7 @@ const DimensionOverlay = ({
   onDimensionSelect,
 }) => {
   const canvasRotation = useAppStore((s) => s.canvasRotation);
+  const isTouch = useIsTouch();
 
   if (mode !== 'manual' || !detectedDimensions || detectedDimensions.length === 0) return null;
 
@@ -76,6 +92,7 @@ const DimensionOverlay = ({
               rotation={-canvasRotation}
               fill="#FFB86C"
               cornerRadius={cornerR}
+              hitFunc={isTouch ? pillHit(labelW, labelH, TOUCH_PILL_HEIGHT / scale) : undefined}
               onClick={handleClick}
               onTap={handleClick}
               onMouseEnter={handlePointerEnter}
