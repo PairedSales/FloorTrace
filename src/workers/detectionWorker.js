@@ -1,6 +1,8 @@
-import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../utils/detection/pipeline';
+import {
+  detectRoomFromClickCore, traceFloorplanBoundaryCore, wallSnapSegmentsCore,
+  prewarmDetectionCore,
+} from '../utils/detection/pipeline';
 import { clearDetectionCache } from '../utils/detection/cache';
-import { wallSnapSegments } from '../utils/wallSnapEngine';
 import { hashDataUrl } from '../utils/hash';
 
 // Decoded image data is reused across requests for the same image: a room
@@ -51,7 +53,7 @@ const imageBitmapToImageData = async (imageDataUrl) => {
 const DEBUG_WHITELIST = [
   'floorCount', 'workingSize', 'scale', 'wallThickness', 'exteriorThickness',
   'sealRadius', 'usedFallback', 'networks', 'elapsedMs', 'hasFootprint',
-  'alternatives', 'sealSearches', 'sides',
+  'alternatives', 'sealSearches', 'sides', 'searchMemo',
 ];
 
 const projectDebug = (debug) => {
@@ -72,7 +74,11 @@ self.onmessage = async (event) => {
       throw new Error('Detection worker requires an image data URL.');
     }
 
+    // Reported on the envelope (not in `data`) so the DEV perf report can show
+    // what the decode costs without touching any result contract.
+    const decodeStart = Date.now();
     const { imageData, cacheKey } = await imageBitmapToImageData(payload.image);
+    const decodeMs = Date.now() - decodeStart;
     const options = { ...payload.options, cacheKey };
     let data = null;
 
@@ -105,18 +111,24 @@ self.onmessage = async (event) => {
       });
     } else if (type === 'traceFloorplanBoundary') {
       data = traceFloorplanBoundaryCore(imageData, options);
+    } else if (type === 'warmDetection') {
+      // Fire-and-forget: runs during the OCR scan so the analysis and the
+      // room-clamp ladder are already in the memo when step 4 asks for them.
+      data = prewarmDetectionCore(imageData, options);
     } else if (type === 'wallSnapSegments') {
-      // The snap engine's vectorisation, run here so it reuses this decode
-      // instead of doing its own full-resolution getImageData on the main
-      // thread mid-gesture. Only the segments cross back — no masks.
-      data = wallSnapSegments(imageData);
+      // Run here so it reuses this decode instead of doing its own
+      // full-resolution getImageData on the main thread mid-gesture, and
+      // routed through the analysis memo so it doubles as the prewarm for the
+      // room and boundary stages that follow the scan. Only the segments cross
+      // back — no masks.
+      data = wallSnapSegmentsCore(imageData, options);
     } else {
       throw new Error(`Unsupported worker action: ${type}`);
     }
 
     if (data?.debug) data.debug = projectDebug(data.debug);
 
-    self.postMessage({ id, ok: true, data });
+    self.postMessage({ id, ok: true, data, decodeMs });
   } catch (error) {
     self.postMessage({
       id,

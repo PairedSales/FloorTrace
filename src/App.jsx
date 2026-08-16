@@ -32,6 +32,7 @@ import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
+import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
   selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
@@ -377,7 +378,9 @@ function App() {
       setOcrFailed(false);
       
       try {
+        perfMark(MARKS.scanStart);
         const result = await detectAllDimensions(imgSrc);
+        perfMark(MARKS.scanEnd);
 
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
@@ -638,11 +641,14 @@ function App() {
         ...(brush ? { brush } : {}),
       });
 
+      perfMark(MARKS.traceEnd);
       if (useAppStore.getState().image !== startImage) return null;
       // Kept for brush results too: a drawn trace has the same inner/outer
       // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
       const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+      perfMark(MARKS.areaReady);
+      perfReportRun();
       // Every trace, not only the one the automatic scan ran: the footprint is
       // the one check on the scale that survives a majority of bad rooms, and a
       // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure

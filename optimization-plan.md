@@ -1,5 +1,12 @@
 # FloorTrace — image-load-to-area performance analysis
 
+> **Implementation status (items 1–6 and 8 are done).** Measured result on the fixtures:
+> **~25–30% off the end-to-end clock**, plus ~1 s on the large inputs that trip §4.2 — slightly
+> ahead of the 20–28% this plan estimated. Detection output is byte-identical throughout
+> (`bench:detection` and both `probe:exterior` modes diff empty against the pre-change tree), and
+> OCR holds 62/82 with 2 false positives. See §7 for the per-item outcome and what was
+> deliberately left undone.
+
 **Metric:** wall-clock from image drop to a completed area figure on screen. Nothing else is
 scored here. Bundle size, memory and code cleanliness appear only where they move that clock.
 
@@ -453,6 +460,52 @@ For pure-perf detection changes, diff `bench:detection` before/after with `sed -
 and it is the only check that distinguishes "faster" from "different".
 
 ---
+
+## 7. Implementation outcome
+
+### What shipped
+
+| Item | Change | Measured |
+|---|---|---|
+| Task 0 | `src/utils/perfMarks.js` — DEV-only marks at drop / scan / measure / trace / area, plus worker decode reported on the message envelope | the missing instrumentation now exists |
+| §4.1a | `wallSnapSegmentsCore` routes the existing snap request through `getCachedAnalysis` | folded into §4.1b below |
+| §4.1b | `prewarmDetectionCore` + a `warmDetection` worker message, fired unawaited when the image is set | **631 ms/plan, 75% of the detection half** |
+| §4.2 | `retain()` stops storing without clearing; `searchCacheStats()` makes a trip observable | step 5 on a tripped plan **1128 ms → ~95 ms** |
+| §4.3 | `recognizeSparse` gains `onDispatch`; the pipeline waits for it plus one macrotask | **OCR 183–450 ms faster per scan** |
+| §4.4 | Pool cap 4 → 8 gated on `hardwareConcurrency >= 16 && deviceMemory >= 8` | 45–242 ms (browser only; Node has no `deviceMemory`) |
+| §4.5 | `collectNonGlaRegions` computes `barrier`/`cavities` only when something reads them | ~15–20 ms, pure dead-code guard |
+| §4.6 | Histogram fused into `toGrayscale`; `Uint32` downscale accumulator + hoisted x-map; one shared `keepLongRuns` buffer | shortens the prewarm; scales with full image resolution |
+
+On-clock detection, before → after: EF1 791→184, EF2 1041→308, EF6 549→91, EF7 989→263 ms. The
+prewarm costs 318–705 ms and runs inside a 2.0–4.2 s scan, so it has margin on every fixture.
+
+### Two things worth knowing
+
+**§4.3 beat its estimate by 3–4×** (predicted ~100–140 ms, measured 183–450 ms). The extra comes
+from a second broken overlap the same fix repairs: `prewarmOcrPool()` at `pipeline.js:440` was
+meant to boot the remaining workers *under* the sparse pass, but with no yield before the
+synchronous spatial block those boots could not progress either. One change repairs both.
+
+**§4.1's risk profile is better than the plan assumed.** The prewarm calls `roomClampBoundary` —
+the *same* function `detectRoomFromClickCore` calls, resolving to the *same* memo entry. Equality
+is structural, not measured. This is also why no `remediate: false` was added: `options.boundary`
+is part of the memo key, so anything extra would key differently and buy nothing.
+
+### Not done, deliberately
+
+- **§4.7 (duplicate decodes)** — the plan says "measure first", and Task 0 only just landed. The
+  decode timing now rides on the worker envelope; take a browser reading before touching it.
+- **§4.8 (speculative ROI prefetch)** — the plan defers this pending main-thread occupancy data,
+  and §4.3 has just changed the shape of that window. Re-measure before building it.
+- **§4.2 changes (2) and (3)** — the byte-charged LRU and the `Uint16` label array. (2) is not
+  merely deferred but *wrong for this access pattern*: both traces climb the ladder from r=2
+  upward, so the entries held when the budget trips are exactly the ones the second trace wants,
+  and an LRU would evict them in favour of the wide rungs. (3) touches `labelComponents` and needs
+  its own bit-identity test.
+- **The browser contention A/B** that §4.1 and §4.4 are gated on. Both are gated defensively
+  (`>= 8` cores for the prewarm, `>= 16` cores *and* `>= 8 GB` for the wide pool), but the
+  wall-clock OCR budget in §0b means only a real browser measurement can confirm they are free on
+  mid-range hardware.
 
 ## Appendix — reproducing the measurements
 

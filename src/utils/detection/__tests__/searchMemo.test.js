@@ -4,65 +4,20 @@
 // cacheKey, so every bench run measured the cold path only.
 //
 // The property that matters is not "the memo is fast" but "the memo cannot
-// change the answer" — a warm trace must be bit-identical to a cold one, and
-// must stay identical when the memo gives up on its byte budget mid-search.
-import fs from 'fs';
-import path from 'path';
-import { describe, expect, it, beforeAll, beforeEach, afterEach } from 'vitest';
-import { PNG } from 'pngjs';
+// change the answer" — a warm trace must be bit-identical to a cold one.
+//
+// Split across three files (see searchMemoShared.js for why); this one holds
+// the warm-equals-cold property, searchMemoKey covers the memo key, and
+// searchMemoBudget covers the byte budget.
+import { describe, expect, it, beforeAll, beforeEach } from 'vitest';
 import { traceFloorplanBoundaryCore, detectRoomFromClickCore } from '../pipeline.js';
-import { clearDetectionCache, setSearchBudgetBytes } from '../cache.js';
+import { clearDetectionCache } from '../cache.js';
+import { FIXTURES, geometryOf, loadFixtures } from './searchMemoShared.js';
 
-const ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
-
-const loadPng = (filePath) => {
-  const png = PNG.sync.read(fs.readFileSync(filePath));
-  return { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
-};
-
-// Everything a caller can observe about a trace's geometry. Deliberately not a
-// tolerance comparison: warm and cold run the same code over the same rasters,
-// so any difference at all is a memo bug.
-const geometryOf = (result) => ({
-  outer: result.outer?.polygon ?? null,
-  inner: result.inner?.polygon ?? null,
-  holes: result.holes ?? [],
-  innerHoles: result.innerHoles ?? [],
-  excludedRegions: result.excludedRegions,
-  excludedGarages: result.excludedGarages,
-  floors: (result.floors ?? []).map((f) => ({
-    outer: f.outer?.polygon ?? null,
-    inner: f.inner?.polygon ?? null,
-    holes: f.holes,
-    innerHoles: f.innerHoles,
-    confidence: f.confidence,
-    excluded: f.excluded,
-    excludedGarages: f.excludedGarages,
-    candidate: f.candidate,
-  })),
-  quality: {
-    confidence: result.quality.confidence,
-    usedFallback: result.quality.usedFallback,
-    source: result.quality.source,
-    floorCount: result.quality.floorCount,
-    candidate: result.quality.candidate,
-    areaPx: result.quality.areaPx,
-    warnings: result.quality.warnings.map((w) => ({ code: w.code, severity: w.severity })),
-  },
-});
-
-const FIXTURES = [
-  'ExampleFloorplan.png',
-  'ExampleFloorplan2.png',
-  'ExampleFloorplan4.png',
-  'ExampleFloorplan5.png',
-  'ExampleFloorplan7.png',
-];
-
-const images = new Map();
+let images;
 
 beforeAll(() => {
-  for (const name of FIXTURES) images.set(name, loadPng(path.join(ROOT, 'fixtures', name)));
+  images = loadFixtures();
 });
 
 beforeEach(() => {
@@ -99,68 +54,5 @@ describe('search memo: a warm trace equals a cold trace', () => {
     );
     const afterClamp = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
     expect(afterClamp).toEqual(alone);
-  });
-});
-
-describe('search memo: the key covers what the search computes', () => {
-  // `generateCandidates` derives `maxRadius`, and therefore the entire closing
-  // ladder, from `options.maxCloseRadius`. The nets key carried that option and
-  // the candidates key did not, so a second trace of one image at a different
-  // radius was answered with the first radius's candidate set.
-  it.each(FIXTURES)('%s traces per radius, not per image', (name) => {
-    const image = images.get(name);
-
-    const narrowAlone = geometryOf(traceFloorplanBoundaryCore(image, {
-      cacheKey: name, boundary: { maxCloseRadius: 8 },
-    }));
-    clearDetectionCache();
-
-    // Same cacheKey, wide first, then narrow: the narrow trace must equal the
-    // one computed with no memo in the way.
-    traceFloorplanBoundaryCore(image, { cacheKey: name, boundary: { maxCloseRadius: 48 } });
-    const narrowAfterWide = geometryOf(traceFloorplanBoundaryCore(image, {
-      cacheKey: name, boundary: { maxCloseRadius: 8 },
-    }));
-
-    expect(narrowAfterWide).toEqual(narrowAlone);
-  });
-
-  it('the two radii do change the answer somewhere in the fixture set', () => {
-    let anyDiffer = false;
-    for (const name of FIXTURES) {
-      const image = images.get(name);
-      clearDetectionCache();
-      const wide = geometryOf(traceFloorplanBoundaryCore(image, { boundary: { maxCloseRadius: 48 } }));
-      clearDetectionCache();
-      const narrow = geometryOf(traceFloorplanBoundaryCore(image, { boundary: { maxCloseRadius: 8 } }));
-      if (JSON.stringify(wide) !== JSON.stringify(narrow)) anyDiffer = true;
-    }
-    expect(anyDiffer).toBe(true);
-  });
-});
-
-describe('search memo: giving up on budget cannot change the answer', () => {
-  afterEach(() => {
-    setSearchBudgetBytes(null);
-  });
-
-  // The cache turns itself off and drops what it holds once the search charges
-  // past its byte budget, and `getSearchCache` only builds a new one when the
-  // key changes — so an image that trips the budget has no memo for as long as
-  // it stays open. That path is reached on real multi-plan sheets, so a memo
-  // that only agreed with a cold trace while it was alive would be worse than
-  // no memo at all.
-  it.each(FIXTURES)('%s traces identically with a budget of one byte', (name) => {
-    const image = images.get(name);
-    const cold = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
-    clearDetectionCache();
-
-    setSearchBudgetBytes(1);
-    const key = `${name}::starved`;
-    const first = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: key }));
-    // The second run meets the permanently-empty, over-budget memo.
-    const second = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: key }));
-    expect(first).toEqual(cold);
-    expect(second).toEqual(cold);
   });
 });

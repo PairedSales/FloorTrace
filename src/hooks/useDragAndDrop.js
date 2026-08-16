@@ -2,6 +2,8 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile, loadImageFromClipboard } from '../utils/imageLoader';
+import { prewarmDetection } from '../utils/detection';
+import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
 
 export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
@@ -14,6 +16,8 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
     if (!(await checkUnsavedChanges())) return;
 
     try {
+      perfResetRun();
+      perfMark(MARKS.imageSet);
       // Load and validate first — a failed paste must leave the current project intact
       const { dataUrl, mimeType } = await loadImageFromClipboard();
       if (dataUrl) {
@@ -21,6 +25,7 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
+        prewarmDetection(dataUrl);
         await handleManualMode(dataUrl, true); // Automatically enter manual mode
       }
     } catch (error) {
@@ -62,12 +67,17 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
 
         flash('Project loaded');
       } else {
+        perfResetRun();
+        perfMark(MARKS.imageSet);
         // Load and validate first — a failed load must leave the current project intact
         const { dataUrl, mimeType } = await loadImageFromFile(file);
         resetOverlays();
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
+        // Not awaited: it runs in the detection worker while the scan below
+        // holds the main thread and the Tesseract pool.
+        prewarmDetection(dataUrl);
         await handleManualMode(dataUrl, true);
       }
     } catch (error) {

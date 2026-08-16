@@ -438,7 +438,28 @@ export const detectDimensionsCore = async (imageData, env) => {
   // Phase 4 is the concurrent one; boot its worker pool now so the boots run
   // under the sparse pass rather than under the reads they're meant to speed up.
   prewarmOcrPool();
-  const pass1Promise = recognizeSparse(env.toOcrInput(pass1Input));
+  // The two phases were written to overlap and did not: `recognizeSparse`
+  // suspends on `acquire` (and again on `applyPreset`, which needs its own
+  // worker round-trip), so the actual `recognize` call sat on the microtask
+  // queue while the synchronous block below ran to completion — measured at
+  // zero overlap, the sparse pass's wall time matching the await window to
+  // within 1 ms on every fixture. Waiting for the dispatch signal and then
+  // yielding one macrotask lets the job — and tesseract's own internal await
+  // chain up to the postMessage — reach the worker first. A bare `setTimeout(0)`
+  // is not enough on its own: it only works when the acquired slot already
+  // carries the `sparse` preset.
+  let signalDispatched;
+  const dispatched = new Promise((resolve) => { signalDispatched = resolve; });
+  const pass1Promise = recognizeSparse(env.toOcrInput(pass1Input), {
+    onDispatch: signalDispatched,
+  });
+  // Settling either way releases the wait: an engine that fails to boot never
+  // reaches `onDispatch`, and without this the scan would hang here instead of
+  // surfacing the failure at `await pass1Promise` below. Doubles as the
+  // rejection handler, so the failure is not reported as unhandled first.
+  pass1Promise.then(signalDispatched, signalDispatched);
+  await dispatched;
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
 
   const analysisScale = Math.min(1, ANALYSIS_DIM / Math.max(enhanced.width, enhanced.height));
   const analysisInk = analysisScale === 1

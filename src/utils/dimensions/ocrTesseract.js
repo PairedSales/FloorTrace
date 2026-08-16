@@ -25,11 +25,24 @@ let idleDelay = 0;
 // enough that a visitor who wandered off gets the memory back.
 const DEFAULT_IDLE_MS = 60000;
 
-const MAX_POOL = 4; // each worker holds the 5.2 MB traineddata plus a WASM heap
+// Each worker holds the 5.2 MB traineddata plus a WASM heap, so the cap is a
+// memory decision rather than a parallelism one — which is why it stays at 4
+// almost everywhere. On a machine with cores and RAM genuinely to spare the ROI
+// queue is read measurably faster (45-242 ms on the fixtures) for identical
+// output: the module's own invariant is that reads are bit-identical at any
+// pool size, and the fixture detection rates are unchanged at 8.
+const MAX_POOL = 4;
+const WIDE_POOL = 8;
 
 const poolSize = (() => {
   const cores = globalThis.navigator?.hardwareConcurrency || 4;
-  return Math.max(1, Math.min(MAX_POOL, Math.floor(cores / 2)));
+  // `deviceMemory` is in GiB and Chrome-only — absent on Firefox and Safari.
+  // Unknown is treated as "not enough", so the wide pool is opt-in on evidence
+  // rather than opt-out on its absence. The core threshold is the one that was
+  // actually measured; a 12-core machine keeps the safe cap.
+  const memoryGb = globalThis.navigator?.deviceMemory ?? 0;
+  const cap = cores >= 16 && memoryGb >= 8 ? WIDE_POOL : MAX_POOL;
+  return Math.max(1, Math.min(cap, Math.floor(cores / 2)));
 })();
 
 /** How many ROI reads the caller may keep in flight. */
@@ -183,13 +196,24 @@ export const warmOcrEngine = (idleMs = DEFAULT_IDLE_MS) => {
   return entry.ready.then(() => armed(true), () => armed(false));
 };
 
-/** Full-page sparse-text OCR. Returns flat lists of lines and words. */
-export const recognizeSparse = async (input) => {
+/**
+ * Full-page sparse-text OCR. Returns flat lists of lines and words.
+ *
+ * `onDispatch` fires once the job is genuinely in the worker's hands. Callers
+ * that want to do main-thread work *while* the page is being read must wait for
+ * it: this function suspends on `acquire` before it ever reaches `recognize`,
+ * so simply holding the returned promise and running synchronous work next
+ * leaves the job parked on the microtask queue and the two run in series.
+ * Signalled after `recognize` is invoked rather than before, so the call's own
+ * synchronous prefix has already run when the caller resumes.
+ */
+export const recognizeSparse = async (input, { onDispatch } = {}) => {
   const entry = await acquire('sparse');
   try {
     await applyPreset(entry, 'sparse');
-    const result = await entry.worker.recognize(input, {}, { blocks: true });
-    return collectLinesAndWords(result);
+    const pending = entry.worker.recognize(input, {}, { blocks: true });
+    onDispatch?.();
+    return collectLinesAndWords(await pending);
   } finally {
     release(entry);
   }

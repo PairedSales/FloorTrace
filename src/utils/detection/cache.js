@@ -43,10 +43,9 @@ let searchCache = null;
 // One image deep is not a size. A rung holds a page-sized label array plus its
 // mask and the memo holds every rung of every policy of every wall network, so
 // a sheet carrying several plans retained over 100 MB in a worker that is also
-// holding the decoded image. Past this budget the memo stops storing and drops
-// what it has: a cold re-trace (~1s) instead of tens of megabytes held for as
-// long as the image is open. Sized from the fixtures so a single-plan page
-// keeps its memo and a multi-plan sheet does not.
+// holding the decoded image. Past this budget the memo stops storing. Sized
+// from the fixtures so a single-plan page keeps its memo and a multi-plan sheet
+// does not.
 const SEARCH_BUDGET_BYTES = 32 * 1024 * 1024;
 
 // Overridable so the eviction path itself is testable: on the fixtures it is
@@ -65,12 +64,26 @@ class SearchCache extends Map {
   }
 
   // Charged by the search as it allocates what this cache would hold.
+  //
+  // Tripping the budget stops further storing; it deliberately does NOT clear
+  // what is already held. Clearing made the budget a cliff rather than a bound:
+  // `getSearchCache` only builds a fresh cache when the KEY changes, and the key
+  // is constant for one image, so a single trip killed the memo for as long as
+  // that image stayed open and turned the perimeter trace back into a full cold
+  // trace (~1 s). Measured: a plan whose working raster reaches the 1400 px cap
+  // charges ~24 B/px and trips, taking the second trace from ~130 ms to ~1130 ms
+  // — i.e. essentially every phone photo, which is why no fixture ever showed it.
+  //
+  // Keeping the early entries is also the right half to keep, not merely the
+  // cheap one: both traces climb the same closing ladder from r=2 upward, so
+  // what is already stored when the budget trips is exactly what the second
+  // trace asks for first. An LRU would evict those in favour of the late,
+  // wide rungs and serve this access pattern worse.
   retain(bytes) {
     if (this.overBudget) return;
     this.bytes += bytes;
     if (this.bytes < searchBudgetBytes) return;
     this.overBudget = true;
-    this.clear();
   }
 
   set(key, value) {
@@ -87,6 +100,17 @@ export const getSearchCache = (cacheKey, maxDimension, analyzeOptions) => {
   }
   return searchCache;
 };
+
+// A tripped budget used to be completely unobservable — the only symptom was a
+// perimeter trace that took a second longer on large plans. Reported through
+// the trace's debug channel so it can be seen rather than inferred.
+export const searchCacheStats = () => (searchCache
+  ? {
+    bytes: searchCache.bytes,
+    entries: searchCache.size,
+    overBudget: searchCache.overBudget,
+  }
+  : null);
 
 export const clearDetectionCache = () => {
   entries.clear();

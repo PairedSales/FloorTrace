@@ -2,13 +2,22 @@
 // Uint8Array(width * height) with 1 = ink. Pure JS so the identical code runs
 // in the browser worker and the Node benchmark harness.
 
+// Builds the 256-bin histogram in the same pass. Otsu needs it and used to
+// re-walk the whole full-resolution buffer for it — a second pass over up to
+// 50 MP, which is per-ORIGINAL-pixel work and so grows with camera resolution
+// rather than being bounded by the 1400 px working cap. The luma expression is
+// unchanged and cannot exceed 255, so no clamping happens and `hist[v]` counts
+// exactly what `histOf(gray)` would have.
 const toGrayscale = (rgba, pixelCount) => {
   const gray = new Uint8ClampedArray(pixelCount);
+  const hist = new Uint32Array(256);
   for (let i = 0, j = 0; j < pixelCount; i += 4, j += 1) {
     // ITU-R BT.601 luma, integer approximation
-    gray[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+    const v = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+    gray[j] = v;
+    hist[v] += 1;
   }
-  return gray;
+  return { gray, hist };
 };
 
 const otsuHist = (hist, lo, hi) => {
@@ -54,8 +63,8 @@ const histOf = (gray) => {
 // for line work, split it again and keep the lower threshold only when it
 // separates two well-spaced modes (strokes vs fills); a genuinely ink-dense
 // B&W plan has a single dark mode and keeps plain Otsu.
-const inkThreshold = (gray) => {
-  const hist = histOf(gray);
+const inkThreshold = (gray, prebuiltHist) => {
+  const hist = prebuiltHist ?? histOf(gray);
   const total = gray.length;
   const t1 = otsuHist(hist, 0, 256);
   let darkCount = 0;
@@ -87,10 +96,10 @@ const inkThreshold = (gray) => {
 export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
   const ow = imageData.width;
   const oh = imageData.height;
-  const gray = toGrayscale(imageData.data, ow * oh);
+  const { gray, hist } = toGrayscale(imageData.data, ow * oh);
   // Clamp Otsu away from extremes so faint paper texture or near-black scans
   // still split ink from paper sensibly.
-  const threshold = Math.min(Math.max(inkThreshold(gray), 60), 220);
+  const threshold = Math.min(Math.max(inkThreshold(gray, hist), 60), 220);
 
   const longest = Math.max(ow, oh);
   const width = longest > maxDimension ? Math.max(1, Math.round((ow * maxDimension) / longest)) : ow;
@@ -106,17 +115,31 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
   } else {
     // Box-average the grayscale alongside the OR-pooled ink (screened fills
     // must keep their tone at working scale for shaded-region detection).
-    const sums = new Float64Array(width * height);
+    //
+    // Uint32 rather than Float64 for the accumulator: a bin sums at most
+    // (ow/width)*(oh/height) samples of <=255, which even for a 50 MP source
+    // into a 1.4 MP raster is ~9000 — six orders of magnitude below the Uint32
+    // ceiling, and Float64 represented those same integers exactly, so
+    // `Math.round(sums[i]/counts[i])` is unchanged. Halves the buffer and drops
+    // the per-pixel float add.
+    const sums = new Uint32Array(width * height);
     const counts = new Uint32Array(width * height);
+    // The column mapping is the same expression for every row; hoisting it
+    // turns a multiply-divide-truncate per pixel into one lookup.
+    const xMap = new Int32Array(ow);
+    for (let sx = 0; sx < ow; sx += 1) {
+      xMap[sx] = Math.min(width - 1, (sx * width / ow) | 0);
+    }
     for (let sy = 0; sy < oh; sy += 1) {
       const ty = Math.min(height - 1, (sy * height / oh) | 0);
       const srcRow = sy * ow;
       const dstRow = ty * width;
       for (let sx = 0; sx < ow; sx += 1) {
-        const tx = Math.min(width - 1, (sx * width / ow) | 0);
-        if (gray[srcRow + sx] < threshold) ink[dstRow + tx] = 1;
-        sums[dstRow + tx] += gray[srcRow + sx];
-        counts[dstRow + tx] += 1;
+        const dst = dstRow + xMap[sx];
+        const v = gray[srcRow + sx];
+        if (v < threshold) ink[dst] = 1;
+        sums[dst] += v;
+        counts[dst] += 1;
       }
     }
     for (let i = 0; i < grayWork.length; i += 1) {
@@ -322,9 +345,14 @@ export const bridgeRuns = (mask, width, height, maxGap, minFlank = 0) => {
 // Run-length opening: keep only runs of >= minLen along a scan direction.
 // Equivalent to morphological opening with a 1xL line kernel, but exact for
 // any L and cheap. Directions: 'h', 'v', 'd' (\), 'a' (/).
-export const keepLongRuns = (mask, width, height, minLen, direction) => {
-  const out = new Uint8Array(mask.length);
-
+// `out` lets a caller accumulate several directions into one buffer. The writer
+// below only ever sets 1s and never clears, so four calls sharing a buffer
+// produce exactly the union that OR-ing four separate ones does — for three
+// fewer page-sized allocations. Defaults to a fresh mask, so callers that want
+// one direction on its own are unaffected.
+export const keepLongRuns = (
+  mask, width, height, minLen, direction, out = new Uint8Array(mask.length),
+) => {
   const scanLine = (startIdx, stepIdx, count) => {
     let runStart = -1;
     for (let i = 0; i <= count; i += 1) {

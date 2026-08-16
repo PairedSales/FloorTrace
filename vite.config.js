@@ -1,5 +1,20 @@
 import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import os from 'node:os'
+
+// Leave one core for the vitest host process.
+//
+// Vitest's worker->host RPC times out after 60 s (`DEFAULT_TIMEOUT = 6e4` in
+// its birpc setup) and reports it as
+// `Error: [vitest-worker]: Timeout calling "onTaskUpdate"` — a non-zero exit
+// *with every test passing*. The detection suites are CPU-bound and run whole
+// fixture plans, so a single file can total ~55 s and sit right at that edge;
+// contention from one-worker-per-core is what pushes it over on a 4-vCPU
+// runner. The primary fix is keeping any one test file well under the window
+// (the memo suites are split three ways for this reason); this cap removes the
+// contention that inflates their wall time.
+const cores = os.availableParallelism?.() ?? os.cpus().length
+const testWorkers = Math.max(1, cores - 1)
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -22,6 +37,7 @@ export default defineConfig({
     // deploy). Raised rather than set per-test so a new fixture test does not
     // have to rediscover this.
     testTimeout: 20000,
+    maxWorkers: testWorkers,
   },
   build: {
     rollupOptions: {
