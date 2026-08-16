@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { toast } from 'sonner';
+import { notify } from '../utils/notify';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { resolveLineScale } from '../utils/detection/validate';
@@ -36,7 +36,7 @@ export function useScaleLine() {
     // question is actually asked.
     const summary = scaleQualitySummary(resolved.quality);
     if (summary && summary.level === 'check') {
-      toast.warning(summary.detail, { duration: 8000, id: 'line-scale-disagreement' });
+      notify(summary.detail, { type: 'warning', id: 'scale-disagreement' });
     }
   }, []);
 

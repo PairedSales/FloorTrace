@@ -250,6 +250,15 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // view preference, not a fact about the project, so it must not ride along
   // in a `.floorplan` or be restored by an undo.
   dockOpen: true,
+  // Pending destructive confirmation, as {message, detail, confirmLabel,
+  // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
+  // promise-returning function callable from non-React code while a real
+  // dialog does the rendering.
+  confirmRequest: null,
+  // A transient canvas highlight for an error that has a place on the plan —
+  // a self-intersection knows which two edges cross. Same anchor shape as
+  // `focusedWarning` resolves to, so WarningHighlightLayer renders both.
+  errorAnchor: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -497,6 +506,21 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setFocusedWarning: (v) => set({ focusedWarning: v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
   setDockOpen: (v) => set({ dockOpen: v }),
+  setErrorAnchor: (v) => set({ errorAnchor: v }),
+  requestConfirm: (req) => {
+    // A second request while one is open would strand the first promise, so
+    // the incumbent is answered `false` — the safe default — before it is
+    // replaced.
+    const pending = get().confirmRequest;
+    if (pending) pending.resolve(false);
+    set({ confirmRequest: req });
+  },
+  resolveConfirm: (value) => {
+    const pending = get().confirmRequest;
+    if (!pending) return;
+    set({ confirmRequest: null });
+    pending.resolve(value);
+  },
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

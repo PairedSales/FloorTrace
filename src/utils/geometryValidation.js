@@ -82,8 +82,17 @@ function checkAdjacentOverlap(A, B, C) {
  * Ensures no edge crossings, no collinear overlaps, no zero-length edges,
  * and no duplicate non-adjacent vertices.
  */
-export function hasSelfIntersection(vertices, isClosed = true) {
-  if (!vertices || vertices.length < 3) return false;
+/**
+ * The first self-intersection found, as `{ runs: [[p,p],[p,p]] }` in image px,
+ * or null. Same shape as the detector's `segment` warning anchors, so the
+ * canvas layer that highlights those renders these too — a refusal that says
+ * "would self-intersect" can point at the two edges that cross.
+ *
+ * `hasSelfIntersection` delegates to this, so the predicate and the location
+ * can never disagree about whether a ring is valid.
+ */
+export function findSelfIntersection(vertices, isClosed = true) {
+  if (!vertices || vertices.length < 3) return null;
   if (!isClosed && vertices.length < 4) {
     // Check coincident vertices for a small open path
     const N = vertices.length;
@@ -92,17 +101,18 @@ export function hasSelfIntersection(vertices, isClosed = true) {
         const dx = vertices[i].x - vertices[j].x;
         const dy = vertices[i].y - vertices[j].y;
         if (dx * dx + dy * dy < EPSILON_SQ) {
-          return true; // Zero-length edge or duplicate
+          // Zero-length edge or duplicate
+          return { runs: [[vertices[i], vertices[j]]] };
         }
       }
     }
     // Check collinear overlap of V0-V1-V2
     if (N === 3) {
       if (checkAdjacentOverlap(vertices[0], vertices[1], vertices[2])) {
-        return true;
+        return { runs: [[vertices[0], vertices[1]], [vertices[1], vertices[2]]] };
       }
     }
-    return false;
+    return null;
   }
 
   const N = vertices.length;
@@ -113,7 +123,8 @@ export function hasSelfIntersection(vertices, isClosed = true) {
       const dx = vertices[i].x - vertices[j].x;
       const dy = vertices[i].y - vertices[j].y;
       if (dx * dx + dy * dy < EPSILON_SQ) {
-        return true; // Coincident vertices
+        // Coincident vertices
+        return { runs: [[vertices[i], vertices[j]]] };
       }
     }
   }
@@ -155,18 +166,24 @@ export function hasSelfIntersection(vertices, isClosed = true) {
         }
 
         if (checkAdjacentOverlap(A, B, C)) {
-          return true; // Collinear overlapping adjacent edges
+          // Collinear overlapping adjacent edges
+          return { runs: [[A, B], [B, C]] };
         }
       } else {
         // Non-adjacent edges must not intersect
         if (segmentsIntersect(e1.start, e1.end, e2.start, e2.end)) {
-          return true;
+          return { runs: [[e1.start, e1.end], [e2.start, e2.end]] };
         }
       }
     }
   }
 
-  return false;
+  return null;
+}
+
+// Unchanged predicate, now derived so it cannot drift from the locator above.
+export function hasSelfIntersection(vertices, isClosed = true) {
+  return findSelfIntersection(vertices, isClosed) !== null;
 }
 
 /**

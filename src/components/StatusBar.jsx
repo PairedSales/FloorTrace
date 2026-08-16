@@ -46,18 +46,25 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage }) => {
   return (
     <footer className="flex items-center h-[26px] px-1 bg-panel-2 border-t border-line
                        text-[11.5px] text-fg-3 select-none shrink-0 overflow-x-auto">
-      {isProcessing ? (
-        <Cell className="text-accent font-semibold">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-          {processingMessage || 'Working…'}
-        </Cell>
-      ) : (
-        <Cell className="text-accent font-semibold">{mode}</Cell>
-      )}
+      {/* The one live region in the app. Acknowledgements moved off toasts and
+          into `flash`, and sonner announces its own toasts but this channel had
+          nothing — so confirmation of a user's own action was the one thing a
+          screen-reader user could not hear. `polite` so it waits its turn
+          rather than cutting across whatever is being read. */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="contents">
+        {isProcessing ? (
+          <Cell className="text-accent font-semibold">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+            {processingMessage || 'Working…'}
+          </Cell>
+        ) : (
+          <Cell className="text-accent font-semibold">{mode}</Cell>
+        )}
 
-      {shownFlash
-        ? <Cell className="text-ok font-semibold">{shownFlash}</Cell>
-        : hint && !isProcessing && <Cell>{hint}</Cell>}
+        {shownFlash
+          ? <Cell className="text-ok font-semibold">{shownFlash}</Cell>
+          : hint && !isProcessing && <Cell>{hint}</Cell>}
+      </div>
 
       <span className="flex-1 min-w-[10px]" />
 

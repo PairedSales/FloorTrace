@@ -1,10 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import useAppStore from '../../../store/appStore';
 import { getCanvasCoordinates } from '../canvasUtils';
-import { hasSelfIntersection } from '../../../utils/geometryValidation';
+import { findSelfIntersection } from '../../../utils/geometryValidation';
 import { shortcutsBlocked } from '../../../utils/keyboardGuard';
 import { useScaleLine } from '../../../hooks/useScaleLine';
-import { toast } from 'sonner';
+import { notifyAt } from '../../../utils/notify';
 
 export function useToolRouter({
   stageRef,
@@ -628,8 +628,10 @@ export function useToolRouter({
           const distance = Math.sqrt(dx * dx + dy * dy);
 
           if (distance < 10 / scaleRef.current) {
-            if (hasSelfIntersection(perimeterVertices, true)) {
-              toast.error('Cannot close perimeter: would cause self-intersection.');
+            const crossing = findSelfIntersection(perimeterVertices, true);
+            if (crossing) {
+              notifyAt('Closing here would make the outline cross itself.',
+                { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
               return;
             }
             handleClosePerimeter();
@@ -639,8 +641,10 @@ export function useToolRouter({
 
         if (perimeterVertices.length > 0) {
           const candidate = [...perimeterVertices, finalPoint];
-          if (hasSelfIntersection(candidate, false)) {
-            toast.error('Cannot add vertex: segment would intersect existing lines.');
+          const crossing = findSelfIntersection(candidate, false);
+          if (crossing) {
+            notifyAt('That segment would cross one you already placed.',
+              { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
             return;
           }
         }
@@ -894,8 +898,10 @@ export function useToolRouter({
       }
       // ── end void tool ──────────────────────────────────────────────────────
       if (perimeterVertices && perimeterVertices.length > 2) {
-        if (hasSelfIntersection(perimeterVertices, true)) {
-          toast.error('Cannot close perimeter: would cause self-intersection.');
+        const crossing = findSelfIntersection(perimeterVertices, true);
+        if (crossing) {
+          notifyAt('Closing here would make the outline cross itself.',
+            { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
           return;
         }
         handleClosePerimeter();

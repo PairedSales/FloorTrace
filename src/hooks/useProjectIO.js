@@ -3,8 +3,9 @@ import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
 import { confirmToast } from '../utils/confirmToast';
+import { notify, flash } from '../utils/notify';
 
-export function useProjectIO(notify, handleManualMode, fileInputRef) {
+export function useProjectIO(handleManualMode, fileInputRef) {
   const image = useAppStore((s) => s.image);
   const isDirty = useAppStore((s) => s.isDirty);
   const setImage = useAppStore((s) => s.setImage);
@@ -52,7 +53,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
           useAppStore.getState().loadProject(statePatch);
           undoManager.setHistoryState(historyPatch);
 
-          notify('Project loaded.', { type: 'success' });
+          flash('Project loaded');
         } else {
           // Load and validate first — a failed load must leave the current project intact
           const { dataUrl, mimeType } = await loadImageFromFile(file);
@@ -64,7 +65,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
         }
       } catch (error) {
         console.error('Error loading file:', error);
-        notify(`Failed to load file: ${error.message}`, { type: 'error' });
+        notify(`Could not open that file — ${error.message}`, { type: 'error', id: 'file-open' });
       } finally {
         setIsProcessing(false);
         // Reset file input so the same file can be selected again
@@ -73,7 +74,7 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
         }
       }
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, notify, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
+  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
 
   const handleSaveProject = useCallback(async (isSaveAs = false) => {
     setIsProcessing(true, isSaveAs ? 'Saving project as…' : 'Saving project…');
@@ -86,15 +87,15 @@ export function useProjectIO(notify, handleManualMode, fileInputRef) {
 
       if (success) {
         useAppStore.getState().setIsDirty(false);
-        notify(isSaveAs ? 'Project saved.' : 'Project exported.', { type: 'success' });
+        flash(isSaveAs ? 'Project saved' : 'Project exported');
       }
     } catch (error) {
       console.error('Error exporting project:', error);
-      notify(`Failed to save project: ${error.message}`, { type: 'error' });
+      notify(`Could not save the project — ${error.message}`, { type: 'error', id: 'file-save' });
     } finally {
       setIsProcessing(false);
     }
-  }, [setIsProcessing, notify]);
+  }, [setIsProcessing]);
 
   const handleSaveProjectNormal = useCallback(() => handleSaveProject(false), [handleSaveProject]);
   const handleSaveProjectAs = useCallback(() => handleSaveProject(true), [handleSaveProject]);
