@@ -33,7 +33,7 @@ import { matchExteriorFeature } from './exteriorLabels.js';
 import {
   toGray, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray,
-  isolateCenterBand, trimFlankRails, dashLineMask, otsu, inkOtsu
+  isolateCenterBand, trimFlankRails, stripStructuralInk, dashLineMask, otsu, inkOtsu
 } from './raster.js';
 import { findTextRegions } from './regions.js';
 import {
@@ -72,6 +72,11 @@ const SPECULATIVE_LADDER = 2;  // zoom rungs a guess earns before the queue move
 // which is the point: this bounds the pathological page without touching plans
 // whose guesses are few enough to be worth reading.
 const MAX_SPECULATIVE_ROIS = 12;
+// Rotated labels are budgeted apart from the horizontal guesses. They are the
+// one thing pass 1 provably cannot read, there are only ever a handful, and
+// sharing the bound above meant one junk column could evict a real horizontal
+// row that was sitting on the boundary (ExampleFloorplan4's NOOK, at slot 12).
+const MAX_SPECULATIVE_VERTICAL_ROIS = 6;
 const MIN_CONFIDENCE = 40;
 const PADDLE_RESERVE_MS = 1100; // time to leave for the neural rescue pass
 
@@ -287,8 +292,15 @@ const prepareRoiVariants = (roiGray, roi, dashMask, maxVariants = Infinity) => {
   const marginHi = (roi.vertical
     ? rawCrop.offsetY + rawCrop.height - (roi.y + roi.height)
     : rawCrop.offsetX + rawCrop.width - (roi.x + roi.width)) - 2;
+  // Filled walls the label sits on: a glyph touching one fuses into it and
+  // Tesseract drops both. The floor matters as much as the ratio — on an 8px
+  // text row a blurred digit bowl measures 5px thick and would be carved out.
+  const cleaned = stripStructuralInk(rawCrop, {
+    vertical: roi.vertical,
+    minThick: Math.max(8, 0.55 * (roi.vertical ? roi.width : roi.height))
+  });
   const crop = trimFlankRails(
-    isolateCenterBand(rawCrop, { vertical: roi.vertical }),
+    isolateCenterBand(cleaned, { vertical: roi.vertical }),
     {
       vertical: roi.vertical,
       marginLo: Math.max(0, marginLo),
@@ -489,7 +501,10 @@ export const detectDimensionsCore = async (imageData, env) => {
       glyphCount: b.glyphCount, vertical: true
     }))
   ];
-  let glyphHeightFull = regions.glyphHeight / toFull;
+  // Kept alongside the word-median override below: this one samples ink of
+  // every orientation, which is what a rotated box has to be judged against.
+  const spatialGlyphHeight = regions.glyphHeight / toFull;
+  let glyphHeightFull = spatialGlyphHeight;
   timings.spatial = elapsed() - timings.preprocess;
 
   const { lines, words } = await pass1Promise;
@@ -626,8 +641,15 @@ export const detectDimensionsCore = async (imageData, env) => {
     // Too thin to contain glyphs (for vertical text the box width IS the
     // glyph height), or too short to hold a dimension pair: dashed wall
     // lines, hatching, and fixture marks — not labels.
+    // A rotated box is sized against the spatial estimate, not the pass-1 one:
+    // `glyphHeightFull` is the median of pass-1 digit words, which are all
+    // horizontal, so a plan whose rotated labels use a smaller face (they have
+    // to fit a narrow room — Matterport does this) had them cut here as noise.
+    const face = box.vertical
+      ? Math.min(glyphHeightFull, spatialGlyphHeight)
+      : glyphHeightFull;
     if (glyphHeightFull > 0 &&
-        Math.min(box.width, box.height) < 0.6 * glyphHeightFull) continue;
+        Math.min(box.width, box.height) < 0.6 * face) continue;
     if (!box.vertical && glyphHeightFull > 0 && box.width < 2.1 * glyphHeightFull) continue;
     if (candidates.some((c) => rowLike(c.bbox) && overlapRatio(c.bbox, box) > 0.4)) continue;
     // Cover-based: a single-row name box fully covering this box vetoes it,
@@ -646,7 +668,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     let priority = 0;
     if (box.glyphCount >= 4 && box.glyphCount <= 20) priority += 2;
     if (aspect >= 2 && aspect <= 14) priority += 2;
-    if (glyphHeightFull > 0 && short >= glyphHeightFull * 0.5 && short <= glyphHeightFull * 2.2) priority += 1;
+    if (face > 0 && short >= face * 0.5 && short <= face * 2.2) priority += 1;
     // Glyph-dense vertical candidates are high-value: the full-page pass
     // cannot read them at all, so the ROI pass is their only chance.
     if (box.vertical) priority += box.glyphCount >= 5 ? 1 : -1;
@@ -725,8 +747,13 @@ export const detectDimensionsCore = async (imageData, env) => {
   // while every evidence-tier ROI survives regardless of how many there are.
   if (rois.length > MAX_SPECULATIVE_ROIS) {
     let guesses = 0;
-    const bounded = rois.filter((roi) => roi.priority >= SPECULATIVE_PRIORITY
-      || (guesses += 1) <= MAX_SPECULATIVE_ROIS);
+    let vertical = 0;
+    const bounded = rois.filter((roi) => {
+      if (roi.priority >= SPECULATIVE_PRIORITY) return true;
+      return roi.vertical
+        ? (vertical += 1) <= MAX_SPECULATIVE_VERTICAL_ROIS
+        : (guesses += 1) <= MAX_SPECULATIVE_ROIS;
+    });
     rois.length = 0;
     rois.push(...bounded);
   }
@@ -1114,7 +1141,7 @@ export const detectDimensionsCore = async (imageData, env) => {
       rois: roiDebug,
       roiQueue: roiQueueDebug,
       glyphHeightFull,
-      spatialGlyphHeight: regions.glyphHeight / toFull,
+      spatialGlyphHeight,
       alphaBoxes: alphaBoxes.map((b) => ({
         x: Math.round(b.x), y: Math.round(b.y),
         width: Math.round(b.width), height: Math.round(b.height)

@@ -64,4 +64,38 @@ describe('search memo: giving up on budget cannot change the answer', () => {
     expect(first).toEqual(cold);
     expect(second).toEqual(cold);
   });
+
+  // The budget is charged incrementally from inside the candidate search, but a
+  // whole wall network's ladder is stored afterwards as ONE entry. A network
+  // that crossed the line part-way therefore lost its entire ladder — the
+  // expensive `gen|` entry — while the cheap `nets|` entry stored before the
+  // charging survived. "Keep what is already stored" was true and useless: the
+  // memo held one worthless entry and the second trace paid a full cold search
+  // (measured 620-790 ms against 64-200 ms once the ladder is kept).
+  //
+  // Asserted on entry count rather than time so it cannot go flaky: one entry
+  // means the ladder was refused, two means it landed.
+  // A property of the cache rather than of any plan's geometry, and each case
+  // costs three full boundary searches, so two plans is the useful coverage.
+  const TRIP_FIXTURES = ['ExampleFloorplan5.png', 'ExampleFloorplan7.png'];
+
+  it.each(TRIP_FIXTURES)('%s keeps the ladder entry, not just the cheap one', (name) => {
+    const image = images.get(name);
+    const cold = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
+    clearDetectionCache();
+
+    // Small enough that the trip happens inside the first network's ladder,
+    // which is the case a single-building page always hits.
+    setSearchBudgetBytes(512 * 1024);
+    const key = `${name}::first-network-trip`;
+    const first = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: key }));
+    const stats = searchCacheStats();
+
+    expect(stats.overBudget).toBe(true);
+    expect(stats.entries).toBeGreaterThanOrEqual(2);
+
+    const second = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: key }));
+    expect(first).toEqual(cold);
+    expect(second).toEqual(cold);
+  });
 });

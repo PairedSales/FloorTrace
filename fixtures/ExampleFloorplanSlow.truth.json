@@ -5,7 +5,7 @@
     "tolerance": 0.04,
     "provenance": "Measured from the ink by row/column profiling, not derived from the room rects below. PRIMARY BEDROOM: at y=250 the flanking walls are x=79-98 and x=585-598, so its interior is 99-584 = 486px against a stated 12'-5\" -> 39.14 px/ft; at x=150 the walls are y=101-121 and y=758-771, interior 122-757 = 636px against 16'-4\" -> 38.94 px/ft. BEDROOM: at y=250 the walls are x=585-598 and x=1123-1136, interior 599-1122 = 524px against 13'-5\" -> 39.06 px/ft. Three independent spans give 38.94-39.14 (+-0.3%); 39.0 is the midpoint. The detector's own pooled estimate over four rooms lands at 38.99 with 0.6% spread, which corroborates but was not used to author this number."
   },
-  "note": "A 2036x1440 Matterport export, added because it is the only large crisp vector render in the set and it exercises three things the other fixtures cannot: the 1800-2600px OCR scaling band where ocrScale stays 1, a speculative ROI tail long enough to dominate a scan, and rotated (vertical) dimension labels that the pipeline currently misses entirely.",
+  "note": "A 2036x1440 Matterport export, the only large crisp vector render in the set. It exercises three things the other fixtures cannot: the 1800-2600px OCR band where ocrScale stays 1, a speculative ROI tail long enough to dominate a scan, and rotated (vertical) dimension labels. All three defects it exposed are now fixed — a leading digit fused to a wall line, rotated labels cut by a horizontal-only glyph-height guard, and a room rectangle leaking through a doorway — so it scores 7/7 with no false positives and is the regression guard for all of them.",
   "ocr": [
     {
       "name": "PRIMARY BEDROOM",
@@ -33,12 +33,12 @@
       "h": 7.9167
     },
     {
-      "name": "PRIMARY BATHROOM (vertical label)",
+      "name": "PRIMARY BATHROOM",
       "w": 4.9167,
       "h": 7.1667
     },
     {
-      "name": "BATHROOM (vertical label)",
+      "name": "BATHROOM",
       "w": 5.1667,
       "h": 7.1667
     }
