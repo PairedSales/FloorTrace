@@ -25,6 +25,9 @@ const ASPECT_SUSPECT = 0.15;
 // An essentially unbroken wall across the whole span: a side this well drawn
 // is a real side, and no label reading may invent one inside it.
 const COV_SOLID = 0.9;
+// Ink this faint is the space between two walls, not part of either: the floor
+// a scan steps down through to know it has left the wall it was standing on.
+const COV_BETWEEN = 0.3;
 const THICK_MIN = 0.22;
 
 const SIDES = [
@@ -183,7 +186,7 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         guard += 1;
         pos += side.dir;
         if (pos < 0 || pos > limit || !insideFootprint(side, pos)) return found;
-        inWall = lineCoverage(side, pos).cov >= 0.3;
+        inWall = lineCoverage(side, pos).cov >= COV_BETWEEN;
       }
       // Free space: advance to the next thick hit.
       let hit = null;
@@ -193,7 +196,7 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         if (pos < 0 || pos > limit || !insideFootprint(side, pos)) return found;
         const c = lineCoverage(side, pos);
         if (isThick(c)) hit = { pos, ...c };
-        else if (c.cov >= 0.3) break; // thin line: skip its body, keep looking
+        else if (c.cov >= COV_BETWEEN) break; // thin line: skip its body, keep looking
       }
       if (hit) found.push(hit);
     }
@@ -217,14 +220,35 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
     const to = state[side.key].pos;
     const found = [];
     let last = -Infinity;
+    let walls = 0;
+    let inWall = false;
     for (let pos = from; side.dir < 0 ? pos > to : pos < to; pos += side.dir) {
       if (pos < 0 || pos > limitFor(side)) break;
       const c = lineCoverage(side, pos);
+      // Out the far side of a wall, by the test scanBeyond already uses to step
+      // over the one it is standing on.
+      if (c.cov < COV_BETWEEN) {
+        inWall = false;
+        continue;
+      }
       if (!isThick(c) && !isPartial(c)) continue;
       if (Math.abs(pos - last) <= band * 2 + 2) continue;
+      // The budget is three WALLS, not three samples of one. A hatched or
+      // double-drawn run is wider than the `band * 2 + 3` sample spacing, so
+      // counting samples spent the whole budget inside the first two runs and
+      // never reached the room's own wall — ExampleFloorplan6's LIVING ROOM,
+      // whose left wall is the third run out, lost 11px off that edge.
+      if (!inWall) {
+        if (walls >= 3) break;
+        walls += 1;
+        inWall = true;
+      }
       last = pos;
       found.push({ pos, ...c });
-      if (found.length >= 3) break;
+      // Phase C searches these four lists as a product, so a pathologically wide
+      // run must not grow one without bound. Never reached on the fixtures; the
+      // widest side offers 5.
+      if (found.length >= 12) break;
     }
     return found;
   };

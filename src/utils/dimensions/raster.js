@@ -582,6 +582,76 @@ export const binarizeGray = (gray) => {
 };
 
 /**
+ * Whiten filled structure (walls, solid door blocks) that enters the crop
+ * across its cross axis. A glyph whose foot lands on a filled wall fuses into
+ * that component and Tesseract discards the pair as non-text — the leading
+ * digit of a dimension row just disappears. Thickness is the smaller of the
+ * two axis run lengths through a pixel, so a digit stem (2px wide, however
+ * tall) is never structural, and the flood only spreads through thick ink, so
+ * the glyph keeps everything above the wall it touches.
+ */
+export const stripStructuralInk = (gray, { vertical = false, minThick = 8 } = {}) => {
+  const { data, width, height } = gray;
+  const t = inkOtsu(gray);
+  const n = data.length;
+  const hExt = new Uint16Array(n);
+  const vExt = new Uint16Array(n);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    let run = 0;
+    for (let x = 0; x < width; x++) {
+      run = data[row + x] < t ? run + 1 : 0;
+      hExt[row + x] = run;
+    }
+    run = 0;
+    for (let x = width - 1; x >= 0; x--) {
+      run = data[row + x] < t ? run + 1 : 0;
+      if (run) hExt[row + x] += run - 1;
+    }
+  }
+  for (let x = 0; x < width; x++) {
+    let run = 0;
+    for (let y = 0; y < height; y++) {
+      const i = y * width + x;
+      run = data[i] < t ? run + 1 : 0;
+      vExt[i] = run;
+    }
+    run = 0;
+    for (let y = height - 1; y >= 0; y--) {
+      const i = y * width + x;
+      run = data[i] < t ? run + 1 : 0;
+      if (run) vExt[i] += run - 1;
+    }
+  }
+
+  const thick = (i) => hExt[i] >= minThick && vExt[i] >= minThick;
+  const seen = new Uint8Array(n);
+  const stack = [];
+  // Seeds: thick ink on the crop's cross-axis borders. Ink that both fills and
+  // leaves the crop is drawing, not text — the padding guarantees a label's own
+  // glyphs never reach those rows.
+  const seed = (i) => { if (!seen[i] && thick(i)) { seen[i] = 1; stack.push(i); } };
+  if (vertical) {
+    for (let y = 0; y < height; y++) { seed(y * width); seed(y * width + width - 1); }
+  } else {
+    for (let x = 0; x < width; x++) { seed(x); seed((height - 1) * width + x); }
+  }
+  if (stack.length === 0) return gray;
+
+  const out = new Uint8Array(data);
+  while (stack.length) {
+    const i = stack.pop();
+    out[i] = 255;
+    const x = i % width;
+    if (x > 0) seed(i - 1);
+    if (x < width - 1) seed(i + 1);
+    if (i >= width) seed(i - width);
+    if (i + width < n) seed(i + width);
+  }
+  return { data: out, width, height };
+};
+
+/**
  * Whiten every cross-axis ink band except the one covering the crop's
  * centre. Generous ROI padding often drags in a clipped sliver of the
  * neighbouring text row (room name above a dimension line); partial glyphs
