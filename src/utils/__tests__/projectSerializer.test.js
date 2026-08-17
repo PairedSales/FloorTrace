@@ -220,6 +220,40 @@ describe('projectSerializer', () => {
       expect(trace.color).toBe('#FFB86C');
     });
 
+    // Losing either half would let the next trace of a reopened project
+    // overwrite the type, and leave "why is this a basement" unanswerable.
+    it('carries an automatically detected type and the label it came from', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].type = 'below-grade';
+      storeState.perimeterTraces[0].typeSource = 'detected';
+      storeState.perimeterTraces[0].typeEvidence = {
+        keyword: 'basement', text: 'BASEMENT', from: 'inside',
+      };
+      storeState.areaLabels = [{
+        type: 'below-grade', keyword: 'basement', text: 'BASEMENT',
+        bbox: { x: 115, y: 651, width: 74, height: 10 },
+      }];
+      const project = serializeSketch(storeState);
+      expect(() => validateProjectSchema(project)).not.toThrow();
+
+      const patch = deserializeSketch(project).statePatch;
+      expect(patch.perimeterTraces[0].typeSource).toBe('detected');
+      expect(patch.perimeterTraces[0].typeEvidence.text).toBe('BASEMENT');
+      expect(patch.areaLabels).toEqual(storeState.areaLabels);
+    });
+
+    // A type in a file written before classification existed can only have come
+    // from the user, and re-tracing must not take it back.
+    it('imports a type saved before classification existed as the user\'s', () => {
+      const storeState = createMockStoreState();
+      storeState.perimeterTraces[0].type = 'garage';
+      delete storeState.perimeterTraces[0].typeSource;
+      const project = serializeSketch(storeState);
+
+      const trace = deserializeSketch(project).statePatch.perimeterTraces[0];
+      expect(trace.typeSource).toBe('user');
+    });
+
     // The migration that has to be non-destructive: a project saved before
     // types must not collapse its multi-coloured floors into one hue.
     it('imports a project saved before types as GLA with its colours intact', () => {

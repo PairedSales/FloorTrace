@@ -30,6 +30,7 @@ import {
 import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
 import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
+import { DEFAULT_TRACE_TYPE, traceTypeLabel } from './utils/traceTypes';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
@@ -219,6 +220,7 @@ function App() {
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
   const setDetectedDimensions = useAppStore((s) => s.setDetectedDimensions);
   const setExteriorLabels = useAppStore((s) => s.setExteriorLabels);
+  const setAreaLabels = useAppStore((s) => s.setAreaLabels);
   const setRooms = useAppStore((s) => s.setRooms);
   const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
@@ -388,6 +390,9 @@ function App() {
         // Garage/porch/patio/deck/balcony labels: kept for perimeter tracing
         // so non-GLA features get carved out of the footprint.
         setExteriorLabels(result.exteriorLabels || []);
+        // Level names ("BASEMENT", "2ND FLOOR"): kept so each traced outline
+        // can be typed from what the plan calls it.
+        setAreaLabels(result.areaLabels || []);
         setDetectedDimensions(dimensions);
 
         if (dimensions.length === 0) {
@@ -433,7 +438,7 @@ function App() {
         releaseOcrWorkersWhenIdle(60000);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -627,6 +632,27 @@ function App() {
     });
   }, [useInteriorWalls, handleDrawMode]);
 
+  // An outline typed from the plan's own words moves its area out of GLA and
+  // into another subtotal. The user can see the new type on the outline row,
+  // but only if they look — and the number they came for changed, so this is
+  // a toast rather than a flash.
+  const reportTraceTypes = useCallback((changes) => {
+    if (!changes?.length) return;
+    const named = changes.filter((c) => c.type !== DEFAULT_TRACE_TYPE);
+    const reverted = changes.length - named.length;
+    const parts = [];
+    if (named.length) {
+      const names = named.map((c) => c.name).join(', ');
+      const kinds = [...new Set(named.map((c) => traceTypeLabel(c.type).toLowerCase()))];
+      parts.push(`${names} read as ${kinds.join(' / ')} from the plan's labels.`);
+    }
+    if (reverted) {
+      parts.push(`${reverted} outline${reverted === 1 ? '' : 's'} back to GLA — `
+        + 'the label the type was read from is gone.');
+    }
+    notify(parts.join(' '), { type: 'info', id: 'trace-types', duration: DURATION.NORMAL });
+  }, []);
+
   // Returns the quality level of the applied trace, so the caller can decide
   // whether to fall back. `brush` carries draw mode's strokes (original image
   // px) and turns the whole stage into a search inside those strokes.
@@ -647,6 +673,12 @@ function App() {
       // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
       const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+      // Runs on the outlines this trace just produced, inside the same undo
+      // step: a basement that arrives typed as living area is the same wrong
+      // answer as one traced in the wrong place.
+      const typeChanges = floorCount
+        ? useAppStore.getState().classifyTraceTypes()
+        : [];
       perfMark(MARKS.areaReady);
       perfReportRun();
       // Every trace, not only the one the automatic scan ran: the footprint is
@@ -656,6 +688,7 @@ function App() {
       // force is still the automatic one.
       if (floorCount) reviewAgainstFootprint(tracedAreaPx(traced));
       reportTrace(traced, floorCount);
+      reportTraceTypes(typeChanges);
       return floorCount ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
       if (useAppStore.getState().image === startImage) {
@@ -673,7 +706,7 @@ function App() {
       }
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
-    reportTrace, handleDrawMode, reviewAgainstFootprint]);
+    reportTrace, reportTraceTypes, handleDrawMode, reviewAgainstFootprint]);
 
   // Auto-detection, with draw mode as its fallback. A result the detector
   // itself rates poor or worse is not something to hand over as an answer, so

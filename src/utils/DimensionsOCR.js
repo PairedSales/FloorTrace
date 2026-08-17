@@ -2,10 +2,13 @@
  * Room-dimension extraction from floorplan images.
  *
  * Public API:
- *   detectAllDimensions(imageDataUrl) -> { dimensions, exteriorLabels, detectedFormat }
+ *   detectAllDimensions(imageDataUrl) -> { dimensions, exteriorLabels, areaLabels,
+ *                                          detectedFormat }
  *     dimensions: [{ width, height, text, bbox, confidence, format }]
  *     exteriorLabels: [{ keyword, text, bbox }] — garage/porch/patio/deck/
  *       balcony name labels, fed to the boundary tracer as footprint exclusions
+ *     areaLabels: [{ type, keyword, text, bbox }] — level names ("BASEMENT",
+ *       "2ND FLOOR"), which type a whole outline rather than carving anything
  *   terminateOcrWorker() / releaseOcrWorkersWhenIdle(ms)
  *
  * Repeat scans of the same image are served from a one-entry cache — "Find
@@ -230,6 +233,7 @@ let lastScan = null;
 const cloneScan = (result) => ({
   dimensions: result.dimensions.map((d) => ({ ...d, bbox: { ...d.bbox } })),
   exteriorLabels: result.exteriorLabels.map((l) => ({ ...l, bbox: { ...l.bbox } })),
+  areaLabels: result.areaLabels.map((l) => ({ ...l, bbox: { ...l.bbox } })),
   detectedFormat: result.detectedFormat
 });
 
@@ -241,7 +245,8 @@ const cloneScan = (result) => ({
  * worker crash would read as a clean scan of an unlabelled plan.
  *
  * @param {string} imageDataUrl base64 data URL (PNG/JPG)
- * @returns {Promise<{dimensions: Array, exteriorLabels: Array, detectedFormat: string|null}>}
+ * @returns {Promise<{dimensions: Array, exteriorLabels: Array, areaLabels: Array,
+ *                    detectedFormat: string|null}>}
  */
 export const detectAllDimensions = async (imageDataUrl) => {
   if (lastScan && lastScan.url === imageDataUrl) return cloneScan(lastScan.result);
@@ -259,15 +264,16 @@ export const detectAllDimensions = async (imageDataUrl) => {
     ctx.drawImage(img, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    const { dimensions, exteriorLabels, detectedFormat, timings } =
+    const { dimensions, exteriorLabels, areaLabels, detectedFormat, timings } =
       await detectDimensionsCore(imageData, browserEnv());
 
     if (import.meta.env?.DEV) {
       console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length,
-        'exterior:', exteriorLabels.map((l) => l.keyword));
+        'exterior:', exteriorLabels.map((l) => l.keyword),
+        'area:', areaLabels.map((l) => `${l.type}:${l.keyword}`));
     }
 
-    const result = { dimensions, exteriorLabels, detectedFormat };
+    const result = { dimensions, exteriorLabels, areaLabels, detectedFormat };
     lastScan = { url: imageDataUrl, result };
     return cloneScan(result);
   } catch (error) {

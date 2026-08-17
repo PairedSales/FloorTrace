@@ -140,6 +140,9 @@ const run = async () => {
     console.log(`   exterior labels: ${(result.exteriorLabels ?? [])
       .map((l) => `${l.keyword}@(${l.bbox.x},${l.bbox.y},${l.bbox.width},${l.bbox.height})`)
       .join('  ') || '(none)'}`);
+    console.log(`   area labels: ${(result.areaLabels ?? [])
+      .map((l) => `${l.type}:${l.keyword}@(${l.bbox.x},${l.bbox.y},${l.bbox.width},${l.bbox.height})`)
+      .join('  ') || '(none)'}`);
     console.log(`   dimensions found: ${result.dimensions.length}`);
     for (const d of result.dimensions) {
       console.log(
