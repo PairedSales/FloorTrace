@@ -13,7 +13,9 @@ const shortcuts = [
   { keys: '[ / ]', description: 'Resize the active brush' },
   { keys: 'R', description: 'Rotate canvas 45° clockwise' },
   { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  { keys: '1 – 9', description: 'Measure, Area, Angle, Place corners, Crop, Erase, Paint outline, Cut out, Scale' },
+  // Same order as the tool rail reads, top to bottom — that is what the digits
+  // now follow, so the two can be learned as one thing.
+  { keys: '1 – 9', description: 'Paint outline, Place corners, Cut out, Set scale, Measure, Area, Angle, Crop, Erase' },
   { keys: 'Alt / Shift + 1 – 7', description: 'Switch perimeter trace' },
   { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },

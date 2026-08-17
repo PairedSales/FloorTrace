@@ -1428,6 +1428,16 @@ function App() {
         onCycleTheme={cycleTheme}
         dockOpen={dockOpen}
         onDockToggle={handleDockToggle}
+        status={(
+          <StatusBar
+            mode={MODE_LABEL[activeTool] ?? 'Select'}
+            hint={MODE_HINT[activeTool] ?? null}
+            hasImage={!!image}
+            onZoomIn={() => handleZoom(1)}
+            onZoomOut={() => handleZoom(-1)}
+            onExport={openExport}
+          />
+        )}
       />
 
       <CommandBar
@@ -1450,6 +1460,10 @@ function App() {
         floorCount={perimeterTraces.length}
         dockOpen={dockOpen}
         onDockToggle={handleDockToggle}
+        toolLabels={toolLabels}
+        onToolLabelsToggle={handleToolLabelsToggle}
+        theme={theme}
+        onCycleTheme={cycleTheme}
       />
 
       <ContextBar
@@ -1497,19 +1511,9 @@ function App() {
             onSelect={handleToolSelect}
             onRotate={handleRotateCanvas}
             onClearTools={handleClearTools}
-            onToggleLabels={handleToolLabelsToggle}
           />
         )}
       </div>
-
-      <StatusBar
-        mode={MODE_LABEL[activeTool] ?? 'Select'}
-        hint={MODE_HINT[activeTool] ?? null}
-        hasImage={!!image}
-        onZoomIn={() => handleZoom(1)}
-        onZoomOut={() => handleZoom(-1)}
-        onExport={openExport}
-      />
       </>
       )}
 

@@ -55,17 +55,23 @@ export function useKeyboardShortcuts({
 }) {
   // The digit → tool mapping is fixed, never renumbered by what the panel is
   // currently showing: a mapping that moves with app state is worse than one
-  // that occasionally says why it did nothing. Append rows to extend it.
+  // that occasionally says why it did nothing.
+  //
+  // This list is TOOL_GROUPS read top to bottom, and the two are kept in step
+  // by hand — see the note there. `label` is documentation only; it names the
+  // tool the way the rail and the status bar name it, which the digits' first
+  // draft did not (it still said "Line" and "Draw Exterior" long after the
+  // shell had renamed both).
   const toolDigits = useMemo(() => [
-    { digit: '1', label: 'Line', toggle: onLineToolToggle, available: hasArea, unavailable: 'Line needs a traced area first.' },
-    { digit: '2', label: 'Area', toggle: onDrawAreaToggle, available: hasArea, unavailable: 'Area needs a traced area first.' },
-    { digit: '3', label: 'Angle', toggle: onAngleToolToggle, available: hasArea, unavailable: 'Angle needs a traced area first.' },
-    { digit: '4', label: 'Outline', toggle: onOutlineByVertex, available: true },
-    { digit: '5', label: 'Crop', toggle: onCropToolToggle, available: true },
-    { digit: '6', label: 'Eraser', toggle: onEraserToolToggle, available: true },
-    { digit: '7', label: 'Draw Exterior', toggle: onDrawExterior, available: true },
-    { digit: '8', label: 'Void', toggle: onVoidToolToggle, available: hasArea, unavailable: 'Void needs a traced area to punch a hole in.' },
-    { digit: '9', label: 'Scale', toggle: onScaleToolToggle, available: true },
+    { digit: '1', label: 'Paint outline', toggle: onDrawExterior, available: true },
+    { digit: '2', label: 'Place corners', toggle: onOutlineByVertex, available: true },
+    { digit: '3', label: 'Cut out', toggle: onVoidToolToggle, available: hasArea, unavailable: 'Cutting a void needs a traced outline first.' },
+    { digit: '4', label: 'Set scale', toggle: onScaleToolToggle, available: true },
+    { digit: '5', label: 'Measure', toggle: onLineToolToggle, available: hasArea, unavailable: 'Measuring needs a traced outline first.' },
+    { digit: '6', label: 'Area', toggle: onDrawAreaToggle, available: hasArea, unavailable: 'Drawing an area needs a traced outline first.' },
+    { digit: '7', label: 'Angle', toggle: onAngleToolToggle, available: hasArea, unavailable: 'Measuring an angle needs a traced outline first.' },
+    { digit: '8', label: 'Crop', toggle: onCropToolToggle, available: true },
+    { digit: '9', label: 'Erase', toggle: onEraserToolToggle, available: true },
   ], [
     hasArea,
     onLineToolToggle,

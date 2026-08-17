@@ -1,13 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Sun, Moon, MonitorSmartphone } from 'lucide-react';
 import FloorTraceLogo from '../assets/logo.svg';
+import { THEME_LABEL } from '../hooks/useTheme';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const mod = isMac ? '⌘' : 'Ctrl';
 const alt = isMac ? '⌥' : 'Alt';
-
-const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
-const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
 
 const MenuItem = ({ label, disabled, danger, keys, onSelect, close }) => (
   <button
@@ -66,6 +63,10 @@ const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
  * Restart lives here as "Close project" rather than on the logo. Clicking a
  * wordmark to wipe the project was a destructive action on the least expected
  * target, warned about only in a tooltip.
+ *
+ * `status` is the status bar, slotted into the empty right of this row instead
+ * of running along the foot of the window. The row was three quarters air and
+ * the status line was the furthest thing on screen from the plan it describes.
  */
 const MenuBar = ({
   image,
@@ -99,6 +100,7 @@ const MenuBar = ({
   onCycleTheme,
   dockOpen,
   onDockToggle,
+  status,
 }) => {
   const [openId, setOpenId] = useState(null);
   const hoverMode = useRef(false);
@@ -123,18 +125,20 @@ const MenuBar = ({
     };
   }, [openId, close]);
 
-  const ThemeIcon = THEME_ICON[theme] ?? MonitorSmartphone;
-
   return (
-    <header
-      className="flex items-center gap-0.5 h-[30px] px-2 bg-panel border-b border-line-soft select-none shrink-0"
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <span className="flex items-center gap-2 pr-2.5 mr-1 text-[12.5px] font-semibold text-fg">
+    <header className="flex items-center h-[30px] px-2 bg-panel border-b border-line-soft select-none shrink-0">
+      <span className="flex items-center gap-2 pr-2.5 mr-1 shrink-0 text-[12.5px] font-semibold text-fg">
         <img src={FloorTraceLogo} alt="" className="w-[15px] h-[15px]" draggable="false" />
         FloorTrace
       </span>
 
+      {/* The swallowed mousedown is scoped to the titles, not the whole row.
+          On the row it also swallowed the status bar's buttons, so zooming
+          with a menu open left the menu hanging over the canvas. */}
+      <div
+        className="flex items-center gap-0.5 shrink-0"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
       {/* Export sits above the project file, and says what it is for. Almost
           every trace is made for one appraisal and never reopened, so the
           image of the finished measurement is the document — the `.floorplan`
@@ -189,8 +193,8 @@ const MenuBar = ({
         <MenuItem label="Select room to scale from" disabled={!canSelectRoom} onSelect={onSelectRoom} close={close} />
         <Sep />
         <MenuItem label="Find outline automatically" disabled={!image} onSelect={onTracePerimeter} close={close} />
-        <MenuItem label="Paint the outline" keys="7" disabled={!image} onSelect={onDrawExterior} close={close} />
-        <MenuItem label="Place corners by hand" keys="4" disabled={!image} onSelect={onOutlineByVertex} close={close} />
+        <MenuItem label="Paint the outline" keys="1" disabled={!image} onSelect={onDrawExterior} close={close} />
+        <MenuItem label="Place corners by hand" keys="2" disabled={!image} onSelect={onOutlineByVertex} close={close} />
         <Sep />
         <MenuItem label="Add another level" disabled={!image} onSelect={onAddFloor} close={close} />
       </Menu>
@@ -211,20 +215,10 @@ const MenuBar = ({
       <Menu id="help" label="Help" open={openId === 'help'} onOpen={open} onClose={close}>
         <MenuItem label="Shortcuts & tips" onSelect={onHelpOpen} close={close} />
       </Menu>
+      </div>
 
-      <div className="flex-1" />
-
-      <button
-        type="button"
-        onClick={onCycleTheme}
-        title={`Theme: ${THEME_LABEL[theme]} — click to change`}
-        className="inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-full border border-line
-                   bg-panel-2 text-[11.5px] text-fg-2 hover:text-fg hover:border-accent/50
-                   transition-colors cursor-pointer"
-      >
-        <ThemeIcon className="w-3.5 h-3.5" aria-hidden="true" />
-        {THEME_LABEL[theme]}
-      </button>
+      {status && <span className="w-px h-4 bg-line mx-2 shrink-0" />}
+      {status}
     </header>
   );
 };
