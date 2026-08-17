@@ -25,9 +25,13 @@ const DRAFT_CELL = {
   },
 };
 
-const Cell = ({ children, className = '' }) => (
-  <span className={`inline-flex items-center gap-1.5 h-[25px] px-2.5 whitespace-nowrap shrink-0
-                    border-l border-line-soft first:border-l-0 ${className}`}>
+// `grow` is only ever the hint: it is the one cell whose text is expendable, so
+// it truncates and every other cell keeps its full width. Nothing here scrolls
+// — a horizontal scrollbar inside the 30px menu bar row would eat the row.
+const Cell = ({ children, grow = false, className = '' }) => (
+  <span className={`inline-flex items-center gap-1.5 h-[25px] px-2.5 whitespace-nowrap
+                    border-l border-line-soft first:border-l-0
+                    ${grow ? 'min-w-0 shrink' : 'shrink-0'} ${className}`}>
     {children}
   </span>
 );
@@ -37,6 +41,11 @@ const Cell = ({ children, className = '' }) => (
  * answers "what mode am I in, how big is the view, what scale is in force,
  * is my work saved". Before this, mode lived only in eight `duration: Infinity`
  * toasts over the canvas and zoom was not displayed anywhere at all.
+ *
+ * It rides in the menu bar row rather than along the bottom of the window —
+ * hence a plain element with no chrome of its own, sized and coloured by the
+ * header it is slotted into. A footer would also be invalid there: `<header>`
+ * and `<footer>` may not contain one another.
  *
  * Live cursor coordinates are deliberately absent. `currentMousePos` is local
  * state inside useToolRouter, and lifting it here would put a store write on
@@ -68,8 +77,8 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
   const zoomPct = zoomScale > 0 ? Math.round(zoomScale * 100) : 100;
 
   return (
-    <footer className="flex items-center h-[26px] px-1 bg-panel-2 border-t border-line
-                       text-[11.5px] text-fg-3 select-none shrink-0 overflow-x-auto">
+    <div className="flex items-center flex-1 min-w-0 h-[25px] overflow-hidden
+                    text-[11.5px] text-fg-3 select-none">
       {/* The one live region in the app. Acknowledgements moved off toasts and
           into `flash`, and sonner announces its own toasts but this channel had
           nothing — so confirmation of a user's own action was the one thing a
@@ -87,7 +96,9 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
 
         {shownFlash
           ? <Cell className="text-ok font-semibold">{shownFlash}</Cell>
-          : hint && !isProcessing && <Cell>{hint}</Cell>}
+          : hint && !isProcessing && (
+            <Cell grow><span className="truncate">{hint}</span></Cell>
+          )}
       </div>
 
       <span className="flex-1 min-w-[10px]" />
@@ -153,7 +164,7 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
           </Cell>
         );
       })()}
-    </footer>
+    </div>
   );
 };
 

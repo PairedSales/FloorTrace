@@ -11,9 +11,16 @@ import {
   Check,
   Brush,
   MousePointerClick,
+  Tags,
+  Sun,
+  Moon,
+  MonitorSmartphone,
 } from 'lucide-react';
 import useUndoHistory from '../hooks/useUndoHistory';
+import { THEME_LABEL } from '../hooks/useTheme';
 import * as undoManager from '../store/undoManager';
+
+const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
 
 /**
  * The stage verbs, plus history and view. Everything here also has a home in
@@ -23,6 +30,11 @@ import * as undoManager from '../store/undoManager';
  * Commands disable rather than disappear: the old toolbar hid Add Floor,
  * Draw Exterior and Find Room Size behind state, so buttons moved under the
  * cursor between one trace and the next.
+ *
+ * The right end is the view end, ordered by widening scope: one action on the
+ * plan, then the two chrome toggles (left to right in the order the things
+ * they show sit on screen — the dock is on the left, the tool rail on the
+ * right), then the one app-wide preference, furthest from the verbs.
  */
 const CommandBar = ({
   image,
@@ -44,7 +56,12 @@ const CommandBar = ({
   floorCount,
   dockOpen,
   onDockToggle,
+  toolLabels,
+  onToolLabelsToggle,
+  theme,
+  onCycleTheme,
 }) => {
+  const ThemeIcon = THEME_ICON[theme] ?? MonitorSmartphone;
   const { canUndo, canRedo } = useUndoHistory();
   const hasOutline = !!perimeterOverlay?.vertices?.length;
 
@@ -138,7 +155,7 @@ const CommandBar = ({
         onClick={onDrawExterior}
         disabled={!image || isProcessing || drawModeActive}
         className="toolbar-btn"
-        title="Paint roughly over the exterior walls and let FloorTrace read them (7)"
+        title="Paint roughly over the exterior walls and let FloorTrace read them (1)"
       >
         <Brush className="w-[15px] h-[15px]" aria-hidden="true" />
         <span>Paint outline</span>
@@ -182,6 +199,8 @@ const CommandBar = ({
         <Maximize className="w-4 h-4" aria-hidden="true" />
       </button>
 
+      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+
       <button
         onClick={onDockToggle}
         className={`toolbar-btn px-2 ${dockOpen ? 'toolbar-btn-active' : ''}`}
@@ -190,6 +209,33 @@ const CommandBar = ({
         aria-pressed={dockOpen}
       >
         <PanelLeft className="w-4 h-4" aria-hidden="true" />
+      </button>
+
+      {/* Named for the state it shows rather than the action it takes, which
+          is what lets it carry aria-pressed alongside the dock toggle: "Hide
+          tool labels, pressed" was the contradiction that kept it off the
+          button while it lived in the rail. Disabled with no plan open — the
+          rail it controls is not on screen until there is one. */}
+      <button
+        onClick={onToolLabelsToggle}
+        disabled={!image}
+        className={`toolbar-btn px-2 ${toolLabels ? 'toolbar-btn-active' : ''}`}
+        title="Show or hide the tool names"
+        aria-label="Show or hide the tool names"
+        aria-pressed={toolLabels}
+      >
+        <Tags className="w-4 h-4" aria-hidden="true" />
+      </button>
+
+      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+
+      <button
+        onClick={onCycleTheme}
+        className="toolbar-btn"
+        title={`Theme: ${THEME_LABEL[theme]} — click to change`}
+      >
+        <ThemeIcon className="w-4 h-4" aria-hidden="true" />
+        <span>{THEME_LABEL[theme]}</span>
       </button>
     </div>
   );
