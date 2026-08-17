@@ -63,6 +63,15 @@ const MAX_ROIS = 40;
 // rather than evidence (a pass-1 digit line, or a candidate awaiting verification).
 const SPECULATIVE_PRIORITY = 7;
 const SPECULATIVE_LADDER = 2;  // zoom rungs a guess earns before the queue moves on
+// How many guesses the queue may carry, on top of every piece of evidence.
+//
+// MAX_ROIS bounds the queue but not its composition, and the speculative tier is
+// a long tail on exactly the pages that are already slow: a 2036x1440 Matterport
+// export queued ~65 ROIs, most of them speculative, and they returned not one
+// dimension — 420 ms of Tesseract for nothing. Short queues are unaffected,
+// which is the point: this bounds the pathological page without touching plans
+// whose guesses are few enough to be worth reading.
+const MAX_SPECULATIVE_ROIS = 12;
 const MIN_CONFIDENCE = 40;
 const PADDLE_RESERVE_MS = 1100; // time to leave for the neural rescue pass
 
@@ -711,6 +720,16 @@ export const detectDimensionsCore = async (imageData, env) => {
       priority: r.priority, vertical: !!r.vertical
     }))
     : null;
+  // Trim the guesses before the overall cap. Sorted by priority, so the
+  // speculative tier is the tail and this keeps its best `MAX_SPECULATIVE_ROIS`
+  // while every evidence-tier ROI survives regardless of how many there are.
+  if (rois.length > MAX_SPECULATIVE_ROIS) {
+    let guesses = 0;
+    const bounded = rois.filter((roi) => roi.priority >= SPECULATIVE_PRIORITY
+      || (guesses += 1) <= MAX_SPECULATIVE_ROIS);
+    rois.length = 0;
+    rois.push(...bounded);
+  }
   rois.length = Math.min(rois.length, MAX_ROIS);
 
   // Cold starts (engine download/init) can eat the whole budget inside
