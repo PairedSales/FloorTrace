@@ -32,6 +32,7 @@ export function useCameraController({
   const [scale, setScale] = useState(1);
   const scaleRef = useRef(1); // Track scale imperatively to avoid React reconciliation
   const viewportSyncTokenRef = useRef(null);
+  const prevSizeRef = useRef(null); // Last measured container size, for resize recentring
 
   const [imageObj, setImageObj] = useState(null);
   const [isImageReady, setIsImageReady] = useState(false);
@@ -204,7 +205,12 @@ export function useCameraController({
     img.src = image;
   }, [image, setViewportTransform, containerRef, stageRef]);
 
-  // Observe container size changes
+  // Observe container size changes. Resizing the window must not slide the
+  // plan: the stage keeps its own origin, so a container that gains width adds
+  // all of it on the right and the image drifts left. Shifting the stage by
+  // half the delta holds whatever was in the middle of the viewport in the
+  // middle of it — a centred image stays centred, and a pan/zoom the user chose
+  // is preserved rather than refit.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -212,7 +218,26 @@ export function useCameraController({
     const measure = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      if (w && h) setDimensions({ width: w, height: h });
+      if (!w || !h) return;
+
+      const prev = prevSizeRef.current;
+      prevSizeRef.current = { width: w, height: h };
+      setDimensions({ width: w, height: h });
+
+      if (!prev || (prev.width === w && prev.height === h)) return;
+
+      const stage = stageRef.current;
+      // No camera yet (no image, or the loader hasn't run) — nothing to hold.
+      if (!stage || useAppStore.getState().zoomScale === null) return;
+
+      const nextX = stage.x() + (w - prev.width) / 2;
+      const nextY = stage.y() + (h - prev.height) / 2;
+      stage.position({ x: nextX, y: nextY });
+      stage.batchDraw();
+
+      const token = Math.random();
+      viewportSyncTokenRef.current = token;
+      setViewportTransform(scaleRef.current, { x: nextX, y: nextY }, token);
     };
 
     const raf = requestAnimationFrame(measure);
@@ -234,7 +259,7 @@ export function useCameraController({
       ro.disconnect();
       window.removeEventListener('resize', debouncedMeasure);
     };
-  }, [containerRef]);
+  }, [containerRef, stageRef, setViewportTransform]);
 
   // Stage transform sync
   useEffect(() => {
