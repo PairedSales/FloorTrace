@@ -61,6 +61,7 @@ class SearchCache extends Map {
     super();
     this.bytes = 0;
     this.overBudget = false;
+    this.trippedStored = false;
   }
 
   // Charged by the search as it allocates what this cache would hold.
@@ -86,7 +87,27 @@ class SearchCache extends Map {
     this.overBudget = true;
   }
 
+  // One store is allowed through after the trip, and that is the whole fix for
+  // a single-building page.
+  //
+  // The budget is charged incrementally from inside the candidate search
+  // (candidates.js retain sites) but a wall network's entire closing ladder is
+  // stored as ONE entry afterwards (boundary.js `memo(cache, 'gen|' + netKey)`).
+  // A network that crosses the line part-way therefore lost its whole ladder —
+  // including the rungs already computed AND already charged for. "Keep what is
+  // already stored" is true at entry granularity, but on a page with one
+  // building there is no earlier entry to keep, so the memo ended up holding
+  // nothing and the perimeter trace paid a full cold search anyway.
+  //
+  // Letting the entry whose own charge crossed the line still land makes the
+  // bound per-network — the granularity the key actually has — and overshoots
+  // the nominal budget by exactly one entry. Measured on plans that trip: the
+  // warm perimeter trace returns from ~1.5 s to ~0.3 s.
   set(key, value) {
+    if (this.overBudget && !this.trippedStored) {
+      this.trippedStored = true;
+      return super.set(key, value);
+    }
     return this.overBudget ? this : super.set(key, value);
   }
 }
