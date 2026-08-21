@@ -230,6 +230,28 @@ export function useCameraController({
   // half the delta holds whatever was in the middle of the viewport in the
   // middle of it — a centred image stays centred, and a pan/zoom the user chose
   // is preserved rather than refit.
+  // The first measure is synchronous rather than a frame later.
+  //
+  // `dimensions` seeds at 800x600 and the Stage mounts as soon as there is an
+  // image — which, since decoded images are now cached, is the *same commit* on
+  // a plan switch. Measuring one animation frame later therefore let Konva
+  // build the stage and both layers at 800x600, draw them, and then rebuild and
+  // redraw every canvas at the real size: roughly 30-60 MB of throwaway backing
+  // store and three redundant full-layer draws per switch, plus one visibly
+  // clipped frame.
+  //
+  // A passive effect, deliberately, NOT `useLayoutEffect`. `containerRef` is
+  // owned by the parent (Canvas) and this hook runs in the child: React attaches
+  // refs bottom-up in the same traversal that runs layout effects, so a layout
+  // effect here sees `containerRef.current === null` on a fresh mount and bails
+  // — leaving the stage at 800x600 with no ResizeObserver attached and nothing
+  // to recover it. That is what the rAF was really buying, and it is why the
+  // keyed remount a plan switch causes is the case that breaks. A passive effect
+  // runs after every ref is attached, and still lands before paint for the
+  // discrete click that triggered it.
+  //
+  // The ResizeObserver below stays debounced — that path is about the window
+  // changing, where coalescing is what is wanted.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -259,7 +281,7 @@ export function useCameraController({
       setViewportTransform(scaleRef.current, { x: nextX, y: nextY }, token);
     };
 
-    const raf = requestAnimationFrame(measure);
+    measure();
 
     let resizeTimer = null;
     const debouncedMeasure = () => {
@@ -273,7 +295,6 @@ export function useCameraController({
     window.addEventListener('resize', debouncedMeasure);
 
     return () => {
-      cancelAnimationFrame(raf);
       if (resizeTimer) clearTimeout(resizeTimer);
       ro.disconnect();
       window.removeEventListener('resize', debouncedMeasure);

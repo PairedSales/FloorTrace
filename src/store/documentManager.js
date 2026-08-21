@@ -21,7 +21,7 @@ import * as undoManager from './undoManager';
 import { detachDocument } from './documentRequests';
 import { disposeDetectionImage } from '../utils/detection';
 import { forgetImage } from '../components/canvas/imageCache';
-import { forgetWallSnapEngine } from '../components/canvas/hooks/useSnappingSystem';
+import { forgetWallSnapEngine } from '../components/canvas/wallSnapEngineCache';
 
 export { newDocumentId };
 
