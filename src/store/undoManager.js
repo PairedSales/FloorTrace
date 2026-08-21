@@ -4,6 +4,12 @@ import { internKey } from '../utils/hash';
 /**
  * Maximum number of undo steps kept across both stacks combined.
  * 50 is generous for typical usage while halving worst-case memory vs 100.
+ *
+ * "Combined" is exact rather than aspirational, and worth knowing why: `undo()`
+ * and `redo()` move one entry between the stacks and create none, and `save()`
+ * clears `redoStack` outright — so total mass only ever falls after a `save()`
+ * trims at the cap. `setHistoryState` was the one path that could break the
+ * invariant, because it installs whatever a `.floorplan` carried.
  */
 const MAX_UNDO = 50;
 
@@ -199,8 +205,23 @@ export function setHistoryState(history) {
     clear();
     return;
   }
-  undoStack = history.undoStack || [];
-  redoStack = history.redoStack || [];
+  // Copies, not the caller's arrays. `getHistoryState()` hands out `[...stack]`,
+  // but `deserializeSketch` hands over arrays parsed straight from the file and
+  // its caller still holds them; installed by reference, the module's stacks and
+  // the caller's are one object and a later `save()` mutates both — silently.
+  //
+  // Capped on the way in because this is the only path that can carry more than
+  // the app ever creates: a `.floorplan` written by a future build, or one
+  // hand-edited, arrives at whatever depth it likes and would then sit above
+  // the ceiling for the rest of the session, holding every image it references
+  // in the pool. Newest entries are the ones kept — the far end of each stack
+  // is what `pop()` reaches first — and `undoStack` is served first because an
+  // undo the user can still take is worth more than a redo they have not.
+  const importedUndo = [...(history.undoStack || [])];
+  const importedRedo = [...(history.redoStack || [])];
+  undoStack = importedUndo.slice(Math.max(0, importedUndo.length - MAX_UNDO));
+  const redoRoom = Math.max(0, MAX_UNDO - undoStack.length);
+  redoStack = importedRedo.slice(Math.max(0, importedRedo.length - redoRoom));
   imagePool.clear();
   if (history.imagePool) {
     for (const [k, v] of history.imagePool) {

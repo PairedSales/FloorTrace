@@ -31,6 +31,9 @@ export function usePinchZoom({ stageRef, scaleRef, setScale, viewportSyncTokenRe
   const isPinchingRef = useRef(false);
   const rafRef = useRef(null);
   const pendingRef = useRef(null);
+  // The 80 ms tail below outlives the gesture by design, so it can also outlive
+  // the component. Held in a ref so unmount can cancel it.
+  const tailTimerRef = useRef(null);
 
   const touchPoints = (stage, evt) => {
     const list = evt?.touches;
@@ -134,7 +137,11 @@ export function usePinchZoom({ stageRef, scaleRef, setScale, viewportSyncTokenRe
     // Held one frame past the gesture: lifting two fingers is never perfectly
     // simultaneous, and the tail of a pinch used to arrive as a one-finger pan
     // that yanked the plan sideways.
-    setTimeout(() => { isPinchingRef.current = false; }, 80);
+    if (tailTimerRef.current) clearTimeout(tailTimerRef.current);
+    tailTimerRef.current = setTimeout(() => {
+      tailTimerRef.current = null;
+      isPinchingRef.current = false;
+    }, 80);
     return true;
   }, [stageRef, scaleRef, setScale, viewportSyncTokenRef, applyPending]);
 
@@ -150,6 +157,7 @@ export function usePinchZoom({ stageRef, scaleRef, setScale, viewportSyncTokenRe
 
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    if (tailTimerRef.current) clearTimeout(tailTimerRef.current);
   }, []);
 
   return { handleTouchStart, handleTouchMove, handleTouchEnd, isPinchingRef };
