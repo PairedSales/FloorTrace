@@ -119,11 +119,43 @@ today — but before reaching for a keyed subtree, know which is which.
 `useExhibitExport`, `useDragAndDrop`.
 
 **Async results are owned, not inferred.** `documentRequests.js` hands out a token
-at `beginWork` and `deliver` decides what may be written, returning `'applied'`,
-`'stale'` or `'dropped'`. The old `image !== startImage` guard answered two
-questions with one comparison, and got the second wrong in the dangerous direction:
-two plans opened from the same file hold the same data URL, so each passes the
-other's staleness test exactly.
+at `beginWork` and `deliver` decides what may be written, returning one of **four**
+verdicts: `'applied'` (the plan is live), `'routed'` (open but parked — the write
+is held and replayed on adopt), `'stale'` (the plan exists but its image changed)
+or `'dropped'` (the plan is gone). The old `image !== startImage` guard answered
+two questions with one comparison, and got the second wrong in the dangerous
+direction: two plans opened from the same file hold the same data URL, so each
+passes the other's staleness test exactly.
+
+`'routed'` is not optional politeness. Phase 2 built this layer when only one plan
+could be open and left `'dropped'` covering "not the active plan"; phase 6 made a
+plan open without being live and nothing went back. Switching tabs mid-trace then
+discarded the trace and cleared the spinner — not a wrong answer but a missing one
+that looks finished, which is harder to even report.
+
+**Three more invariants the multi-plan work rests on**, each of which has been
+broken once already:
+
+- **A plan's file handle dies with the plan.** `utils/fileHandles.js` is a leaf
+  module *specifically* so a close path can drop a handle without importing
+  `projectSerializer`, which is dynamically imported to keep 78 kB off the critical
+  path. Call `forgetFileHandle` wherever a plan stops being that plan — there are
+  three: `closePlan`, `App.jsx`'s last-plan close (`restart()` keeps the id), and
+  `makeRoomForIncoming` reusing an empty plan for a different drawing. A handle
+  that outlives its plan sends the next property's first Ctrl+S into the previous
+  property's file, with no picker.
+- **Every path that removes a plan's records cancels the pending write first.**
+  `useAutosave`'s debounced write is armed with a plan id but reads state when it
+  *fires*; `cancelPendingWrite` is the one helper, and `removePlan` without it puts
+  the records straight back. The last-plan close is why an id check is not enough
+  — `restart()` keeps the id, so the write still looks current.
+- **The workspace index is rewritten whenever the set of plans changes, deferred to
+  a microtask.** `removePlan` never touches the index, and no close path wrote it;
+  it used to be repaired *by accident* by the very write that had to go. Deferred
+  because `closeDocument` trims `documentOrder` and *then* adopts a successor, so a
+  synchronous write stamps `activeId` with the id of the plan being closed. A stale
+  index is not a small thing: `restoreWorkspace` will walk `order` for a plan it can
+  stand on, but anything it cannot read is dropped and counted.
 
 ### State: one Zustand store, snapshot-based undo/autosave
 
@@ -133,6 +165,14 @@ other's staleness test exactly.
 - `AUTOSAVE_FIELDS` is the similar-but-not-identical subset persisted on change to IndexedDB, falling back to localStorage if IndexedDB is unavailable (`draftStorage.js`).
 - `PERSISTENT_FLOOR_FIELDS` (the `.floorplan` projection, re-exported by `projectSerializer.js`) is derived from the same declaration. Do not hand-maintain it: the hand-listed version is how `exteriorLabels` came to be autosaved but not exported, so reopening a project silently degraded every later trace.
 - `rooms[]` accumulates every room the detector has placed (rect, per-side wall faces, implied px/ft). It is the boundary stage's containment evidence and the sample set for a robust multi-room scale — a single `roomOverlay` could be neither. Perimeter traces additionally carry `holes` (enclosed voids, subtracted from area), `quality` (detection confidence + warnings) and `wallFaces` (the detector's exterior/interior pair for *that* outline). `wallFaces` is per trace rather than re-derived from `tracedBoundaries` because that field holds only the most recent detection run: the exterior/interior switch (`setWallFaceMode`) is one setting for the whole canvas, so a plan traced in several passes has outlines the last run cannot describe.
+- **Every surface that prints an area breakdown goes through `displayedBreakdownTotal`**
+  (`areaCalculator.js`), which sums what the *rows* print rather than rounding the raw
+  total separately. Three call sites feed four printed surfaces — the exhibit, the
+  dock's table, the dock's copy-to-clipboard text and the mobile thumb bar — and the
+  last two sit on screen together, so a second definition shows two square footages at
+  once. Rounding each row and the total independently prints 1,241 + 442 + 89 under a
+  Total of 1,772; on a workfile exhibit a reviewer adds up by hand, that reads as an
+  error in the measurement.
 - `src/store/undoManager.js` interns image data URLs into a hash-keyed pool (`hashDataUrl`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step.
 - `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectPerimeterOverlay` / `selectCombinedArea` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library.
 
