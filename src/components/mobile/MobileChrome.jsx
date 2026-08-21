@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
-import { formatArea } from '../../utils/unitConverter';
+import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
+import { displayedBreakdownTotal } from '../../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary } from '../../utils/boundaryQuality';
 import MeasurementDock from '../MeasurementDock';
 import BottomSheet from './BottomSheet';
@@ -100,9 +101,14 @@ const MobileChrome = ({
 
   const hasOutline = (perimeterTraces || []).some((t) => t.vertices?.length >= 3);
   const noGla = areas.gla === 0 && areas.total > 0;
-  const { value: areaText, suffix: areaSuffix } = formatArea(
-    noGla ? areas.total : areas.gla, unit,
-  );
+  // The same arithmetic the dock and the exhibit do, because the thumb bar and
+  // the measurement sheet are on screen together: a total summed from the raw
+  // areas here and from the printed rows there put two different square
+  // footages a few pixels apart on one phone screen.
+  const totalDisplay = displayedBreakdownTotal(areas.byType, unit);
+  const { value: areaText, suffix: areaSuffix } = noGla
+    ? formatAreaValue(totalDisplay, unit)
+    : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
 
   // The same three questions the desktop's outline chips and scale chip answer,
   // reduced to the one bit the action bar has room for: is this number worth

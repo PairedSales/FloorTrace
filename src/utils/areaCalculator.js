@@ -1,3 +1,13 @@
+import { TRACE_TYPES } from './traceTypes';
+import { areaDisplayValue } from './unitConverter';
+
+// The total a breakdown prints: the sum of the figures its own rows print, not
+// the raw sum rounded separately. Every surface that shows a breakdown total
+// — the exhibit, the measurement dock, the mobile thumb bar — goes through
+// here, because two of them are on screen at once and may not disagree.
+export const displayedBreakdownTotal = (byType, unit) =>
+  TRACE_TYPES.reduce((sum, t) => sum + areaDisplayValue(byType?.[t.id] ?? 0, unit), 0);
+
 // Signed shoelace: area, centroid and winding all derive from this one
 // primitive. Taking the absolute value per-lobe hides self-intersection, where
 // the lobes cancel and the area silently under-reports.

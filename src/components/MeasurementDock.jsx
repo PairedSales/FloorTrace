@@ -2,8 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
-import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
-import { calculateArea, holeRings, isSubtracted } from '../utils/areaCalculator';
+import {
+  formatDimensionInput, formatArea, metersToFeet,
+  areaDisplayValue, formatAreaValue,
+} from '../utils/unitConverter';
+import {
+  calculateArea, holeRings, isSubtracted, displayedBreakdownTotal,
+} from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
 import { resolveAnchor } from '../utils/warningAnchors';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
@@ -283,9 +288,14 @@ const MeasurementDock = ({
   const breakdownRows = noGla
     ? typedRows
     : typedRows.filter((t) => t.id !== DEFAULT_TRACE_TYPE);
-  const { value: areaText, suffix: areaSuffix } = formatArea(
-    noGla ? areas.total : areas.gla, unit
-  );
+  // The printed total is the sum of the printed rows. Rounding the raw sum on
+  // its own lets the breakdown fail to reach the total sitting under it, and
+  // this table is what gets copied into a report.
+  const totalDisplay = displayedBreakdownTotal(areas.byType, unit);
+  const totalFormatted = formatAreaValue(totalDisplay, unit);
+  const { value: areaText, suffix: areaSuffix } = noGla
+    ? totalFormatted
+    : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
   const areaCaption = noGla
     ? 'Total · no living-area outline'
     : `Gross Living Area · ${glaCount} ${glaCount === 1 ? 'level' : 'levels'}`
@@ -317,9 +327,9 @@ const MeasurementDock = ({
     }
     // Tab-separated so it pastes into a report or a spreadsheet as rows.
     const lines = typedRows.map(
-      (t) => `${t.label}\t${formatArea(areas.byType[t.id], unit).value} ${areaSuffix}`
+      (t) => `${t.label}\t${formatAreaValue(areaDisplayValue(areas.byType[t.id], unit), unit).value} ${areaSuffix}`
     );
-    lines.push(`Total\t${formatArea(areas.total, unit).value} ${areaSuffix}`);
+    lines.push(`Total\t${totalFormatted.value} ${areaSuffix}`);
     navigator.clipboard.writeText(lines.join('\n'));
     flashStatus('Area breakdown copied to the clipboard');
   };
@@ -538,14 +548,14 @@ const MeasurementDock = ({
                         {t.label}
                       </td>
                       <td className="py-1 border-t border-line-soft text-right font-mono tabular-nums text-fg">
-                        {formatArea(areas.byType[t.id], unit).value}
+                        {formatAreaValue(areaDisplayValue(areas.byType[t.id], unit), unit).value}
                       </td>
                     </tr>
                   ))}
                   <tr>
                     <td className="pt-1.5 border-t border-line font-semibold text-fg">Total</td>
                     <td className="pt-1.5 border-t border-line text-right font-mono tabular-nums font-semibold text-fg">
-                      {formatArea(areas.total, unit).value}
+                      {totalFormatted.value}
                     </td>
                   </tr>
                 </tbody>

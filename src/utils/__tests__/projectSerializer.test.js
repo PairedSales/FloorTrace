@@ -6,6 +6,7 @@ import {
   validateProjectVersion,
   sanitizeData,
   importProject,
+  planStateForSave,
 } from '../projectSerializer';
 import { hashDataUrl } from '../hash';
 
@@ -634,5 +635,57 @@ describe('warning anchors round-trip', () => {
     const { statePatch } = deserializeSketch(project);
     expect(statePatch.perimeterTraces[0].quality.warnings[0].anchor).toBeUndefined();
     expect(statePatch.perimeterTraces[0].quality.warnings[0].code).toBe('bridged-opening');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planStateForSave — what "Save all plans" writes for one plan
+// ---------------------------------------------------------------------------
+
+describe('planStateForSave', () => {
+  const live = {
+    projectName: 'Plan on screen',
+    image: 'data:image/png;base64,LIVE',
+    unit: 'decimal',
+    perimeterTraces: [{ id: 'live' }],
+  };
+
+  it('takes the plan’s own state over the plan that happens to be live', () => {
+    const record = {
+      projectName: 'Parked plan',
+      image: 'data:image/png;base64,PARKED',
+      perimeterTraces: [{ id: 'parked' }],
+    };
+    const state = planStateForSave(live, record);
+    expect(state.projectName).toBe('Parked plan');
+    expect(state.image).toBe('data:image/png;base64,PARKED');
+    expect(state.perimeterTraces).toEqual([{ id: 'parked' }]);
+  });
+
+  // The whole point. `writeDocDraft` stores the image as a separate record, so
+  // a draft read back without it has no `image` KEY at all — and a spread over
+  // the live state then left the plan on screen supplying the picture for
+  // someone else's file, saved under someone else's name.
+  it('never lets a record with no image key inherit the live one', () => {
+    const state = planStateForSave(live, {
+      projectName: 'Lost its picture',
+      perimeterTraces: [{ id: 'parked' }],
+    });
+    expect(state.image).toBeNull();
+    expect(state.projectName).toBe('Lost its picture');
+  });
+
+  it('treats an explicitly empty image the same way', () => {
+    expect(planStateForSave(live, { image: null }).image).toBeNull();
+    expect(planStateForSave(live, { image: undefined }).image).toBeNull();
+  });
+
+  it('still supplies fields the record legitimately omits', () => {
+    expect(planStateForSave(live, { image: 'x' }).unit).toBe('decimal');
+  });
+
+  it('refuses to invent a plan when there is no record', () => {
+    expect(planStateForSave(live, null)).toBeNull();
+    expect(planStateForSave(live, undefined)).toBeNull();
   });
 });

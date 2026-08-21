@@ -54,6 +54,7 @@ import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { useDocumentTitle } from './hooks/useDocumentTitle';
+import { forgetFileHandle } from './utils/fileHandles';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -339,6 +340,10 @@ function App() {
       }
       detachActiveDocument();
       undoManager.clear();
+      // `restart` empties this plan in place and deliberately keeps its id, so
+      // the Save As grant cached against that id would carry into whatever is
+      // opened next and overwrite the file just closed.
+      forgetFileHandle(useAppStore.getState().activeDocumentId);
       useAppStore.getState().restart();
       flash('Plan closed');
       return;

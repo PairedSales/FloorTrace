@@ -143,6 +143,46 @@ export const formatArea = (areaInSqFeet, unit = 'decimal') => {
   };
 };
 
+/**
+ * An area as a number at display precision, before it becomes a string.
+ *
+ * A breakdown has to add up to the total printed beneath it. Each row is
+ * rounded on its own, so a total taken from the raw sum and rounded separately
+ * need not equal them — 1,241 + 442 + 89 under a Total of 1,771. On a workfile
+ * exhibit a reviewer adds up by hand, that reads as an error in the
+ * measurement.
+ *
+ * So a breakdown runs *every* figure through here — rows and total alike — and
+ * prints them with `formatAreaValue`. Summing rows that were formatted some
+ * other way is the same bug wearing a different hat.
+ */
+export const areaDisplayValue = (areaInSqFeet, unit = 'decimal') => {
+  if (unit === 'metric') {
+    const sqMeters = sqFeetToSqMeters(areaInSqFeet);
+    return sqMeters >= 1 ? Math.round(sqMeters) : Number(sqMeters.toFixed(2));
+  }
+  return areaInSqFeet > 0 ? Math.round(areaInSqFeet) : 0;
+};
+
+/**
+ * Print a value `areaDisplayValue` produced, or a sum of them.
+ *
+ * Never rounds again — that is what would reintroduce the mismatch — and always
+ * groups thousands, including on the fractional branch a sub-1 m² part puts a
+ * total onto. `toFixed` there quietly dropped the separator from the one number
+ * on the page that most needs it, in a column where every other cell had it.
+ *
+ * Not identical to `formatArea` on every input, and not meant to be: a bare
+ * zero prints "0" rather than metric's "0.00", and an area that rounds up to a
+ * whole square metre prints "1" rather than "1.00".
+ */
+export const formatAreaValue = (value, unit = 'decimal') => ({
+  value: Number.isInteger(value)
+    ? value.toLocaleString()
+    : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  suffix: unit === 'metric' ? 'm²' : 'ft²',
+});
+
 
 /**
  * Format dimension value for display in input field

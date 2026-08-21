@@ -3,6 +3,7 @@ import { internKey } from './hash';
 import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from './traceTypes';
 import { newTraceId } from '../store/ids';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
+import { getFileHandle, rememberFileHandle, forgetFileHandle } from './fileHandles';
 
 // Floor state fields written to a project file. Derived from the store's one
 // declaration of working state rather than hand-listed here — the hand-listed
@@ -529,23 +530,20 @@ export function deserializeSketch(project) {
 
 // ── Export & Import Orchestration ───────────────────────────────────────────
 
-/**
- * The file handle a plan was last saved to, for as long as the page lives.
- *
- * Kept in memory rather than in IndexedDB. A `FileSystemFileHandle` is
- * structured-cloneable and could be persisted, but a handle read back after a
- * reload has no permission attached — writing through it needs
- * `requestPermission`, which needs a user gesture, which means a re-grant
- * prompt on the first save of every restored plan. Within a session there is
- * no such problem: the grant from `showSaveFilePicker` is still live, so Save
- * overwrites the file the user chose instead of dropping another dated copy in
- * Downloads. That is the whole win, and it costs nothing.
- *
- * @type {Map<string, FileSystemFileHandle>} docId → handle
- */
-const fileHandles = new Map();
 
-export const forgetFileHandle = (docId) => fileHandles.delete(docId);
+/**
+ * The state to write for one plan of a multi-plan save.
+ *
+ * `record` is what that plan was parked with, or what its draft holds; the live
+ * state supplies only the fields such a projection legitimately omits. `image`
+ * is named explicitly because that is precisely where this went wrong: a draft
+ * read back without its image record carries no `image` key at all, so
+ * spreading it over the live state left the plan on screen supplying the
+ * picture for another plan's file — saved under that plan's name.
+ */
+export const planStateForSave = (liveState, record) => (
+  record ? { ...liveState, ...record, image: record.image ?? null } : null
+);
 
 export async function exportProject(storeState, historyState, isSaveAs = false, docId = null) {
   // Sanitize on the way out as well as the way in: a NaN produced in-session
@@ -567,7 +565,7 @@ export async function exportProject(storeState, historyState, isSaveAs = false, 
 
   // A plan already saved through the picker this session overwrites that file,
   // rather than asking again or leaving a second dated copy behind.
-  const known = docId ? fileHandles.get(docId) : null;
+  const known = getFileHandle(docId);
   if (!isSaveAs && known) {
     try {
       const writable = await known.createWritable();
@@ -577,7 +575,7 @@ export async function exportProject(storeState, historyState, isSaveAs = false, 
     } catch (err) {
       // The file may have been moved, deleted or had permission revoked since.
       // Fall through to the normal path rather than failing the save.
-      if (err.name !== 'AbortError') fileHandles.delete(docId);
+      if (err.name !== 'AbortError') forgetFileHandle(docId);
     }
   }
 
@@ -596,7 +594,7 @@ export async function exportProject(storeState, historyState, isSaveAs = false, 
       const writable = await handle.createWritable();
       await writable.write(jsonString);
       await writable.close();
-      if (docId) fileHandles.set(docId, handle);
+      rememberFileHandle(docId, handle);
       return true;
     } catch (err) {
       if (err.name === 'AbortError') return false; // user cancelled

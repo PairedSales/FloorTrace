@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
-import { parkedStateFor } from '../store/documentManager';
+import { parkedStateFor, parkedHistoryFor } from '../store/documentManager';
+import { readDocDraft, readHistoryRecord } from '../utils/workspaceDrafts';
+import { forgetFileHandle } from '../utils/fileHandles';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
@@ -43,7 +45,15 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
    */
   const makeRoomForIncoming = useCallback(() => {
     const state = useAppStore.getState();
-    if (!state.image) return true;
+    if (!state.image) {
+      // The incoming file takes this plan's id — a different drawing, a
+      // different name, the same tab. Whatever that id was last saved to
+      // belongs to something else now, so the next Save has to ask rather than
+      // overwrite it. The third place a plan stops being that plan, beside
+      // closing one and emptying the last.
+      forgetFileHandle(state.activeDocumentId);
+      return true;
+    }
     return Boolean(openPlan());
   }, [openPlan]);
 
@@ -160,37 +170,80 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
    * find out you saved one plan twice.
    */
   const handleSaveAllProjects = useCallback(async () => {
-    const state = useAppStore.getState();
-    const order = state.documentOrder;
+    const order = useAppStore.getState().documentOrder;
     if (order.length < 2) return handleSaveProject(false);
 
     setIsProcessing(true, 'Saving all plans…');
     try {
-      const { exportProject } = await import('../utils/projectSerializer');
+      const { exportProject, planStateForSave } = await import('../utils/projectSerializer');
       const used = new Set();
       let saved = 0;
+      let unreadable = 0;
+      let withoutImage = 0;
 
       for (const docId of order) {
-        const isActive = docId === state.activeDocumentId;
-        const meta = state.documents[docId] ?? {};
-        if (!(isActive ? state.image : meta.hasWork)) continue;
+        // Read live, per iteration. A plan's records come off disk inside this
+        // loop — roughly a second each on a real plan — and the tab strip stays
+        // clickable throughout, so which plan is active can change mid-save.
+        // Deciding it from a snapshot taken before the first await is the same
+        // shape of mistake as the one below.
+        const live = useAppStore.getState();
+        const isActive = docId === live.activeDocumentId;
+        const meta = live.documents[docId] ?? {};
+        if (!(isActive ? live.image : meta.hasWork)) continue;
 
-        // Only the active plan's full state is on the root; the rest are saved
-        // from what they were parked with.
-        const planState = isActive
-          ? useAppStore.getState()
-          : { ...useAppStore.getState(), ...(parkedStateFor(docId) ?? {}) };
+        // Only the active plan's full state is on the root. A plan parked this
+        // session is in memory; one the workspace reopened but has not been
+        // switched to since is only on disk, because `adoptWorkspace` opens
+        // with `clearParked()`.
+        //
+        // Spread over the active state, a null record left the active state
+        // standing: Save all wrote the plan you were looking at into every
+        // other plan's file, under that plan's name, and flashed "Saved 3
+        // plans". `planStateForSave` never falls back to the live plan, and
+        // pins `image` rather than letting an absent key inherit one.
+        let planState;
+        let history;
+        if (isActive) {
+          planState = live;
+          history = undoManager.getHistoryState();
+        } else {
+          const parked = parkedStateFor(docId);
+          planState = planStateForSave(live, parked ?? (await readDocDraft(docId)).state);
+          if (!planState) {
+            unreadable += 1;
+            continue;
+          }
+          // Its own history, not none. The plan is either in memory with its
+          // stacks or on disk with its history record beside its draft, so the
+          // reason this used to hard-code null — that only the live plan's
+          // stacks were reachable — stopped being true. Without it, Save all
+          // and Ctrl+S produced two different files for the same plan.
+          history = parked ? parkedHistoryFor(docId) : await readHistoryRecord(docId);
+        }
+        if (!planState.image) withoutImage += 1;
 
         const success = await exportProject(
           { ...planState, projectName: uniqueName(planState.projectName || meta.title, used) },
-          isActive ? undoManager.getHistoryState() : null,
+          history ?? null,
           false,
           docId,
         );
         if (success) saved += 1;
       }
 
-      flash(saved === 1 ? 'Saved 1 plan' : `Saved ${saved} plans`);
+      // Counted and said. A plan silently missing from "Save all", or one
+      // written without the drawing, is the kind of loss the user finds out
+      // about from the folder, later.
+      const message = saved === 1 ? 'Saved 1 plan' : `Saved ${saved} plans`;
+      const notes = [];
+      if (unreadable) notes.push(`${unreadable} could not be read back`);
+      if (withoutImage) notes.push(`${withoutImage} saved without its image`);
+      if (notes.length) {
+        notify(`${message} — ${notes.join(', ')}.`, { type: 'warning', id: 'file-save' });
+      } else {
+        flash(message);
+      }
     } catch (error) {
       console.error('Error saving all projects:', error);
       notify(`Could not save every plan — ${error.message}`, { type: 'error', id: 'file-save' });

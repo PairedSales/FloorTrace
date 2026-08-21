@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 import { readDocDraft, readHistoryRecord, removePlan } from '../utils/workspaceDrafts';
+import { forgetFileHandle } from '../utils/fileHandles';
 import { confirmToast } from '../utils/confirmToast';
 import { notify, flash } from '../utils/notify';
 
@@ -125,6 +126,10 @@ export function usePlanManager() {
     }
 
     await removePlan(docId);
+    // The Save As grant dies with the plan. Left behind, the handle cached
+    // under this id sends the next plan's first Save into the closed plan's
+    // file — no picker, no warning, the previous property's exhibit gone.
+    forgetFileHandle(docId);
     useAppStore.getState().closeDocument(docId);
     return true;
   }, []);
