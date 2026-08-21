@@ -4,6 +4,7 @@ import {
   beginWork, settleWork, deliver, isCurrent, signalOf,
   detachDocument, detachActiveDocument, workCount, resetRequests,
 } from '../documentRequests';
+import { clearParked, parkedInboxSize } from '../documentManager';
 
 const app = () => useAppStore.getState();
 
@@ -13,6 +14,7 @@ const IMAGE_B = 'data:image/png;base64,BBBB';
 describe('documentRequests', () => {
   beforeEach(() => {
     resetRequests();
+    clearParked();
     app().restart();
     useAppStore.setState({ image: IMAGE_A });
   });
@@ -37,9 +39,10 @@ describe('documentRequests', () => {
     expect(isCurrent(work)).toBe(false);
   });
 
-  it('refuses a result whose plan is gone', () => {
+  it('drops a result whose plan is gone', () => {
     const work = beginWork('scan');
-    useAppStore.setState({ activeDocumentId: 'doc-somewhere-else' });
+    // Closed, not merely parked: the plan is no longer in `documents`.
+    useAppStore.setState({ documents: {}, activeDocumentId: 'doc-somewhere-else' });
 
     expect(deliver(work, () => {})).toBe('dropped');
   });
@@ -49,11 +52,81 @@ describe('documentRequests', () => {
   // the other's staleness test exactly.
   it('tells two plans holding identical images apart', () => {
     const work = beginWork('scan');
-    // Same pixels, different plan.
-    useAppStore.setState({ activeDocumentId: 'doc-the-other-one', image: IMAGE_A });
+    // Same pixels, different plan, and the owning plan is closed.
+    useAppStore.setState({ documents: {}, activeDocumentId: 'doc-the-other-one', image: IMAGE_A });
 
     expect(work.image).toBe(useAppStore.getState().image);
     expect(deliver(work, () => {})).toBe('dropped');
+  });
+
+  // The distinction this layer gained once a plan could be open without being
+  // live. Parking used to abort in-flight work, so switching tabs mid-trace
+  // threw the trace away and cleared the spinner — you came back to a plan
+  // where nothing had happened and nothing said so.
+  describe('a plan that is open but parked', () => {
+    it('holds the write instead of dropping it', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('trace');
+
+      const docB = app().openDocument();
+      expect(app().activeDocumentId).toBe(docB);
+
+      let ran = false;
+      expect(deliver(work, () => { ran = true; })).toBe('routed');
+      // Held, not run: the store's setters address whichever plan is live.
+      expect(ran).toBe(false);
+      expect(parkedInboxSize(work.docId)).toBe(1);
+    });
+
+    it('runs the held write when that plan is adopted', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('trace');
+      const docA = work.docId;
+
+      app().openDocument();
+      deliver(work, () => useAppStore.getState().setProjectName('traced while away'));
+
+      app().switchDocument(docA);
+      expect(app().projectName).toBe('traced while away');
+    });
+
+    it('refuses a write that must not survive a switch', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('measure');
+      app().openDocument();
+
+      let ran = false;
+      const verdict = deliver(work, () => { ran = true; }, { replayable: false });
+
+      // A calibration is the case: area goes as scale squared, so applying one
+      // late is a wrong number wearing the same green as a right one.
+      expect(verdict).toBe('refused');
+      expect(ran).toBe(false);
+      expect(parkedInboxSize(work.docId)).toBe(0);
+    });
+
+    it('drops a held write when its plan is closed before it returns', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('trace');
+      const docA = work.docId;
+
+      app().openDocument();
+      deliver(work, () => useAppStore.getState().setProjectName('should never land'));
+      app().closeDocument(docA);
+
+      expect(app().projectName).toBe('');
+      expect(parkedInboxSize(docA)).toBe(0);
+    });
+
+    it('still refuses a result whose parked plan has a different image', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('trace');
+      // A crop lands before the switch, so the result describes ink that is gone.
+      useAppStore.setState({ image: IMAGE_B });
+      app().openDocument();
+
+      expect(deliver(work, () => {})).toBe('stale');
+    });
   });
 
   it('owns the image it was handed, not whatever is loaded', () => {

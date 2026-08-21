@@ -708,21 +708,39 @@ function App() {
       });
 
       perfMark(MARKS.traceEnd);
-      if (!isCurrent(work)) return null;
-      // Kept for brush results too: a drawn trace has the same inner/outer
-      // pair, so toggling wall mode afterwards must still work.
-      setTracedBoundaries(traced);
-      const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+
+      // One closure, whichever plan it turns out to belong to. Run now if this
+      // plan is live; held and replayed on adopt if the user switched tabs
+      // while the trace ran. Held rather than dropped is the whole point: a
+      // trace is seconds of work, and losing it silently because you looked at
+      // another plan is the kind of nothing-happened that is hard to even
+      // report as a bug.
+      // Captured from the apply, never re-derived. This count is what decides
+      // whether `handleTracePerimeter` falls back to draw mode, and
+      // `applyTracedBoundary` returns the floors it could actually use — which
+      // is not the same as the floors the detector reported.
+      let applied = 0;
+      const applyTrace = () => {
+        // Kept for brush results too: a drawn trace has the same inner/outer
+        // pair, so toggling wall mode afterwards must still work.
+        setTracedBoundaries(traced);
+        const floors = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+        // Every trace, not only the one the automatic scan ran: the footprint is
+        // the one check on the scale that survives a majority of bad rooms, and a
+        // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure
+        // selection over rooms already measured, and no-ops unless the scale in
+        // force is still the automatic one.
+        applied = floors;
+        if (floors) reviewAgainstFootprint(tracedAreaPx(traced));
+        reportTrace(traced, floors);
+      };
+
+      const verdict = deliver(work, applyTrace);
+      if (verdict !== 'applied') return null;
+
       perfMark(MARKS.areaReady);
       perfReportRun();
-      // Every trace, not only the one the automatic scan ran: the footprint is
-      // the one check on the scale that survives a majority of bad rooms, and a
-      // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure
-      // selection over rooms already measured, and no-ops unless the scale in
-      // force is still the automatic one.
-      if (floorCount) reviewAgainstFootprint(tracedAreaPx(traced));
-      reportTrace(traced, floorCount);
-      return floorCount ? qualitySummary(traced?.quality).level : 'failed';
+      return applied ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
       // The toast is a claim about the plan on screen — `id: 'trace-result'`
       // means it replaces whatever that plan's own trace had to say — so it is

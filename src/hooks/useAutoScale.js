@@ -5,7 +5,7 @@ import { isUserAsserted } from '../utils/detection/validate.js';
 import { notify, flash } from '../utils/notify';
 import { perfMark, MARKS } from '../utils/perfMarks';
 import useAppStore from '../store/appStore';
-import { beginWork, settleWork, isCurrent } from '../store/documentRequests';
+import { beginWork, settleWork, deliver } from '../store/documentRequests';
 import * as undoManager from '../store/undoManager';
 
 /**
@@ -94,9 +94,19 @@ export function useAutoScale() {
       settleWork(work);
       perfMark(MARKS.measureEnd);
     }
-    // The plan changed under us — a crop, an erase, a new file — while the
-    // batch ran, so these measurements are of ink that is gone.
-    if (!isCurrent(work)) return null;
+    // The plan changed under us while the batch ran.
+    //
+    // A calibration is deliberately NOT held for a parked plan the way a trace
+    // is. Area goes as scale squared, so a scale applied late — from rooms the
+    // user has since moved on from, onto a plan they are not looking at — is a
+    // wrong number wearing the same green as a right one. The plan is flagged
+    // instead, and re-measuring is one click.
+    const verdict = deliver(work, () => {}, { replayable: false });
+    if (verdict === 'refused') {
+      useAppStore.getState().setDocumentMeta(work.docId, { needsRescale: true });
+      return null;
+    }
+    if (verdict !== 'applied') return null;
 
     const rooms = measured.filter(Boolean);
     const decision = selectProjectScale(rooms, { nonGlaRegions });
