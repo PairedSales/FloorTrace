@@ -14,9 +14,20 @@ import { orientDimsToBox } from './validate.js';
 
 const COV_STRONG = 0.6;
 const COV_THIN = 0.8;
+// Floor for a wall that a doorway has broken. Below this a side is genuinely
+// open (a cased opening into the next room, an open-plan boundary) and the
+// evidence is too weak to offer even as an alternative.
+const COV_PARTIAL = 0.4;
+// How far the default rectangle's aspect must sit from the label before its
+// sides are reconsidered at all. Below this the drawing and the label agree and
+// there is nothing to repair.
+const ASPECT_SUSPECT = 0.15;
 // An essentially unbroken wall across the whole span: a side this well drawn
 // is a real side, and no label reading may invent one inside it.
 const COV_SOLID = 0.9;
+// Ink this faint is the space between two walls, not part of either: the floor
+// a scan steps down through to know it has left the wall it was standing on.
+const COV_BETWEEN = 0.3;
 const THICK_MIN = 0.22;
 
 const SIDES = [
@@ -88,6 +99,15 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
 
   const isThick = (c) => c.cov >= COV_STRONG && c.thick >= THICK_MIN;
   const isThin = (c) => c.cov >= COV_THIN;
+  // A real wall with a wide opening in it: thick where it is drawn, but covering
+  // too little of the span to stop growth and too little to read as a thin line
+  // either, since COV_THIN is *higher* than COV_STRONG. Such a wall was invisible
+  // to both tests and simply passed through — a kitchen whose west wall is broken
+  // by a 3'-3" doorway covers 58% of the side against COV_STRONG's 60%, so the
+  // rectangle ran on through the doorway and stopped at the far wall of the next
+  // room, 39% too wide. Recorded here as an option for the label-driven search;
+  // never as a stop, and never as a default.
+  const isPartial = (c) => c.cov >= COV_PARTIAL && c.cov < COV_STRONG && c.thick >= THICK_MIN;
   // On thin-wall plans the thick mask carries no signal; coverage is all we have.
   const thinPlan = wallThickness <= 3;
 
@@ -166,7 +186,7 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         guard += 1;
         pos += side.dir;
         if (pos < 0 || pos > limit || !insideFootprint(side, pos)) return found;
-        inWall = lineCoverage(side, pos).cov >= 0.3;
+        inWall = lineCoverage(side, pos).cov >= COV_BETWEEN;
       }
       // Free space: advance to the next thick hit.
       let hit = null;
@@ -176,9 +196,59 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         if (pos < 0 || pos > limit || !insideFootprint(side, pos)) return found;
         const c = lineCoverage(side, pos);
         if (isThick(c)) hit = { pos, ...c };
-        else if (c.cov >= 0.3) break; // thin line: skip its body, keep looking
+        else if (c.cov >= COV_BETWEEN) break; // thin line: skip its body, keep looking
       }
       if (hit) found.push(hit);
+    }
+    return found;
+  };
+
+  // Phase A judges every side against whatever span the perpendicular sides
+  // have reached so far, and its inner loop accelerates — one pass can carry a
+  // side ~150 px while that span is still the label's own box. A wall broken by
+  // a doorway at the label's height therefore reads as completely empty on the
+  // way past: the kitchen's west wall covers 65% of the finished side but 0% of
+  // the 13 px strip the scan actually judged it against, so the rectangle ran
+  // through the doorway and stopped at the next room's far wall, 39% too wide.
+  //
+  // Re-walk each side once the rectangle has settled, when the span is the real
+  // one, and collect the walls that were passed. Offered to the label-driven
+  // search only; a side's default stop is never changed by what turns up here.
+  const rescanSide = (side) => {
+    const horizontal = side.key === 'left' || side.key === 'right';
+    const from = horizontal ? px : py;
+    const to = state[side.key].pos;
+    const found = [];
+    let last = -Infinity;
+    let walls = 0;
+    let inWall = false;
+    for (let pos = from; side.dir < 0 ? pos > to : pos < to; pos += side.dir) {
+      if (pos < 0 || pos > limitFor(side)) break;
+      const c = lineCoverage(side, pos);
+      // Out the far side of a wall, by the test scanBeyond already uses to step
+      // over the one it is standing on.
+      if (c.cov < COV_BETWEEN) {
+        inWall = false;
+        continue;
+      }
+      if (!isThick(c) && !isPartial(c)) continue;
+      if (Math.abs(pos - last) <= band * 2 + 2) continue;
+      // The budget is three WALLS, not three samples of one. A hatched or
+      // double-drawn run is wider than the `band * 2 + 3` sample spacing, so
+      // counting samples spent the whole budget inside the first two runs and
+      // never reached the room's own wall — ExampleFloorplan6's LIVING ROOM,
+      // whose left wall is the third run out, lost 11px off that edge.
+      if (!inWall) {
+        if (walls >= 3) break;
+        walls += 1;
+        inWall = true;
+      }
+      last = pos;
+      found.push({ pos, ...c });
+      // Phase C searches these four lists as a product, so a pathologically wide
+      // run must not grow one without bound. Never reached on the fixtures; the
+      // widest side offers 5.
+      if (found.length >= 12) break;
     }
     return found;
   };
@@ -207,6 +277,32 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
 
   const cands = {};
   for (const side of SIDES) cands[side.key] = candidatesFor(side);
+
+  // Offer the walls Phase A passed over — but only once the ordinary search has
+  // been tried and still cannot produce a rectangle the label agrees with.
+  //
+  // Gating on the DEFAULT rectangle is not enough: the default is frequently a
+  // leaked rectangle that the ordinary search already repairs, so a
+  // default-based gate opens this path on rooms that were about to come out
+  // right and lets a marginally better-aspected candidate pull a correct edge
+  // off its wall (measured: ExampleFloorplan6's LIVING ROOM moved 11px inward
+  // off a wall at x=166-175, 99.2% -> 93.2% IoU). Gating on the search's own
+  // best answer keeps this strictly a repair of last resort.
+  const addRescanCandidates = () => {
+    let added = false;
+    for (const side of SIDES) {
+      const { list } = cands[side.key];
+      for (const p of rescanSide(side)) {
+        const edge = edgeFromHit(side, p.pos);
+        // The rescan re-finds the wall the side stopped at, and the thin lines
+        // it recorded on the way; only new positions are worth adding.
+        if (list.some((c) => Math.abs(c.edge - edge) <= band)) continue;
+        list.push({ edge, cov: p.cov, thick: p.thick, kind: 'partial' });
+        added = true;
+      }
+    }
+    return added;
+  };
 
   const pick = { left: cands.left.def, right: cands.right.def, top: cands.top.def, bottom: cands.bottom.def };
 
@@ -269,6 +365,12 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
         const chosen = list[p[side.key]];
         if (chosen.kind === 'beyond') penalty += 0.12 * (p[side.key] - def);
         else if (chosen.kind === 'thin' && def !== p[side.key]) penalty += 0.05;
+        // Weaker evidence than a thin line — the wall is there but a door is
+        // missing from it — so it costs more, and only a label the geometry
+        // genuinely fits will buy it. The fixtures are insensitive to the exact
+        // figure (0.08, 0.15 and 0.25 all give identical results across the set),
+        // so it is set on the conservative side of that range.
+        else if (chosen.kind === 'partial') penalty += 0.15;
         else if (chosen.kind === 'clamp' && list.length > 1) penalty += 0.1;
       }
       if (footprintInfo?.footprintArea && w * h > 0.55 * footprintInfo.footprintArea) {
@@ -283,20 +385,39 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
     let best = { ...pick };
     let bestCost = comboCost(pick);
     const indices = (key) => cands[key].list.map((_, i) => i);
-    for (const li of indices('left')) {
-      for (const ri of indices('right')) {
-        for (const ti of indices('top')) {
-          for (const bi of indices('bottom')) {
-            const p = { left: li, right: ri, top: ti, bottom: bi };
-            const cost = comboCost(p);
-            if (cost < bestCost - 1e-9) {
-              bestCost = cost;
-              best = p;
+    const search = () => {
+      for (const li of indices('left')) {
+        for (const ri of indices('right')) {
+          for (const ti of indices('top')) {
+            for (const bi of indices('bottom')) {
+              const p = { left: li, right: ri, top: ti, bottom: bi };
+              const cost = comboCost(p);
+              if (cost < bestCost - 1e-9) {
+                bestCost = cost;
+                best = p;
+              }
             }
           }
         }
       }
-    }
+    };
+    search();
+
+    // Still the wrong shape after considering every ordinary candidate: the
+    // side the label wants is a wall Phase A never recorded, because it judged
+    // it against a span that was still only the label's own box. Re-walk the
+    // sides now that the rectangle has settled and search again over the
+    // widened set. `best`/`bestCost` carry over, so this can only improve on
+    // the answer the ordinary search reached.
+    const shapeOf = (p) => {
+      const w = cands.right.list[p.right].edge - cands.left.list[p.left].edge;
+      const h = cands.bottom.list[p.bottom].edge - cands.top.list[p.top].edge;
+      return w > 0 && h > 0
+        ? Math.min(Math.abs(Math.log((w / h) / target)), Math.abs(Math.log((w / h) * target)))
+        : Infinity;
+    };
+    if (shapeOf(best) > ASPECT_SUSPECT && addRescanCandidates()) search();
+
     Object.assign(pick, best);
   }
 

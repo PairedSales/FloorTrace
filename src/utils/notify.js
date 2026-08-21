@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 
 /**
  * The one place the app decides how loudly to speak.
@@ -86,8 +87,17 @@ export function notifyAt(message, { anchor, id, type = 'error', duration } = {})
   if (anchor) {
     // Outlives the toast slightly: the highlight is the useful half, and it
     // should not vanish the instant the words do.
+    //
+    // The plan it belongs to is captured now, and checked when it fires. An
+    // anchor is a place on one drawing, so clearing it later must not reach
+    // across a plan switch and wipe a highlight the user has since raised on a
+    // different plan — the timer outlives the toast by a second and a half,
+    // which is long enough to switch.
+    const anchoredTo = store.activeDocumentId;
     anchorTimer = setTimeout(() => {
-      useAppStore.getState().setErrorAnchor(null);
+      const now = useAppStore.getState();
+      if (now.activeDocumentId !== anchoredTo) return;
+      now.setErrorAnchor(null);
     }, ms + 1500);
   }
   return notify(message, { type, id, duration: ms });
@@ -99,5 +109,5 @@ export function notifyAt(message, { anchor, id, type = 'error', duration } = {})
  * compare between two acknowledgements.
  */
 export function flash(text) {
-  useAppStore.getState().flashStatus(text);
+  useWorkspaceStore.getState().flashStatus(text);
 }

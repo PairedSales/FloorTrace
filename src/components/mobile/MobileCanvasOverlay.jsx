@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CloudOff, Loader2, Maximize } from 'lucide-react';
 import useAppStore from '../../store/appStore';
+import useWorkspaceStore from '../../store/workspaceStore';
 
 /**
  * What the desktop status bar says, said where a phone has room for it: over
@@ -16,7 +17,7 @@ const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
   const draftState = useAppStore((s) => s.draftState);
-  const flash = useAppStore((s) => s.statusFlash);
+  const flash = useWorkspaceStore((s) => s.statusFlash);
 
   const [shownFlash, setShownFlash] = useState(null);
   useEffect(() => {

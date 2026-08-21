@@ -116,6 +116,11 @@ export function useToolRouter({
 
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
+  // The deferred single-click below *places geometry* — a perimeter vertex, a
+  // scale line end, a shape corner — 50 ms after the click, through callback
+  // props. Unlike the boolean-ref timers elsewhere in this file, letting it
+  // fire after unmount writes to the store on behalf of a canvas that is gone.
+  const deferredClickRef = useRef(null);
 
   const getCanvasCoords = useCallback(
     (stage) => getCanvasCoordinates(stage, scaleRef, contentLayerRef),
@@ -624,9 +629,11 @@ export function useToolRouter({
       return;
     }
     
-    setTimeout(() => {
+    if (deferredClickRef.current) clearTimeout(deferredClickRef.current);
+    deferredClickRef.current = setTimeout(() => {
+      deferredClickRef.current = null;
       if (clickCountRef.current !== 1) return;
-      
+
       const stage = e.target.getStage();
       if (!stage) return;
       
@@ -1018,6 +1025,20 @@ export function useToolRouter({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [handleKeyDown]);
+
+  useEffect(() => () => {
+    if (deferredClickRef.current) clearTimeout(deferredClickRef.current);
+    if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+  }, []);
+
+  // `selectedScaleLineIndex` is an index into `scaleLines`, resolved against the
+  // live store only when Delete is pressed — so any change of that array's
+  // identity leaves the held index pointing at a different line. Same rule, and
+  // the same fix, as `selectedVertexIndex` in usePerimeterEditor.
+  const scaleLines = useAppStore((s) => s.scaleLines);
+  useEffect(() => {
+    setSelectedScaleLineIndex(null);
+  }, [scaleLines]);
 
   const handleRoomMouseDown = useCallback((e) => {
     if (!roomOverlay) return;

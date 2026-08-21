@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 export function useShapeEditor({
   customShapes,
@@ -6,6 +6,15 @@ export function useShapeEditor({
   setSelectedMeasurementLineIndex,
 }) {
   const [selectedCustomShapeIndex, setSelectedCustomShapeIndex] = useState(null);
+
+  // An index into `customShapes`, so any change of that array's identity — a
+  // shape added, deleted, dragged, or the whole set cleared — makes the held
+  // index mean a different shape than the one the user selected. Same rule as
+  // `selectedVertexIndex` in usePerimeterEditor, which is where this pattern
+  // is documented.
+  useEffect(() => {
+    setSelectedCustomShapeIndex(null);
+  }, [customShapes]);
 
   const handleCustomShapeSelect = useCallback((index, e) => {
     e.cancelBubble = true;

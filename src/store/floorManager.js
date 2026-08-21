@@ -1,4 +1,5 @@
 import * as undoManager from './undoManager';
+import { newTraceId } from './ids';
 import {
   DEFAULT_TRACE_TYPE,
   assignTypeColors,
@@ -24,15 +25,11 @@ import { markStaleHoles } from '../utils/geometryValidation';
 const ordinalSuffix = (num) =>
   num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
 
-/**
- * Mint a trace id. A bare `Date.now()` is not unique: two traces created in the
- * same millisecond shared an id, and `deletePerimeterTrace` filters by id, so
- * deleting one deleted both. The counter is what guarantees uniqueness — unlike
- * trace *names*, ids are never user-visible, so it surviving loadProject is
- * harmless; the timestamp is only there to keep ids readable.
- */
-let traceIdCounter = 0;
-export const newTraceId = () => `trace-${Date.now()}-${(traceIdCounter += 1)}`;
+// Minted in `ids.js`, which imports nothing: this module sits in a cycle with
+// appStore and undoManager, and appStore mints a default trace id at module
+// load — so whoever entered the cycle first decided whether the minter existed
+// yet. Re-exported here because this is where callers expect to find it.
+export { newTraceId } from './ids';
 
 // A trace's stored wall-face pair is read repeatedly — every flip of the
 // exterior/interior switch — so what lands on the trace is a copy. Sharing the

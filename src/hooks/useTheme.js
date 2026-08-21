@@ -3,6 +3,11 @@ import { useState, useEffect, useCallback } from 'react';
 const THEME_KEY = 'floortrace:theme';
 export const THEME_MODES = ['system', 'light', 'dark'];
 
+// Two places name the current mode — the command bar's toggle and the View
+// menu's row — so the wording lives with the modes rather than in whichever
+// component happened to render it first.
+export const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
+
 const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
 
 // Stamped on <html>, which is what index.css keys the dark token block off.

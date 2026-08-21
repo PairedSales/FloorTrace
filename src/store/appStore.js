@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createFloorSlice, newTraceId } from './floorManager';
+import { createFloorSlice } from './floorManager';
+import { newTraceId } from './ids';
+import { createDocumentSlice } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import {
@@ -15,16 +17,23 @@ import {
  * undo/redo and autosave). Defining them in one place avoids the duplication
  * that previously existed across applySnapshot, resetOverlays, and autosave.
  */
-const DEFAULT_TRACE_ID = 'trace-default';
 // A function, not a literal: handing out the same nested objects on every
 // reset and undo fallback aliased one project's calibration into the next.
-const workingStateDefaults = () => ({
+//
+// The default trace's id is minted per call for the same class of reason, one
+// level up. It used to be the constant `'trace-default'`, so every plan that
+// had never had a trace added shared it — and trace ids are what
+// `focusedWarning`, the double-counting report and an exhibit's outline ids all
+// key on. With one plan that is invisible; with two it is a collision.
+const workingStateDefaults = () => {
+  const defaultTraceId = newTraceId();
+  return {
   image: null,
   imageMimeType: 'image/png',
   roomOverlay: null,
   perimeterTraces: [
     {
-      id: DEFAULT_TRACE_ID,
+      id: defaultTraceId,
       name: '1st Floor',
       vertices: [],
       closed: false,
@@ -38,7 +47,7 @@ const workingStateDefaults = () => ({
     }
   ],
   traceInteractionMode: 'idle',
-  activeTraceId: DEFAULT_TRACE_ID,
+  activeTraceId: defaultTraceId,
   roomDimensions: { width: '', height: '' },
   calibration: {
     calibrated: false,
@@ -106,7 +115,8 @@ const workingStateDefaults = () => ({
   // Project tracking states
   isDirty: false,
   projectId: null,
-});
+  };
+};
 
 const WORKING_STATE_DEFAULTS = workingStateDefaults();
 
@@ -137,6 +147,15 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)
 );
+
+/**
+ * The names of every working-state field, exported so the three projections
+ * below can be checked against their one source rather than by hand. The keys
+ * and not the object: handing out `WORKING_STATE_DEFAULTS` itself is how one
+ * project's calibration came to be aliased into the next — callers who need
+ * values want `workingStateDefaults()`.
+ */
+export const WORKING_STATE_KEYS = Object.keys(WORKING_STATE_DEFAULTS);
 
 /**
  * Snapshot fields carried by reference instead of deep-cloned. Both are replaced
@@ -243,34 +262,19 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  showHelpModal: false,
+  // Per-plan, despite being UI: both name a place on one drawing. Window-level
+  // UI — the dock, the modals, the status flash — lives in workspaceStore.js.
   // Which detection warning the user is inspecting, as {traceId, index} into
   // that trace's `quality.warnings`. Declared here rather than in the working
   // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
   // edit must not restore a highlight. Every reader resolves it against the
   // live traces, so a focus left on a deleted trace simply renders nothing.
   focusedWarning: null,
-  // Transient confirmation for the status bar ("Area copied"), as
-  // {text, at}. `at` is what makes two identical messages in a row two
-  // separate flashes rather than one no-op set. UI-only for the same reason
-  // as focusedWarning: undo must not replay a confirmation.
-  statusFlash: null,
-  // Whether the measurement dock is open. UI-only — a collapsed panel is a
-  // view preference, not a fact about the project, so it must not ride along
-  // in a `.floorplan` or be restored by an undo.
-  dockOpen: true,
-  // Whether the export dialog is up. UI-only for the same reason.
-  showExportDialog: false,
   // What the autosaved draft is actually doing right now: 'off' | 'pending' |
   // 'saved' | 'error'. Reported rather than assumed — the status bar used to
   // read a hardcoded "Saved", which was the one claim in the shell that was
   // true by coincidence and never checked.
   draftState: 'off',
-  // Pending destructive confirmation, as {message, detail, confirmLabel,
-  // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
-  // promise-returning function callable from non-React code while a real
-  // dialog does the rendering.
-  confirmRequest: null,
   // A transient canvas highlight for an error that has a place on the plan —
   // a self-intersection knows which two edges cross. Same anchor shape as
   // `focusedWarning` resolves to, so WarningHighlightLayer renders both.
@@ -278,6 +282,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
+
+  // ── document identity (which plans exist; metadata only) ───────────────────
+  ...createDocumentSlice(set, get),
 
   // ── floor management ───────────────────────────────────────────────────────
   ...createFloorSlice(set, get),
@@ -520,30 +527,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     isProcessing: false,
     processingMessage: '',
   }),
-  setShowHelpModal: (v) => set({ showHelpModal: v }),
   setFocusedWarning: (v) => set({ focusedWarning: v }),
-  flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
-  setDockOpen: (v) => set({ dockOpen: v }),
-  setShowExportDialog: (v) => set({ showExportDialog: v }),
   setDraftState: (v) => set({ draftState: v }),
   // Dirty like any other document edit: the subject line is what a saved
   // project is filed under, so losing it is losing work.
   setProjectName: (v) => set({ projectName: v, isDirty: true }),
   setErrorAnchor: (v) => set({ errorAnchor: v }),
-  requestConfirm: (req) => {
-    // A second request while one is open would strand the first promise, so
-    // the incumbent is answered `false` — the safe default — before it is
-    // replaced.
-    const pending = get().confirmRequest;
-    if (pending) pending.resolve(false);
-    set({ confirmRequest: req });
-  },
-  resolveConfirm: (value) => {
-    const pending = get().confirmRequest;
-    if (!pending) return;
-    set({ confirmRequest: null });
-    pending.resolve(value);
-  },
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────
@@ -618,6 +607,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   restart: () => {
     set(workingStateDefaults());
     get().resetPerimeterTraces();
+    // The tab is the same tab, so its identity survives — but nothing it knew
+    // about the old plan may, or a closed project leaves its filename behind to
+    // name the empty one that replaces it.
+    get().resetActiveDocumentMeta();
   },
 
   // ── bulk restore (used by autosave restore) ────────────────────────────────
@@ -674,8 +667,12 @@ let lastOverlayResult = null;
 
 // Carries the whole trace geometry, not just `vertices`: a lossy adapter is how
 // an edit round-tripped through here could drop holes on the way back in.
-/** Selector to get the active perimeter overlay (compatibility adapter) */
-export const selectPerimeterOverlay = (state) => {
+//
+// Named for what it reads: the overlay of the *active* trace of the *live*
+// store, memoised on module state. Anything that needs the overlay of a state
+// it was handed must not come through here — the memo answers for whichever
+// state called last.
+export const selectActivePerimeterOverlay = (state) => {
   const traces = state.perimeterTraces || [];
   const active = traces.find(t => t.id === state.activeTraceId);
   if (!active) {
@@ -753,7 +750,47 @@ const findDoubleCounted = (traces) => {
   return found;
 };
 
-export const selectAreaByType = (state) => {
+/**
+ * Area of the visible traces, split by type — computed, not memoised.
+ *
+ * Takes any working state, not necessarily the live one, and returns a fresh
+ * object every call. That is exactly what a caller wants when it is not a React
+ * subscription: the exhibit builder is handed a state and must describe *that*
+ * state, and a module-level memo keyed on nothing but the last call is the
+ * wrong tool for it — with more than one plan around, alternating callers would
+ * thrash the memo, and the exhibit could be handed the other plan's numbers.
+ *
+ * `selectActiveAreaByType` below is the memoised view of the live store, for
+ * components. This is the arithmetic underneath it.
+ */
+export const computeAreaByType = (state) => {
+  const traces = state.perimeterTraces || [];
+  const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
+
+  const byType = {};
+  const counts = {};
+  let total = 0;
+  // Hiding a trace drops it from its own subtotal and from the total, which is
+  // what hiding a trace has always meant here.
+  for (const t of traces) {
+    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
+    const type = normalizeTraceType(t.type);
+    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
+    byType[type] = (byType[type] ?? 0) + value;
+    counts[type] = (counts[type] ?? 0) + 1;
+    total += value;
+  }
+
+  return {
+    byType,
+    counts,
+    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
+    total,
+    doubleCounted: findDoubleCounted(traces),
+  };
+};
+
+export const selectActiveAreaByType = (state) => {
   const traces = state.perimeterTraces || [];
   const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
 
@@ -775,34 +812,14 @@ export const selectAreaByType = (state) => {
     return lastAreaByType;
   }
 
-  const byType = {};
-  const counts = {};
-  let total = 0;
-  // Hiding a trace drops it from its own subtotal and from the total, which is
-  // what hiding a trace has always meant here.
-  for (const t of traces) {
-    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
-    const type = normalizeTraceType(t.type);
-    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
-    byType[type] = (byType[type] ?? 0) + value;
-    counts[type] = (counts[type] ?? 0) + 1;
-    total += value;
-  }
-
   lastFeetPerPixel = { ...feetPerPixel };
   lastTraces = traces.slice();
-  lastAreaByType = {
-    byType,
-    counts,
-    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
-    total,
-    doubleCounted: findDoubleCounted(traces),
-  };
+  lastAreaByType = computeAreaByType(state);
   return lastAreaByType;
 };
 
 /** Selector to get the combined total area of all visible traces */
-export const selectCombinedArea = (state) => selectAreaByType(state).total;
+export const selectCombinedArea = (state) => selectActiveAreaByType(state).total;
 
-export { AUTOSAVE_FIELDS };
+export { AUTOSAVE_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

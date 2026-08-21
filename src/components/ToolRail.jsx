@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { Trash2, Tags } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { TOOL_GROUPS } from './toolCatalog';
 
 /**
@@ -15,7 +15,8 @@ import { TOOL_GROUPS } from './toolCatalog';
  *  3. An icon-only rail is learnable by hover alone, which costs twelve
  *     hovers on the first visit. `showLabels` puts the name and the digit
  *     beside every icon instead — on by default for a new user (see
- *     useToolLabels) and switched from the button at the foot of the rail.
+ *     useToolLabels) and switched from the command bar, alongside the other
+ *     control that shows and hides a panel.
  *
  * `short` is the rail's own name for a tool and matches the status bar's
  * MODE_LABEL; `label` stays the fuller phrase, and stays the accessible name
@@ -94,7 +95,7 @@ const ToolButton = ({ tool, active, disabled, showLabels, onSelect, onRotate }) 
 
 const ToolRail = ({
   activeTool, hasArea, hasToolData, showLabels,
-  onSelect, onRotate, onClearTools, onToggleLabels,
+  onSelect, onRotate, onClearTools,
 }) => (
   <div
     role="toolbar"
@@ -136,11 +137,12 @@ const ToolRail = ({
       ))}
     </div>
 
-    {/* Pinned, so the labels switch is in the same place whether or not the
-        clear button is there and however long the tool list grows. */}
-    <div className={`shrink-0 flex flex-col gap-0.5 border-t border-line py-1.5
-                     ${showLabels ? 'px-1.5' : 'items-center'}`}>
-      {hasToolData && (
+    {/* Pinned to the foot, so clearing sits in the same place however long the
+        tool list grows — and the whole strip goes when there is nothing to
+        clear, rather than leaving its rule across an empty row. */}
+    {hasToolData && (
+      <div className={`shrink-0 flex flex-col gap-0.5 border-t border-line py-1.5
+                       ${showLabels ? 'px-1.5' : 'items-center'}`}>
         <button
           type="button"
           onClick={onClearTools}
@@ -160,26 +162,8 @@ const ToolRail = ({
             ? <span key="name" className="flex-1 text-left truncate">Clear tools</span>
             : <span key="tip" role="tooltip" className={TOOLTIP}>Clear measurements &amp; shapes</span>}
         </button>
-      )}
-
-      {/* The name is the action, not a state, so no aria-pressed: "Hide tool
-          labels, pressed" is a contradiction to read out. */}
-      <button
-        type="button"
-        onClick={onToggleLabels}
-        aria-label={showLabels ? 'Hide tool labels' : 'Show tool labels'}
-        className={`group relative shrink-0 border border-transparent rounded-md cursor-pointer
-          text-fg-dim hover:bg-sunken hover:text-fg transition-colors
-          ${showLabels
-            ? 'flex items-center gap-2.5 w-full h-8 px-2 text-[12px]'
-            : 'grid place-items-center w-9 h-9'}`}
-      >
-        <Tags className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
-        {showLabels
-          ? <span key="name" className="flex-1 text-left truncate">Hide labels</span>
-          : <span key="tip" role="tooltip" className={TOOLTIP}>Show tool labels</span>}
-      </button>
-    </div>
+      </div>
+    )}
   </div>
 );
 

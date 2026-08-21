@@ -6,7 +6,7 @@
 // rule applies to doubt: a trace the detector rated poor, a scale the rooms
 // disagreed about and a void that fell outside its outline all reach the page.
 
-import { selectAreaByType } from '../../store/appStore';
+import { computeAreaByType } from '../../store/appStore';
 import { calculateArea, getCentroid, holeRings, isSubtracted } from '../areaCalculator';
 import {
   formatArea, formatLength, getUnitStyleFromDimensions,
@@ -161,10 +161,17 @@ const buildFlags = (state, areas, outlines) => {
  * The whole exhibit, as data. `state` is the app store's state; `now` is passed
  * in rather than read so the same state always produces the same page.
  */
-export function buildExhibitModel(state, { now = Date.now(), options = {} } = {}) {
+// `areas` is an option rather than something this file reaches for, so an
+// exhibit can be built from a state that is not the live store — and so it can
+// never be handed the numbers of whichever plan happened to read the memo last.
+// It defaults to computing them, which is why every existing caller is unchanged.
+export function buildExhibitModel(state, {
+  now = Date.now(),
+  options = {},
+  areas = computeAreaByType(state),
+} = {}) {
   const opts = { ...EXHIBIT_DEFAULTS, ...options };
   const unit = state.unit ?? 'decimal';
-  const areas = selectAreaByType(state);
   const feetPerPixel = state.calibration?.feetPerPixel ?? { x: 1, y: 1 };
   const calibrated = !!state.calibration?.calibrated;
   const unitStyle = getUnitStyleFromDimensions(state.detectedDimensions, unit);

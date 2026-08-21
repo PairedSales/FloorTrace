@@ -35,9 +35,11 @@ import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
-  selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
+  selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
+import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
+import { beginWork, settleWork, deliver, isCurrent, detachActiveDocument } from './store/documentRequests';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -49,6 +51,7 @@ import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
 import { useIsMobile } from './hooks/useViewport';
+import { useDocumentTitle } from './hooks/useDocumentTitle';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -167,7 +170,7 @@ function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
   const image = useAppStore((s) => s.image);
   const roomOverlay = useAppStore((s) => s.roomOverlay);
-  const perimeterOverlay = useAppStore(selectPerimeterOverlay);
+  const perimeterOverlay = useAppStore(selectActivePerimeterOverlay);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
   const traceInteractionMode = useAppStore((s) => s.traceInteractionMode);
@@ -193,8 +196,8 @@ function App() {
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
-  const showHelpModal = useAppStore((s) => s.showHelpModal);
-  const showExportDialog = useAppStore((s) => s.showExportDialog);
+  const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
+  const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
@@ -232,7 +235,7 @@ function App() {
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setAngleToolState = useAppStore((s) => s.setAngleToolState);
-  const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
+  const setShowHelpModal = useWorkspaceStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
@@ -284,6 +287,9 @@ function App() {
   // tesseract eagerly cost every visitor ~4.4 MB gz on the critical path.
   useOcrWarmup();
 
+  // Names the browser tab after the plan that is open.
+  useDocumentTitle();
+
   useEffect(() => {
     return () => {
       terminateDetectionWorker();
@@ -322,6 +328,10 @@ function App() {
       if (!confirmed) return;
     }
     clearAutosavedDraft();
+    // Anything still running was about the drawing being closed. Its results
+    // would be refused anyway — the image is about to be null — but aborting
+    // says so now rather than paying for a trace nobody will read.
+    detachActiveDocument();
     undoManager.clear();
     useAppStore.getState().restart();
     flash('Project closed');
@@ -330,8 +340,17 @@ function App() {
   // OCR found nothing usable: drop a placeholder overlay in the middle of the
   // image for the user to size by hand.
   const placeCentredOverlay = useCallback((imgSrc) => {
+    // A second async hop, and the one nobody guarded: reached from the scan's
+    // two failure paths, it decodes the image *again* and then writes an
+    // overlay, a perimeter and a mode. A guard where the scan resumes does not
+    // cover this — by the time `onload` fires the user may have cropped, erased
+    // or loaded a different plan, and the placeholder would land on it. It owns
+    // its own hop rather than inheriting the scan's, because it outlives it.
+    const work = beginWork('placeholder', { image: imgSrc });
     const img = new Image();
     img.onload = () => {
+      settleWork(work);
+      if (!isCurrent(work)) return;
       const centerX = img.width / 2;
       const centerY = img.height / 2;
       setRoomOverlay({
@@ -340,6 +359,7 @@ function App() {
       setPerimeterVertices([]);
       setMode('normal');
     };
+    img.onerror = () => settleWork(work);
     img.src = imgSrc;
   }, [setRoomOverlay, setPerimeterVertices, setMode]);
 
@@ -379,10 +399,21 @@ function App() {
       setManualEntryMode(false);
       setOcrFailed(false);
       
+      // Owns `imgSrc`, not "whatever is loaded": this is handed an image and
+      // must report on that one. The scan is the longest await in the app —
+      // seconds, not milliseconds — and everything below writes the *reading of
+      // this image*: labels, dimensions, the unit, and then the whole
+      // measure→calibrate→trace pipeline. Landing any of it on a plan the user
+      // has since cropped, erased or replaced attributes one drawing's numbers
+      // to another, which is the exact shape of wrong answer this codebase is
+      // least able to detect.
+      const work = beginWork('scan', { image: imgSrc });
       try {
         perfMark(MARKS.scanStart);
         const result = await detectAllDimensions(imgSrc);
         perfMark(MARKS.scanEnd);
+
+        if (!isCurrent(work)) return;
 
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
@@ -426,10 +457,17 @@ function App() {
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
-        setOcrFailed(true);
-        notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
-        placeCentredOverlay(imgSrc);
+        // Same rule as the success path: a failure to read an image the user
+        // has already moved on from is not news about the plan on screen, and
+        // `id: 'scan'` means this toast would replace whatever the current
+        // plan's own scan had to say.
+        deliver(work, () => {
+          setOcrFailed(true);
+          notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
+          placeCentredOverlay(imgSrc);
+        });
       } finally {
+        settleWork(work);
         setIsProcessing(false);
         // Keep the warm worker pool around for a re-scan or a second image,
         // then release its WASM heaps once the user has clearly moved on.
@@ -659,7 +697,7 @@ function App() {
   const runTrace = useCallback(async (message, brush = null) => {
     if (!image) return null;
     setIsProcessing(true, message);
-    const startImage = image;
+    const work = beginWork('trace');
     try {
       const traced = await traceFloorplanBoundary(image, {
         excludeRegions: nonGlaExcludeRegions(),
@@ -668,7 +706,7 @@ function App() {
       });
 
       perfMark(MARKS.traceEnd);
-      if (useAppStore.getState().image !== startImage) return null;
+      if (!isCurrent(work)) return null;
       // Kept for brush results too: a drawn trace has the same inner/outer
       // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
@@ -691,19 +729,28 @@ function App() {
       reportTraceTypes(typeChanges);
       return floorCount ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
-      if (useAppStore.getState().image === startImage) {
+      // The toast is a claim about the plan on screen — `id: 'trace-result'`
+      // means it replaces whatever that plan's own trace had to say — so it is
+      // raised only by work that still owns what it was tracing.
+      deliver(work, () => {
         console.error('Perimeter detection failed:', error);
         notify('Could not trace this plan.', {
           type: 'error',
           id: 'trace-result',
           action: { label: 'Paint it instead', onClick: () => handleDrawMode() },
         });
-      }
+      });
       return 'failed';
     } finally {
-      if (useAppStore.getState().image === startImage) {
-        setIsProcessing(false);
-      }
+      settleWork(work);
+      // Unconditional, unlike the result writes above. Gated on the image, a
+      // trace the user interrupted by cropping left `isProcessing` true with
+      // nothing left to turn it off: a spinner that never stops and five
+      // CommandBar buttons disabled for the rest of the session. Clearing a
+      // spinner a newer operation had just set is a flicker; this was a wedge.
+      // Exact ownership needs a request token, which is what the document
+      // request layer will carry — this is the honest stopgap until then.
+      setIsProcessing(false);
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
     reportTrace, reportTraceTypes, handleDrawMode, reviewAgainstFootprint]);
@@ -873,7 +920,7 @@ function App() {
   // selected vertex). The floor of three needs a voice: with a visible
   // selection and a Delete key, a silent no-op reads as a broken keybinding.
   const handleDeletePerimeterVertex = useCallback((index) => {
-    const overlay = selectPerimeterOverlay(useAppStore.getState());
+    const overlay = selectActivePerimeterOverlay(useAppStore.getState());
     if (!overlay?.vertices) return;
     if (overlay.vertices.length <= 3) {
       notify('An outline needs at least three corners.', { type: 'warning', id: 'min-vertices' });
@@ -988,29 +1035,29 @@ function App() {
     let detected = null;
 
     setIsProcessing(true, 'Finding room…');
-    const startImage = image;
+    const work = beginWork('room');
     try {
       detected = await detectRoomFromClick(image, point, {
         labelBbox, labelDims: dims, pixelsPerFoot: roomScaleHint(),
       });
-      if (useAppStore.getState().image === startImage && detected?.overlay) {
-        overlay = {
-          ...detected.overlay,
-          polygon: detected.polygon,
-          confidence: detected.confidence,
-        };
+      if (detected?.overlay) {
+        deliver(work, () => {
+          overlay = {
+            ...detected.overlay,
+            polygon: detected.polygon,
+            confidence: detected.confidence,
+          };
+        });
       }
     } catch (error) {
-      if (useAppStore.getState().image === startImage) {
-        console.error('Room detection failed:', error);
-      }
+      deliver(work, () => console.error('Room detection failed:', error));
     } finally {
-      if (useAppStore.getState().image === startImage) {
-        setIsProcessing(false);
-      }
+      // Unconditional — see the note in `runTrace`'s finally.
+      setIsProcessing(false);
+      settleWork(work);
     }
 
-    if (useAppStore.getState().image !== startImage) return;
+    if (!isCurrent(work)) return;
 
     if (!detected) {
       // A failed room detection used to fall through to a hardcoded 200x200
@@ -1100,8 +1147,8 @@ function App() {
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
   const handleHelpOpen = useCallback(() => {
-    const s = useAppStore.getState();
-    s.setShowHelpModal(!s.showHelpModal);
+    const w = useWorkspaceStore.getState();
+    w.setShowHelpModal(!w.showHelpModal);
   }, []);
   // Typing a dimension fires this per keystroke, and half of a typed pair
   // disagrees with the room by construction: 16.7 entered as the width of a
@@ -1209,10 +1256,10 @@ function App() {
     () => setToolLabels(!toolLabels),
     [toolLabels, setToolLabels],
   );
-  const dockOpen = useAppStore((s) => s.dockOpen);
-  const setDockOpen = useAppStore((s) => s.setDockOpen);
+  const dockOpen = useWorkspaceStore((s) => s.dockOpen);
+  const setDockOpen = useWorkspaceStore((s) => s.setDockOpen);
   const handleDockToggle = useCallback(
-    () => setDockOpen(!useAppStore.getState().dockOpen),
+    () => setDockOpen(!useWorkspaceStore.getState().dockOpen),
     [setDockOpen],
   );
 
@@ -1461,6 +1508,16 @@ function App() {
         onCycleTheme={cycleTheme}
         dockOpen={dockOpen}
         onDockToggle={handleDockToggle}
+        status={(
+          <StatusBar
+            mode={MODE_LABEL[activeTool] ?? 'Select'}
+            hint={MODE_HINT[activeTool] ?? null}
+            hasImage={!!image}
+            onZoomIn={() => handleZoom(1)}
+            onZoomOut={() => handleZoom(-1)}
+            onExport={openExport}
+          />
+        )}
       />
 
       <CommandBar
@@ -1483,6 +1540,10 @@ function App() {
         floorCount={perimeterTraces.length}
         dockOpen={dockOpen}
         onDockToggle={handleDockToggle}
+        toolLabels={toolLabels}
+        onToolLabelsToggle={handleToolLabelsToggle}
+        theme={theme}
+        onCycleTheme={cycleTheme}
       />
 
       <ContextBar
@@ -1530,19 +1591,9 @@ function App() {
             onSelect={handleToolSelect}
             onRotate={handleRotateCanvas}
             onClearTools={handleClearTools}
-            onToggleLabels={handleToolLabelsToggle}
           />
         )}
       </div>
-
-      <StatusBar
-        mode={MODE_LABEL[activeTool] ?? 'Select'}
-        hint={MODE_HINT[activeTool] ?? null}
-        hasImage={!!image}
-        onZoomIn={() => handleZoom(1)}
-        onZoomOut={() => handleZoom(-1)}
-        onExport={openExport}
-      />
       </>
       )}
 

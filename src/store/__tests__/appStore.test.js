@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore, {
-  selectAreaByType,
+  selectActiveAreaByType,
   selectCombinedArea,
-  selectPerimeterOverlay,
+  selectActivePerimeterOverlay,
   AUTOSAVE_FIELDS,
   CALIBRATION_SOURCES,
   PERSISTENT_FLOOR_FIELDS,
@@ -186,7 +186,7 @@ describe('addHole / removeHole', () => {
   });
 });
 
-describe('selectPerimeterOverlay', () => {
+describe('selectActivePerimeterOverlay', () => {
   beforeEach(() => {
     useAppStore.getState().resetOverlays();
   });
@@ -194,7 +194,7 @@ describe('selectPerimeterOverlay', () => {
   it('carries holes and quality, not vertices alone', () => {
     seedTracedFloor();
 
-    const overlay = selectPerimeterOverlay(useAppStore.getState());
+    const overlay = selectActivePerimeterOverlay(useAppStore.getState());
     expect(overlay.vertices).toEqual(outer);
     expect(overlay.holes).toEqual([courtyard]);
     expect(overlay.quality).toMatchObject({ source: 'auto' });
@@ -202,17 +202,17 @@ describe('selectPerimeterOverlay', () => {
 
   it('re-derives when holes change even though vertices do not', () => {
     seedTracedFloor();
-    const before = selectPerimeterOverlay(useAppStore.getState());
+    const before = selectActivePerimeterOverlay(useAppStore.getState());
 
     useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
-    const after = selectPerimeterOverlay(useAppStore.getState());
+    const after = selectActivePerimeterOverlay(useAppStore.getState());
 
     expect(after).not.toBe(before);
     expect(after.holes).toEqual([]);
   });
 });
 
-describe('selectAreaByType', () => {
+describe('selectActiveAreaByType', () => {
   const box = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
   const trace = (id, type, size, visible = true) => ({
     id,
@@ -251,7 +251,7 @@ describe('selectAreaByType', () => {
       trace('c', 'garage', 30),   // 900
     ]);
 
-    const areas = selectAreaByType(useAppStore.getState());
+    const areas = selectActiveAreaByType(useAppStore.getState());
     expect(areas.byType).toEqual({ gla: 500, garage: 900 });
     expect(areas.counts).toEqual({ gla: 2, garage: 1 });
     expect(areas.gla).toBe(500);
@@ -264,13 +264,13 @@ describe('selectAreaByType', () => {
     delete untyped.type;
     seed([untyped]);
 
-    expect(selectAreaByType(useAppStore.getState()).gla).toBe(100);
+    expect(selectActiveAreaByType(useAppStore.getState()).gla).toBe(100);
   });
 
   it('drops a hidden trace from its own subtotal and from the total', () => {
     seed([trace('a', 'gla', 10), trace('b', 'garage', 20, false)]);
 
-    const areas = selectAreaByType(useAppStore.getState());
+    const areas = selectActiveAreaByType(useAppStore.getState());
     expect(areas.byType.garage).toBeUndefined();
     expect(areas.counts.garage).toBeUndefined();
     expect(areas.total).toBe(100);
@@ -281,13 +281,13 @@ describe('selectAreaByType', () => {
   // unrelated `set()`.
   it('returns a reference-stable object across an unrelated set()', () => {
     seed([trace('a', 'gla', 10)]);
-    const before = selectAreaByType(useAppStore.getState());
+    const before = selectActiveAreaByType(useAppStore.getState());
 
     useAppStore.getState().setIsProcessing(true, 'working');
-    expect(selectAreaByType(useAppStore.getState())).toBe(before);
+    expect(selectActiveAreaByType(useAppStore.getState())).toBe(before);
 
     useAppStore.getState().setPerimeterTraceType('a', 'porch');
-    const after = selectAreaByType(useAppStore.getState());
+    const after = selectActiveAreaByType(useAppStore.getState());
     expect(after).not.toBe(before);
     expect(after.byType).toEqual({ porch: 100 });
   });
@@ -494,7 +494,7 @@ describe('double-count detection', () => {
       trace('garage', 'garage', box(10, 10, 40, 40)),
     ]);
 
-    const { doubleCounted } = selectAreaByType(useAppStore.getState());
+    const { doubleCounted } = selectActiveAreaByType(useAppStore.getState());
     expect(doubleCounted).toHaveLength(1);
     expect(doubleCounted[0]).toMatchObject({ innerId: 'garage', outerName: 'house' });
   });
@@ -505,7 +505,7 @@ describe('double-count detection', () => {
       trace('garage', 'garage', box(200, 0, 260, 60)),
     ]);
 
-    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+    expect(selectActiveAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
   });
 
   // Two storeys of a house are nested by construction and are not double counted.
@@ -515,7 +515,7 @@ describe('double-count detection', () => {
       trace('second', 'gla', box(10, 10, 90, 90)),
     ]);
 
-    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+    expect(selectActiveAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
   });
 
   it('ignores a hidden trace, which is already out of both totals', () => {
@@ -524,6 +524,6 @@ describe('double-count detection', () => {
       trace('garage', 'garage', box(10, 10, 40, 40), false),
     ]);
 
-    expect(selectAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+    expect(selectActiveAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
   });
 });
