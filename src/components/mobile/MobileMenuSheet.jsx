@@ -112,7 +112,7 @@ const MobileMenuSheet = ({
           />
           <Row
             icon={Layers}
-            label="Add another level"
+            label="Add another outline"
             disabled={!image}
             onSelect={onAddFloor}
             close={onClose}

@@ -165,10 +165,10 @@ const CommandBar = ({
         onClick={onAddFloor}
         disabled={!hasOutline || floorCount >= 7}
         className="toolbar-btn"
-        title={floorCount >= 7 ? 'Seven outlines is the maximum' : 'Add another level'}
+        title={floorCount >= 7 ? 'Seven outlines is the maximum' : 'Add another outline to this plan'}
       >
         <Layers className="w-[15px] h-[15px]" aria-hidden="true" />
-        <span>Add level</span>
+        <span>Add outline</span>
       </button>
 
       <div className="w-px h-5 bg-line mx-1.5 shrink-0" />

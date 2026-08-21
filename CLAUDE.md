@@ -40,6 +40,23 @@ code may use "floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
+**The tab strip is its own band**, between the menu bar and the command bar
+(`DocumentTabs.jsx`, inserted in `App.jsx`). It cannot ride in the menu bar row —
+that 30 px row is fully spent by the wordmark, five menu titles and a `StatusBar`
+whose cells are deliberately `shrink-0` and forbidden from scrolling. **The band
+must not scroll either**: tabs share the width and truncate to a ~96 px floor, and
+whatever no longer fits moves into a chevron menu. A strip that scrolls hides plans
+behind a gesture, which is what a tab strip exists to prevent.
+
+**`DocumentTabs` must import nothing from `./canvas/` or `./CanvasStage`.** It lives
+in the eager shell; one such import returns konva to the entry's static module graph
+and puts a `modulepreload` for 320 kB back in `dist/index.html`. Check that file
+after touching the shell — the link is the regression signal.
+
+On mobile the switcher gets **no permanent chrome**: the thumb bar is contractually
+one verb and the canvas claims every touch, so the subject line in the top bar —
+which already names the plan — opens `MobilePlansSheet`, rendering the same list.
+
 **One plan is on the store root at a time; the rest are parked.** `documentManager.js`
 holds parked plans as inert records in a module `Map` — never in the store, because
 putting them there would invite a component subscribing to a plan it is not showing.
