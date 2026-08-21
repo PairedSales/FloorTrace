@@ -6,6 +6,8 @@ import {
   formatLength,
   formatArea,
   formatDimensionInput,
+  areaDisplayValue,
+  formatAreaValue,
 } from '../unitConverter';
 
 // ---------------------------------------------------------------------------
@@ -146,5 +148,41 @@ describe('formatDimensionInput – metric', () => {
   it('normalizes 12 inches into the next foot for display', () => {
     // 5.999 feet rounds to 6' 0", not 5' 12"
     expect(formatDimensionInput(5.999, 'inches')).toBe("6' 0\"");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// areaDisplayValue / formatAreaValue
+// ---------------------------------------------------------------------------
+
+describe('areaDisplayValue', () => {
+  it('is the number formatArea prints, for every area a breakdown can hold', () => {
+    for (const sqft of [1, 100.4, 1234.5, 99999.6]) {
+      for (const unit of ['decimal', 'metric']) {
+        expect(formatAreaValue(areaDisplayValue(sqft, unit), unit).value)
+          .toBe(formatArea(sqft, unit).value);
+        expect(formatAreaValue(areaDisplayValue(sqft, unit), unit).suffix)
+          .toBe(formatArea(sqft, unit).suffix);
+      }
+    }
+  });
+
+  it('lets a breakdown add up to its own total', () => {
+    // Three areas that each round down. Rounded per row they come to 600;
+    // rounding the raw sum on its own prints 601 under rows reaching 600.
+    const rows = [100.4, 200.4, 300.4].map((a) => areaDisplayValue(a, 'decimal'));
+    expect(rows).toEqual([100, 200, 300]);
+    expect(formatAreaValue(rows.reduce((a, b) => a + b, 0), 'decimal').value).toBe('600');
+    expect(formatArea(601.2, 'decimal').value).toBe('601');
+  });
+
+  it('prints a zero area the way an uncalibrated plan reads it', () => {
+    expect(formatAreaValue(areaDisplayValue(0, 'decimal'), 'decimal').value).toBe('0');
+    expect(formatArea(0, 'decimal').value).toBe('0');
+  });
+
+  it('keeps two decimals for a sub-square-metre area', () => {
+    expect(areaDisplayValue(1, 'metric')).toBeCloseTo(0.09, 2);
+    expect(formatAreaValue(0.09, 'metric')).toEqual({ value: '0.09', suffix: 'm²' });
   });
 });

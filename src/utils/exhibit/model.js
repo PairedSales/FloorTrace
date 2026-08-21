@@ -7,9 +7,12 @@
 // disagreed about and a void that fell outside its outline all reach the page.
 
 import { computeAreaByType } from '../../store/appStore';
-import { calculateArea, getCentroid, holeRings, isSubtracted } from '../areaCalculator';
+import {
+  calculateArea, getCentroid, holeRings, isSubtracted, displayedBreakdownTotal,
+} from '../areaCalculator';
 import {
   formatArea, formatLength, getUnitStyleFromDimensions,
+  areaDisplayValue, formatAreaValue,
 } from '../unitConverter';
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
 import { qualitySummary, scaleQualitySummary } from '../boundaryQuality';
@@ -198,7 +201,14 @@ export function buildExhibitModel(state, {
   });
 
   const noGla = areas.gla === 0 && areas.total > 0;
-  const headline = formatArea(noGla ? areas.total : areas.gla, unit);
+  // The printed total is the sum of the printed rows, not the raw sum rounded
+  // on its own — a breakdown that does not reach its own total reads as a
+  // measurement error to whoever checks it with a calculator.
+  const totalDisplay = displayedBreakdownTotal(areas.byType, unit);
+  const total = formatAreaValue(totalDisplay, unit);
+  const headline = noGla
+    ? total
+    : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
   const glaCount = areas.counts[DEFAULT_TRACE_TYPE] ?? 0;
 
   const rows = TRACE_TYPES
@@ -206,7 +216,7 @@ export function buildExhibitModel(state, {
     .map((t) => ({
       label: t.label,
       color: t.color,
-      value: formatArea(areas.byType[t.id], unit).value,
+      value: formatAreaValue(areaDisplayValue(areas.byType[t.id], unit), unit).value,
       count: areas.counts[t.id] ?? 0,
     }));
 
@@ -272,8 +282,8 @@ export function buildExhibitModel(state, {
           + `${state.useInteriorWalls ? 'interior' : 'exterior'} wall face`,
     },
     rows,
-    total: formatArea(areas.total, unit).value,
-    totalSuffix: formatArea(areas.total, unit).suffix,
+    total: total.value,
+    totalSuffix: total.suffix,
     showBreakdown: rows.length > 1,
     scale: scaleLines(state),
     outlines,

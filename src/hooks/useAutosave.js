@@ -64,13 +64,30 @@ export function useAutosave() {
 
   // ── storage helpers ───────────────────────────────────────────────────────
 
+  // The debounced write in flight, if any.
+  //
+  // Declared here rather than beside its effect because every path that
+  // *removes* a plan's records has to cancel it first. A timer scheduled two
+  // seconds ago does not know the plan was closed, the last plan emptied, or
+  // autosave switched off — it just fires and writes the records back, and
+  // `restart` keeps the plan's id, so that write lands under a live key and
+  // survives the reload as a plan the user had closed.
+  const autosaveTimerRef = useRef(null);
+  const cancelPendingWrite = useCallback(() => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+  }, []);
+
   // Every plan the workspace holds, not just the one on screen: switching the
   // preference off must leave nothing behind, and it used to sweep one key.
   const clearAutosavedDraft = useCallback(async () => {
+    cancelPendingWrite();
     const index = await readWorkspaceIndex();
     if (index) await removeWorkspace(index);
     removeDraft(LEGACY_DRAFT_KEY);
-  }, []);
+  }, [cancelPendingWrite]);
 
   /**
    * What the index should say right now. Built from the store rather than
@@ -180,16 +197,37 @@ export function useAutosave() {
    */
   const restoreWorkspace = useCallback(async (index) => {
     const store = useAppStore.getState();
-    const activeId = index.order.includes(index.activeId) ? index.activeId : index.order[0];
+    // The index's own choice first, then any other plan it names. One plan
+    // whose record is gone — the plan that was open when a close left the
+    // index stale, most likely — used to discard every *other* plan with it,
+    // silently, while their records sat intact on disk under keys nothing
+    // would read again. A workspace needs one plan to stand on, not that one.
+    const preferred = index.order.includes(index.activeId) ? index.activeId : index.order[0];
+    const candidates = [preferred, ...index.order.filter((id) => id !== preferred)];
 
-    const activeDraft = await readDocDraft(activeId);
-    if (activeDraft.status === 'missing' || activeDraft.status === 'malformed') {
+    let activeId = null;
+    let activeDraft = null;
+    const missing = new Set();
+    for (const docId of candidates) {
+      const draft = await readDocDraft(docId);
+      if (draft.status !== 'missing' && draft.status !== 'malformed') {
+        activeId = docId;
+        activeDraft = draft;
+        break;
+      }
+      missing.add(docId);
+    }
+    if (!activeId) {
       // Nothing to stand on. Better to start clean than to open a workspace
       // whose visible plan is empty for reasons the user cannot see.
       return { opened: 0, lost: index.order.length };
     }
 
-    store.adoptWorkspace(index.order.map((docId) => ({
+    // Only the plans that were probed and failed are dropped; the rest are
+    // opened un-hydrated as before, and answer for themselves on first switch.
+    const order = index.order.filter((docId) => !missing.has(docId));
+
+    store.adoptWorkspace(order.map((docId) => ({
       docId,
       meta: {
         sourceFileName: index.docs?.[docId]?.sourceFileName ?? null,
@@ -212,8 +250,8 @@ export function useAutosave() {
     // An image record that went missing leaves the traces and calibration
     // intact and worth showing; the plan simply cannot be edited against ink
     // that is not there. Counted so the user is told, not silently degraded.
-    const lost = activeDraft.status === 'no-image' ? 1 : 0;
-    return { opened: index.order.length, lost };
+    const lost = missing.size + (activeDraft.status === 'no-image' ? 1 : 0);
+    return { opened: order.length, lost };
   }, []);
 
   // ── Restore the workspace on startup ─────────────────────────────────────
@@ -299,6 +337,33 @@ export function useAutosave() {
     return () => unsub();
   }, []);
 
+  // ── Keep the index describing the plans that actually exist ─────────────
+  //
+  // `removePlan` deletes a plan's own records and touches the index not at all,
+  // and no close path wrote it. Closing the active plan used to be repaired by
+  // accident: the debounced write that followed was armed with the *closing*
+  // plan's id, and its last step rewrote the index from live state. That write
+  // was putting the neighbour's drawing under the closed plan's key, so it had
+  // to go — which left a stale index naming a plan whose records are gone, and
+  // a restore that answers that by discarding the whole workspace.
+  //
+  // Opening and reordering are the same fact about the same object, so they
+  // land here too. The index is small; writing it again costs nothing next to
+  // the multi-megabyte image writes it sits behind.
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(
+      (state) => state.documentOrder,
+      () => {
+        if (!saveOnExit) return;
+        if (!useAppStore.getState()._hasRestoredState) return;
+        writeWorkspaceIndex(buildIndex()).catch((error) => {
+          console.error('Failed to write the workspace index:', error);
+        });
+      },
+    );
+    return () => unsub();
+  }, [saveOnExit, buildIndex]);
+
   // ── Write a plan when it is parked ────────────────────────────────────────
   //
   // The moment a plan leaves the store root is the right time to write it, and
@@ -325,6 +390,20 @@ export function useAutosave() {
         writeDocDraft(previousId, parkedState, true)
           .then(() => writeHistoryRecord(previousId, parkedHistoryFor(previousId)))
           .then(() => writeWorkspaceIndex(buildIndex()))
+          // Reported, not just on failure: this is the write that saves a plan
+          // being switched away from, and the debounced timer it supersedes had
+          // already put the status bar into 'pending'.
+          //
+          // Only *from* 'pending', the way the timer's own guard below does.
+          // `draftState` is one field for the whole window, and this chain is
+          // three IndexedDB transactions long — the user is on another plan
+          // while it runs. Unconditional, it overwrites that plan's real
+          // 'pending', the 'error' a failed write had just reported, or the
+          // 'off' the user chose by unticking Save on exit mid-flight.
+          .then(() => {
+            const store = useAppStore.getState();
+            if (store.draftState === 'pending') store.setDraftState('saved');
+          })
           .catch((error) => {
             console.error('Failed to write a parked plan:', error);
             useAppStore.getState().setDraftState('error');
@@ -335,7 +414,6 @@ export function useAutosave() {
   }, [saveOnExit, buildIndex]);
 
   // ── Debounced autosave on working-state changes ───────────────────────────
-  const autosaveTimerRef = useRef(null);
   useEffect(() => {
     const unsub = useAppStore.subscribe(
       autosaveSelector,
@@ -352,8 +430,18 @@ export function useAutosave() {
         if (!slice.image) {
           // This plan has nothing to keep. Its own records go; the rest of the
           // workspace is untouched, which is the whole difference from before.
+          // Cancel first: closing the last plan empties it in place and keeps
+          // its id, so a write still pending from the edit before the close
+          // would put the records straight back under a key that is live.
+          cancelPendingWrite();
           writtenImageByDocRef.current.delete(state.activeDocumentId);
           removePlan(state.activeDocumentId);
+          // `documentOrder` does not change when the last plan is emptied in
+          // place, so the subscription above does not fire for it, and the
+          // index would go on naming a plan whose records have just gone.
+          writeWorkspaceIndex(buildIndex()).catch((error) => {
+            console.error('Failed to write the workspace index:', error);
+          });
           return;
         }
 
@@ -371,16 +459,32 @@ export function useAutosave() {
         // Debounce: wait 2 seconds of inactivity before writing the draft.
         // This write, not the unload handler below, is what actually protects
         // the user's work.
-        if (autosaveTimerRef.current) {
-          clearTimeout(autosaveTimerRef.current);
-        }
+        cancelPendingWrite();
 
         // The plan that changed, captured now. Reading the active id when the
         // timer fires would write the *incoming* plan's state under whichever
         // key happened to be active two seconds later.
         const docId = state.activeDocumentId;
         autosaveTimerRef.current = setTimeout(() => {
-          saveAutosavedDraft(docId, useAppStore.getState().getParkedState());
+          autosaveTimerRef.current = null;
+          const live = useAppStore.getState();
+          // Capturing the id was only half of it: the *state* is still read
+          // here, so a switch inside the debounce window wrote the incoming
+          // plan's image, traces and calibration under the outgoing plan's
+          // key — the exact swap the capture above exists to prevent, and one
+          // that survives a reload looking like the plan it overwrote.
+          //
+          // A plan that has left the root needs nothing from this timer: it
+          // was written in full, with its history, by the park subscription
+          // above, or its records were removed when it closed. The last-plan
+          // close does not reach here at all — `restart` keeps the id, so this
+          // guard would not trip; what covers it is `cancelPendingWrite` in the
+          // `!slice.image` branch, before the records are removed.
+          if (live.activeDocumentId !== docId) {
+            if (live.draftState === 'pending') live.setDraftState('saved');
+            return;
+          }
+          saveAutosavedDraft(docId, live.getParkedState());
         }, 2000);
       },
       { equalityFn: shallow },
@@ -388,11 +492,9 @@ export function useAutosave() {
 
     return () => {
       unsub();
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-      }
+      cancelPendingWrite();
     };
-  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite, buildIndex]);
 
   // Best-effort flush when the tab is hidden or unloaded, and the only write
   // that carries the undo history. It is not a guarantee: setDraft opens an
@@ -413,6 +515,9 @@ export function useAutosave() {
 
       const snapshot = state.getParkedState();
       if (!snapshot.image) {
+        // `visibilitychange` fires while the page is still alive, so a pending
+        // write outlives this and would undo the removal.
+        cancelPendingWrite();
         writtenImageByDocRef.current.delete(state.activeDocumentId);
         removePlan(state.activeDocumentId);
         return;
@@ -460,7 +565,7 @@ export function useAutosave() {
       window.removeEventListener('pagehide', flushAutosaveNow);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft]);
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite]);
 
   return { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft };
 }

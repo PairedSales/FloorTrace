@@ -80,6 +80,27 @@ describe('exhibit model', () => {
     expect(model.outlines[0].areaText).toBe('10,000 ft²');
   });
 
+  it('prints a total its own breakdown adds up to', () => {
+    // Each area rounds down on its own: 100.4 + 200.4 + 300.4. Per row that is
+    // 100 + 200 + 300 = 600, but rounding the raw 601.2 separately printed 601
+    // directly beneath rows reaching 600 — on a workfile exhibit a reviewer
+    // adds up by hand, that reads as an error in the measurement.
+    const model = buildExhibitModel(setUp({
+      perimeterTraces: [
+        trace({ id: 'a', type: 'gla', vertices: rect(0, 0, 1, 100.4) }),
+        trace({ id: 'b', type: 'garage', vertices: rect(0, 0, 1, 200.4) }),
+        trace({ id: 'c', type: 'porch', vertices: rect(0, 0, 1, 300.4) }),
+      ],
+      activeTraceId: 'a',
+    }));
+    const asNumber = (text) => Number(String(text).replace(/,/g, ''));
+    const rowSum = model.rows.reduce((n, r) => n + asNumber(r.value), 0);
+    expect(model.rows).toHaveLength(3);
+    expect(rowSum).toBe(600);
+    expect(asNumber(model.total)).toBe(rowSum);
+    expect(model.total).toBe('600');
+  });
+
   it('states the wall face the area was measured to', () => {
     expect(buildExhibitModel(setUp()).headline.caption).toContain('exterior wall face');
     expect(buildExhibitModel(setUp({ useInteriorWalls: true })).headline.caption)
