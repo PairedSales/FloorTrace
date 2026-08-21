@@ -15,7 +15,8 @@ import MobileToolSheet from './MobileToolSheet';
 import MobileTopBar from './MobileTopBar';
 
 /**
- * The mobile shell: top bar, bottom bar, and the three sheets between them.
+ * The mobile shell: top bar, bottom bar, and the four sheets between them
+ * — menu, tools, measurement, and the plans sheet the tab strip stands in for.
  *
  * `App` still owns every workflow decision — this component owns only where
  * those decisions appear on a phone. It reads the store directly for the state
