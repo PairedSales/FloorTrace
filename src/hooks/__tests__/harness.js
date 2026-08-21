@@ -8,7 +8,7 @@
 // only the persistence layer replaced, so a test failure means the decision was
 // wrong rather than that a mock drifted.
 //
-// Files that use this need `// @vitest-environment jsdom` at the top. The
+// Files that use this need `// @vitest-environment happy-dom` at the top. The
 // default environment stays node deliberately: the detection suites are
 // CPU-bound pure-JS pipelines that gain nothing from a DOM and would pay for it.
 

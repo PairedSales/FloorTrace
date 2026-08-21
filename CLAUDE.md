@@ -30,10 +30,13 @@ worker or a real layout is verified by hand with `npm run dev` — see the mobil
 note further down for why the Browser pane lies about this app. What *is*
 covered now is the layer between the store and the UI:
 
-- **Hook tests run in jsdom, per file, via a `// @vitest-environment jsdom`
+- **Hook tests run in happy-dom, per file, via a `// @vitest-environment happy-dom`
   docblock.** The default environment stays node on purpose: the detection
   suites are CPU-bound pure-JS pipelines that gain nothing from a DOM and would
-  pay for one. Setting it globally costs about 10 s a run.
+  pay for one. happy-dom rather than jsdom because jsdom 30 requires Node
+  ≥ 22.22 through `undici`, and CI pins Node 20 — it passes locally and fails
+  there, which is the worst shape a test dependency can have. It is also ~7
+  transitive packages against jsdom's ~360.
 - `src/hooks/__tests__/harness.js` holds the store setup (`oneDocument`,
   `addParkedDocument`, `addUnhydratedDocument`). Tests mock only the persistence
   layer — `workspaceDrafts`, `draftStorage`, `notify` — and run the real hook

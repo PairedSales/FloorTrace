@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment happy-dom
 //
 // Closing a plan has to end that plan's identity as well as its records. The
 // Save As grant is cached against the plan's id for the life of the page, and a

@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment happy-dom
 //
 // The autosave hook decides two things nothing else can check: which plan a
 // debounced write names, and when the workspace index is rewritten. Both were

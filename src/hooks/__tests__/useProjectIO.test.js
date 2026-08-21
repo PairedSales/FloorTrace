@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment happy-dom
 //
 // `Save all plans` composes each plan's state itself, and got it wrong twice in
 // the same expression: a plan with no parked record fell back to the plan on
