@@ -5,6 +5,7 @@ import { isUserAsserted } from '../utils/detection/validate.js';
 import { notify, flash } from '../utils/notify';
 import { perfMark, MARKS } from '../utils/perfMarks';
 import useAppStore from '../store/appStore';
+import { beginWork, settleWork, isCurrent } from '../store/documentRequests';
 import * as undoManager from '../store/undoManager';
 
 /**
@@ -28,7 +29,15 @@ import * as undoManager from '../store/undoManager';
 export function useAutoScale() {
   // Kept so the verdict can be revisited once the perimeter exists without
   // measuring anything again — selectProjectScale is pure.
-  const lastRunRef = useRef(null);
+  //
+  // Keyed by plan, not a single slot. This is a cross-plan wrong-scale path
+  // that lives entirely outside the store, so no grep for a store field finds
+  // it: `reviewAgainstFootprint` re-runs the scale decision from whatever rooms
+  // are in this ref, and its only other guard is that the scale in force is
+  // still the automatic one — which any auto-scaled plan satisfies. One slot
+  // shared between plans would recalibrate plan B from plan A's measured rooms
+  // and report it as a clean automatic consensus.
+  const lastRunByDocRef = useRef(new Map());
 
   // Returns whether the decision was actually written. The guard lives here
   // rather than at the two call sites so measureAndCalibrate and
@@ -69,6 +78,7 @@ export function useAutoScale() {
     if (!image || !labels?.length) return null;
 
     const nonGlaRegions = state.exteriorLabels.map((l) => l.bbox);
+    const work = beginWork('measure', { image });
     let measured = [];
     try {
       measured = await detectRoomsFromLabels(image, labels.map((label) => ({
@@ -81,14 +91,16 @@ export function useAutoScale() {
       console.error('Automatic scale measurement failed:', error);
       return null;
     } finally {
+      settleWork(work);
       perfMark(MARKS.measureEnd);
     }
-    // The image changed under us (a crop, a new file) while the batch ran.
-    if (useAppStore.getState().image !== image) return null;
+    // The plan changed under us — a crop, an erase, a new file — while the
+    // batch ran, so these measurements are of ink that is gone.
+    if (!isCurrent(work)) return null;
 
     const rooms = measured.filter(Boolean);
     const decision = selectProjectScale(rooms, { nonGlaRegions });
-    lastRunRef.current = { rooms, nonGlaRegions };
+    lastRunByDocRef.current.set(work.docId, { rooms, nonGlaRegions });
     if (!(decision.pixelsPerFoot > 0)) return null;
 
     undoManager.save();
@@ -143,9 +155,10 @@ export function useAutoScale() {
    * longer fit inside it.
    */
   const reviewAgainstFootprint = useCallback((footprintAreaPx) => {
-    const run = lastRunRef.current;
-    if (!run || !(footprintAreaPx > 0)) return;
     const state = useAppStore.getState();
+    // This plan's own measurements, never another's.
+    const run = lastRunByDocRef.current.get(state.activeDocumentId);
+    if (!run || !(footprintAreaPx > 0)) return;
     if (state.calibration.quality?.source !== 'auto') return;
     applyDecision(selectProjectScale(run.rooms, {
       nonGlaRegions: run.nonGlaRegions,

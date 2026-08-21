@@ -38,6 +38,7 @@ import useAppStore, {
 } from './store/appStore';
 import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
+import { beginWork, settleWork, deliver, isCurrent, detachActiveDocument } from './store/documentRequests';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -325,6 +326,10 @@ function App() {
       if (!confirmed) return;
     }
     clearAutosavedDraft();
+    // Anything still running was about the drawing being closed. Its results
+    // would be refused anyway — the image is about to be null — but aborting
+    // says so now rather than paying for a trace nobody will read.
+    detachActiveDocument();
     undoManager.clear();
     useAppStore.getState().restart();
     flash('Project closed');
@@ -333,14 +338,17 @@ function App() {
   // OCR found nothing usable: drop a placeholder overlay in the middle of the
   // image for the user to size by hand.
   const placeCentredOverlay = useCallback((imgSrc) => {
+    // A second async hop, and the one nobody guarded: reached from the scan's
+    // two failure paths, it decodes the image *again* and then writes an
+    // overlay, a perimeter and a mode. A guard where the scan resumes does not
+    // cover this — by the time `onload` fires the user may have cropped, erased
+    // or loaded a different plan, and the placeholder would land on it. It owns
+    // its own hop rather than inheriting the scan's, because it outlives it.
+    const work = beginWork('placeholder', { image: imgSrc });
     const img = new Image();
     img.onload = () => {
-      // A second async hop, and the one nobody guarded: reached from the scan's
-      // two failure paths, it decodes the image *again* and then writes an
-      // overlay, a perimeter and a mode. A guard where the scan resumes does
-      // not cover this — by the time `onload` fires the user may have cropped,
-      // erased or loaded a different plan, and the placeholder would land on it.
-      if (useAppStore.getState().image !== imgSrc) return;
+      settleWork(work);
+      if (!isCurrent(work)) return;
       const centerX = img.width / 2;
       const centerY = img.height / 2;
       setRoomOverlay({
@@ -349,6 +357,7 @@ function App() {
       setPerimeterVertices([]);
       setMode('normal');
     };
+    img.onerror = () => settleWork(work);
     img.src = imgSrc;
   }, [setRoomOverlay, setPerimeterVertices, setMode]);
 
@@ -388,20 +397,21 @@ function App() {
       setManualEntryMode(false);
       setOcrFailed(false);
       
+      // Owns `imgSrc`, not "whatever is loaded": this is handed an image and
+      // must report on that one. The scan is the longest await in the app —
+      // seconds, not milliseconds — and everything below writes the *reading of
+      // this image*: labels, dimensions, the unit, and then the whole
+      // measure→calibrate→trace pipeline. Landing any of it on a plan the user
+      // has since cropped, erased or replaced attributes one drawing's numbers
+      // to another, which is the exact shape of wrong answer this codebase is
+      // least able to detect.
+      const work = beginWork('scan', { image: imgSrc });
       try {
         perfMark(MARKS.scanStart);
         const result = await detectAllDimensions(imgSrc);
         perfMark(MARKS.scanEnd);
 
-        // The scan is the longest await in the app — seconds, not milliseconds
-        // — and until now it was the only one that resumed without checking
-        // what it was resuming into. Everything below writes the *reading of
-        // this image*: labels, dimensions, the unit, and then the whole
-        // measure→calibrate→trace pipeline. Landing any of it on a plan the
-        // user has since cropped, erased or replaced attributes one drawing's
-        // numbers to another, which is the exact shape of wrong answer this
-        // codebase is least able to detect.
-        if (useAppStore.getState().image !== imgSrc) return;
+        if (!isCurrent(work)) return;
 
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
@@ -446,12 +456,13 @@ function App() {
         // has already moved on from is not news about the plan on screen, and
         // `id: 'scan'` means this toast would replace whatever the current
         // plan's own scan had to say.
-        if (useAppStore.getState().image === imgSrc) {
+        deliver(work, () => {
           setOcrFailed(true);
           notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
           placeCentredOverlay(imgSrc);
-        }
+        });
       } finally {
+        settleWork(work);
         setIsProcessing(false);
         // Keep the warm worker pool around for a re-scan or a second image,
         // then release its WASM heaps once the user has clearly moved on.
@@ -660,7 +671,7 @@ function App() {
   const runTrace = useCallback(async (message, brush = null) => {
     if (!image) return null;
     setIsProcessing(true, message);
-    const startImage = image;
+    const work = beginWork('trace');
     try {
       const traced = await traceFloorplanBoundary(image, {
         excludeRegions: nonGlaExcludeRegions(),
@@ -669,7 +680,7 @@ function App() {
       });
 
       perfMark(MARKS.traceEnd);
-      if (useAppStore.getState().image !== startImage) return null;
+      if (!isCurrent(work)) return null;
       // Kept for brush results too: a drawn trace has the same inner/outer
       // pair, so toggling wall mode afterwards must still work.
       setTracedBoundaries(traced);
@@ -685,16 +696,20 @@ function App() {
       reportTrace(traced, floorCount);
       return floorCount ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
-      if (useAppStore.getState().image === startImage) {
+      // The toast is a claim about the plan on screen — `id: 'trace-result'`
+      // means it replaces whatever that plan's own trace had to say — so it is
+      // raised only by work that still owns what it was tracing.
+      deliver(work, () => {
         console.error('Perimeter detection failed:', error);
         notify('Could not trace this plan.', {
           type: 'error',
           id: 'trace-result',
           action: { label: 'Paint it instead', onClick: () => handleDrawMode() },
         });
-      }
+      });
       return 'failed';
     } finally {
+      settleWork(work);
       // Unconditional, unlike the result writes above. Gated on the image, a
       // trace the user interrupted by cropping left `isProcessing` true with
       // nothing left to turn it off: a spinner that never stops and five
@@ -987,28 +1002,29 @@ function App() {
     let detected = null;
 
     setIsProcessing(true, 'Finding room…');
-    const startImage = image;
+    const work = beginWork('room');
     try {
       detected = await detectRoomFromClick(image, point, {
         labelBbox, labelDims: dims, pixelsPerFoot: roomScaleHint(),
       });
-      if (useAppStore.getState().image === startImage && detected?.overlay) {
-        overlay = {
-          ...detected.overlay,
-          polygon: detected.polygon,
-          confidence: detected.confidence,
-        };
+      if (detected?.overlay) {
+        deliver(work, () => {
+          overlay = {
+            ...detected.overlay,
+            polygon: detected.polygon,
+            confidence: detected.confidence,
+          };
+        });
       }
     } catch (error) {
-      if (useAppStore.getState().image === startImage) {
-        console.error('Room detection failed:', error);
-      }
+      deliver(work, () => console.error('Room detection failed:', error));
     } finally {
       // Unconditional — see the note in `runTrace`'s finally.
       setIsProcessing(false);
+      settleWork(work);
     }
 
-    if (useAppStore.getState().image !== startImage) return;
+    if (!isCurrent(work)) return;
 
     if (!detected) {
       // A failed room detection used to fall through to a hardcoded 200x200

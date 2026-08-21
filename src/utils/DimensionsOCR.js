@@ -8,8 +8,11 @@
  *       balcony name labels, fed to the boundary tracer as footprint exclusions
  *   terminateOcrWorker() / releaseOcrWorkersWhenIdle(ms)
  *
- * Repeat scans of the same image are served from a one-entry cache — "Find
- * room size" and re-entering manual mode both re-scan what is already known.
+ * Repeat scans of the same image are served from a small LRU — "Find room
+ * size" and re-entering manual mode both re-scan what is already known. Scans
+ * also run one at a time: the pipeline's budget is wall clock, so two at once
+ * return fewer dimensions each rather than simply taking longer. See
+ * dimensions/scanQueue.js.
  *
  * Parsing primitives (normalizeOcrText, parseSingleToken, parseDimensionLine,
  * inferDominantFormat) are re-exported for the unit-test suite.
@@ -23,6 +26,7 @@
 
 import { dataUrlToImage } from './imageLoader.js';
 import { detectDimensionsCore } from './dimensions/pipeline.js';
+import { createScanQueue } from './dimensions/scanQueue.js';
 import { ensurePaddle, paddleIfReady, paddleRecognizeTiles } from './dimensions/ocrPaddle.js';
 import { loadOpenCv } from './dimensions/opencvBridge.js';
 import { configureTesseract, warmOcrEngine } from './dimensions/ocrTesseract.js';
@@ -221,16 +225,25 @@ const browserEnv = () => ({
   }
 });
 
-// Last scan, keyed by the image itself. "Find room size" and re-entering
+// Recent scans, keyed by the image itself. "Find room size" and re-entering
 // manual mode both re-scan the same image; a full scan is seconds of OCR.
 // Identity is the data URL, not a hash — the caller passes the same string
 // reference back, so === is O(1) here and cannot alias two distinct images.
-let lastScan = null;
+//
+// The memoising, de-duplicating and serialising all live in `scanQueue`, which
+// is pure and testable; see that file for why scans must not run concurrently.
+// Four entries is sized to the analysis cache in the detection worker, which
+// holds the same number for the same reason.
+const scanQueue = createScanQueue({ maxEntries: 4 });
 
 const cloneScan = (result) => ({
   dimensions: result.dimensions.map((d) => ({ ...d, bbox: { ...d.bbox } })),
   exteriorLabels: result.exteriorLabels.map((l) => ({ ...l, bbox: { ...l.bbox } })),
-  detectedFormat: result.detectedFormat
+  detectedFormat: result.detectedFormat,
+  // How many candidate regions the budget cut off. Zero on a scan that ran to
+  // completion; non-zero means this reading of the plan is short of what the
+  // page actually holds, which is otherwise invisible.
+  truncated: result.truncated ?? 0
 });
 
 /**
@@ -243,37 +256,41 @@ const cloneScan = (result) => ({
  * @param {string} imageDataUrl base64 data URL (PNG/JPG)
  * @returns {Promise<{dimensions: Array, exteriorLabels: Array, detectedFormat: string|null}>}
  */
+const scanImage = async (imageDataUrl) => {
+  const img = await dataUrlToImage(imageDataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const { dimensions, exteriorLabels, detectedFormat, timings, truncated } =
+    await detectDimensionsCore(imageData, browserEnv());
+
+  if (import.meta.env?.DEV) {
+    console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length,
+      'truncated:', truncated ?? 0,
+      'exterior:', exteriorLabels.map((l) => l.keyword));
+  }
+
+  return { dimensions, exteriorLabels, detectedFormat, truncated: truncated ?? 0 };
+};
+
 export const detectAllDimensions = async (imageDataUrl) => {
-  if (lastScan && lastScan.url === imageDataUrl) return cloneScan(lastScan.result);
-  try {
-    // Warm engines in the background / in parallel with image decode.
-    // Tesseract's worker is the one this run will actually wait on.
+  // Warmed outside the queue, not inside it: engine download and init are the
+  // part that most wants to overlap with waiting, and both are idempotent.
+  if (!scanQueue.has(imageDataUrl)) {
     warmOcrEngine();
     loadOpenCv();
-
-    const img = await dataUrlToImage(imageDataUrl);
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    const { dimensions, exteriorLabels, detectedFormat, timings } =
-      await detectDimensionsCore(imageData, browserEnv());
-
-    if (import.meta.env?.DEV) {
-      console.debug('[DimensionsOCR] timings(ms):', timings, 'found:', dimensions.length,
-        'exterior:', exteriorLabels.map((l) => l.keyword));
-    }
-
-    const result = { dimensions, exteriorLabels, detectedFormat };
-    lastScan = { url: imageDataUrl, result };
-    return cloneScan(result);
+  }
+  try {
+    return cloneScan(await scanQueue.run(imageDataUrl, () => scanImage(imageDataUrl)));
   } catch (error) {
-    // lastScan is assigned only after the await above, so a failed scan is
-    // never cached and the next call retries.
     console.error('DimensionsOCR error:', error);
     throw error;
   }
 };
+
+/** Forget every memoised scan. For tests, and for a plan being closed. */
+export const clearScanCache = () => scanQueue.clear();

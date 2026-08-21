@@ -385,6 +385,11 @@ export const detectDimensionsCore = async (imageData, env) => {
   const t0 = Date.now();
   const elapsed = () => Date.now() - t0;
   const timings = {};
+  // Candidate regions the clock cut off. The budget is wall clock, so anything
+  // else competing for it — a second scan, a busy main thread — costs
+  // detections rather than time, and until now that was completely invisible:
+  // a truncated scan and a plan with fewer labels produced identical results.
+  let truncated = 0;
 
   // ---- Phase 1: preprocess -------------------------------------------------
   // Started here, awaited just before the CLAHE step so the download overlaps
@@ -814,6 +819,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     if (elapsed() > effectiveBudget - reserve - 100) {
       // Out of OCR time — dimension-shaped leftovers still go to the
       // rescue collage (tile prep is cheap JS; only OCR is expensive).
+      truncated += 1;
       if (paddleAvailable && failedTiles.length < 10 && paddleWorthyShape(roi)) {
         failedTiles.push({ gray: prepareRoiVariants(roiGray, roi, dashMask)[0], bbox: roi });
       }
@@ -1134,7 +1140,8 @@ export const detectDimensionsCore = async (imageData, env) => {
     dimensions,
     exteriorLabels,
     detectedFormat: inferDominantFormat(dimensions),
-    timings
+    timings,
+    truncated
   };
   if (env.debug) {
     result.debug = {
