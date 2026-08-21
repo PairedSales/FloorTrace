@@ -29,10 +29,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Node 20 reached end of life in April 2026. It was not merely stale: a
+      # devDependency's `engines` can require newer, and the failure lands only
+      # here. jsdom 30 (via undici 8's `webidl.util.markAsUncloneable`) wants
+      # >= 22.19, so the hook-test harness passed locally and failed this job
+      # with unhandled TypeErrors while every test reported green.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
