@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 
 /**
  * The one place the app decides how loudly to speak.
@@ -99,5 +100,5 @@ export function notifyAt(message, { anchor, id, type = 'error', duration } = {})
  * compare between two acknowledgements.
  */
 export function flash(text) {
-  useAppStore.getState().flashStatus(text);
+  useWorkspaceStore.getState().flashStatus(text);
 }

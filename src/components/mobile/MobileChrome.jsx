@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
-import useAppStore, { selectAreaByType } from '../../store/appStore';
+import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
 import { formatArea } from '../../utils/unitConverter';
 import { qualitySummary, scaleQualitySummary } from '../../utils/boundaryQuality';
 import MeasurementDock from '../MeasurementDock';
@@ -91,7 +91,7 @@ const MobileChrome = ({
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const setDrawBrushSize = useAppStore((s) => s.setDrawBrushSize);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
-  const areas = useAppStore(selectAreaByType);
+  const areas = useAppStore(selectActiveAreaByType);
 
   const hasOutline = (perimeterTraces || []).some((t) => t.vertices?.length >= 3);
   const noGla = areas.gla === 0 && areas.total > 0;

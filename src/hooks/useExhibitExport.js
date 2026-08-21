@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import { notify, flash } from '../utils/notify';
 
 /**
@@ -9,7 +10,7 @@ import { notify, flash } from '../utils/notify';
  * never reach an export.
  */
 export function useExhibitExport() {
-  const setShowExportDialog = useAppStore((s) => s.setShowExportDialog);
+  const setShowExportDialog = useWorkspaceStore((s) => s.setShowExportDialog);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
   const openExport = useCallback(() => {

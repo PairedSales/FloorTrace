@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import { useIsTouch } from '../hooks/useViewport';
 
 /**
@@ -14,8 +14,8 @@ import { useIsTouch } from '../hooks/useViewport';
  * its four call sites are unchanged.
  */
 const ConfirmDialog = () => {
-  const request = useAppStore((s) => s.confirmRequest);
-  const resolve = useAppStore((s) => s.resolveConfirm);
+  const request = useWorkspaceStore((s) => s.confirmRequest);
+  const resolve = useWorkspaceStore((s) => s.resolveConfirm);
   const isTouch = useIsTouch();
   const confirmRef = useRef(null);
   const previouslyFocused = useRef(null);

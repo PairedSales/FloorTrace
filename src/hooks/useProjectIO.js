@@ -59,6 +59,7 @@ export function useProjectIO(handleManualMode, fileInputRef) {
 
           useAppStore.getState().loadProject(statePatch);
           undoManager.setHistoryState(historyPatch);
+          useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
 
           flash('Project loaded');
         } else {
@@ -72,6 +73,10 @@ export function useProjectIO(handleManualMode, fileInputRef) {
           undoManager.clear();
           setImage(dataUrl);
           setImageMimeType(mimeType);
+          // The name of the file this plan came from. `useProjectIO` and the
+          // drop handler have both always had it in hand and thrown it away;
+          // it is what names a plan before the user types a subject line.
+          useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
           // Not awaited: it runs in the detection worker while the scan below
           // holds the main thread and the Tesseract pool.
           prewarmDetection(dataUrl);

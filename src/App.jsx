@@ -34,8 +34,9 @@ import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
-  selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
+  selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
+import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
@@ -48,6 +49,7 @@ import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
 import { useIsMobile } from './hooks/useViewport';
+import { useDocumentTitle } from './hooks/useDocumentTitle';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -166,7 +168,7 @@ function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
   const image = useAppStore((s) => s.image);
   const roomOverlay = useAppStore((s) => s.roomOverlay);
-  const perimeterOverlay = useAppStore(selectPerimeterOverlay);
+  const perimeterOverlay = useAppStore(selectActivePerimeterOverlay);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
   const traceInteractionMode = useAppStore((s) => s.traceInteractionMode);
@@ -192,8 +194,8 @@ function App() {
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
-  const showHelpModal = useAppStore((s) => s.showHelpModal);
-  const showExportDialog = useAppStore((s) => s.showExportDialog);
+  const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
+  const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
@@ -230,7 +232,7 @@ function App() {
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setAngleToolState = useAppStore((s) => s.setAngleToolState);
-  const setShowHelpModal = useAppStore((s) => s.setShowHelpModal);
+  const setShowHelpModal = useWorkspaceStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
   const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
@@ -281,6 +283,9 @@ function App() {
   // Warm-up is deliberately *not* at mount — see useOcrWarmup for why booting
   // tesseract eagerly cost every visitor ~4.4 MB gz on the critical path.
   useOcrWarmup();
+
+  // Names the browser tab after the plan that is open.
+  useDocumentTitle();
 
   useEffect(() => {
     return () => {
@@ -867,7 +872,7 @@ function App() {
   // selected vertex). The floor of three needs a voice: with a visible
   // selection and a Delete key, a silent no-op reads as a broken keybinding.
   const handleDeletePerimeterVertex = useCallback((index) => {
-    const overlay = selectPerimeterOverlay(useAppStore.getState());
+    const overlay = selectActivePerimeterOverlay(useAppStore.getState());
     if (!overlay?.vertices) return;
     if (overlay.vertices.length <= 3) {
       notify('An outline needs at least three corners.', { type: 'warning', id: 'min-vertices' });
@@ -1093,8 +1098,8 @@ function App() {
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
   const handleHelpOpen = useCallback(() => {
-    const s = useAppStore.getState();
-    s.setShowHelpModal(!s.showHelpModal);
+    const w = useWorkspaceStore.getState();
+    w.setShowHelpModal(!w.showHelpModal);
   }, []);
   // Typing a dimension fires this per keystroke, and half of a typed pair
   // disagrees with the room by construction: 16.7 entered as the width of a
@@ -1202,10 +1207,10 @@ function App() {
     () => setToolLabels(!toolLabels),
     [toolLabels, setToolLabels],
   );
-  const dockOpen = useAppStore((s) => s.dockOpen);
-  const setDockOpen = useAppStore((s) => s.setDockOpen);
+  const dockOpen = useWorkspaceStore((s) => s.dockOpen);
+  const setDockOpen = useWorkspaceStore((s) => s.setDockOpen);
   const handleDockToggle = useCallback(
-    () => setDockOpen(!useAppStore.getState().dockOpen),
+    () => setDockOpen(!useWorkspaceStore.getState().dockOpen),
     [setDockOpen],
   );
 
