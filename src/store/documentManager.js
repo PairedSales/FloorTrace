@@ -56,6 +56,16 @@ export const clearParked = () => parked.clear();
 /** How many plans are set aside. For tests and diagnosis. */
 export const parkedCount = () => parked.size;
 
+/**
+ * A parked plan's working state, read-only.
+ *
+ * The one legitimate way to see a plan that is not on the root, and narrow on
+ * purpose: it is for writing a plan out to a file, not for rendering one. A
+ * component subscribing to another plan's geometry is the read path this
+ * architecture exists to not have.
+ */
+export const parkedStateFor = (docId) => parked.get(docId)?.state ?? null;
+
 /** The metadata a plan carries whether or not it is the one on screen. */
 export const newDocumentMeta = (patch = {}) => ({
   // The file this plan came from, if any, so a tab can name itself before the

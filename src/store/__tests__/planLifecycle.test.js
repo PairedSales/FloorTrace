@@ -149,3 +149,31 @@ describe('plan lifecycle', () => {
     });
   });
 });
+
+describe('reading a parked plan for saving', () => {
+  let docA;
+  beforeEach(() => {
+    docA = oneDocument();
+  });
+
+  // The one legitimate way to see a plan that is not on the root, and narrow
+  // on purpose: writing a plan out to a file, never rendering one.
+  it('exposes a parked plan’s state without adopting it', async () => {
+    const { parkedStateFor } = await import('../documentManager');
+    useAppStore.setState({ image: IMAGE, projectName: 'Parked plan' });
+
+    const docB = app().openDocument();
+
+    expect(parkedStateFor(docA)?.projectName).toBe('Parked plan');
+    expect(parkedStateFor(docA)?.image).toBe(IMAGE);
+    // Reading it does not make it live.
+    expect(app().activeDocumentId).toBe(docB);
+    expect(app().projectName).toBe('');
+  });
+
+  it('reports nothing for a plan that is live or unknown', async () => {
+    const { parkedStateFor } = await import('../documentManager');
+    expect(parkedStateFor(docA)).toBeNull();
+    expect(parkedStateFor('doc-nope')).toBeNull();
+  });
+});

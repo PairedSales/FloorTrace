@@ -42,9 +42,7 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
     e.preventDefault();
   }, []);
 
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
+  const openOne = useCallback(async (file) => {
     if (!file) return;
 
     const isFloorplan = file.name.endsWith('.floorplan');
@@ -96,6 +94,20 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
       setIsProcessing(false);
     }
   }, [resetOverlays, handleManualMode, makeRoomForIncoming, setIsProcessing, setImage, setImageMimeType]);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    // Every dropped file, each becoming its own plan. Dropping a folder's worth
+    // of elevations and getting only the first one was never the intent; it was
+    // the only thing a single-document app could do.
+    const files = [...(e.dataTransfer?.files ?? [])];
+    for (const file of files) {
+      // Sequential on purpose: each file opens a plan, and opening runs a
+      // scan that must not race the next one for the OCR clock.
+      await openOne(file);
+    }
+  }, [openOne]);
+
 
   return {
     handlePasteImage,
