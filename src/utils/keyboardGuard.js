@@ -1,4 +1,4 @@
-import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 
 // One guard for the several window-level keydown listeners. The modal half is
 // load-bearing: HelpModal owns Escape while it is open, so without this a
@@ -8,4 +8,4 @@ export const isTypingInField = (target) =>
   !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
 export const shortcutsBlocked = (target) =>
-  isTypingInField(target) || useAppStore.getState().showHelpModal;
+  isTypingInField(target) || useWorkspaceStore.getState().showHelpModal;

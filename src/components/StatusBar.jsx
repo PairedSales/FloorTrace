@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Check, Loader2, Minus, Plus, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 
 // What the draft store is actually doing, said in the user's terms. The cell
 // used to render a hardcoded "Saved" — the one claim in the shell that was
@@ -60,7 +61,7 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
   const draftState = useAppStore((s) => s.draftState);
 
   // Low-stakes confirmations land here rather than as a toast over the plan.
-  const flash = useAppStore((s) => s.statusFlash);
+  const flash = useWorkspaceStore((s) => s.statusFlash);
   const [shownFlash, setShownFlash] = useState(null);
   useEffect(() => {
     if (!flash) return;

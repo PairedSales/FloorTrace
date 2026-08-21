@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
 import useAppStore, { selectAreaByType } from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea, holeRings, isSubtracted } from '../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
@@ -197,7 +198,7 @@ const MeasurementDock = ({
   const detectedDimensions = useAppStore((s) => s.detectedDimensions);
   const focusedWarning = useAppStore((s) => s.focusedWarning);
   const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
-  const flashStatus = useAppStore((s) => s.flashStatus);
+  const flashStatus = useWorkspaceStore((s) => s.flashStatus);
   const [openQualityTraceId, setOpenQualityTraceId] = useState(null);
 
   const scrollRef = useRef(null);

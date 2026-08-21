@@ -1,4 +1,4 @@
-import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 
 /**
  * Promise-based confirmation for actions that discard work.
@@ -18,7 +18,7 @@ export function confirmToast(message, {
   detail = null,
 } = {}) {
   return new Promise((resolve) => {
-    useAppStore.getState().requestConfirm({
+    useWorkspaceStore.getState().requestConfirm({
       message, detail, confirmLabel, cancelLabel, resolve,
     });
   });

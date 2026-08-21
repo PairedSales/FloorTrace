@@ -247,34 +247,19 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  showHelpModal: false,
+  // Per-plan, despite being UI: both name a place on one drawing. Window-level
+  // UI — the dock, the modals, the status flash — lives in workspaceStore.js.
   // Which detection warning the user is inspecting, as {traceId, index} into
   // that trace's `quality.warnings`. Declared here rather than in the working
   // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
   // edit must not restore a highlight. Every reader resolves it against the
   // live traces, so a focus left on a deleted trace simply renders nothing.
   focusedWarning: null,
-  // Transient confirmation for the status bar ("Area copied"), as
-  // {text, at}. `at` is what makes two identical messages in a row two
-  // separate flashes rather than one no-op set. UI-only for the same reason
-  // as focusedWarning: undo must not replay a confirmation.
-  statusFlash: null,
-  // Whether the measurement dock is open. UI-only — a collapsed panel is a
-  // view preference, not a fact about the project, so it must not ride along
-  // in a `.floorplan` or be restored by an undo.
-  dockOpen: true,
-  // Whether the export dialog is up. UI-only for the same reason.
-  showExportDialog: false,
   // What the autosaved draft is actually doing right now: 'off' | 'pending' |
   // 'saved' | 'error'. Reported rather than assumed — the status bar used to
   // read a hardcoded "Saved", which was the one claim in the shell that was
   // true by coincidence and never checked.
   draftState: 'off',
-  // Pending destructive confirmation, as {message, detail, confirmLabel,
-  // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
-  // promise-returning function callable from non-React code while a real
-  // dialog does the rendering.
-  confirmRequest: null,
   // A transient canvas highlight for an error that has a place on the plan —
   // a self-intersection knows which two edges cross. Same anchor shape as
   // `focusedWarning` resolves to, so WarningHighlightLayer renders both.
@@ -522,30 +507,12 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     isProcessing: false,
     processingMessage: '',
   }),
-  setShowHelpModal: (v) => set({ showHelpModal: v }),
   setFocusedWarning: (v) => set({ focusedWarning: v }),
-  flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
-  setDockOpen: (v) => set({ dockOpen: v }),
-  setShowExportDialog: (v) => set({ showExportDialog: v }),
   setDraftState: (v) => set({ draftState: v }),
   // Dirty like any other document edit: the subject line is what a saved
   // project is filed under, so losing it is losing work.
   setProjectName: (v) => set({ projectName: v, isDirty: true }),
   setErrorAnchor: (v) => set({ errorAnchor: v }),
-  requestConfirm: (req) => {
-    // A second request while one is open would strand the first promise, so
-    // the incumbent is answered `false` — the safe default — before it is
-    // replaced.
-    const pending = get().confirmRequest;
-    if (pending) pending.resolve(false);
-    set({ confirmRequest: req });
-  },
-  resolveConfirm: (value) => {
-    const pending = get().confirmRequest;
-    if (!pending) return;
-    set({ confirmRequest: null });
-    pending.resolve(value);
-  },
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

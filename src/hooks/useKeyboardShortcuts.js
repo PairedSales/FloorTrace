@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
 
@@ -123,8 +124,8 @@ export function useKeyboardShortcuts({
           // Was the options popover, which the menu bar absorbed. Kept bound to
           // the nearest thing it meant — show/hide the side panel — rather than
           // left toggling a store field nothing renders any more.
-          const s = useAppStore.getState();
-          s.setDockOpen(!s.dockOpen);
+          const w = useWorkspaceStore.getState();
+          w.setDockOpen(!w.dockOpen);
           return;
         }
         if (e.key.toLowerCase() === 'l') {
