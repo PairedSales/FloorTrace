@@ -195,6 +195,7 @@ function App() {
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
   const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
   const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -373,11 +374,16 @@ function App() {
     } else {
       // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
       if (!forceEnter && (roomOverlay || perimeterOverlay)) {
+        // A dialog is an await like any other. The plan it is asking about must
+        // still be the live one when the answer arrives, or the undo point and
+        // the clearing below land on a different drawing.
+        const asking = beginWork('confirm');
         const confirmed = await confirmToast(
           'Entering Manual Mode will clear existing overlays. Continue?',
           { confirmLabel: 'Continue' }
         );
-        if (!confirmed) {
+        settleWork(asking);
+        if (!confirmed || !isCurrent(asking)) {
           return;
         }
         // Save undo state before clearing overlays
@@ -477,13 +483,20 @@ function App() {
   const handleFindRoomSize = useCallback(async () => {
     if (!image) return;
 
+    const asking = beginWork('confirm');
     if (roomOverlay || perimeterOverlay) {
       const confirmed = await confirmToast(
         'Scanning for room size will clear your existing room and perimeter overlays. Continue?',
         { confirmLabel: 'Scan' }
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        settleWork(asking);
+        return;
+      }
     }
+    settleWork(asking);
+    // Same rule as above: everything below clears and re-scans one plan.
+    if (!isCurrent(asking)) return;
 
     undoManager.save();
     
@@ -1320,8 +1333,16 @@ function App() {
   // The plan view, built once and handed to whichever shell is on. Same
   // element, same props: nothing about tracing depends on the chrome around it,
   // and a second copy of this list is a second place for them to diverge.
+  // `key` is the entire correctness argument for in-progress gestures across a
+  // plan switch. The canvas hooks hold real state outside the store — a crop
+  // rectangle mid-drag, the eraser's starting vertices, the void tool's target
+  // trace, a half-dragged vertex index, the protractor's live coordinates — and
+  // none of it is parked, because none of it is a fact about the plan. Keying
+  // the subtree on the plan means all of it dies with the tree instead of being
+  // reinterpreted against a different drawing.
   const canvasElement = (
     <Canvas
+      key={activeDocumentId}
       ref={canvasRef}
       image={image}
       roomOverlay={roomOverlay}

@@ -187,6 +187,11 @@ export function useAutosave() {
         const state = useAppStore.getState();
         if (!state._hasRestoredState) return;
         if (!saveOnExit) return;
+        // A plan switch replaces every field at once. Without this it reads as
+        // the largest edit the app can make, and the debounced write that
+        // followed would put the *incoming* plan's state under the *outgoing*
+        // plan's key.
+        if (state._swappingDocument) return;
 
         if (!slice.image) {
           writtenImageRef.current = null;
