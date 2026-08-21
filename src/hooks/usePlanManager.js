@@ -21,10 +21,7 @@ export function usePlanManager() {
    * active one, so the first switch to any other plan lands here. A plan that
    * is already in memory — parked during this session — needs nothing.
    */
-  const hydrate = useCallback(async (docId) => {
-    const meta = useAppStore.getState().documents[docId];
-    if (!meta || meta.hydrated) return true;
-
+  const readPlanIntoMemory = useCallback(async (docId) => {
     const draft = await readDocDraft(docId);
     if (draft.status === 'missing' || draft.status === 'malformed') {
       // The tab promised a plan that is not there. Saying so is the point:
@@ -53,6 +50,23 @@ export function usePlanManager() {
     }
     return true;
   }, []);
+
+  const hydrate = useCallback(async (docId) => {
+    const meta = useAppStore.getState().documents[docId];
+    if (!meta || meta.hydrated) return true;
+
+    // Reading a plan back means pulling a multi-megabyte image out of
+    // IndexedDB — measured at roughly a second on a real plan. Switching to a
+    // restored tab and getting nothing at all for that long reads as a hang,
+    // so it says what it is doing. Only this path is slow: a plan parked during
+    // this session is already in memory and never reaches here.
+    useAppStore.getState().setIsProcessing(true, 'Opening plan…');
+    try {
+      return await readPlanIntoMemory(docId);
+    } finally {
+      useAppStore.getState().setIsProcessing(false);
+    }
+  }, [readPlanIntoMemory]);
 
   const switchPlan = useCallback(async (docId) => {
     const state = useAppStore.getState();

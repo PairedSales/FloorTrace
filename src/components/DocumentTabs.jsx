@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Plus, ChevronDown, Loader2, AlertTriangle } from 'lucide-react';
+import { X, Plus, ChevronDown, Loader2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
@@ -29,7 +29,7 @@ const TAB_MIN = 96;
 const TAB_MAX = 200;
 
 const PlanTab = ({
-  docId, label, isActive, isBusy, needsAttention, canClose,
+  docId, label, isActive, isBusy, canClose,
   onSelect, onClose, onRename,
 }) => {
   const [renaming, setRenaming] = useState(false);
@@ -77,9 +77,6 @@ const PlanTab = ({
         className="flex items-center gap-1.5 flex-1 min-w-0 h-full text-left cursor-pointer"
       >
         {isBusy && <Loader2 className="w-3 h-3 shrink-0 animate-spin text-accent" aria-hidden="true" />}
-        {needsAttention && !isBusy && (
-          <AlertTriangle className="w-3 h-3 shrink-0 text-warn" aria-hidden="true" />
-        )}
         {renaming ? (
           <input
             ref={inputRef}
@@ -191,7 +188,6 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
             label={labelFor(docId, i)}
             isActive={docId === activeDocumentId}
             isBusy={docId === activeDocumentId && isProcessing}
-            needsAttention={Boolean(documents[docId]?.needsRescale)}
             // The last plan cannot be closed away — there is no "no document"
             // state in this app — so it is emptied from the File menu instead.
             canClose={documentOrder.length > 1}

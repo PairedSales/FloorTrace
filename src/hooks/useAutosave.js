@@ -11,7 +11,7 @@ import {
   isQuotaError, LEGACY_DRAFT_KEY,
 } from '../utils/workspaceDrafts';
 import { getDraft, removeDraft } from '../utils/draftStorage';
-import { documentLabel } from '../store/documentManager';
+import { documentLabel, parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
 const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
@@ -91,7 +91,10 @@ export function useAutosave() {
           index: i,
         }),
         sourceFileName: meta.sourceFileName ?? null,
-        updatedAt: Date.now(),
+        // This plan's own timestamp, recorded when it was parked. Stamping
+        // every plan on every write made the field say "the workspace was
+        // saved", which is not what a per-plan updatedAt means.
+        updatedAt: isActive ? Date.now() : (meta.updatedAt ?? Date.now()),
         hasWork: isActive ? Boolean(state.image) : Boolean(meta.hasWork),
       };
     });
@@ -295,6 +298,41 @@ export function useAutosave() {
     );
     return () => unsub();
   }, []);
+
+  // ── Write a plan when it is parked ────────────────────────────────────────
+  //
+  // The moment a plan leaves the store root is the right time to write it, and
+  // the only time its undo history can be written at all: history lives in
+  // module state that belongs to whichever plan is live, so once another plan
+  // has adopted the stacks there is nothing left to read.
+  //
+  // Without this, only the active plan's history ever reached disk — through
+  // the exit flush — and every background plan came back from a reload with an
+  // empty undo stack. Which is exactly what it did.
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(
+      (state) => state.activeDocumentId,
+      (activeId, previousId) => {
+        if (!previousId || previousId === activeId) return;
+        const state = useAppStore.getState();
+        if (!state._hasRestoredState || !saveOnExit) return;
+
+        // The plan that just left the root, as it was when it left.
+        const parkedState = parkedStateFor(previousId);
+        if (!parkedState?.image) return;
+
+        writtenImageByDocRef.current.set(previousId, parkedState.image);
+        writeDocDraft(previousId, parkedState, true)
+          .then(() => writeHistoryRecord(previousId, parkedHistoryFor(previousId)))
+          .then(() => writeWorkspaceIndex(buildIndex()))
+          .catch((error) => {
+            console.error('Failed to write a parked plan:', error);
+            useAppStore.getState().setDraftState('error');
+          });
+      },
+    );
+    return () => unsub();
+  }, [saveOnExit, buildIndex]);
 
   // ── Debounced autosave on working-state changes ───────────────────────────
   const autosaveTimerRef = useRef(null);
