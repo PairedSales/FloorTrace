@@ -52,6 +52,16 @@ export const newDocumentMeta = (patch = {}) => ({
   // and the `.floorplan` whether or not that makes sense. This belongs in none
   // of the three.
   sourceFileName: null,
+  // What the tab says. Kept for plans that are not on the root, whose
+  // projectName lives in a parked record or on disk rather than in the store.
+  title: null,
+  // Whether this plan holds an image, so a restored tab can be drawn honestly
+  // before its state has been read back.
+  hasWork: false,
+  // False for a restored plan whose state is still on disk. Its records are
+  // read on first switch rather than at startup — reading every open plan's
+  // multi-megabyte image to show one of them is the wrong trade.
+  hydrated: true,
   ...patch,
 });
 
@@ -135,10 +145,24 @@ export function createDocumentSlice(set, get) {
       undoManager.cancelPendingSave();
       detachDocument(docId);
 
+      const parkedState = state.getParkedState();
       parked.set(docId, {
-        state: state.getParkedState(),
+        state: parkedState,
         history: undoManager.parkHistory(),
       });
+      // The tab has to keep saying the right thing after the plan leaves the
+      // root, where `projectName` no longer describes it.
+      set((s) => ({
+        documents: {
+          ...s.documents,
+          [docId]: {
+            ...(s.documents[docId] ?? newDocumentMeta()),
+            title: parkedState.projectName || null,
+            hasWork: Boolean(parkedState.image),
+            hydrated: true,
+          },
+        },
+      }));
       return docId;
     },
 
@@ -251,6 +275,28 @@ export function createDocumentSlice(set, get) {
         get().adoptDocument(remaining[Math.max(0, index - 1)]);
       }
       return true;
+    },
+
+    /**
+     * Replace the whole set of open plans, as a restored workspace does.
+     *
+     * The caller hydrates the active plan itself: this establishes identity and
+     * order so a tab strip can be drawn, including for plans whose state is
+     * still on disk. `hydrated: false` is what marks those.
+     */
+    adoptWorkspace: (plans, activeId) => {
+      if (!plans?.length) return;
+      clearParked();
+      const documents = {};
+      for (const { docId, meta } of plans) {
+        documents[docId] = newDocumentMeta(meta);
+      }
+      const order = plans.map((p) => p.docId);
+      set({
+        documents,
+        documentOrder: order,
+        activeDocumentId: order.includes(activeId) ? activeId : order[0],
+      });
     },
 
     /**
