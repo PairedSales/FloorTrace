@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createFloorSlice, newTraceId } from './floorManager';
+import { createFloorSlice } from './floorManager';
+import { newTraceId } from './ids';
+import { createDocumentSlice } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import {
@@ -15,16 +17,23 @@ import {
  * undo/redo and autosave). Defining them in one place avoids the duplication
  * that previously existed across applySnapshot, resetOverlays, and autosave.
  */
-const DEFAULT_TRACE_ID = 'trace-default';
 // A function, not a literal: handing out the same nested objects on every
 // reset and undo fallback aliased one project's calibration into the next.
-const workingStateDefaults = () => ({
+//
+// The default trace's id is minted per call for the same class of reason, one
+// level up. It used to be the constant `'trace-default'`, so every plan that
+// had never had a trace added shared it — and trace ids are what
+// `focusedWarning`, the double-counting report and an exhibit's outline ids all
+// key on. With one plan that is invisible; with two it is a collision.
+const workingStateDefaults = () => {
+  const defaultTraceId = newTraceId();
+  return {
   image: null,
   imageMimeType: 'image/png',
   roomOverlay: null,
   perimeterTraces: [
     {
-      id: DEFAULT_TRACE_ID,
+      id: defaultTraceId,
       name: '1st Floor',
       vertices: [],
       closed: false,
@@ -37,7 +46,7 @@ const workingStateDefaults = () => ({
     }
   ],
   traceInteractionMode: 'idle',
-  activeTraceId: DEFAULT_TRACE_ID,
+  activeTraceId: defaultTraceId,
   roomDimensions: { width: '', height: '' },
   calibration: {
     calibrated: false,
@@ -101,7 +110,8 @@ const workingStateDefaults = () => ({
   // Project tracking states
   isDirty: false,
   projectId: null,
-});
+  };
+};
 
 const WORKING_STATE_DEFAULTS = workingStateDefaults();
 
@@ -267,6 +277,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
+
+  // ── document identity (which plans exist; metadata only) ───────────────────
+  ...createDocumentSlice(set, get),
 
   // ── floor management ───────────────────────────────────────────────────────
   ...createFloorSlice(set, get),
@@ -587,6 +600,10 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   restart: () => {
     set(workingStateDefaults());
     get().resetPerimeterTraces();
+    // The tab is the same tab, so its identity survives — but nothing it knew
+    // about the old plan may, or a closed project leaves its filename behind to
+    // name the empty one that replaces it.
+    get().resetActiveDocumentMeta();
   },
 
   // ── bulk restore (used by autosave restore) ────────────────────────────────
@@ -643,8 +660,12 @@ let lastOverlayResult = null;
 
 // Carries the whole trace geometry, not just `vertices`: a lossy adapter is how
 // an edit round-tripped through here could drop holes on the way back in.
-/** Selector to get the active perimeter overlay (compatibility adapter) */
-export const selectPerimeterOverlay = (state) => {
+//
+// Named for what it reads: the overlay of the *active* trace of the *live*
+// store, memoised on module state. Anything that needs the overlay of a state
+// it was handed must not come through here — the memo answers for whichever
+// state called last.
+export const selectActivePerimeterOverlay = (state) => {
   const traces = state.perimeterTraces || [];
   const active = traces.find(t => t.id === state.activeTraceId);
   if (!active) {
@@ -722,7 +743,47 @@ const findDoubleCounted = (traces) => {
   return found;
 };
 
-export const selectAreaByType = (state) => {
+/**
+ * Area of the visible traces, split by type — computed, not memoised.
+ *
+ * Takes any working state, not necessarily the live one, and returns a fresh
+ * object every call. That is exactly what a caller wants when it is not a React
+ * subscription: the exhibit builder is handed a state and must describe *that*
+ * state, and a module-level memo keyed on nothing but the last call is the
+ * wrong tool for it — with more than one plan around, alternating callers would
+ * thrash the memo, and the exhibit could be handed the other plan's numbers.
+ *
+ * `selectActiveAreaByType` below is the memoised view of the live store, for
+ * components. This is the arithmetic underneath it.
+ */
+export const computeAreaByType = (state) => {
+  const traces = state.perimeterTraces || [];
+  const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
+
+  const byType = {};
+  const counts = {};
+  let total = 0;
+  // Hiding a trace drops it from its own subtotal and from the total, which is
+  // what hiding a trace has always meant here.
+  for (const t of traces) {
+    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
+    const type = normalizeTraceType(t.type);
+    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
+    byType[type] = (byType[type] ?? 0) + value;
+    counts[type] = (counts[type] ?? 0) + 1;
+    total += value;
+  }
+
+  return {
+    byType,
+    counts,
+    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
+    total,
+    doubleCounted: findDoubleCounted(traces),
+  };
+};
+
+export const selectActiveAreaByType = (state) => {
   const traces = state.perimeterTraces || [];
   const feetPerPixel = state.calibration?.feetPerPixel || { x: 1.0, y: 1.0 };
 
@@ -744,34 +805,14 @@ export const selectAreaByType = (state) => {
     return lastAreaByType;
   }
 
-  const byType = {};
-  const counts = {};
-  let total = 0;
-  // Hiding a trace drops it from its own subtotal and from the total, which is
-  // what hiding a trace has always meant here.
-  for (const t of traces) {
-    if (!t.visible || !t.vertices || t.vertices.length < 3) continue;
-    const type = normalizeTraceType(t.type);
-    const value = calculateArea(t.vertices, feetPerPixel, t.holes);
-    byType[type] = (byType[type] ?? 0) + value;
-    counts[type] = (counts[type] ?? 0) + 1;
-    total += value;
-  }
-
   lastFeetPerPixel = { ...feetPerPixel };
   lastTraces = traces.slice();
-  lastAreaByType = {
-    byType,
-    counts,
-    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
-    total,
-    doubleCounted: findDoubleCounted(traces),
-  };
+  lastAreaByType = computeAreaByType(state);
   return lastAreaByType;
 };
 
 /** Selector to get the combined total area of all visible traces */
-export const selectCombinedArea = (state) => selectAreaByType(state).total;
+export const selectCombinedArea = (state) => selectActiveAreaByType(state).total;
 
 export { AUTOSAVE_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

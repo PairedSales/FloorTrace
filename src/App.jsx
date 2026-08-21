@@ -34,7 +34,7 @@ import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
-  selectCombinedArea, selectPerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
+  selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
 import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
@@ -49,6 +49,7 @@ import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
 import { useIsMobile } from './hooks/useViewport';
+import { useDocumentTitle } from './hooks/useDocumentTitle';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
 // Deliberately separate from ContextBar's copy: that bar states the whole
@@ -167,7 +168,7 @@ function App() {
   // ── Pull everything from the Zustand store ──────────────────────────────
   const image = useAppStore((s) => s.image);
   const roomOverlay = useAppStore((s) => s.roomOverlay);
-  const perimeterOverlay = useAppStore(selectPerimeterOverlay);
+  const perimeterOverlay = useAppStore(selectActivePerimeterOverlay);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
   const traceInteractionMode = useAppStore((s) => s.traceInteractionMode);
@@ -282,6 +283,9 @@ function App() {
   // Warm-up is deliberately *not* at mount — see useOcrWarmup for why booting
   // tesseract eagerly cost every visitor ~4.4 MB gz on the critical path.
   useOcrWarmup();
+
+  // Names the browser tab after the plan that is open.
+  useDocumentTitle();
 
   useEffect(() => {
     return () => {
@@ -868,7 +872,7 @@ function App() {
   // selected vertex). The floor of three needs a voice: with a visible
   // selection and a Delete key, a silent no-op reads as a broken keybinding.
   const handleDeletePerimeterVertex = useCallback((index) => {
-    const overlay = selectPerimeterOverlay(useAppStore.getState());
+    const overlay = selectActivePerimeterOverlay(useAppStore.getState());
     if (!overlay?.vertices) return;
     if (overlay.vertices.length <= 3) {
       notify('An outline needs at least three corners.', { type: 'warning', id: 'min-vertices' });

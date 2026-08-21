@@ -25,6 +25,10 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
+        // Cleared, not left alone: a pasted image has no file behind it, and
+        // inheriting the previous plan's filename would name this one after a
+        // drawing it has nothing to do with.
+        useAppStore.getState().setActiveDocumentMeta({ sourceFileName: null });
         prewarmDetection(dataUrl);
         await handleManualMode(dataUrl, true); // Automatically enter manual mode
       }
@@ -64,6 +68,7 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
 
         useAppStore.getState().loadProject(statePatch);
         undoManager.setHistoryState(historyPatch);
+        useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
 
         flash('Project loaded');
       } else {
@@ -75,6 +80,7 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
         undoManager.clear();
         setImage(dataUrl);
         setImageMimeType(mimeType);
+        useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
         // Not awaited: it runs in the detection worker while the scan below
         // holds the main thread and the Tesseract pool.
         prewarmDetection(dataUrl);

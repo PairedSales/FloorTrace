@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
-import useAppStore, { selectAreaByType } from '../store/appStore';
+import useAppStore, { selectActiveAreaByType } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { formatDimensionInput, formatArea, metersToFeet } from '../utils/unitConverter';
 import { calculateArea, holeRings, isSubtracted } from '../utils/areaCalculator';
@@ -186,7 +186,7 @@ const MeasurementDock = ({
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
   const setPerimeterTraceType = useAppStore((s) => s.setPerimeterTraceType);
-  const areas = useAppStore(selectAreaByType);
+  const areas = useAppStore(selectActiveAreaByType);
   const image = useAppStore((s) => s.image);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { internKey } from './hash';
 import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from './traceTypes';
+import { newTraceId } from '../store/ids';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // Floor state fields written to a project file. Derived from the store's one
@@ -470,7 +471,10 @@ export function deserializeSketch(project) {
   if (perimeterTraces.length === 0) {
     perimeterTraces = [
       {
-        id: 'trace-default',
+        // Minted, not the old `'trace-default'` constant: this is a second,
+        // independent place a default trace was created, so a file with no
+        // traces opened alongside a fresh plan gave both the same trace id.
+        id: newTraceId(),
         name: '1st Floor',
         vertices: [],
         closed: false,
