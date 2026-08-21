@@ -393,12 +393,32 @@ export function useAutosave() {
       }
     };
 
+    /**
+     * Warn on close only when closing actually loses something.
+     *
+     * With `saveOnExit` on, the draft is the net and every open plan is on
+     * disk, so a prompt would fire on every close and teach the user to dismiss
+     * it. With it off, nothing is being kept at all, and a plan holding work is
+     * about to be lost — which is the one case worth interrupting for.
+     */
+    const warnIfUnkept = (event) => {
+      if (saveOnExit) return;
+      const state = useAppStore.getState();
+      const anyWork = state.image
+        || state.documentOrder.some((id) => state.documents[id]?.hasWork);
+      if (!anyWork) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
     window.addEventListener('beforeunload', flushAutosaveNow);
+    window.addEventListener('beforeunload', warnIfUnkept);
     window.addEventListener('pagehide', flushAutosaveNow);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('beforeunload', flushAutosaveNow);
+      window.removeEventListener('beforeunload', warnIfUnkept);
       window.removeEventListener('pagehide', flushAutosaveNow);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };

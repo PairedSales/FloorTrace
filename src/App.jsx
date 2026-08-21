@@ -50,6 +50,8 @@ import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
 import { useIsMobile } from './hooks/useViewport';
+import { usePlanManager } from './hooks/usePlanManager';
+import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { useDocumentTitle } from './hooks/useDocumentTitle';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
@@ -196,6 +198,7 @@ function App() {
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
   const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  const documentOrder = useAppStore((s) => s.documentOrder);
   const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
   const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -256,6 +259,7 @@ function App() {
 
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
+  const { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan } = usePlanManager();
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave();
   const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr();
   const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
@@ -318,23 +322,32 @@ function App() {
                       : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
                         : 'select';
 
-  // Reset entire application
-  const handleRestart = async () => {
-    if (image) {
-      const confirmed = await confirmToast('Restart and clear the current project?', {
-        confirmLabel: 'Restart',
-      });
-      if (!confirmed) return;
+  // "Close project" split in two once more than one plan can be open: closing
+  // the one you are looking at is a different act from closing everything, and
+  // the old single command silently meant the second.
+  const handleClosePlan = useCallback(async () => {
+    const state = useAppStore.getState();
+    // The last plan does not disappear — there is no "no document" state in
+    // this app — so closing it empties it in place.
+    if (state.documentOrder.length === 1) {
+      if (state.image) {
+        const confirmed = await confirmToast('Close this plan? Its measurements will be discarded.', {
+          confirmLabel: 'Close plan',
+        });
+        if (!confirmed) return;
+      }
+      detachActiveDocument();
+      undoManager.clear();
+      useAppStore.getState().restart();
+      flash('Plan closed');
+      return;
     }
-    clearAutosavedDraft();
-    // Anything still running was about the drawing being closed. Its results
-    // would be refused anyway — the image is about to be null — but aborting
-    // says so now rather than paying for a trace nobody will read.
-    detachActiveDocument();
-    undoManager.clear();
-    useAppStore.getState().restart();
-    flash('Project closed');
-  };
+    await closePlan(state.activeDocumentId);
+  }, [closePlan]);
+
+  const handleCloseAllPlans = useCallback(async () => {
+    if (await closeAllPlans()) clearAutosavedDraft();
+  }, [closeAllPlans, clearAutosavedDraft]);
 
   // OCR found nothing usable: drop a placeholder overlay in the middle of the
   // image for the user to size by hand.
@@ -523,13 +536,13 @@ function App() {
   ]);
 
   const {
-    checkUnsavedChanges,
+    makeRoomForIncoming,
     handleFileOpen,
     handleFileUpload,
     handleSaveProject,
     handleSaveProjectNormal,
     handleSaveProjectAs,
-  } = useProjectIO(handleManualMode, fileInputRef);
+  } = useProjectIO(handleManualMode, fileInputRef, openPlan);
 
   const { openExport, closeExport, copyExhibitNow } = useExhibitExport();
 
@@ -537,7 +550,7 @@ function App() {
     handlePasteImage,
     handleDragOver,
     handleDrop,
-  } = useDragAndDrop(handleManualMode, checkUnsavedChanges);
+  } = useDragAndDrop(handleManualMode, makeRoomForIncoming);
 
   // Vertex-by-vertex outline placement. Draw mode is the default fallback now,
   // but placing exact corners is still the right tool when the plan is clean
@@ -1206,7 +1219,15 @@ function App() {
       ? { field: 'eraserBrushSize', setSize: setEraserBrushSize, min: 4, max: 200, step: 4 }
       : null;
 
+  const handleSelectPlan = useCallback((index) => {
+    const order = useAppStore.getState().documentOrder;
+    if (order[index]) switchPlan(order[index]);
+  }, [switchPlan]);
+
   useKeyboardShortcuts({
+    onNewPlan: openPlan,
+    onStepPlan: stepPlan,
+    onSelectPlan: handleSelectPlan,
     onPaste: handlePasteImage,
     onFileOpen: handleFileOpen,
     onSaveProject: handleSaveProject,
@@ -1425,7 +1446,7 @@ function App() {
           onExport={openExport}
           onCopyExhibit={copyExhibitNow}
           onSaveProject={handleSaveProject}
-          onRestart={handleRestart}
+          onRestart={handleClosePlan}
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
@@ -1472,7 +1493,13 @@ function App() {
         onSaveProjectAs={handleSaveProjectAs}
         onExport={openExport}
         onCopyExhibit={copyExhibitNow}
-        onRestart={handleRestart}
+        onRestart={handleClosePlan}
+        onCloseAllPlans={handleCloseAllPlans}
+        onNewPlan={openPlan}
+        onNextPlan={() => stepPlan(1)}
+        onPrevPlan={() => stepPlan(-1)}
+        planCount={documentOrder.length}
+        canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
         onHelpOpen={handleHelpOpen}
         onFitToWindow={handleFitToWindow}
         onTracePerimeter={handleTracePerimeter}

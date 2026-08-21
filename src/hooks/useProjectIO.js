@@ -4,26 +4,30 @@ import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
-import { confirmToast } from '../utils/confirmToast';
 import { notify, flash } from '../utils/notify';
 
-export function useProjectIO(handleManualMode, fileInputRef) {
-  const image = useAppStore((s) => s.image);
-  const isDirty = useAppStore((s) => s.isDirty);
+export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
   const setImage = useAppStore((s) => s.setImage);
   const setImageMimeType = useAppStore((s) => s.setImageMimeType);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
-  const checkUnsavedChanges = useCallback(() => {
-    if (isDirty || image) {
-      return confirmToast(
-        'You have unsaved changes. Opening a new project or image will discard them. Continue?',
-        { confirmLabel: 'Discard' }
-      );
-    }
-    return Promise.resolve(true);
-  }, [isDirty, image]);
+  /**
+   * Make room for an incoming plan.
+   *
+   * This used to be a discard prompt — opening anything with an image loaded
+   * asked whether to throw the current work away, on `isDirty || image`, which
+   * is essentially always. Opening now adds a plan instead of replacing one, so
+   * there is nothing to discard and nothing to ask.
+   *
+   * The empty plan the app starts with is reused rather than left behind, so
+   * opening your first file does not leave an "Untitled 1" tab beside it.
+   */
+  const makeRoomForIncoming = useCallback(() => {
+    const state = useAppStore.getState();
+    if (!state.image) return true;
+    return Boolean(openPlan());
+  }, [openPlan]);
 
   const handleFileOpen = useCallback(() => {
     fileInputRef.current?.click();
@@ -36,7 +40,7 @@ export function useProjectIO(handleManualMode, fileInputRef) {
     const input = event.target;
     const file = input.files[0];
     if (file) {
-      if (!(await checkUnsavedChanges())) {
+      if (!makeRoomForIncoming()) {
         input.value = '';
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -97,7 +101,7 @@ export function useProjectIO(handleManualMode, fileInputRef) {
         }
       }
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
+  }, [resetOverlays, handleManualMode, makeRoomForIncoming, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
 
   const handleSaveProject = useCallback(async (isSaveAs = false) => {
     setIsProcessing(true, isSaveAs ? 'Saving project as…' : 'Saving project…');
@@ -124,7 +128,7 @@ export function useProjectIO(handleManualMode, fileInputRef) {
   const handleSaveProjectAs = useCallback(() => handleSaveProject(true), [handleSaveProject]);
 
   return {
-    checkUnsavedChanges,
+    makeRoomForIncoming,
     handleFileOpen,
     handleFileUpload,
     handleSaveProject,

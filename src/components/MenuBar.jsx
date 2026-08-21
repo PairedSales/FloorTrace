@@ -60,9 +60,13 @@ const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
  * the old UI taught its shortcuts only through 34 native `title` tooltips,
  * which are keyboard-invisible and touch-invisible.
  *
- * Restart lives here as "Close project" rather than on the logo. Clicking a
- * wordmark to wipe the project was a destructive action on the least expected
- * target, warned about only in a tooltip.
+ * Closing lives here rather than on the logo. Clicking a wordmark to wipe the
+ * project was a destructive action on the least expected target, warned about
+ * only in a tooltip.
+ *
+ * It is two commands now, not one: closing the plan you are looking at is a
+ * different act from closing every plan, and a single "Close project" silently
+ * meant the second once more than one could be open.
  *
  * `status` is the status bar, slotted into the empty right of this row instead
  * of running along the foot of the window. The row was three quarters air and
@@ -77,6 +81,12 @@ const MenuBar = ({
   onExport,
   onCopyExhibit,
   onRestart,
+  onCloseAllPlans,
+  onNewPlan,
+  onNextPlan,
+  onPrevPlan,
+  planCount = 1,
+  canOpenPlan = true,
   onHelpOpen,
   onFitToWindow,
   onTracePerimeter,
@@ -153,7 +163,12 @@ const MenuBar = ({
         <MenuItem label="Save editable project" keys={`${mod}+S`} disabled={!image} onSelect={() => onSaveProject(false)} close={close} />
         <MenuItem label="Save editable project as…" keys={`${mod}+Shift+S`} disabled={!image} onSelect={onSaveProjectAs} close={close} />
         <Sep />
-        <MenuItem label="Close project" danger disabled={!image} onSelect={onRestart} close={close} />
+        <MenuItem label="New plan" keys={`${mod}+${alt}+N`} disabled={!canOpenPlan} onSelect={onNewPlan} close={close} />
+        <MenuItem label="Next plan" keys={`${mod}+${alt}+→`} disabled={planCount < 2} onSelect={onNextPlan} close={close} />
+        <MenuItem label="Previous plan" keys={`${mod}+${alt}+←`} disabled={planCount < 2} onSelect={onPrevPlan} close={close} />
+        <Sep />
+        <MenuItem label="Close this plan" danger disabled={!image} onSelect={onRestart} close={close} />
+        <MenuItem label="Close all plans" danger disabled={planCount < 2} onSelect={onCloseAllPlans} close={close} />
       </Menu>
 
       <Menu id="view" label="View" open={openId === 'view'} onOpen={open} onClose={close}>
