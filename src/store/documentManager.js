@@ -37,6 +37,19 @@ export { newDocumentId };
  */
 const parked = new Map();
 
+/**
+ * How many plans may be open at once.
+ *
+ * Storage is not what sets this. At six the persisted footprint tops out near
+ * 60 MB, comfortable against every browser's quota — the ceiling would allow
+ * more. What six buys is a tab strip that still truncates gracefully above its
+ * ~96 px floor on a laptop, and a worker search budget with room to spare.
+ *
+ * One constant, read by the open path, the digit shortcuts and the message
+ * shown at the cap, so raising it is a one-line change.
+ */
+export const MAX_OPEN_DOCUMENTS = 6;
+
 /** Test seam, and what a full reset needs. */
 export const clearParked = () => parked.clear();
 
@@ -208,10 +221,24 @@ export function createDocumentSlice(set, get) {
     },
 
     /**
+     * Insert a plan's state as if it had been parked. How a plan restored from
+     * disk becomes switchable without going through the root first.
+     */
+    parkRestoredDocument: (docId, record) => {
+      parked.set(docId, record);
+      get().setDocumentMeta(docId, { hydrated: true });
+    },
+
+    /**
      * Add a plan and make it active. The plan being left is parked, so opening
      * a second plan never costs the first one anything.
+     *
+     * Returns null at the cap rather than silently doing nothing — silent
+     * failure at a limit is the failure mode this codebase is most prone to,
+     * and the caller is expected to say so.
      */
     openDocument: () => {
+      if (get().documentOrder.length >= MAX_OPEN_DOCUMENTS) return null;
       const docId = newDocumentId();
       set({ _swappingDocument: true });
       try {
