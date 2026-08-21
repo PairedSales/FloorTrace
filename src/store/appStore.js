@@ -414,6 +414,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       throw new Error("Invalid calibration scale");
     }
 
+    // Whatever the plan was flagged for is now answered.
+    get().setActiveDocumentMeta({ needsRescale: false });
     set({
       calibration: {
         calibrated: true,

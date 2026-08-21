@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { X, Plus, ChevronDown, Loader2 } from 'lucide-react';
+import { X, Plus, ChevronDown, Loader2, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
@@ -36,8 +36,8 @@ const TAB_MIN = 96;
 const TAB_MAX = 200;
 
 const PlanTab = ({
-  docId, label, isActive, isBusy, canClose,
-  onSelect, onClose, onRename,
+  docId, label, index, isActive, isBusy, needsRescale, canClose, isDragging,
+  onSelect, onClose, onRename, onDragStart,
 }) => {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -63,12 +63,18 @@ const PlanTab = ({
 
   return (
     <div
+      data-tab-id={docId}
       className={`group relative flex items-center gap-1.5 h-[26px] pl-2.5 pr-1
                   border-r border-line-soft text-[12px] select-none
                   ${isActive
         ? 'bg-panel-2 text-fg font-medium'
         : 'bg-panel text-fg-3 hover:text-fg-2 hover:bg-sunken'}`}
-      style={{ flex: `1 1 ${TAB_MIN}px`, minWidth: 0, maxWidth: TAB_MAX }}
+      style={{ flex: `1 1 ${TAB_MIN}px`, minWidth: 0, maxWidth: TAB_MAX, opacity: isDragging ? 0.4 : 1 }}
+      // Pointer events, never HTML5 drag. The app root owns `onDragOver` and
+      // `onDrop` with an unconditional `preventDefault`, so a native tab drag
+      // would bubble straight into the file-drop path and try to open the tab
+      // as a floorplan.
+      onPointerDown={(e) => onDragStart(e, docId, index)}
     >
       {/* The tab itself is the tab; the close control is a sibling, never a
           child. A focusable control inside `role="tab"` breaks the pattern a
@@ -84,6 +90,13 @@ const PlanTab = ({
         className="flex items-center gap-1.5 flex-1 min-w-0 h-full text-left cursor-pointer"
       >
         {isBusy && <Loader2 className="w-3 h-3 shrink-0 animate-spin text-accent" aria-hidden="true" />}
+        {/* A scale this plan's own work would have set was refused because the
+            plan was not live at the time — see documentRequests. Shown here
+            because a plan that is silently un-scaled reports an area from a
+            scale nobody chose. */}
+        {needsRescale && !isBusy && (
+          <AlertTriangle className="w-3 h-3 shrink-0 text-warn" aria-hidden="true" />
+        )}
         {renaming ? (
           <input
             ref={inputRef}
@@ -133,7 +146,56 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
 
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [stripWidth, setStripWidth] = useState(0);
+  const [draggingId, setDraggingId] = useState(null);
   const stripRef = useRef(null);
+  const dragRef = useRef(null);
+  const moveDocument = useAppStore((s) => s.moveDocument);
+
+  /**
+   * Drag a tab along the strip.
+   *
+   * A drag only begins once the pointer has travelled far enough to not be a
+   * click — a tab is a button first, and a strip where selecting sometimes
+   * reorders instead is worse than one that does not reorder at all.
+   */
+  const handleDragStart = useCallback((e, docId, index) => {
+    if (e.button !== 0) return;
+    dragRef.current = { docId, index, startX: e.clientX, started: false };
+
+    const onMove = (ev) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      if (!drag.started) {
+        if (Math.abs(ev.clientX - drag.startX) < 6) return;
+        drag.started = true;
+        setDraggingId(drag.docId);
+      }
+      const strip = stripRef.current;
+      if (!strip) return;
+      // Which slot the pointer is over, from the tabs themselves rather than
+      // from arithmetic on a nominal width: they truncate, so their real widths
+      // are the only ones that place the pointer correctly.
+      const rects = [...strip.querySelectorAll('[data-tab-id]')]
+        .map((el) => ({ id: el.dataset.tabId, rect: el.getBoundingClientRect() }));
+      const over = rects.findIndex(({ rect }) => ev.clientX < rect.left + rect.width / 2);
+      const target = over === -1 ? rects.length - 1 : over;
+      if (target >= 0 && rects[target] && rects[target].id !== drag.docId) {
+        moveDocument(drag.docId, target);
+      }
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      dragRef.current = null;
+      setDraggingId(null);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }, [moveDocument]);
 
   // Layout phase, so the first paint already knows how many tabs fit rather
   // than showing them all for a frame and then collapsing.
@@ -214,7 +276,11 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
             docId={docId}
             label={labelFor(docId, i)}
             isActive={docId === activeDocumentId}
+            index={i}
+            isDragging={draggingId === docId}
+            onDragStart={handleDragStart}
             isBusy={docId === activeDocumentId && isProcessing}
+            needsRescale={Boolean(documents[docId]?.needsRescale)}
             // The last plan cannot be closed away — there is no "no document"
             // state in this app — so it is emptied from the File menu instead.
             canClose={documentOrder.length > 1}

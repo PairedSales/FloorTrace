@@ -69,6 +69,24 @@ export const parkedStateFor = (docId) => parked.get(docId)?.state ?? null;
 /** A parked plan's undo history, so it can be written to disk after a park. */
 export const parkedHistoryFor = (docId) => parked.get(docId)?.history ?? null;
 
+/**
+ * Hold a write for a plan that is not on the store root, to be run when it is.
+ *
+ * The write is the same closure that would have run live — it goes through the
+ * store's setters, which address whichever plan is active, so it can only be
+ * run once this plan is active again. Queued rather than applied, and dropped
+ * with the plan if it closes first.
+ */
+export function queueForParked(docId, apply) {
+  const record = parked.get(docId);
+  if (!record) return false;
+  (record.inbox ??= []).push(apply);
+  return true;
+}
+
+/** How many held writes a plan has waiting. For tests and diagnosis. */
+export const parkedInboxSize = (docId) => parked.get(docId)?.inbox?.length ?? 0;
+
 /** The metadata a plan carries whether or not it is the one on screen. */
 export const newDocumentMeta = (patch = {}) => ({
   // The file this plan came from, if any, so a tab can name itself before the
@@ -88,6 +106,11 @@ export const newDocumentMeta = (patch = {}) => ({
   // to stamp every plan on every write, which made the field say "the
   // workspace was saved" rather than what a per-plan updatedAt means.
   updatedAt: null,
+  // Set when a scale this plan's own work would have applied was refused
+  // because the plan was not live at the time. Area goes as scale squared, so
+  // a late calibration is a wrong number that looks right; the plan is flagged
+  // instead and the user re-runs it.
+  needsRescale: false,
   // False for a restored plan whose state is still on disk. Its records are
   // read on first switch rather than at startup — reading every open plan's
   // multi-megabyte image to show one of them is the wrong trade.
@@ -173,7 +196,14 @@ export function createDocumentSlice(set, get) {
       // belongs to this plan and the cancel would land on whichever plan is
       // live by then.
       undoManager.cancelPendingSave();
-      detachDocument(docId);
+
+      // Deliberately NOT detaching this plan's in-flight work. Parking used to
+      // abort it, which is why switching tabs mid-trace silently threw the
+      // trace away: the result resolved to 'dropped' and the spinner cleared,
+      // and you came back to a plan where nothing had happened. The work now
+      // runs to completion and `deliver` holds the result until this plan is
+      // adopted again. Closing a plan still detaches — there, the drawing the
+      // work was about really is gone.
 
       const parkedState = state.getParkedState();
       parked.set(docId, {
@@ -208,6 +238,17 @@ export function createDocumentSlice(set, get) {
       get().adoptParkedState(record?.state ?? {});
       undoManager.adoptHistory(record?.history ?? null);
       set({ activeDocumentId: docId });
+
+      // Anything that finished while this plan was away, applied now that the
+      // store's setters mean this plan. Run after `activeDocumentId` is set,
+      // which is what makes them mean it, and in arrival order.
+      for (const apply of record?.inbox ?? []) {
+        try {
+          apply();
+        } catch (error) {
+          console.error('A result that arrived while a plan was parked could not be applied:', error);
+        }
+      }
     },
 
     /**
@@ -270,6 +311,25 @@ export function createDocumentSlice(set, get) {
         set({ _swappingDocument: false });
       }
       return docId;
+    },
+
+    /**
+     * Move a plan to a new position in the strip.
+     *
+     * Order is workspace state, not per-plan state — it is written to the
+     * index, so a reordered strip survives a reload.
+     */
+    moveDocument: (docId, toIndex) => {
+      const order = get().documentOrder;
+      const from = order.indexOf(docId);
+      if (from === -1) return false;
+      const to = Math.max(0, Math.min(order.length - 1, toIndex));
+      if (from === to) return false;
+      const next = [...order];
+      next.splice(from, 1);
+      next.splice(to, 0, docId);
+      set({ documentOrder: next });
+      return true;
     },
 
     /**

@@ -219,3 +219,43 @@ describe('a parked plan’s history is still readable', () => {
     expect(app().documents[docB].updatedAt).toBeNull();
   });
 });
+
+describe('reordering plans', () => {
+  let docA;
+  beforeEach(() => {
+    docA = oneDocument();
+  });
+
+  it('moves a plan and keeps every other plan in order', () => {
+    const docB = app().openDocument();
+    const docC = app().openDocument();
+    expect(app().documentOrder).toEqual([docA, docB, docC]);
+
+    expect(app().moveDocument(docC, 0)).toBe(true);
+    expect(app().documentOrder).toEqual([docC, docA, docB]);
+
+    expect(app().moveDocument(docC, 2)).toBe(true);
+    expect(app().documentOrder).toEqual([docA, docB, docC]);
+  });
+
+  // Order is workspace state; which plan you are looking at is not part of it.
+  it('does not change which plan is active', () => {
+    const docB = app().openDocument();
+    app().moveDocument(docB, 0);
+    expect(app().activeDocumentId).toBe(docB);
+  });
+
+  it('clamps a target beyond either end rather than losing the plan', () => {
+    const docB = app().openDocument();
+    app().moveDocument(docA, 99);
+    expect(app().documentOrder).toEqual([docB, docA]);
+    app().moveDocument(docA, -5);
+    expect(app().documentOrder).toEqual([docA, docB]);
+  });
+
+  it('reports no move for a no-op or an unknown plan', () => {
+    app().openDocument();
+    expect(app().moveDocument(docA, 0)).toBe(false);
+    expect(app().moveDocument('doc-nope', 0)).toBe(false);
+  });
+});
