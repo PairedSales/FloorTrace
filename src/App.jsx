@@ -24,7 +24,7 @@ import {
   detectAllDimensions,
   terminateOcrWorker,
   releaseOcrWorkersWhenIdle
-} from './utils/DimensionsOCR';
+} from './utils/ocrLazy';
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';

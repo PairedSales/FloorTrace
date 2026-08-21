@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { warmupNeuralOcr } from '../utils/DimensionsOCR';
+import { warmupNeuralOcr } from '../utils/ocrLazy';
 import { notify, flash } from '../utils/notify';
 
 const ENHANCED_OCR_KEY = 'floortrace:enhancedOcr';

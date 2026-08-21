@@ -69,7 +69,14 @@ export default defineConfig({
           // was enough to keep 320 kB of konva on the critical path.
           if (id.includes('commonjsHelpers')) return 'interop';
           if (/node_modules[/\\](konva|react-konva)[/\\]/.test(id)) return 'konva';
-          if (/node_modules[/\\]tesseract\.js[/\\]/.test(id)) return 'tesseract';
+          // `?url` ids are excluded deliberately. `tesseract.js/dist/worker.min.js?url`
+          // matched this rule, so a 15.9 kB chunk existed solely to export a
+          // 60-character URL string — and because the entry imported that
+          // string, the chunk was entry-reachable and modulepreloaded on every
+          // page load. A URL belongs in whichever chunk asks for it. The
+          // sibling `tesseract.js-core/…?url` imports never matched this regex
+          // and already inline that way, which is what proves the shape.
+          if (!id.includes('?url') && /node_modules[/\\]tesseract\.js[/\\]/.test(id)) return 'tesseract';
           if (/node_modules[/\\](react|react-dom|scheduler)[/\\]/.test(id)) return 'react';
           return undefined;
         }
