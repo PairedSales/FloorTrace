@@ -541,6 +541,7 @@ function App() {
     handleFileOpen,
     handleFileUpload,
     handleSaveProject,
+    handleSaveAllProjects,
     handleSaveProjectNormal,
     handleSaveProjectAs,
   } = useProjectIO(handleManualMode, fileInputRef, openPlan);
@@ -1495,6 +1496,7 @@ function App() {
         onPasteImage={handlePasteImage}
         onSaveProject={handleSaveProject}
         onSaveProjectAs={handleSaveProjectAs}
+        onSaveAllProjects={handleSaveAllProjects}
         onExport={openExport}
         onCopyExhibit={copyExhibitNow}
         onRestart={handleClosePlan}
@@ -1638,10 +1640,13 @@ function App() {
 
       <ConfirmDialog />
 
+      {/* `multiple`, now that each file can become its own plan. The camera
+          input below stays single — a photo is one plan by definition. */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*,.floorplan"
+        multiple
         onChange={handleFileUpload}
         className="hidden"
       />

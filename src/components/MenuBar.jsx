@@ -78,6 +78,7 @@ const MenuBar = ({
   onPasteImage,
   onSaveProject,
   onSaveProjectAs,
+  onSaveAllProjects,
   onExport,
   onCopyExhibit,
   onRestart,
@@ -162,6 +163,7 @@ const MenuBar = ({
         <Sep />
         <MenuItem label="Save editable project" keys={`${mod}+S`} disabled={!image} onSelect={() => onSaveProject(false)} close={close} />
         <MenuItem label="Save editable project as…" keys={`${mod}+Shift+S`} disabled={!image} onSelect={onSaveProjectAs} close={close} />
+        <MenuItem label="Save all plans" disabled={planCount < 2} onSelect={onSaveAllProjects} close={close} />
         <Sep />
         <MenuItem label="New plan" keys={`${mod}+${alt}+N`} disabled={!canOpenPlan} onSelect={onNewPlan} close={close} />
         <MenuItem label="Next plan" keys={`${mod}+${alt}+→`} disabled={planCount < 2} onSelect={onNextPlan} close={close} />

@@ -1,10 +1,28 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
+import { parkedStateFor } from '../store/documentManager';
 import * as undoManager from '../store/undoManager';
 import { loadImageFromFile } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
+
+/**
+ * A name no other plan in this save is using. Two unnamed plans both produce
+ * "Sketch <date>.floorplan", and the browser then silently appends "(1)" or
+ * overwrites — neither is a good way to find out you saved one plan twice.
+ */
+const uniqueName = (name, used) => {
+  const base = (name ?? '').trim() || 'Sketch';
+  let candidate = base;
+  let n = 2;
+  while (used.has(candidate)) {
+    candidate = `${base} (${n})`;
+    n += 1;
+  }
+  used.add(candidate);
+  return candidate;
+};
 
 export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
   const setImage = useAppStore((s) => s.setImage);
@@ -38,15 +56,14 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
     // input on mobile, and clearing the wrong one leaves a retaken photo of the
     // same scene looking to the browser like no change at all.
     const input = event.target;
-    const file = input.files[0];
-    if (file) {
-      if (!makeRoomForIncoming()) {
-        input.value = '';
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-        return;
-      }
+    // Every file, not just the first. Each becomes its own plan, which is what
+    // a tab strip makes possible and what selecting several files has always
+    // looked like it should do.
+    const files = [...(input.files ?? [])];
+    for (const file of files) {
+      // At the cap: stop opening, keep what was opened, and let the plan
+      // manager's own message explain why the rest did not appear.
+      if (!makeRoomForIncoming()) break;
 
       try {
         if (file.name.endsWith('.floorplan')) {
@@ -94,12 +111,15 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
         notify(`Could not open that file — ${error.message}`, { type: 'error', id: 'file-open' });
       } finally {
         setIsProcessing(false);
-        // Reset file input so the same file can be selected again
-        input.value = '';
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
       }
+    }
+
+    // Outside the loop: clearing it empties `input.files`, which is why the
+    // list is snapshotted above before anything is opened. Reset so selecting
+    // the same file again still counts as a change.
+    input.value = '';
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   }, [resetOverlays, handleManualMode, makeRoomForIncoming, setIsProcessing, setImage, setImageMimeType, fileInputRef]);
 
@@ -110,7 +130,9 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
       const historyState = undoManager.getHistoryState();
 
       const { exportProject } = await import('../utils/projectSerializer');
-      const success = await exportProject(storeState, historyState, isSaveAs);
+      const success = await exportProject(
+        storeState, historyState, isSaveAs, storeState.activeDocumentId,
+      );
 
       if (success) {
         useAppStore.getState().setIsDirty(false);
@@ -124,6 +146,60 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
     }
   }, [setIsProcessing]);
 
+  /**
+   * Save every plan that holds work.
+   *
+   * Through the download fallback, never the picker: `showSaveFilePicker`
+   * consumes the user gesture, so the second call in a loop is refused by the
+   * browser. A plan already saved through the picker this session still
+   * overwrites its own file, because that grant is still live.
+   *
+   * Names are disambiguated here rather than left to collide. Two unnamed
+   * plans both produce "Sketch <date>.floorplan", and a browser silently
+   * appends "(1)" — or, with a picker, overwrites. Neither is a good way to
+   * find out you saved one plan twice.
+   */
+  const handleSaveAllProjects = useCallback(async () => {
+    const state = useAppStore.getState();
+    const order = state.documentOrder;
+    if (order.length < 2) return handleSaveProject(false);
+
+    setIsProcessing(true, 'Saving all plans…');
+    try {
+      const { exportProject } = await import('../utils/projectSerializer');
+      const used = new Set();
+      let saved = 0;
+
+      for (const docId of order) {
+        const isActive = docId === state.activeDocumentId;
+        const meta = state.documents[docId] ?? {};
+        if (!(isActive ? state.image : meta.hasWork)) continue;
+
+        // Only the active plan's full state is on the root; the rest are saved
+        // from what they were parked with.
+        const planState = isActive
+          ? useAppStore.getState()
+          : { ...useAppStore.getState(), ...(parkedStateFor(docId) ?? {}) };
+
+        const success = await exportProject(
+          { ...planState, projectName: uniqueName(planState.projectName || meta.title, used) },
+          isActive ? undoManager.getHistoryState() : null,
+          false,
+          docId,
+        );
+        if (success) saved += 1;
+      }
+
+      flash(saved === 1 ? 'Saved 1 plan' : `Saved ${saved} plans`);
+    } catch (error) {
+      console.error('Error saving all projects:', error);
+      notify(`Could not save every plan — ${error.message}`, { type: 'error', id: 'file-save' });
+    } finally {
+      setIsProcessing(false);
+    }
+    return true;
+  }, [setIsProcessing, handleSaveProject]);
+
   const handleSaveProjectNormal = useCallback(() => handleSaveProject(false), [handleSaveProject]);
   const handleSaveProjectAs = useCallback(() => handleSaveProject(true), [handleSaveProject]);
 
@@ -132,6 +208,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
     handleFileOpen,
     handleFileUpload,
     handleSaveProject,
+    handleSaveAllProjects,
     handleSaveProjectNormal,
     handleSaveProjectAs,
   };
