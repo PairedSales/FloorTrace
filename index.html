@@ -2,8 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg">
-    <link rel="apple-touch-icon" sizes="180x180" href="/logo.svg">
+    <!-- The real favicons, which have always shipped and were referenced by
+         nothing. `logo.svg` was pointed at both of these slots and is a 41 kB
+         SVG whose whole body is one base64 PNG — 31 kB gzipped, fetched on
+         every cold load, to draw a 16 px tab icon. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <!-- viewport-fit=cover hands the notch and the home-indicator strip to the
          page, which is what makes env(safe-area-inset-*) resolve to anything
          other than 0. The shell pads itself with those insets; without the

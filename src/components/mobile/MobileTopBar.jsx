@@ -1,7 +1,7 @@
 import { ChevronDown, Menu, Redo2, Share, Undo2 } from 'lucide-react';
 import useUndoHistory from '../../hooks/useUndoHistory';
 import * as undoManager from '../../store/undoManager';
-import FloorTraceLogo from '../../assets/logo.svg';
+import FloorTraceMark from '../FloorTraceMark';
 
 /**
  * Four things earn the top of a phone screen, and the choice is not the desktop
@@ -49,7 +49,7 @@ const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, hasArea, on
               <span className="block text-[14px] font-semibold text-fg truncate leading-tight">{subject}</span>
             ) : (
               <span className="flex items-center gap-1.5 text-[14px] font-semibold text-fg">
-                <img src={FloorTraceLogo} alt="" className="w-4 h-4" draggable="false" />
+                <FloorTraceMark className="w-4 h-4" />
                 FloorTrace
               </span>
             )}

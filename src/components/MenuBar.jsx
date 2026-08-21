@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import FloorTraceLogo from '../assets/logo.svg';
+import FloorTraceMark from './FloorTraceMark';
 import { THEME_LABEL } from '../hooks/useTheme';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -139,7 +139,7 @@ const MenuBar = ({
   return (
     <header className="flex items-center h-[30px] px-2 bg-panel border-b border-line-soft select-none shrink-0">
       <span className="flex items-center gap-2 pr-2.5 mr-1 shrink-0 text-[12.5px] font-semibold text-fg">
-        <img src={FloorTraceLogo} alt="" className="w-[15px] h-[15px]" draggable="false" />
+        <FloorTraceMark className="w-[15px] h-[15px] text-fg-3" />
         FloorTrace
       </span>
 

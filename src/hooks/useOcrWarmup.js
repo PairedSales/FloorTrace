@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { warmupOcrEngines } from '../utils/DimensionsOCR';
+import { warmupOcrEngines } from '../utils/ocrLazy';
 
 // Warming the OCR engines at mount cost every visitor ~4.4 MB gz — tesseract's
 // worker script, the core WASM and the 5.2 MB language model — because
