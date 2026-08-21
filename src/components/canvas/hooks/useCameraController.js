@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import useAppStore from '../../../store/appStore';
+import { decodedImage, loadImage } from '../imageCache';
 import { useCanvasZoom } from '../../../hooks/useCanvasZoom';
 import { useCanvasPan } from '../../../hooks/useCanvasPan';
 import { usePinchZoom } from '../../../hooks/usePinchZoom';
@@ -136,8 +137,15 @@ export function useCameraController({
     }
 
     setIsImageReady(false);
-    const img = new window.Image();
-    img.onload = () => {
+
+    // Already decoded — from this plan before a switch, or from another plan
+    // holding the same file. Applied synchronously so returning to a plan does
+    // not flash an empty stage while a decode it does not need runs again.
+    const cached = decodedImage(image);
+    let cancelled = false;
+
+    const settle = (img) => {
+      if (cancelled || !img) return;
       setImageObj(img);
 
       requestAnimationFrame(() => {
@@ -198,11 +206,22 @@ export function useCameraController({
         setIsImageReady(true);
       });
     };
-    img.onerror = () => {
+
+    if (cached) {
+      settle(cached);
+      return undefined;
+    }
+
+    loadImage(image).then(settle).catch(() => {
+      if (cancelled) return;
       console.error('Failed to load image');
       setIsImageReady(false);
-    };
-    img.src = image;
+    });
+
+    // A switch away mid-decode must not land the old plan's image on the new
+    // one: the effect re-runs with a different `image`, and the decode it
+    // replaced may still resolve afterwards.
+    return () => { cancelled = true; };
   }, [image, setViewportTransform, containerRef, stageRef]);
 
   // Observe container size changes. Resizing the window must not slide the
