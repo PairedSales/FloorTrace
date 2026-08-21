@@ -330,6 +330,12 @@ function App() {
   const placeCentredOverlay = useCallback((imgSrc) => {
     const img = new Image();
     img.onload = () => {
+      // A second async hop, and the one nobody guarded: reached from the scan's
+      // two failure paths, it decodes the image *again* and then writes an
+      // overlay, a perimeter and a mode. A guard where the scan resumes does
+      // not cover this — by the time `onload` fires the user may have cropped,
+      // erased or loaded a different plan, and the placeholder would land on it.
+      if (useAppStore.getState().image !== imgSrc) return;
       const centerX = img.width / 2;
       const centerY = img.height / 2;
       setRoomOverlay({
@@ -382,6 +388,16 @@ function App() {
         const result = await detectAllDimensions(imgSrc);
         perfMark(MARKS.scanEnd);
 
+        // The scan is the longest await in the app — seconds, not milliseconds
+        // — and until now it was the only one that resumed without checking
+        // what it was resuming into. Everything below writes the *reading of
+        // this image*: labels, dimensions, the unit, and then the whole
+        // measure→calibrate→trace pipeline. Landing any of it on a plan the
+        // user has since cropped, erased or replaced attributes one drawing's
+        // numbers to another, which is the exact shape of wrong answer this
+        // codebase is least able to detect.
+        if (useAppStore.getState().image !== imgSrc) return;
+
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
 
@@ -421,9 +437,15 @@ function App() {
         }
       } catch (error) {
         console.error('Error detecting dimensions:', error);
-        setOcrFailed(true);
-        notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
-        placeCentredOverlay(imgSrc);
+        // Same rule as the success path: a failure to read an image the user
+        // has already moved on from is not news about the plan on screen, and
+        // `id: 'scan'` means this toast would replace whatever the current
+        // plan's own scan had to say.
+        if (useAppStore.getState().image === imgSrc) {
+          setOcrFailed(true);
+          notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
+          placeCentredOverlay(imgSrc);
+        }
       } finally {
         setIsProcessing(false);
         // Keep the warm worker pool around for a re-scan or a second image,
@@ -668,9 +690,14 @@ function App() {
       }
       return 'failed';
     } finally {
-      if (useAppStore.getState().image === startImage) {
-        setIsProcessing(false);
-      }
+      // Unconditional, unlike the result writes above. Gated on the image, a
+      // trace the user interrupted by cropping left `isProcessing` true with
+      // nothing left to turn it off: a spinner that never stops and five
+      // CommandBar buttons disabled for the rest of the session. Clearing a
+      // spinner a newer operation had just set is a flicker; this was a wedge.
+      // Exact ownership needs a request token, which is what the document
+      // request layer will carry — this is the honest stopgap until then.
+      setIsProcessing(false);
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
     reportTrace, handleDrawMode, reviewAgainstFootprint]);
@@ -972,9 +999,8 @@ function App() {
         console.error('Room detection failed:', error);
       }
     } finally {
-      if (useAppStore.getState().image === startImage) {
-        setIsProcessing(false);
-      }
+      // Unconditional — see the note in `runTrace`'s finally.
+      setIsProcessing(false);
     }
 
     if (useAppStore.getState().image !== startImage) return;

@@ -156,3 +156,74 @@ describe('undoManager subscription', () => {
     expect(fired).toBe(1);
   });
 });
+
+/**
+ * The stacks are bounded together, not separately: `undo`/`redo` move one entry
+ * between them and create none, and `save()` clears the redo stack, so the
+ * combined total only ever falls after a save trims at the cap. That invariant
+ * held everywhere except the one path that installs a history it did not build.
+ */
+describe('undoManager stack bounds', () => {
+  const MAX_UNDO = 50;
+
+  beforeEach(() => {
+    undoManager.clear();
+    useAppStore.getState().resetOverlays();
+    useAppStore.setState({ image: COLLIDE_A });
+  });
+
+  const depth = () => {
+    const { undoStack, redoStack } = undoManager.getHistoryState();
+    return { undo: undoStack.length, redo: redoStack.length, total: undoStack.length + redoStack.length };
+  };
+
+  it('caps the undo stack', () => {
+    for (let i = 0; i < MAX_UNDO + 20; i += 1) undoManager.save();
+    expect(depth().undo).toBe(MAX_UNDO);
+  });
+
+  it('never exceeds the combined cap under any save/undo/redo sequence', () => {
+    let worst = 0;
+    const note = () => { worst = Math.max(worst, depth().total); };
+    for (let round = 0; round < 4; round += 1) {
+      for (let i = 0; i < 80; i += 1) { undoManager.save(); note(); }
+      for (let i = 0; i < 80; i += 1) { undoManager.undo(); note(); }
+      for (let i = 0; i < 40; i += 1) { undoManager.redo(); note(); }
+      for (let i = 0; i < 40; i += 1) { undoManager.undo(); note(); }
+    }
+    expect(worst).toBe(MAX_UNDO);
+  });
+
+  it('caps an oversized imported history to the combined ceiling', () => {
+    // The one path that can carry more than the app ever creates.
+    const snapshot = () => ({ ...useAppStore.getState().createSnapshot(null), __imageRef: null });
+    const oversized = Array.from({ length: MAX_UNDO + 30 }, snapshot);
+
+    undoManager.setHistoryState({ undoStack: oversized, redoStack: oversized, imagePool: [] });
+
+    const { undo, total } = depth();
+    expect(total).toBe(MAX_UNDO);
+    // Undo is served first: a step the user can still take beats one they have not.
+    expect(undo).toBe(MAX_UNDO);
+  });
+
+  it('keeps the newest entries when trimming an import', () => {
+    const tagged = (n) => Array.from({ length: n }, (_unused, i) => ({ __imageRef: null, projectName: `s${i}` }));
+    undoManager.setHistoryState({ undoStack: tagged(MAX_UNDO + 5), redoStack: [], imagePool: [] });
+
+    const { undoStack } = undoManager.getHistoryState();
+    // `pop()` reaches the far end first, so the far end is what must survive.
+    expect(undoStack[undoStack.length - 1].projectName).toBe(`s${MAX_UNDO + 4}`);
+    expect(undoStack[0].projectName).toBe('s5');
+  });
+
+  it('installs copies of an imported history, not the caller’s arrays', () => {
+    const caller = { undoStack: [], redoStack: [], imagePool: [] };
+    undoManager.setHistoryState(caller);
+
+    undoManager.save();
+
+    expect(caller.undoStack).toHaveLength(0);
+    expect(depth().undo).toBe(1);
+  });
+});

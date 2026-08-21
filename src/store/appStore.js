@@ -134,6 +134,15 @@ const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
 );
 
 /**
+ * The names of every working-state field, exported so the three projections
+ * below can be checked against their one source rather than by hand. The keys
+ * and not the object: handing out `WORKING_STATE_DEFAULTS` itself is how one
+ * project's calibration came to be aliased into the next — callers who need
+ * values want `workingStateDefaults()`.
+ */
+export const WORKING_STATE_KEYS = Object.keys(WORKING_STATE_DEFAULTS);
+
+/**
  * Snapshot fields carried by reference instead of deep-cloned. Both are replaced
  * wholesale by their setters and never mutated in place, so N snapshots of an
  * unchanged value share one copy. `tracedBoundaries` is here because it is the
@@ -797,5 +806,5 @@ export const selectAreaByType = (state) => {
 /** Selector to get the combined total area of all visible traces */
 export const selectCombinedArea = (state) => selectAreaByType(state).total;
 
-export { AUTOSAVE_FIELDS };
+export { AUTOSAVE_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

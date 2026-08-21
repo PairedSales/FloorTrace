@@ -316,20 +316,30 @@ const CanvasStage = React.memo(({
     routerRef.current = router;
   });
 
-  // Center stage when a new image is loaded
+  // Centre the stage when a *new* image is loaded — not when this component
+  // mounts over an image it has already been told where to look at.
+  //
+  // `prevImageDimsRef` is null on every mount, so `sameSize` was false and the
+  // fit always fired 100 ms later, throwing away the camera that
+  // `useCameraController` had just restored from the draft or the `.floorplan`.
+  // The symptom was a view that settled and then jumped, on every project open.
+  // First sight of an image therefore only fits when there is no stored camera
+  // to honour; a genuine change of image dimensions still fits unconditionally.
   useEffect(() => {
-    if (camera.imageObj && camera.dimensions.width > 0 && camera.dimensions.height > 0) {
-      const prev = prevImageDimsRef.current;
-      const sameSize = prev && prev.width === camera.imageObj.width && prev.height === camera.imageObj.height;
+    if (!camera.imageObj || camera.dimensions.width <= 0 || camera.dimensions.height <= 0) return;
 
-      if (!sameSize) {
-        prevImageDimsRef.current = { width: camera.imageObj.width, height: camera.imageObj.height };
-        const timeoutId = setTimeout(() => {
-          camera.fitToWindow();
-        }, 100);
-        return () => clearTimeout(timeoutId);
-      }
-    }
+    const prev = prevImageDimsRef.current;
+    const dims = { width: camera.imageObj.width, height: camera.imageObj.height };
+    if (prev && prev.width === dims.width && prev.height === dims.height) return;
+
+    const isFirstSight = prev === null;
+    prevImageDimsRef.current = dims;
+    if (isFirstSight && useAppStore.getState().zoomScale !== null) return;
+
+    const timeoutId = setTimeout(() => {
+      camera.fitToWindow();
+    }, 100);
+    return () => clearTimeout(timeoutId);
   }, [camera.dimensions, camera.imageObj, camera.fitToWindow]);
 
   // Publish the viewport controls to the eager shell, which owns the ref the
