@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
 import MenuBar from './components/MenuBar';
+import DocumentTabs from './components/DocumentTabs';
 import CommandBar from './components/CommandBar';
 import ContextBar from './components/ContextBar';
 import ToolRail from './components/ToolRail';
@@ -1439,6 +1440,9 @@ function App() {
     >
       {isMobile ? (
         <MobileChrome
+          onSelectPlan={switchPlan}
+          onClosePlan={closePlan}
+          onNewPlan={openPlan}
           activeTool={activeTool}
           hasToolData={hasToolData}
           onMenuFileOpen={handleFileOpen}
@@ -1533,6 +1537,17 @@ function App() {
             onExport={openExport}
           />
         )}
+      />
+
+      {/* Its own band. It cannot ride in the menu bar row — that 30 px row is
+          fully spent, and the status bar in it is explicitly forbidden from
+          scrolling. Gated on there being plans, like the tool rail, so the
+          empty app is unchanged. */}
+      <DocumentTabs
+        onSelect={switchPlan}
+        onClose={closePlan}
+        onNew={openPlan}
+        isProcessing={isProcessing}
       />
 
       <CommandBar
@@ -1658,7 +1673,7 @@ function App() {
         style={{
           top: isMobile
             ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : '86px',
+            : '116px',
         }}
         toastOptions={{
           classNames: {

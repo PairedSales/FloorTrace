@@ -1,4 +1,4 @@
-import { Menu, Redo2, Share, Undo2 } from 'lucide-react';
+import { ChevronDown, Menu, Redo2, Share, Undo2 } from 'lucide-react';
 import useUndoHistory from '../../hooks/useUndoHistory';
 import * as undoManager from '../../store/undoManager';
 import FloorTraceLogo from '../../assets/logo.svg';
@@ -15,7 +15,7 @@ import FloorTraceLogo from '../../assets/logo.svg';
  * Export is here because it is the end of the job and the only reason the app
  * was opened. Everything else lives behind the menu button.
  */
-const MobileTopBar = ({ image, subject, isProcessing, hasArea, onMenu, onExport }) => {
+const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, hasArea, onMenu, onExport, onPlans }) => {
   const { canUndo, canRedo } = useUndoHistory();
 
   return (
@@ -35,16 +35,32 @@ const MobileTopBar = ({ image, subject, isProcessing, hasArea, onMenu, onExport 
         {/* The subject line, once there is one. A workfile exhibit is filed
             under the property it measures, so the app says which one is open
             rather than repeating its own name back at the user. */}
-        <div className="flex-1 min-w-0 px-1">
-          {subject ? (
-            <p className="text-[14px] font-semibold text-fg truncate leading-tight">{subject}</p>
-          ) : (
-            <span className="flex items-center gap-1.5 text-[14px] font-semibold text-fg">
-              <img src={FloorTraceLogo} alt="" className="w-4 h-4" draggable="false" />
-              FloorTrace
+        {/* Also the plan switcher, because a phone has no room for a strip and
+            this line already names the plan that is open. */}
+        <button
+          type="button"
+          onClick={onPlans}
+          aria-label={`Plans — ${planCount} open`}
+          className="tap-target flex items-center gap-1 flex-1 min-w-0 px-1 text-left
+                     rounded-lg active:bg-sunken cursor-pointer"
+        >
+          <span className="flex-1 min-w-0">
+            {subject ? (
+              <span className="block text-[14px] font-semibold text-fg truncate leading-tight">{subject}</span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[14px] font-semibold text-fg">
+                <img src={FloorTraceLogo} alt="" className="w-4 h-4" draggable="false" />
+                FloorTrace
+              </span>
+            )}
+          </span>
+          {planCount > 1 && (
+            <span className="shrink-0 text-[11px] font-medium text-fg-3 tabular-nums">
+              {planCount}
             </span>
           )}
-        </div>
+          <ChevronDown className="w-3.5 h-3.5 shrink-0 text-fg-3" aria-hidden="true" />
+        </button>
 
         <button
           type="button"

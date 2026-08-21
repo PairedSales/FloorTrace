@@ -211,7 +211,7 @@ const MenuBar = ({
         <MenuItem label="Paint the outline" keys="1" disabled={!image} onSelect={onDrawExterior} close={close} />
         <MenuItem label="Place corners by hand" keys="2" disabled={!image} onSelect={onOutlineByVertex} close={close} />
         <Sep />
-        <MenuItem label="Add another level" disabled={!image} onSelect={onAddFloor} close={close} />
+        <MenuItem label="Add another outline" disabled={!image} onSelect={onAddFloor} close={close} />
       </Menu>
 
       <Menu id="settings" label="Settings" open={openId === 'settings'} onOpen={open} onClose={close}>

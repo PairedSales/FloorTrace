@@ -5,6 +5,7 @@ import { formatArea } from '../../utils/unitConverter';
 import { qualitySummary, scaleQualitySummary } from '../../utils/boundaryQuality';
 import MeasurementDock from '../MeasurementDock';
 import BottomSheet from './BottomSheet';
+import MobilePlansSheet from './MobilePlansSheet';
 import MobileActionBar from './MobileActionBar';
 import MobileCanvasOverlay from './MobileCanvasOverlay';
 import MobileMenuSheet from './MobileMenuSheet';
@@ -21,6 +22,9 @@ import MobileTopBar from './MobileTopBar';
  * props for everything it *does*, so no behaviour forks between the two shells.
  */
 const MobileChrome = ({
+  onSelectPlan,
+  onClosePlan,
+  onNewPlan,
   // The canvas, handed in rather than rendered here: it is the same element
   // the desktop shell mounts, and it must stay one subtree so a re-render of
   // the chrome never rebuilds the Konva stage underneath it.
@@ -73,7 +77,7 @@ const MobileChrome = ({
   theme,
   onCycleTheme,
 }) => {
-  const [sheet, setSheet] = useState(null); // 'menu' | 'tools' | 'panel'
+  const [sheet, setSheet] = useState(null); // 'menu' | 'tools' | 'panel' | 'plans'
 
   const image = useAppStore((s) => s.image);
   const mode = useAppStore((s) => s.mode);
@@ -92,6 +96,7 @@ const MobileChrome = ({
   const setDrawBrushSize = useAppStore((s) => s.setDrawBrushSize);
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const areas = useAppStore(selectActiveAreaByType);
+  const documentOrder = useAppStore((s) => s.documentOrder);
 
   const hasOutline = (perimeterTraces || []).some((t) => t.vertices?.length >= 3);
   const noGla = areas.gla === 0 && areas.total > 0;
@@ -158,6 +163,8 @@ const MobileChrome = ({
       <MobileTopBar
         image={image}
         subject={projectName}
+        planCount={documentOrder.length}
+        onPlans={() => setSheet('plans')}
         isProcessing={isProcessing}
         hasArea={areas.total > 0}
         onMenu={() => setSheet('menu')}
@@ -194,6 +201,14 @@ const MobileChrome = ({
           areaWarn={areaWarn}
         />
       )}
+
+      <MobilePlansSheet
+        open={sheet === 'plans'}
+        onClose={closeSheet}
+        onSelect={onSelectPlan}
+        onClosePlan={onClosePlan}
+        onNew={onNewPlan}
+      />
 
       <MobileMenuSheet
         open={sheet === 'menu'}
