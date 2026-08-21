@@ -2,16 +2,49 @@ import {
   detectRoomFromClickCore, traceFloorplanBoundaryCore, wallSnapSegmentsCore,
   prewarmDetectionCore,
 } from '../utils/detection/pipeline';
-import { clearDetectionCache } from '../utils/detection/cache';
+import { dropCacheKey } from '../utils/detection/cache';
 import { hashDataUrl } from '../utils/hash';
 
 // Decoded image data is reused across requests for the same image: a room
 // click and a perimeter trace on one floorplan used to decode, binarize and
 // analyse it from scratch every time.
-let lastImageUrl = null;
-let lastCacheKey = null;
-let lastImageData = null;
-let decodeCount = 0;
+//
+// Two entries, not one. One is right while a session works on a single image;
+// with two plans open, alternating between them evicted the other every time,
+// so every trace after a switch was a cold trace (~1130ms rather than ~130ms).
+// Two is what makes flipping back and forth free, and the ceiling stays bounded
+// because a decoded page is the largest thing this worker holds.
+const MAX_DECODED = 2;
+
+/** @type {Map<string, {imageData: ImageData, cacheKey: string}>} url -> decode */
+const decoded = new Map();
+
+/** Decodes already running, so two requests for one image decode once. */
+const decoding = new Map();
+
+// The memo key must be stable across every request for one image — that sharing
+// is what makes N room clicks cost one trace — and distinct across images.
+//
+// It used to be `hash#${++decodeCount}`, minted fresh on every decode. That is
+// stable only while an image is never re-decoded, which was true with a
+// one-entry cache and one plan, and false the moment anything evicts: the same
+// image would come back under a new key and miss the analysis memo entirely.
+// Minted once per decode and kept *with* the entry, it is stable for as long as
+// the entry lives, which is exactly as long as anything can refer to it.
+let cacheKeySeq = 0;
+
+const evictDecoded = () => {
+  while (decoded.size > MAX_DECODED) {
+    const oldestUrl = decoded.keys().next().value;
+    const entry = decoded.get(oldestUrl);
+    decoded.delete(oldestUrl);
+    // Everything the detection memo holds under this key is now unreachable —
+    // tens of MB of page-sized label arrays. Dropped by key rather than by
+    // clearing the whole cache, which is what the old code did on every image
+    // change and which threw away the other plan's work along with it.
+    if (entry) dropCacheKey(entry.cacheKey);
+  }
+};
 
 const imageBitmapToImageData = async (imageDataUrl) => {
   // Identity is the data URL itself, not its hash — same as the OCR memo, and
@@ -19,29 +52,47 @@ const imageBitmapToImageData = async (imageDataUrl) => {
   // can hand two images one key, and the eraser and crop tools emit same-length
   // URLs from one canvas. Returning the previous image's pixels here would be a
   // wrong answer with nothing to look wrong about.
-  if (imageDataUrl === lastImageUrl && lastImageData) {
-    return { imageData: lastImageData, cacheKey: lastCacheKey };
+  const hit = decoded.get(imageDataUrl);
+  if (hit) {
+    // Refresh recency.
+    decoded.delete(imageDataUrl);
+    decoded.set(imageDataUrl, hit);
+    return hit;
   }
-  // Everything the detection memo holds is keyed by image, so a new one makes
-  // all of it unreadable dead weight — tens of MB of page-sized label arrays,
-  // previously kept until the *next* trace of the new image happened to evict
-  // it, or forever if the user only ran OCR.
-  if (lastImageUrl) clearDetectionCache();
-  const response = await fetch(imageDataUrl);
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  lastImageUrl = imageDataUrl;
-  // The memo key has to be stable across requests for one image (that sharing
-  // is what makes N room clicks cost one trace) and distinct across images. The
-  // decode counter supplies the second half, which the hash alone cannot.
-  lastCacheKey = `${hashDataUrl(imageDataUrl)}#${++decodeCount}`;
-  lastImageData = imageData;
-  return { imageData, cacheKey: lastCacheKey };
+
+  // `lastImageUrl` used to be assigned *after* these awaits, so two overlapping
+  // requests for one image each decoded it, each cleared the cache and each
+  // minted a key. Reachable via prewarmDetection racing the wall-snap request.
+  const already = decoding.get(imageDataUrl);
+  if (already) return already;
+
+  const task = (async () => {
+    const response = await fetch(imageDataUrl);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const entry = { imageData, cacheKey: `${hashDataUrl(imageDataUrl)}#${++cacheKeySeq}` };
+    decoded.set(imageDataUrl, entry);
+    evictDecoded();
+    return entry;
+  })().finally(() => {
+    decoding.delete(imageDataUrl);
+  });
+
+  decoding.set(imageDataUrl, task);
+  return task;
+};
+
+/** Forget one image and everything the detection memo holds for it. */
+const disposeImage = (imageDataUrl) => {
+  const entry = decoded.get(imageDataUrl);
+  if (!entry) return;
+  decoded.delete(imageDataUrl);
+  dropCacheKey(entry.cacheKey);
 };
 
 // Only these fields cross back to the main thread. The previous blanket
@@ -69,9 +120,21 @@ self.onmessage = async (event) => {
   const { id, type, payload } = event.data ?? {};
   if (!id || !type) return;
 
+  // Picked up. The main thread arms its timeout before `postMessage`, so
+  // without this the wait behind a long-running request is charged to whoever
+  // is queued behind it — a second plan's trace could time out having executed
+  // nothing at all.
+  self.postMessage({ id, started: true });
+
   try {
     if (!payload?.image) {
       throw new Error('Detection worker requires an image data URL.');
+    }
+
+    if (type === 'disposeImage') {
+      disposeImage(payload.image);
+      self.postMessage({ id, ok: true, data: null });
+      return;
     }
 
     // Reported on the envelope (not in `data`) so the DEV perf report can show

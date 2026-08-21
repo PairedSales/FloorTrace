@@ -9,12 +9,42 @@ import { computeWallSnapSegments } from '../../../utils/detection';
 // data-URL decode, landing a few frames into the first gesture after every
 // image change (and `image` changes on every crop, so this is not once per
 // session).
-const buildWallSnapEngine = (image) =>
-  computeWallSnapSegments(image)
+// Memoised across mounts, keyed by image identity, because this hook now
+// remounts on every plan switch — the canvas subtree is keyed on the active
+// plan. Without the memo, `autoSnapEnabled` defaulting to true means merely
+// switching tabs posts a `wallSnapSegments` request and rebuilds an engine the
+// app already had, with no user action at all.
+//
+// Two entries, matching the worker's decode cache: alternating between two
+// plans is the case worth being free, and an engine holds vectorised segments
+// for a whole page.
+const MAX_ENGINES = 2;
+/** @type {Map<string, Promise<object>>} data URL → engine */
+const engines = new Map();
+
+const buildWallSnapEngine = (image) => {
+  const hit = engines.get(image);
+  if (hit) {
+    engines.delete(image);
+    engines.set(image, hit);
+    return hit;
+  }
+
+  const task = computeWallSnapSegments(image)
     .then((segments) => (segments
       ? wallSnapEngineFromSegments(segments)
       : createWallSnapEngine(image)))
     .catch(() => createWallSnapEngine(image));
+
+  engines.set(image, task);
+  while (engines.size > MAX_ENGINES) engines.delete(engines.keys().next().value);
+  return task;
+};
+
+/** Forget a plan's engine. Called when its image is gone for good. */
+export const forgetWallSnapEngine = (image) => {
+  engines.delete(image);
+};
 
 export function useSnappingSystem({ autoSnapEnabled, image }) {
   const imageSnapAnalyzerRef = useRef(null);

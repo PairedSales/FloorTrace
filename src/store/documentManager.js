@@ -19,6 +19,9 @@
 import { newDocumentId } from './ids';
 import * as undoManager from './undoManager';
 import { detachDocument } from './documentRequests';
+import { disposeDetectionImage } from '../utils/detection';
+import { forgetImage } from '../components/canvas/imageCache';
+import { forgetWallSnapEngine } from '../components/canvas/hooks/useSnappingSystem';
 
 export { newDocumentId };
 
@@ -216,6 +219,18 @@ export function createDocumentSlice(set, get) {
       if (index === -1) return false;
 
       detachDocument(docId);
+      // Free what this plan held before forgetting where it was: the decoded
+      // page in the worker, its detection memo, its decoded bitmap on the main
+      // thread and its wall-snap engine are all keyed by the image, and after
+      // the record is dropped nothing knows the image to release.
+      const closingImage = docId === state.activeDocumentId
+        ? state.image
+        : parked.get(docId)?.state?.image;
+      if (closingImage) {
+        disposeDetectionImage(closingImage);
+        forgetImage(closingImage);
+        forgetWallSnapEngine(closingImage);
+      }
       parked.delete(docId);
 
       const remaining = order.filter((id) => id !== docId);

@@ -10,10 +10,17 @@ const ensureWorker = () => {
 
   detectionWorker = new Worker(new URL('../../workers/detectionWorker.js', import.meta.url), { type: 'module' });
   detectionWorker.onmessage = (event) => {
-    const { id, ok, data, error } = event.data ?? {};
+    const { id, ok, data, error, started } = event.data ?? {};
     perfRecordWorker(event.data);
     const request = pending.get(id);
     if (!request) return;
+    // The worker has picked this up, so the clock now measures the work rather
+    // than the queue in front of it.
+    if (started) {
+      request.started = true;
+      request.rearm();
+      return;
+    }
     pending.delete(id);
     if (ok) {
       request.resolve(data);
@@ -38,14 +45,37 @@ const runWorkerRequest = (
   const worker = ensureWorker();
   const id = nextRequestId;
   nextRequestId += 1;
-  const timer = setTimeout(() => {
-    pending.delete(id);
-    // The worker is single-threaded and still crunching the runaway job —
-    // kill it so the next request respawns a fresh worker instead of queueing.
-    terminateDetectionWorker();
-    reject(new Error('Detection timed out'));
-  }, timeoutMs);
-  pending.set(id, {
+
+  let timer = null;
+  const request = {
+    type,
+    payload,
+    timeoutMs,
+    started: false,
+    rearm: () => {
+      clearTimeout(timer);
+      timer = setTimeout(request.expire, timeoutMs);
+    },
+    expire: () => {
+      pending.delete(id);
+      // The runaway job is still crunching, so the worker is killed — but the
+      // requests queued behind it never ran and are pure functions of their
+      // image and payload, so they are re-posted to the fresh worker rather
+      // than failed alongside it. With one plan the queue was almost always
+      // empty; with two, one plan's runaway trace would have failed the other's.
+      const unstarted = [...pending.entries()].filter(([, r]) => !r.started);
+      for (const [otherId] of unstarted) pending.delete(otherId);
+
+      terminateDetectionWorker();
+      reject(new Error('Detection timed out'));
+
+      const fresh = ensureWorker();
+      for (const [otherId, r] of unstarted) {
+        pending.set(otherId, r);
+        r.rearm();
+        fresh.postMessage({ id: otherId, type: r.type, payload: r.payload });
+      }
+    },
     resolve: (data) => {
       clearTimeout(timer);
       resolve(data);
@@ -54,7 +84,10 @@ const runWorkerRequest = (
       clearTimeout(timer);
       reject(error);
     },
-  });
+  };
+
+  pending.set(id, request);
+  request.rearm();
   worker.postMessage({ id, type, payload });
 });
 
@@ -107,6 +140,16 @@ export const detectRoomFromClick = async (image, clickPoint, options = {}) => {
 export const detectRoomsFromLabels = async (image, labels, options = {}) => {
   if (!image || !labels?.length) return [];
   return runWorkerRequest('detectRoomsFromLabels', { image, labels, options });
+};
+
+/**
+ * Tell the worker a plan's image is gone, so it can free the decode and
+ * everything the detection memo holds for it. Fire-and-forget: the cost of it
+ * not arriving is memory the LRU would have reclaimed anyway.
+ */
+export const disposeDetectionImage = (image) => {
+  if (!image || !detectionWorker) return;
+  runWorkerRequest('disposeImage', { image }, 15_000).catch(() => {});
 };
 
 export const traceFloorplanBoundary = async (image, options = {}) => {

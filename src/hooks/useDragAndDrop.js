@@ -69,6 +69,9 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
         useAppStore.getState().loadProject(statePatch);
         undoManager.setHistoryState(historyPatch);
         useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
+        // The image branch below prewarms and this one never did, so opening a
+        // saved project paid for a cold analysis on its first trace.
+        prewarmDetection(statePatch.image);
 
         flash('Project loaded');
       } else {

@@ -37,8 +37,12 @@ export const getCachedAnalysis = (cacheKey, maxDimension, analyzeOptions, comput
 // megabytes in a worker. One entry is all the sharing that is needed — the
 // clamp trace behind a room click and the perimeter trace that follows it are
 // always the same image.
-let searchKey = null;
-let searchCache = null;
+// Keyed like the analysis memo, and bounded the same way. One entry was right
+// while one image was ever in play; with two plans open, alternating between
+// them meant the ladder was rebuilt from scratch on every switch.
+const MAX_SEARCH_CACHES = 2;
+/** @type {Map<string, SearchCache>} */
+const searchCaches = new Map();
 
 // One image deep is not a size. A rung holds a page-sized label array plus its
 // mask and the memo holds every rung of every policy of every wall network, so
@@ -54,11 +58,36 @@ const SEARCH_BUDGET_BYTES = 32 * 1024 * 1024;
 let searchBudgetBytes = SEARCH_BUDGET_BYTES;
 export const setSearchBudgetBytes = (bytes) => {
   searchBudgetBytes = bytes ?? SEARCH_BUDGET_BYTES;
+  retainedBytes = 0;
+  for (const cache of searchCaches.values()) retainedBytes += cache.bytes;
+};
+
+// Charged across every live cache, not per instance.
+//
+// The budget was declared once and then charged against each SearchCache's own
+// `this.bytes`, while one instance was minted per key. With a single instance
+// alive that read as a global bound and behaved as one. Holding a ladder per
+// plan without changing this would have multiplied the worker's ceiling by the
+// number of open plans, against a comment (above) already recording >100 MB
+// retained on a single multi-plan sheet.
+let retainedBytes = 0;
+
+// Evict whole caches, least recently used first, until the total is back
+// under budget. A ladder is only useful entire, so a cache is dropped whole
+// rather than trimmed — and the one being built is never the one evicted.
+const evictSearchCaches = (keep) => {
+  for (const [key, cache] of searchCaches) {
+    if (retainedBytes < searchBudgetBytes) return;
+    if (key === keep) continue;
+    retainedBytes -= cache.bytes;
+    searchCaches.delete(key);
+  }
 };
 
 class SearchCache extends Map {
-  constructor() {
+  constructor(key) {
     super();
+    this.key = key;
     this.bytes = 0;
     this.overBudget = false;
     this.trippedStored = false;
@@ -83,7 +112,13 @@ class SearchCache extends Map {
   retain(bytes) {
     if (this.overBudget) return;
     this.bytes += bytes;
-    if (this.bytes < searchBudgetBytes) return;
+    retainedBytes += bytes;
+    if (retainedBytes < searchBudgetBytes) return;
+    // Free what other plans are holding before giving up on this one: a ladder
+    // that is still being climbed is worth more than one nobody has asked for
+    // since the last switch.
+    evictSearchCaches(this.key);
+    if (retainedBytes < searchBudgetBytes) return;
     this.overBudget = true;
   }
 
@@ -115,26 +150,63 @@ class SearchCache extends Map {
 export const getSearchCache = (cacheKey, maxDimension, analyzeOptions) => {
   if (!cacheKey) return new Map();
   const key = keyFor(cacheKey, maxDimension, analyzeOptions);
-  if (key !== searchKey) {
-    searchKey = key;
-    searchCache = new SearchCache();
+  const existing = searchCaches.get(key);
+  if (existing) {
+    // Refresh recency.
+    searchCaches.delete(key);
+    searchCaches.set(key, existing);
+    return existing;
   }
-  return searchCache;
+  const cache = new SearchCache(key);
+  searchCaches.set(key, cache);
+  while (searchCaches.size > MAX_SEARCH_CACHES) {
+    const oldest = searchCaches.keys().next().value;
+    if (oldest === key) break;
+    retainedBytes -= searchCaches.get(oldest).bytes;
+    searchCaches.delete(oldest);
+  }
+  return cache;
 };
 
 // A tripped budget used to be completely unobservable — the only symptom was a
 // perimeter trace that took a second longer on large plans. Reported through
 // the trace's debug channel so it can be seen rather than inferred.
-export const searchCacheStats = () => (searchCache
-  ? {
-    bytes: searchCache.bytes,
-    entries: searchCache.size,
-    overBudget: searchCache.overBudget,
+export const searchCacheStats = () => {
+  if (searchCaches.size === 0) return null;
+  // The most recently used cache is the one the trace that is asking just used.
+  let latest = null;
+  for (const cache of searchCaches.values()) latest = cache;
+  return {
+    bytes: latest.bytes,
+    entries: latest.size,
+    overBudget: latest.overBudget,
+    // Across every plan, which is the number the budget actually bounds.
+    totalBytes: retainedBytes,
+    caches: searchCaches.size,
+  };
+};
+
+/**
+ * Forget everything held for one image. Called when a decode is evicted or a
+ * plan is closed — the alternative, clearing the whole cache on any image
+ * change, threw away every other plan's work along with it.
+ */
+export const dropCacheKey = (cacheKey) => {
+  if (!cacheKey) return;
+  const prefix = `${cacheKey}|`;
+  for (const key of entries.keys()) {
+    if (key.startsWith(prefix)) entries.delete(key);
   }
-  : null);
+  for (const [key, cache] of searchCaches) {
+    if (key.startsWith(prefix)) {
+      retainedBytes -= cache.bytes;
+      searchCaches.delete(key);
+    }
+  }
+};
 
 export const clearDetectionCache = () => {
   entries.clear();
-  searchKey = null;
-  searchCache = null;
+  searchCaches.clear();
+  retainedBytes = 0;
 };
