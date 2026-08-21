@@ -66,6 +66,9 @@ export const parkedCount = () => parked.size;
  */
 export const parkedStateFor = (docId) => parked.get(docId)?.state ?? null;
 
+/** A parked plan's undo history, so it can be written to disk after a park. */
+export const parkedHistoryFor = (docId) => parked.get(docId)?.history ?? null;
+
 /** The metadata a plan carries whether or not it is the one on screen. */
 export const newDocumentMeta = (patch = {}) => ({
   // The file this plan came from, if any, so a tab can name itself before the
@@ -81,6 +84,10 @@ export const newDocumentMeta = (patch = {}) => ({
   // Whether this plan holds an image, so a restored tab can be drawn honestly
   // before its state has been read back.
   hasWork: false,
+  // When this plan was last written. Per plan, not per write: the index used
+  // to stamp every plan on every write, which made the field say "the
+  // workspace was saved" rather than what a per-plan updatedAt means.
+  updatedAt: null,
   // False for a restored plan whose state is still on disk. Its records are
   // read on first switch rather than at startup — reading every open plan's
   // multi-megabyte image to show one of them is the wrong trade.
@@ -183,6 +190,7 @@ export function createDocumentSlice(set, get) {
             title: parkedState.projectName || null,
             hasWork: Boolean(parkedState.image),
             hydrated: true,
+            updatedAt: Date.now(),
           },
         },
       }));

@@ -177,3 +177,45 @@ describe('reading a parked plan for saving', () => {
     expect(parkedStateFor('doc-nope')).toBeNull();
   });
 });
+
+describe('a parked plan’s history is still readable', () => {
+  let docA;
+  beforeEach(() => {
+    docA = oneDocument();
+  });
+
+  // The bug this pins: undo history lives in module state belonging to
+  // whichever plan is live, so once another plan has adopted the stacks there
+  // is nothing left to read. If it is not captured at park time it is gone —
+  // which is why every background plan came back from a reload with an empty
+  // undo stack even though its geometry restored perfectly.
+  it('exposes the parked history so it can be written to disk', async () => {
+    const { parkedHistoryFor } = await import('../documentManager');
+    useAppStore.setState({ image: IMAGE });
+    undoManager.save();
+    undoManager.save();
+
+    app().openDocument();
+
+    const parked = parkedHistoryFor(docA);
+    expect(parked).toBeTruthy();
+    expect(parked.undoStack).toHaveLength(2);
+    // The live stacks belong to the new plan now, so this is the only copy.
+    expect(undoManager.getHistoryState().undoStack).toHaveLength(0);
+  });
+
+  it('reports nothing for a plan that is live or unknown', async () => {
+    const { parkedHistoryFor } = await import('../documentManager');
+    expect(parkedHistoryFor(docA)).toBeNull();
+    expect(parkedHistoryFor('doc-nope')).toBeNull();
+  });
+
+  it('records when a plan was parked, per plan', async () => {
+    useAppStore.setState({ image: IMAGE });
+    const docB = app().openDocument();
+
+    expect(app().documents[docA].updatedAt).toEqual(expect.any(Number));
+    // The plan that has never been parked has no timestamp to report.
+    expect(app().documents[docB].updatedAt).toBeNull();
+  });
+});
