@@ -19,11 +19,12 @@ npm run bench:detection    # detection accuracy against fixtures/ (runs in CI)
 npm run bench:scale        # scale selection against fixtures/ (runs in CI)
 npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path only)
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
+npm run probe:memory       # what the detection memo retains per image (needs --expose-gc)
 ```
 
-Vitest tests live under `src/utils/**/__tests__/`, `src/store/__tests__/` and
-`src/hooks/__tests__/`. Benchmark/test fixture floorplans (`ExampleFloorplanN.*` +
-`.truth.json` sidecars) live under `fixtures/`.
+Vitest tests live under `src/utils/**/__tests__/`, `src/store/__tests__/`,
+`src/hooks/__tests__/` and `src/workers/__tests__/`. Benchmark/test fixture
+floorplans (`ExampleFloorplanN.*` + `.truth.json` sidecars) live under `fixtures/`.
 
 **There is still no browser/e2e harness**, so anything that needs a canvas, a
 worker or a real layout is verified by hand with `npm run dev` — see the mobile
@@ -33,15 +34,22 @@ covered now is the layer between the store and the UI:
 - **Hook tests run in happy-dom, per file, via a `// @vitest-environment happy-dom`
   docblock.** The default environment stays node on purpose: the detection
   suites are CPU-bound pure-JS pipelines that gain nothing from a DOM and would
-  pay for one. happy-dom rather than jsdom because jsdom 30 requires Node
-  ≥ 22.22 through `undici`, and CI pins Node 20 — it passes locally and fails
-  there, which is the worst shape a test dependency can have. It is also ~7
-  transitive packages against jsdom's ~360.
+  pay for one. happy-dom rather than jsdom because jsdom 30 wants Node
+  ≥ 22.19 through `undici`'s `webidl.util.markAsUncloneable`, and CI ran Node 20
+  when this was written — it passed locally and failed there with unhandled
+  `TypeError`s while every test reported green, which is the worst shape a test
+  dependency can have. #227 moved CI to Node 22 and closed that particular trap;
+  happy-dom stays for the ~7 transitive packages against jsdom's ~360. **Check a
+  new devDependency's `engines` against the CI runtime**, because that class of
+  failure lands nowhere else.
 - `src/hooks/__tests__/harness.js` holds the store setup (`oneDocument`,
-  `addParkedDocument`, `addUnhydratedDocument`). Tests mock only the persistence
-  layer — `workspaceDrafts`, `draftStorage`, `notify` — and run the real hook
-  against the real store, so a failure means a decision was wrong rather than
-  that a mock drifted.
+  `addParkedDocument`, `addUnhydratedDocument`). Tests mock only the outward
+  edge — `workspaceDrafts`, `draftStorage`, `notify`, plus whatever leaves the
+  process for that hook (`exportProject`, `imageLoader`, `confirmToast`,
+  `prewarmDetection`) — and run the real hook against the real store, so a
+  failure means a decision was wrong rather than that a mock drifted. What is
+  under test stays real: `useProjectIO.test.js` mocks `exportProject` but keeps
+  `planStateForSave`, which is the function the defect was in.
 - **A hook test is worth writing when the logic lives inside an effect**, which
   is where every multi-plan data-integrity defect has been: which plan a
   debounced write names, when the workspace index is rewritten, whether a file
@@ -80,10 +88,20 @@ must not scroll either**: tabs share the width and truncate to a ~96 px floor, a
 whatever no longer fits moves into a chevron menu. A strip that scrolls hides plans
 behind a gesture, which is what a tab strip exists to prevent.
 
-**`DocumentTabs` must import nothing from `./canvas/` or `./CanvasStage`.** It lives
-in the eager shell; one such import returns konva to the entry's static module graph
-and puts a `modulepreload` for 320 kB back in `dist/index.html`. Check that file
-after touching the shell — the link is the regression signal.
+At `MAX_OPEN_DOCUMENTS` = 6 no user reaches that chevron: six tabs at the 96 px
+floor need 606 px and the desktop shell only exists above the 819.98 px mobile
+breakpoint. The overflow path is kept so raising the cap cannot silently squeeze
+tabs below their floor — not because anyone sees it. Do not go looking for it in
+the running app.
+
+**Nothing the eager shell reaches may pull konva into the entry's static module
+graph.** One such import puts a `modulepreload` for 320 kB back in
+`dist/index.html`; check that file after touching the shell — the link is the
+regression signal. In practice that means `DocumentTabs` imports no canvas
+*component*. Two modules under `./canvas/` are deliberate exceptions and are
+reached from the shell today through `documentManager`: `imageCache` and
+`wallSnapEngineCache` import nothing at all, which is why they are safe and why
+they must stay that way.
 
 On mobile the switcher gets **no permanent chrome**: the thumb bar is contractually
 one verb and the canvas claims every touch, so the subject line in the top bar —
@@ -110,21 +128,33 @@ A switch is *park → adopt*, and its correctness rests on three things:
   of it is parked, because none of it is a fact about the plan. It dies with the tree.
 
 **Hooks are workspace-level or per-plan, and it matters where they mount.**
-`App.jsx` mounts twelve; the `key` is on `<Canvas>` only, so none of them remount
+`App.jsx` mounts fourteen; the `key` is on `<Canvas>` only, so none of them remount
 today — but before reaching for a keyed subtree, know which is which.
+
 *Workspace-level, must never sit inside a keyed subtree:* `useAutosave`,
 `useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`, `useToolLabels`,
-`useKeyboardShortcuts`, `useIsMobile`. *Per-plan, state keyed by plan id:*
-`useAutoScale` (its `lastRunByDocRef`), `useToolManager`, `useProjectIO`,
-`useExhibitExport`, `useDragAndDrop`.
+`useKeyboardShortcuts`, `useIsMobile`, `useDocumentTitle`, and `usePlanManager` —
+which *performs* the switch, so inside the keyed subtree it would be torn down
+mid-adopt.
+
+*Per-plan in what they act on, but only one holds state:* `useAutoScale`'s
+`lastRunByDocRef` is keyed by plan id and is the only per-plan state any of them has.
+`useToolManager`, `useProjectIO`, `useExhibitExport` and `useDragAndDrop` are
+`useCallback` over store setters and hold nothing — so a keyed subtree would cost
+them nothing, and keeping them out of one buys nothing either.
 
 **Async results are owned, not inferred.** `documentRequests.js` hands out a token
-at `beginWork` and `deliver` decides what may be written, returning one of **four**
+at `beginWork` and `deliver` decides what may be written, returning one of **five**
 verdicts: `'applied'` (the plan is live), `'routed'` (open but parked — the write
-is held and replayed on adopt), `'stale'` (the plan exists but its image changed)
-or `'dropped'` (the plan is gone). The old `image !== startImage` guard answered
-two questions with one comparison, and got the second wrong in the dangerous
-direction: two plans opened from the same file hold the same data URL, so each
+is held and replayed on adopt), `'stale'` (the plan exists but its image changed),
+`'dropped'` (the plan is gone), or `'refused'` — a write passed `replayable: false`,
+held for nobody because replaying it would be wrong. Calibration is the only caller:
+area goes as scale squared, so a scale applied late from evidence the user has moved
+on from is a wrong number that looks right. That plan is flagged `needsRescale`
+(`documentManager.js`) and the tab draws a warning triangle instead.
+
+The old `image !== startImage` guard answered two questions with one comparison,
+and got the second wrong in the dangerous direction: two plans opened from the same file hold the same data URL, so each
 passes the other's staleness test exactly.
 
 `'routed'` is not optional politeness. Phase 2 built this layer when only one plan
@@ -164,7 +194,7 @@ broken once already:
 - `SNAPSHOT_FIELDS` (working state minus transient UI/camera fields) is what `undoManager` snapshots on `undoManager.save()`. Callers call `undoManager.save()` themselves *before* mutating state for an undoable action — it is not automatic.
 - `AUTOSAVE_FIELDS` is the similar-but-not-identical subset persisted on change to IndexedDB, falling back to localStorage if IndexedDB is unavailable (`draftStorage.js`).
 - `PERSISTENT_FLOOR_FIELDS` (the `.floorplan` projection, re-exported by `projectSerializer.js`) is derived from the same declaration. Do not hand-maintain it: the hand-listed version is how `exteriorLabels` came to be autosaved but not exported, so reopening a project silently degraded every later trace.
-- `rooms[]` accumulates every room the detector has placed (rect, per-side wall faces, implied px/ft). It is the boundary stage's containment evidence and the sample set for a robust multi-room scale — a single `roomOverlay` could be neither. Perimeter traces additionally carry `holes` (enclosed voids, subtracted from area), `quality` (detection confidence + warnings) and `wallFaces` (the detector's exterior/interior pair for *that* outline). `wallFaces` is per trace rather than re-derived from `tracedBoundaries` because that field holds only the most recent detection run: the exterior/interior switch (`setWallFaceMode`) is one setting for the whole canvas, so a plan traced in several passes has outlines the last run cannot describe.
+- `rooms[]` accumulates the rooms the detector has *confirmed* (rect, per-side wall faces, implied px/ft). A single room click adds unconditionally; the scan path adds only `decision.contributors`, so rooms rejected as non-GLA, low-confidence or scale outliers never land there. That serves both jobs at once — a rectangle that leaked through a doorway is evidence for the wrong building, so it is no better as containment evidence than it was as a scale sample. It is the boundary stage's containment evidence and the sample set for a robust multi-room scale — a single `roomOverlay` could be neither. Perimeter traces additionally carry `holes` (enclosed voids, subtracted from area), `quality` (detection confidence + warnings) and `wallFaces` (the detector's exterior/interior pair for *that* outline). `wallFaces` is per trace rather than re-derived from `tracedBoundaries` because that field holds only the most recent detection run: the exterior/interior switch (`setWallFaceMode`) is one setting for the whole canvas, so a plan traced in several passes has outlines the last run cannot describe.
 - **Every surface that prints an area breakdown goes through `displayedBreakdownTotal`**
   (`areaCalculator.js`), which sums what the *rows* print rather than rounding the raw
   total separately. Three call sites feed four printed surfaces — the exhibit, the
@@ -173,8 +203,11 @@ broken once already:
   once. Rounding each row and the total independently prints 1,241 + 442 + 89 under a
   Total of 1,772; on a workfile exhibit a reviewer adds up by hand, that reads as an
   error in the measurement.
-- `src/store/undoManager.js` interns image data URLs into a hash-keyed pool (`hashDataUrl`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step.
-- `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectPerimeterOverlay` / `selectCombinedArea` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library.
+- `src/store/undoManager.js` interns image data URLs into a pool keyed by `internKey` (`utils/hash.js`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step. **It must be `internKey`, never `hashDataUrl`:** the latter folds an 8 KB prefix plus the length into 32 bits, so two images can share a key — and this key is what undo resolves back into `image`, so a collision restores the wrong drawing with nothing looking wrong. `internKey` picks the bucket by hash and then string-compares the occupant.
+- **The undo stacks are module state, so a plan switch hands them over explicitly.** `parkHistory`/`adoptHistory` are the `PARK_FIELDS` of the history — a plan that has never been parked adopts an empty one rather than inheriting the last plan's. `cancelLastSave` deliberately does not survive the switch (`cancelPendingSave` gives it up): the save belongs to one plan and the cancel would pop whichever is live. `setHistoryState` copies the caller's arrays and caps them, because a `.floorplan` is the one path that can arrive deeper than the app ever creates and would then pin every image it references in the pool.
+- `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
+
+  Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 
 ### `App.jsx` is a thin orchestrator
 
@@ -182,9 +215,9 @@ broken once already:
 
 ### Two shells over one workflow
 
-`useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
+`useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819.98px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
 
-`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the four desktop bands, or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and three sheets over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
+`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the five desktop bands — the tab strip became one of them — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
@@ -223,7 +256,10 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
   - `polygon.js` — Moore trace (Jacob's criterion) → RDP → de-skewed rectilinear fit; signed shoelace, ring-set area, point-in-polygon
   - `room.js` — rectangle growth from the label with wall-coverage stops (door gaps don't leak), thin-line candidates + label-aspect arbitration (closets/counters), open-plan virtual sides, then a final pass seating each chosen edge on its wall's **interior face** (measured in the unsmeared mask over the final span, never predicted from the smear trigger, and never on the centreline). Returns per-side wall faces (`{edge, cov, thick, kind, exterior}`) and the px/ft the room implies
   - `brush.js` — **draw mode**: the user's rough brush strokes as a constraint. Strokes rasterise into a `corridor` (the painted band, which *replaces* `partitionWallNetworks` — one painted loop is one building) and a `ribbon` (the centreline at wall width, fed to `createEvidence` as asserted wall). The tracer then searches only ink inside the corridor, which is why draw mode beats auto-detection on the plans auto-detection fails: legends, dimension strings and neighbouring plans are outside the band by construction. `regionFit` scores a candidate on *miss* and *spill* against the stroke, **not** IoU — the band is thick, and plain IoU flags every generous stroke as a mismatch
-  - `cache.js` — memoises analysis and boundary per `(cacheKey, maxDimension)`. The worker passes the image hash, so N room clicks cost one trace instead of 2N
+  - `labelFrame.js` — a label array plus the window of the page it covers. Labels stay in crop space and carry their `frame` (absent means page-sized); re-expanding each to a page-sized array left it 16-81% `-1` padding, and the boundary search memoises one per kept ladder rung — which pushed three of seven fixtures past the memo's byte budget and cost them their memo for as long as the image stayed open
+  - `garage.js` — the OCR-independent geometric garage detector behind `nonGla.js`'s garage source: a large near-rectangular cavity with one exterior-facing side drawn almost entirely as thin garage-door stroke. Porches fail the "other sides are real walls" guard; windows fail the door-run guard
+  - `scale.js` — which rooms the project scale is taken from, decided without the user. Every labelled room is measured and the rooms outvote each other: the old flow calibrated from whichever room the user clicked, and the worst clickable room implies a scale 58-90% wrong — which, since area goes as scale squared, is a 3-4x area error. Deliberately little machinery: weighting samples by isotropy, pixel length or bounding walls each moved no fixture more than 0.8 pp, and isotropy weighting is *worse* than nothing because it promotes the one honest sample that is wrong. Only the confidence gate earns its place. Scored by `npm run bench:scale`
+  - `cache.js` — memoises analysis and boundary per `(cacheKey, maxDimension, analyzeOptions)`, four entries, with a 32 MB budget on the search caches: past it the memo stops storing but deliberately does not clear what it holds, so the budget is a bound and not a cliff. `dropCacheKey` drops one image's entries rather than the whole cache, which is what used to throw away the other plan's work on every image change. **The memo is keyed on the data URL, not on its hash** — `hashDataUrl` folds an 8 KB prefix into 32 bits and the eraser and crop tools emit same-length URLs from one canvas, so a hash key can hand two images one entry and return the previous image's pixels with nothing looking wrong. The `cacheKey` (`hash#seq`) is minted once per decode and kept *with* the decode entry, and that stability is what makes N room clicks cost one trace instead of 2N. `MAX_DECODED` is 2, not 1: with two plans open, alternating evicted the other every time and made every trace after a switch cold (~1130 ms against ~130 ms)
 
   **Quality is a first-class output.** `traceFloorplanBoundaryCore` returns `quality: {confidence, warnings[], usedFallback, source, …}`; the worker forwards a whitelist of debug fields (it must never blanket-null them again); traces carry their quality into the store; `App.jsx` reports a doubtful trace as doubtful. `src/utils/boundaryQuality.js` decides the wording.
 
@@ -241,11 +277,11 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
   5. Optional PaddleOCR neural "rescue" pass over ROIs Tesseract couldn't parse (browser-only; skipped if the model isn't warmed up or the time budget — `budgetMs`, default 2600ms — is spent)
   6. Merge: overlap-based dedup, confidence scoring, dominant unit-format inference
 
-  A scan is ~90% Tesseract inference, so the speed levers are all about the calls: `ocrTesseract.js` keeps a **worker pool** (`min(4, cores/2)`, preset-affine, torn down on an idle timer rather than after every scan) and phase 4 reads ROIs concurrently across it, while the speculative ROI tier (priority ≤6 — spatial clusters nothing corroborates) gets one zoom rung instead of the full ladder. `detectAllDimensions` memoises the last scan by image identity. Two things that look like free wins are **not**, and are benchmarked shut: running CLAHE before the pre-OCR upscale instead of after (bilinear zoom is what creates the gradients CLAHE exists to flatten — costs six detections), and lowering `UPSCALE_MAX`/`TARGET_GLYPH_PX` (flat detection rate, more false positives).
+  A scan is ~90% Tesseract inference, so the speed levers are all about the calls: `ocrTesseract.js` keeps a **worker pool** (`max(1, min(cap, cores/2))`, where `cap` is 8 only when `hardwareConcurrency >= 16` *and* `deviceMemory >= 8`, else 4 — each worker holds the 5.2 MB traineddata plus a WASM heap, so the cap is a memory decision and an unknown `deviceMemory` counts as "not enough"; reads are bit-identical at any pool size. Preset-affine, torn down on a 60 s idle timer rather than after every scan) and phase 4 reads ROIs concurrently across it, while the speculative ROI tier (priority below `SPECULATIVE_PRIORITY` = 7 — spatial clusters nothing corroborates) gets two zoom rungs instead of the full ladder, and is capped in count as well as depth (`MAX_SPECULATIVE_ROIS` 12, `MAX_SPECULATIVE_VERTICAL_ROIS` 6; the overall `MAX_ROIS` bounds the queue but not its composition). `detectAllDimensions` runs through `scanQueue.js` — pure and testable, deliberately outside `DimensionsOCR.js`, which cannot load outside a browser. Three behaviours: a **four-entry LRU** keyed by data-URL identity rather than one slot (one slot is right only while one image is in play; with two plans open every scan went cold); **de-duplication**, so two callers asking for one image wait on one scan; and **serialisation**, which is the load-bearing one. The pipeline's budget is wall clock, so two scans running together do not each take twice as long — they each return *fewer dimensions*, with nothing in either result saying so, and fewer dimensions is a worse scale, and the scale multiplies every reported area. Failures are never memoised: an empty result would otherwise be served forever as "this plan has no labels". Two things that look like free wins are **not**, and are benchmarked shut: running CLAHE before the pre-OCR upscale instead of after (bilinear zoom is what creates the gradients CLAHE exists to flatten — costs six detections), and lowering `UPSCALE_MAX`/`TARGET_GLYPH_PX` (flat detection rate, more false positives).
 
   This pipeline core (`detectDimensionsCore` in `pipeline.js`) is deliberately environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`) so the identical code path runs in the browser (`DimensionsOCR.js`'s `browserEnv()`) and in the Node benchmark harness (`scripts/ocrBenchmark.mjs`, which stubs `toOcrInput` with a PNG encoder and skips the PaddleOCR step). When changing pipeline behavior, prefer running the benchmark script over `fixtures/ExampleFloorplan.png` to check detection rate/accuracy/timings before/after.
 
-  PaddleOCR model weights are committed under `public/models/ocr-det` and `public/models/ocr-rec` (`model.json` + `chunk_N.dat`, 10.6 MB). They are checked in deliberately — the app must work offline and on first paint — but note that regenerating them adds another copy to git history, so replace rather than accumulate.
+  PaddleOCR model weights are committed under `public/models/ocr-det` and `public/models/ocr-rec` (`model.json` + `chunk_N.dat` — one chunk under `ocr-det`, two under `ocr-rec`, 11.9 MB committed). They are checked in deliberately — the app must work offline and on first paint — but note that regenerating them adds another copy to git history, so replace rather than accumulate.
 
   Tesseract's runtime assets are self-hosted (no jsdelivr at runtime): the worker script and core WASM come straight from `node_modules` via Vite `?url` imports — see the `configureTesseract` block in `DimensionsOCR.js`, which also does the SIMD probe — so they track the installed tesseract.js version automatically. The language data lives at `public/tesseract/eng.traineddata.gz`; regenerate it by gzipping the `eng.traineddata` that a Node benchmark run caches in the repo root.
 
@@ -253,11 +289,14 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
 
 `vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
 
-**Splitting is not lazying.** The konva chunk existed for a long time while `App.jsx → Canvas.jsx → react-konva` kept it in the entry's *static* module graph, so `index.html` modulepreloaded it and the browser fetched and compiled all 320 kB before the app could run — the opposite of what the config appeared to say. What actually defers it is `Canvas.jsx`, which lazy-loads the whole `<Stage>` subtree (`CanvasStage.jsx`) behind `React.lazy`; the manual chunks only decide *which file* the deferred code lands in. Two entries are load-bearing for that: React and `commonjsHelpers` are pinned to their own chunks because, left unassigned, rollup folds the dependency shared by konva and the entry *into the konva chunk*, and the entry then statically imports konva to reach it. If you change `manualChunks`, check `dist/index.html` for a konva modulepreload afterwards — that link is the regression signal.
+**Splitting is not lazying.** The konva chunk existed for a long time while `App.jsx → Canvas.jsx → react-konva` kept it in the entry's *static* module graph, so `index.html` modulepreloaded it and the browser fetched and compiled all 320 kB before the app could run — the opposite of what the config appeared to say. What actually defers it is `Canvas.jsx`, which lazy-loads the whole `<Stage>` subtree (`CanvasStage.jsx`) behind `React.lazy`; the manual chunks only decide *which file* the deferred code lands in. Two entries are load-bearing for that: React and `commonjsHelpers` are pinned to their own chunks because, left unassigned, rollup folds the dependency shared by konva and the entry *into the konva chunk*, and the entry then statically imports konva to reach it.
+
+The same shape applies a second time, for OCR. `utils/ocrLazy.js` is a facade over `DimensionsOCR.js`, whose import pulls the whole dimension graph (45 kB, 17.8 kB gz) — code that cannot run before an image exists. **`App.jsx` and the two OCR hooks must import from `ocrLazy`, never `DimensionsOCR`**; one direct import returns the graph to the entry chunk. `terminateOcrWorker` is the shape-setter: it runs in an unmount cleanup and cannot await, so it reads the cached module handle and does nothing when OCR was never loaded. If you change `manualChunks`, rebuild and check `dist/index.html`: it must modulepreload **exactly `interop` and `react`**. A konva-only check is what let the tesseract regression stand — `tesseract.js/dist/worker.min.js?url` matched the tesseract rule, so a 15.9 kB chunk existed to export a 60-character URL string, entry-reachable and preloaded on every load, while the konva link was correctly absent. Hence the `!id.includes('?url')` guard on that rule.
 
 ## Conventions
 
 - No comment blocks/docstrings beyond a short "why" line — several files already model this well (`pipeline.js`, `appStore.js`); match that density, not the verbosity of one-off code you're editing near.
 - `eslint.config.js` treats unused vars as an error except names matching `^[A-Z_]`.
+- `eslint.config.js` also errors on `%TypedArray%.from(x, fn)` with a mapper: it walks the iterator protocol and dispatches per element, ~92 ns/px against a plain loop's ~4 ns/px — which is the entire per-pixel budget in `detection/`. Allocate and loop.
 - Prefer adding new cross-cutting interaction logic as a hook in `src/hooks/` rather than growing `App.jsx`.
 - Detection results carry their own quality. Never drop a `warnings[]`/`confidence` on the way to the UI, and never report a trace as a plain success without consulting it — the failure mode this codebase is most prone to is a wrong answer that looks green.
