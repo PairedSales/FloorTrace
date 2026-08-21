@@ -118,6 +118,30 @@ export function useAutosave() {
     return { order: [...state.documentOrder], activeId: state.activeDocumentId, docs };
   }, []);
 
+  // Writing the index, deferred to a microtask and coalesced.
+  //
+  // Deferred because a plan transition is several `set` calls, and the index
+  // has to describe the end of one. `closeDocument` trims `documentOrder` and
+  // *then* adopts a successor, so a write that runs synchronously on the first
+  // of those reads a half-finished transition and stamps `activeId` with the id
+  // of the plan being closed — producing exactly the stale index this exists to
+  // prevent, and doing it on every close rather than occasionally.
+  //
+  // Coalesced because those same several sets would otherwise each write.
+  const indexWriteQueued = useRef(false);
+  const queueIndexWrite = useCallback(() => {
+    if (indexWriteQueued.current) return;
+    indexWriteQueued.current = true;
+    queueMicrotask(() => {
+      indexWriteQueued.current = false;
+      if (!useAppStore.getState()._hasRestoredState) return;
+      writeWorkspaceIndex(buildIndex()).catch((error) => {
+        console.error('Failed to write the workspace index:', error);
+      });
+    });
+  }, [buildIndex]);
+
+
   // `withHistory` is off for the recurring debounced write: the undo stack is up
   // to 50 snapshots and dwarfs the document itself (2.3 MB vs 755 KB on the
   // largest fixture), and re-serialising it every 2 s buys nothing a user can
@@ -353,16 +377,10 @@ export function useAutosave() {
   useEffect(() => {
     const unsub = useAppStore.subscribe(
       (state) => state.documentOrder,
-      () => {
-        if (!saveOnExit) return;
-        if (!useAppStore.getState()._hasRestoredState) return;
-        writeWorkspaceIndex(buildIndex()).catch((error) => {
-          console.error('Failed to write the workspace index:', error);
-        });
-      },
+      () => { if (saveOnExit) queueIndexWrite(); },
     );
     return () => unsub();
-  }, [saveOnExit, buildIndex]);
+  }, [saveOnExit, queueIndexWrite]);
 
   // ── Write a plan when it is parked ────────────────────────────────────────
   //
@@ -439,9 +457,7 @@ export function useAutosave() {
           // `documentOrder` does not change when the last plan is emptied in
           // place, so the subscription above does not fire for it, and the
           // index would go on naming a plan whose records have just gone.
-          writeWorkspaceIndex(buildIndex()).catch((error) => {
-            console.error('Failed to write the workspace index:', error);
-          });
+          queueIndexWrite();
           return;
         }
 
@@ -494,7 +510,7 @@ export function useAutosave() {
       unsub();
       cancelPendingWrite();
     };
-  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite, buildIndex]);
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite, queueIndexWrite]);
 
   // Best-effort flush when the tab is hidden or unloaded, and the only write
   // that carries the undo history. It is not a guarantee: setDraft opens an

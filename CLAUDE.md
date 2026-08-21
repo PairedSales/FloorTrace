@@ -21,7 +21,36 @@ npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 ```
 
-Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test harness — UI changes need to be manually verified with `npm run dev`. Benchmark/test fixture floorplans (`ExampleFloorplanN.*` + `.truth.json` sidecars) live under `fixtures/`.
+Vitest tests live under `src/utils/**/__tests__/`, `src/store/__tests__/` and
+`src/hooks/__tests__/`. Benchmark/test fixture floorplans (`ExampleFloorplanN.*` +
+`.truth.json` sidecars) live under `fixtures/`.
+
+**There is still no browser/e2e harness**, so anything that needs a canvas, a
+worker or a real layout is verified by hand with `npm run dev` — see the mobile
+note further down for why the Browser pane lies about this app. What *is*
+covered now is the layer between the store and the UI:
+
+- **Hook tests run in jsdom, per file, via a `// @vitest-environment jsdom`
+  docblock.** The default environment stays node on purpose: the detection
+  suites are CPU-bound pure-JS pipelines that gain nothing from a DOM and would
+  pay for one. Setting it globally costs about 10 s a run.
+- `src/hooks/__tests__/harness.js` holds the store setup (`oneDocument`,
+  `addParkedDocument`, `addUnhydratedDocument`). Tests mock only the persistence
+  layer — `workspaceDrafts`, `draftStorage`, `notify` — and run the real hook
+  against the real store, so a failure means a decision was wrong rather than
+  that a mock drifted.
+- **A hook test is worth writing when the logic lives inside an effect**, which
+  is where every multi-plan data-integrity defect has been: which plan a
+  debounced write names, when the workspace index is rewritten, whether a file
+  handle outlives its plan. `parkAdopt.test.js` and friends cannot reach any of
+  it. Check a new one *fails* against the unfixed code before trusting it — the
+  index-on-close test passed either way at first, because the bug it replaced
+  happened to write the index two seconds later.
+- **`App.jsx` orchestration is still out of reach.** Its last-plan close path
+  (`restart()` keeps the plan's id, so the file handle has to be dropped there
+  too) has no test, because rendering `App` means konva, workers and OCR. Moving
+  that branch into `usePlanManager` beside `closePlan` would fix that; it has
+  not been done.
 
 **Always run `npm run bench:detection` before and after a detection change.** It scores polygon shape and square feet, not just bounding boxes — a tracer that returns each building's bounding rectangle passes a box check while discarding every notch and wing. `npm run probe:exterior` prints the same scenarios `exterior-failures.test.js` asserts (wide openings, U-notches, dimension strings, courtyards, legends, garage doors, nested plans, mixed wall thickness) with IoU/area/confidence, which is the fastest way to see what a change did. `npm run probe:exterior draw` does the same for draw mode, re-tracing those scenarios from a synthetic sloppy brush stroke (`strokeAround` in `synthetic.js`) — jitter and brush width should not move the numbers.
 
