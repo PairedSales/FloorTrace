@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
-import useAppStore, { selectActiveAreaByType } from '../store/appStore';
+import useAppStore, { selectActiveAreaByType, selectWorkspaceArea } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import {
   formatDimensionInput, formatArea, metersToFeet,
@@ -192,6 +192,7 @@ const MeasurementDock = ({
   const toggleVisibility = useAppStore((s) => s.togglePerimeterTraceVisibility);
   const setPerimeterTraceType = useAppStore((s) => s.setPerimeterTraceType);
   const areas = useAppStore(selectActiveAreaByType);
+  const property = useAppStore(selectWorkspaceArea);
   const image = useAppStore((s) => s.image);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
@@ -291,6 +292,12 @@ const MeasurementDock = ({
   // The printed total is the sum of the printed rows. Rounding the raw sum on
   // its own lets the breakdown fail to reach the total sitting under it, and
   // this table is what gets copied into a report.
+  // The property, when there is one. A two-storey house is two plans, and the
+  // sum used to be made on a calculator and typed into the report by hand.
+  const propertyTotal = formatAreaValue(displayedBreakdownTotal(property.byType, unit), unit);
+  const propertyGla = formatAreaValue(areaDisplayValue(property.gla, unit), unit);
+  const propertyLevels = property.counts?.[DEFAULT_TRACE_TYPE] ?? 0;
+
   const totalDisplay = displayedBreakdownTotal(areas.byType, unit);
   const totalFormatted = formatAreaValue(totalDisplay, unit);
   const { value: areaText, suffix: areaSuffix } = noGla
@@ -330,6 +337,13 @@ const MeasurementDock = ({
       (t) => `${t.label}\t${formatAreaValue(areaDisplayValue(areas.byType[t.id], unit), unit).value} ${areaSuffix}`
     );
     lines.push(`Total\t${totalFormatted.value} ${areaSuffix}`);
+    if (property.isMultiPlan) {
+      lines.push('');
+      for (const plan of property.plans) {
+        lines.push(`${plan.label}: ${formatAreaValue(areaDisplayValue(plan.total, unit), unit).value} ${areaSuffix}`);
+      }
+      lines.push(`Property total: ${propertyTotal.value} ${areaSuffix}`);
+    }
     navigator.clipboard.writeText(lines.join('\n'));
     flashStatus('Area breakdown copied to the clipboard');
   };
@@ -560,6 +574,66 @@ const MeasurementDock = ({
                   </tr>
                 </tbody>
               </table>
+            )}
+
+            {/* The property, above the export button because it is the figure
+                that goes in the report. Only when there is more than one plan
+                contributing: on a single-plan job it would just restate the
+                number directly above it. */}
+            {property.isMultiPlan && (
+              <div className="mt-4 pt-3 border-t border-line">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10.5px] font-bold uppercase tracking-[.06em] text-fg-dim">
+                    Property
+                  </span>
+                  {propertyLevels > 0 && (
+                    <span className="text-[11px] text-fg-3">
+                      {propertyLevels} {propertyLevels === 1 ? 'level' : 'levels'} across{' '}
+                      {property.plans.length} plans
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-1.5 flex items-baseline gap-2">
+                  <span className="font-mono font-bold tabular-nums text-fg leading-none tracking-tight text-[1.75rem]">
+                    {property.gla > 0 ? propertyGla.value : propertyTotal.value}
+                  </span>
+                  <span className="text-[13px] text-fg-3 font-medium">{areaSuffix}</span>
+                  <span className="text-[11px] text-fg-3">
+                    {property.gla > 0 ? 'gross living area' : 'total, no living-area outline'}
+                  </span>
+                </div>
+
+                <table className="w-full border-collapse mt-2.5 text-[12.5px]">
+                  <tbody>
+                    {property.plans.map((plan) => (
+                      <tr key={plan.docId}>
+                        <td className="py-1 border-t border-line-soft text-fg-2">
+                          {plan.label}
+                          {plan.isActive && (
+                            <span className="ml-1.5 text-[10.5px] text-fg-dim">this plan</span>
+                          )}
+                          {/* A plan the workspace has not read back cannot be
+                              re-measured; its figure is the one it last
+                              reported. Said rather than hidden. */}
+                          {plan.fromDisk && (
+                            <span className="ml-1.5 text-[10.5px] text-fg-dim">from the last save</span>
+                          )}
+                        </td>
+                        <td className="py-1 border-t border-line-soft text-right font-mono tabular-nums text-fg">
+                          {formatAreaValue(areaDisplayValue(plan.total, unit), unit).value}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td className="pt-1.5 border-t border-line font-semibold text-fg">Property total</td>
+                      <td className="pt-1.5 border-t border-line text-right font-mono tabular-nums font-semibold text-fg">
+                        {propertyTotal.value}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {/* The number is read here, so the way to take it away is here.
