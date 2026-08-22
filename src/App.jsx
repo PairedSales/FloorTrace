@@ -151,6 +151,11 @@ const roomScaleHint = () => {
   return null;
 };
 
+// A parsed label's identity, from what it says and where it says it. Used to
+// tell the label a room was placed from apart from the rest of them, so the
+// three places that name one cannot drift.
+const labelKeyOf = (d) => `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`;
+
 // Traced floor area in image pixels. Every floor, not the largest: the labels
 // are spread over all of them, and weighing them against one floor reports a
 // correct scale on a multi-floor sheet as implausible.
@@ -999,7 +1004,7 @@ function App() {
     const labels = dimensions
       .filter((d) => d.bbox && d.width > 0 && d.height > 0)
       .map((d) => ({
-        id: `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`,
+        id: labelKeyOf(d),
         point: { x: d.bbox.x + d.bbox.width / 2, y: d.bbox.y + d.bbox.height / 2 },
         labelBbox: d.bbox,
         labelDims: { width: d.width, height: d.height },
@@ -1053,11 +1058,22 @@ function App() {
     };
     let detected = null;
 
+    // Every other parsed label on the page, as a place this room is not: a
+    // rectangle holding another room's dimensions grew through a wall. The
+    // scan's batch gives each room it measures the same evidence, and this is
+    // the same rooms by another route, so the two must not be able to disagree.
+    // A canvas click in manual mode names no label, and needs to name none —
+    // growRoomRect drops any of these that the room it settled on contains,
+    // which is exactly the label of the room being clicked.
+    const foreignPoints = useAppStore.getState().detectedDimensions
+      .filter((d) => d.bbox && labelKeyOf(d) !== labelId)
+      .map((d) => ({ x: d.bbox.x + d.bbox.width / 2, y: d.bbox.y + d.bbox.height / 2 }));
+
     setIsProcessing(true, 'Finding room…');
     const work = beginWork('room');
     try {
       detected = await detectRoomFromClick(image, point, {
-        labelBbox, labelDims: dims, pixelsPerFoot: roomScaleHint(),
+        labelBbox, labelDims: dims, pixelsPerFoot: roomScaleHint(), foreignPoints,
       });
       if (detected?.overlay) {
         deliver(work, () => {
@@ -1144,7 +1160,7 @@ function App() {
       },
       dims: { width: dimension.width, height: dimension.height },
       labelBbox: dimension.bbox,
-      labelId: `${dimension.text ?? ''}@${Math.round(dimension.bbox.x)},${Math.round(dimension.bbox.y)}`,
+      labelId: labelKeyOf(dimension),
     });
   }, [placeRoom]);
 
