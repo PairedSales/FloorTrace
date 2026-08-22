@@ -54,11 +54,12 @@ import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { forgetFileHandle } from './utils/fileHandles';
 
-// The desktop chrome a top-centre toast has to clear: menu bar 30 + command
-// bar 40 + tab strip 30 + status band 26, and 10 px of air. Every band is
-// permanent now that the context bar has been folded into the status band, so
-// this is a constant rather than a sum computed per render.
-const DESKTOP_CHROME_PX = 30 + 40 + 30 + 26 + 10;
+// The desktop chrome a top-centre toast has to clear: one top band of 40 (the
+// menu titles and the command bar share it) + tab strip 30 + status band 26,
+// and 10 px of air. Every band is permanent now that the context bar has been
+// folded into the status band, so this is a constant rather than a sum
+// computed per render.
+const DESKTOP_CHROME_PX = 40 + 30 + 26 + 10;
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
@@ -1411,11 +1412,12 @@ function App() {
     />
   );
 
-  // Two shells over one workflow. Desktop: two full-width bands (menu,
-  // command) over a row of dock, plan and tool rail — with the tab strip and
-  // the status bar stacked inside the plan's own column, so both describe the
-  // plan and stop where it does. The status bar is also the context bar: a
-  // running tool's instruction and its way out are cells in it.
+  // Two shells over one workflow. Desktop: one full-width band — the menu
+  // titles and the command bar share it — over a row of dock, plan and tool
+  // rail, with the tab strip and the status bar stacked inside the plan's own
+  // column, so both describe the plan and stop where it does. The status bar is
+  // also the context bar: a running tool's instruction, its brush and its way
+  // out are cells in it.
   // Mobile: a top bar, the plan, and one bar under the thumb — see MobileChrome
   // for why that is a different arrangement rather than the same one scaled
   // down.
@@ -1481,6 +1483,12 @@ function App() {
         </MobileChrome>
       ) : (
       <>
+      {/* One band, not two. The menu row was three titles and a wordmark with
+          the rest of the window empty beside them — 30 px of chrome above the
+          plan spent on whitespace. The titles are the left group of the
+          command bar now; both components render bare and this header owns the
+          height, surface and rule. */}
+      <header className="flex items-center h-10 px-2 bg-panel-2 border-b border-line select-none shrink-0">
       <MenuBar
         image={image}
         onFileOpen={handleFileOpen}
@@ -1520,6 +1528,8 @@ function App() {
         onDockToggle={handleDockToggle}
       />
 
+      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+
       <CommandBar
         image={image}
         isProcessing={isProcessing}
@@ -1543,6 +1553,7 @@ function App() {
         theme={theme}
         onCycleTheme={cycleTheme}
       />
+      </header>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {dockOpen && (
