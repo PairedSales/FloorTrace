@@ -84,15 +84,27 @@ switches outlines, so plan switching cannot have those keys.
 **The tab strip is the top row of the plan's own column** (`DocumentTabs.jsx`,
 rendered in `App.jsx` inside the row, not above it), with the `StatusBar` directly
 under it and the canvas under that — so both bands are inset between the
-measurement dock and the tool rail and stop where the plan stops. **The strip must
-not scroll**: tabs share the width and truncate to a ~96 px floor, and whatever no
-longer fits moves into a chevron menu. A strip that scrolls hides plans behind a
-gesture, which is what a tab strip exists to prevent.
+measurement dock and the tool rail and stop where the plan stops.
+
+**It renders only when two or more plans are open.** One tab is 30 px of chrome
+answering a question nobody asked, taken off the plan for the whole of an ordinary
+single-plan session; `File > New plan` (Ctrl+Alt+N) is how the second plan — and
+the strip with it — arrives.
+
+**The strip ends where the last tab does.** A tab is as wide as its own name
+(`flex: 0 1 auto`, floor 96 px, ceiling 200) and the new-plan button follows it
+immediately rather than sitting in the far corner. Tabs that grew to share the
+width put the band's only two controls at opposite ends of an empty panel.
+
+**The strip must
+not scroll**: tabs truncate to a ~96 px floor, and whatever no longer fits moves
+into a chevron menu. A strip that scrolls hides plans behind a gesture, which is
+what a tab strip exists to prevent.
 
 **The chevron is reachable, and that is new.** While the strip spanned the window,
 six tabs at the 96 px floor needed 606 px against a 819.98 px minimum, so nobody
-ever saw it. Inset, the strip is the window less a 320 px dock and a 48 px rail —
-~452 px at the breakpoint, which fits four — so five or six open plans overflow on
+ever saw it. Inset, the strip is measured against the window less a 320 px dock and
+a 48 px rail — ~452 px at the breakpoint, which fits four at the floor — so five or six open plans overflow on
 a real screen. Treat that path as live.
 
 **Its width is re-measured three ways and none is redundant:** a window `resize`,
@@ -260,7 +272,7 @@ Two rules that fall out of it, both about 452 px — the narrowest this band eve
 
 The vertex count sits outside the live region for the same reason the hover hint does — it changes on every click.
 
-The toast offset is one named constant again (`DESKTOP_CHROME_PX`), because every band it counts is permanent now. It was a hard-coded `116px` for a stack that had already changed twice, then a sum that had to account for a band that came and went.
+The toast's desktop offset (`desktopChromePx`) counts the 40 px top band, the 26 px status band and 10 px of air, plus the tab strip's 30 only when there is a strip — at one plan there is not. It was a hard-coded `116px` for a stack that had already changed twice, then a constant for a stack in which every band was permanent, and then the tab strip stopped being permanent.
 
 **The tool digits run 1–9 straight down `TOOL_GROUPS`.** Both `toolCatalog.js` and `useKeyboardShortcuts.js` claimed to match and did not — the rail read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits were handed out in the order the tools were built and the rail was regrouped around them later. Nothing derives a digit from an index (a mapping that moves with app state is the thing being avoided), so renumbering means editing both lists together, plus the four places that print a digit: the `keys` on the two Trace menu items, the Paint-outline tooltip in `CommandBar`, the `1 – 9` row in `HelpModal`, and the badge in the corner of every rail button (which the status bar then repeats on hover, from the same field).
 

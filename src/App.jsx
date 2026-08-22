@@ -55,11 +55,12 @@ import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { forgetFileHandle } from './utils/fileHandles';
 
 // The desktop chrome a top-centre toast has to clear: one top band of 40 (the
-// menu titles and the command bar share it) + tab strip 30 + status band 26,
-// and 10 px of air. Every band is permanent now that the context bar has been
-// folded into the status band, so this is a constant rather than a sum
-// computed per render.
-const DESKTOP_CHROME_PX = 40 + 30 + 26 + 10;
+// menu titles and the command bar share it) + the status band's 26 + 10 px of
+// air, and the tab strip's 30 only when there is a strip. One plan does not get
+// one, and one plan is the common case — so this went back to a function of
+// what is actually on screen rather than the constant it was while every band
+// was permanent.
+const desktopChromePx = (planCount) => 40 + (planCount > 1 ? 30 : 0) + 26 + 10;
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
@@ -1693,12 +1694,11 @@ function App() {
         // Clears whichever chrome is above it: the desktop stack down to the
         // status band, or one mobile bar plus whatever the notch takes. Named
         // rather than written inline, because it was a hard-coded `116px` for a
-        // stack that had already changed twice — and the bands it counts are
-        // all permanent now, which is the only reason one number is enough.
+        // stack that had already changed twice.
         style={{
           top: isMobile
             ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : `${DESKTOP_CHROME_PX}px`,
+            : `${desktopChromePx(documentOrder.length)}px`,
         }}
         toastOptions={{
           classNames: {
