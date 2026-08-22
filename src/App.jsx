@@ -89,11 +89,11 @@ const MODE_HINT = {
   pick: 'Click a dimension label to use that room',
 };
 
-// The desktop chrome a top-centre toast has to clear: menu bar 30 + command
-// bar 40 + tab strip 30 + status band 26, and 10 px of air. The context bar is
-// added on top when a tool is running, which is the only one of the five that
-// comes and goes.
-const DESKTOP_CHROME_PX = 30 + 40 + 30 + 26 + 10;
+// The desktop chrome a top-centre toast has to clear: command bar 40 (the
+// menu titles share that one band) + tab strip 30 + status band 26, and 10 px
+// of air. The context bar is added on top when a tool is running, which is the
+// only one of the four that comes and goes.
+const DESKTOP_CHROME_PX = 40 + 30 + 26 + 10;
 const CONTEXT_BAR_PX = 36;
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
@@ -1515,6 +1515,12 @@ function App() {
         </MobileChrome>
       ) : (
       <>
+      {/* One band, not two. The menu row was three titles and a wordmark with
+          the rest of the window empty beside them — 30 px of chrome above the
+          plan spent on whitespace. The titles are the left group of the
+          command bar now; both components render bare and this header owns the
+          height, surface and rule. */}
+      <header className="flex items-center h-10 px-2 bg-panel-2 border-b border-line select-none shrink-0">
       <MenuBar
         image={image}
         onFileOpen={handleFileOpen}
@@ -1554,6 +1560,8 @@ function App() {
         onDockToggle={handleDockToggle}
       />
 
+      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+
       <CommandBar
         image={image}
         isProcessing={isProcessing}
@@ -1577,6 +1585,7 @@ function App() {
         theme={theme}
         onCycleTheme={cycleTheme}
       />
+      </header>
 
       <ContextBar
         active={activeTool === 'select' ? null : activeTool}
