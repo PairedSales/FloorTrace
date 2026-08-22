@@ -7,13 +7,14 @@ import {
   areaDisplayValue, formatAreaValue,
 } from '../utils/unitConverter';
 import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
-import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
+import { scaleQualitySummary } from '../utils/boundaryQuality';
 import { summariseIssues } from '../utils/traceIssues';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import Card from './DockCard';
 import InchesInput from './InchesInput';
 import ScaleSection from './ScaleSection';
 import StageSpine from './StageSpine';
+import { planStage, MAX_TRACES } from '../utils/planStage';
 import StatsWarningsCard from './StatsWarningsCard';
 
 const MeasurementDock = ({
@@ -31,6 +32,7 @@ const MeasurementDock = ({
   onDimensionFocus,
   onDimensionBlur,
   onScaleTool,
+  onSelectRoom,
   onExport,
   // Rendered inside the mobile bottom sheet rather than docked beside the
   // canvas. Everything below this line — the area maths, the breakdown, the
@@ -52,6 +54,7 @@ const MeasurementDock = ({
   const image = useAppStore((s) => s.image);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
+  const detectedDimensions = useAppStore((s) => s.detectedDimensions) || [];
   const calibrationSource = useAppStore((s) => s.calibration?.source);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
   // The rooms the detector confirmed — how many of them agreed is what the
@@ -203,28 +206,21 @@ const MeasurementDock = ({
     flashStatus('Area breakdown copied to the clipboard');
   };
 
-  // ── the pipeline, derived from the same state the cards read ──────────────
-  const tracedCount = perimeterTraces.filter((t) => t.vertices?.length >= 3).length;
-  const worstTrace = perimeterTraces
-    .filter((t) => t.quality)
-    .map((t) => qualitySummary(t.quality).level);
-  const outlineState = tracedCount === 0
-    ? 'todo'
-    : worstTrace.some((l) => l === 'poor' || l === 'failed' || l === 'fair') ? 'warn' : 'done';
-  const reportState = area > 0
-    ? ((areas.doubleCounted?.length > 0 || outlineState === 'warn') ? 'warn' : 'done')
-    : 'todo';
-  const stages = [
-    { id: 'plan', label: 'Plan', state: image ? 'done' : 'todo',
-      title: image ? 'A plan is loaded' : 'Open or paste a floorplan' },
-    { id: 'scale', label: 'Scale',
-      state: calibrated ? (scaleNote?.level === 'check' ? 'warn' : 'done') : 'todo',
-      title: calibrated ? 'The scale is set' : 'Read dimensions, or set the scale by hand' },
-    { id: 'outline', label: 'Outline', state: outlineState,
-      title: tracedCount === 0 ? 'No outline traced yet' : `${tracedCount} outline(s) traced` },
-    { id: 'report', label: 'Report', state: reportState,
-      title: area > 0 ? 'An area is available' : 'No area yet' },
-  ];
+  // ── the pipeline ──
+  // Derived in `utils/planStage.js` rather than here, because the top bar reads
+  // the same answer to decide which verb carries the primary weight — and the
+  // two used to disagree about what "outlined" means. The command bar asked
+  // `perimeterOverlay`, the detector's most recent overlay; this asked
+  // `perimeterTraces`, which is what the area is computed from. The area is the
+  // number on the report, so it is the one that decides.
+  const { stages } = planStage({
+    image,
+    calibrated,
+    scaleNeedsCheck: scaleNote?.level === 'check',
+    perimeterTraces,
+    area,
+    doubleCounted: areas.doubleCounted?.length ?? 0,
+  });
 
   // How much there is to check, counted once for both the chip on the Stats &
   // warnings card and the line the Area card points at it with.
@@ -533,11 +529,11 @@ const MeasurementDock = ({
           <div id="dock-outline">
             <Card
               title="Outlines"
-              action={perimeterTraces.length < 7 && (
+              action={perimeterTraces.length < MAX_TRACES && (
                 <button
                   onClick={addPerimeterTrace}
-                  aria-label="Add an outline"
-                  title="Add an outline"
+                  aria-label="Add another outline"
+                  title="Add another outline"
                   className="grid place-items-center w-[26px] h-[26px] rounded text-fg-3
                              hover:bg-sunken hover:text-fg transition-colors cursor-pointer"
                 >
@@ -680,10 +676,31 @@ const MeasurementDock = ({
             </div>
             <p className="mt-1 text-[12px] text-fg-3">{scaleProvenance}</p>
 
+            {/* The two ways to correct a scale, where the scale is read. A bad
+                room implies a px/ft that can be 58-90% out, and area goes as
+                scale squared — so this is the most consequential correction the
+                app has, and it used to be a button in the top row that was
+                disabled until a scan had run, plus a menu item under a title
+                you had to guess. You discover the problem by reading this card;
+                the fix belongs here. Labels first, then the manual override:
+                picking a different room re-uses what the scan already read,
+                which is cheaper and usually right. */}
+            {detectedDimensions.length > 0 && (
+              <button
+                type="button"
+                onClick={onSelectRoom}
+                className="mt-2.5 w-full h-8 rounded-md border border-line bg-panel-2
+                           text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
+                           transition-colors cursor-pointer"
+              >
+                Select room to scale from
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onScaleTool}
-              className="mt-2.5 w-full h-8 rounded-md border border-line bg-panel-2
+              className="mt-2 w-full h-8 rounded-md border border-line bg-panel-2
                          text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
                          transition-colors cursor-pointer"
             >

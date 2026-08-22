@@ -1,6 +1,6 @@
 import {
   Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Layers, Maximize,
-  Moon, Brush, ScanSearch, ScanText, Share, Spline, Sun, Trash2, MonitorSmartphone,
+  Moon, Brush, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
 
@@ -90,22 +90,22 @@ const MobileMenuSheet = ({
           />
           <Row
             icon={ScanSearch}
-            label="Find outline automatically"
+            label="Find outline"
             disabled={!image}
             onSelect={onTracePerimeter}
             close={onClose}
           />
           <Row
             icon={Brush}
-            label="Paint the outline"
+            label="Paint outline"
             detail="Best when auto-detection cannot read the plan"
             disabled={!image}
             onSelect={onDrawExterior}
             close={onClose}
           />
           <Row
-            icon={Spline}
-            label="Place corners by hand"
+            icon={Waypoints}
+            label="Place corners"
             disabled={!image}
             onSelect={onOutlineByVertex}
             close={onClose}

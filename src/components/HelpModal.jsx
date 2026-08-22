@@ -1,10 +1,9 @@
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
 import { useIsTouch, useIsMobile } from '../hooks/useViewport';
+import { TOOL_GROUPS } from './toolCatalog';
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
-const mod = isMac ? '⌘' : 'Ctrl';
-const alt = isMac ? '⌥' : 'Alt';
+import { MOD as mod, ALT as alt } from '../utils/keySymbols';
 
 const shortcuts = [
   { keys: 'O', description: 'Show or hide the measurement panel' },
@@ -13,9 +12,11 @@ const shortcuts = [
   { keys: '[ / ]', description: 'Resize the active brush' },
   { keys: 'R', description: 'Rotate canvas 45° clockwise' },
   { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  // Same order as the tool rail reads, top to bottom — that is what the digits
-  // now follow, so the two can be learned as one thing.
-  { keys: '1 – 9', description: 'Paint outline, Place corners, Cut out, Set scale, Measure, Area, Angle, Crop, Erase' },
+  // Read off the catalogue rather than retyped. Same order as the tool rail
+  // reads, top to bottom — that is what the digits follow, so the two can be
+  // learned as one thing — and one fewer hand-maintained printing of a map that
+  // is already written down twice.
+  { keys: '1 – 9', description: TOOL_GROUPS.flatMap((g) => g.tools).filter((t) => t.digit).map((t) => t.short).join(', ') },
   { keys: 'Alt / Shift + 1 – 7', description: 'Switch outline within this plan' },
   // Ctrl+Alt rather than the obvious chords: Ctrl+Tab, Ctrl+W and Ctrl+1–9 all
   // belong to the browser's own tab strip and cannot be taken from a page.

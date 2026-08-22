@@ -126,6 +126,18 @@
     @apply bg-accent/30 text-fg;
   }
 
+  /* Every transition and animation in the shell is decorative — the menus, the
+     accent that moves with the stage, the spinning draft icon. None of them
+     carries information the still frame does not, so all of them can stop. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   ::-webkit-scrollbar {
     width: 9px;
     height: 9px;
@@ -170,23 +182,31 @@
   .toolbar-btn:disabled {
     @apply opacity-40 cursor-default hover:bg-transparent hover:text-fg-2;
   }
-  .toolbar-btn-active {
-    @apply bg-accent/12 text-accent hover:bg-accent/20 hover:text-accent;
+
+  /* The three labelled verbs. It exists so that the accent weight can move
+     between them without moving *them*: the semibold and the border box are
+     permanent here, and `-primary` / `-ready` below only recolour. When the
+     weight lived on `-primary` and the border on `-ready`, advancing a stage
+     reflowed the row — the same defect as a button moving under the cursor,
+     with the button you were about to press as the one that moves. */
+  .toolbar-btn-stage {
+    @apply font-semibold border border-transparent;
   }
 
-  /* Primary command — the one verb the current stage is about. */
+  /* Primary command — the one verb the current stage is about, and never a
+     disabled one: filled accent at `opacity-40` is 1.76:1. */
   .toolbar-btn-primary {
-    @apply bg-accent text-accent-ink font-semibold hover:bg-accent hover:text-accent-ink
+    @apply bg-accent text-accent-ink border-accent hover:bg-accent hover:text-accent-ink
            hover:brightness-110;
   }
 
   /* A command that has become worth doing. Outlined rather than filled so it
      cannot compete with the filled primary: Export is the end of the job, not
      the current step, and two solid accent buttons in one row make the row
-     say nothing. */
+     say nothing. It is also the only accent Export ever gets — a filled Export
+     over a `fair` trace is a wrong answer that looks green. */
   .toolbar-btn-ready {
-    @apply border border-accent/55 text-accent font-semibold
-           hover:bg-accent/12 hover:text-accent;
+    @apply border-accent/55 text-accent hover:bg-accent/12 hover:text-accent;
   }
 
   .panel-input {
