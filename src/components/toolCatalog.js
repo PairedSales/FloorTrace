@@ -25,16 +25,20 @@ import {
  * whatever must happen first comes first — Set scale above the measurements it
  * gives meaning to, Cut out below the outline it punches a hole in.
  *
- * `short` is the compact name and matches the status bar's MODE_LABEL; `label`
- * stays the fuller phrase and stays the accessible name at every density.
+ * `short` is the compact, imperative name of the *tool* ("Place corners").
+ * `label` stays the fuller phrase and stays the accessible name at every
+ * density. Neither is what the status bar prints once the tool is running: that
+ * is `TOOL_MODES[id].name`, which names the *state* ("Placing corners"), and the
+ * two are deliberately worded differently — one is a thing you pick, the other
+ * is a thing you are doing.
  *
  * **Every tool carries a `hint`.** The rail is icon-only, so hovering or
  * focusing a button prints `short` and `hint` in the status bar — that is the
  * only place a tool says what it does now that the labelled density is gone.
  * `line`, `area` and `crop` had no hint while the words could be switched on
  * beside the icon; a missing one is now a tool that answers nothing. It says
- * what the tool is *for*, in contrast to App's MODE_HINT, which says what to do
- * once the tool is running.
+ * what the tool is *for*, in contrast to `TOOL_MODES[id].hint`, which says what
+ * to do once the tool is running.
  *
  * `needsArea` doubles as the disabled reason. Every tool disables in place
  * rather than disappearing, so a button never moves out from under the pointer
