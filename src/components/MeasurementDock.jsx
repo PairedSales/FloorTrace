@@ -625,7 +625,12 @@ const MeasurementDock = ({
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPerimeterTraceType(trace.id, e.target.value)}
                           aria-label="Area type"
-                          title="Area type"
+                          // A type the app assigned has to say what it read it
+                          // from — the user never chose it and the plan is the
+                          // only place the answer lives.
+                          title={trace.typeSource === 'detected' && trace.typeEvidence?.text
+                            ? `Area type — read from "${trace.typeEvidence.text.trim()}" on the plan`
+                            : 'Area type'}
                           className="h-[26px] px-1.5 rounded border border-line bg-panel-2
                                      text-[11.5px] text-fg-2 cursor-pointer hover:border-accent/50
                                      focus:outline-none focus:ring-2 focus:ring-accent"
