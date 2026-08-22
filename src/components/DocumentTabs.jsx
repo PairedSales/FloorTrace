@@ -7,18 +7,28 @@ import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 /**
  * The open plans, as the top row of the plan's own column — under the command
  * bar, over the status bar, and inset between the measurement dock and the tool
- * rail so the strip spans exactly the plan it addresses.
+ * rail so the strip is measured against exactly the plan it addresses.
  *
- * **This band must not scroll.** Tabs share the width and truncate, with a floor
- * below which they stop shrinking; whatever no longer fits moves into a chevron
- * menu at the end. A tab strip that scrolls hides plans behind a gesture, which
- * is the thing a tab strip exists to prevent.
+ * **Two plans or it does not render.** A strip with one tab in it is 30 px of
+ * chrome answering a question nobody asked, and it took that height from the
+ * plan on every ordinary single-plan session. `File ▸ New plan` (Ctrl+Alt+N)
+ * is how a second plan arrives, and the strip arrives with it.
  *
- * **The chevron is reachable now**, which it was not while this band spanned the
+ * **A tab is as wide as its own name**, up to a ceiling, and the strip ends
+ * where the last tab does — the new-plan button sits directly after it rather
+ * than pinned to the far corner. Tabs that stretched to share the width put the
+ * only two controls in this band at opposite ends of an empty panel.
+ *
+ * **This band must not scroll.** Tabs truncate, with a floor below which they
+ * stop shrinking; whatever no longer fits moves into a chevron menu at the end.
+ * A tab strip that scrolls hides plans behind a gesture, which is the thing a
+ * tab strip exists to prevent.
+ *
+ * **The chevron is reachable**, which it was not while this band spanned the
  * window: inset, the strip is the window less a 320 px dock and a 48 px rail, so
- * at the 819.98 px breakpoint it has ~452 px and fits four tabs — five or six
- * open plans overflow. It is a real path with real users in it, not the
- * dead-code guard it used to be.
+ * at the 819.98 px breakpoint it has ~452 px and fits four tabs at the floor —
+ * five or six open plans overflow. It is a real path with real users in it, not
+ * the dead-code guard it used to be.
  *
  * That is also why the width is re-measured three ways, none of them redundant:
  * on a window `resize`, on a `ResizeObserver` callback, and on the two pieces of
@@ -41,6 +51,11 @@ import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 // do not each take half the window.
 const TAB_MIN = 96;
 const TAB_MAX = 200;
+
+// The two controls that share the strip with the tabs, reserved out of the
+// width before the tabs are counted.
+const NEW_BUTTON_PX = 30;
+const CHEVRON_PX = 34;
 
 const PlanTab = ({
   docId, label, index, isActive, isBusy, needsRescale, canClose, isDragging,
@@ -76,7 +91,10 @@ const PlanTab = ({
                   ${isActive
         ? 'bg-panel-2 text-fg font-medium'
         : 'bg-panel text-fg-3 hover:text-fg-2 hover:bg-sunken'}`}
-      style={{ flex: `1 1 ${TAB_MIN}px`, minWidth: 0, maxWidth: TAB_MAX, opacity: isDragging ? 0.4 : 1 }}
+      // `0 1 auto`, not `1 1`: a tab is as wide as its own name and no wider.
+      // Growing them to share the strip made two plans take half the window
+      // each, which is the space this band was spending on nothing.
+      style={{ flex: '0 1 auto', minWidth: TAB_MIN, maxWidth: TAB_MAX, opacity: isDragging ? 0.4 : 1 }}
       // Pointer events, never HTML5 drag. The app root owns `onDragOver` and
       // `onDrop` with an unconditional `preventDefault`, so a native tab drag
       // would bubble straight into the file-drop path and try to open the tab
@@ -261,7 +279,10 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
     }
   }, [documentOrder, activeDocumentId, onSelect]);
 
-  if (documentOrder.length === 0) return null;
+  // One plan is not a choice between plans, so the band and its 30 px go with
+  // the second tab. File > New plan (Ctrl+Alt+N) is the way back to two, and
+  // the strip returns with it.
+  if (documentOrder.length <= 1) return null;
 
   // How many tabs fit before they would go below their floor.
   //
@@ -272,40 +293,50 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   // the overflow menu was computed once and then never again. Narrowing the
   // strip left tabs squeezed below their floor with no chevron to reach the
   // rest.
-  const room = stripWidth > 0
-    ? Math.max(1, Math.floor((stripWidth - 30) / TAB_MIN))
-    : documentOrder.length;
+  //
+  // The new-plan button is always in the strip, so it always costs width; the
+  // chevron costs it only when there is going to be one.
+  const fitting = (reserve) => Math.max(1, Math.floor((stripWidth - reserve) / TAB_MIN));
+  const bare = stripWidth > 0 ? fitting(NEW_BUTTON_PX) : documentOrder.length;
+  const room = bare >= documentOrder.length ? bare : fitting(NEW_BUTTON_PX + CHEVRON_PX);
   const visible = documentOrder.slice(0, room);
   const hidden = documentOrder.slice(room);
 
   return (
-    <div className="flex items-stretch h-[30px] bg-panel border-b border-line-soft shrink-0">
-      <div
-        ref={stripRef}
-        role="tablist"
-        aria-label="Open plans"
-        onKeyDown={handleKeyDown}
-        className="flex items-stretch flex-1 min-w-0 border-r border-line-soft"
-      >
-        {visible.map((docId, i) => (
-          <PlanTab
-            key={docId}
-            docId={docId}
-            label={labelFor(docId, i)}
-            isActive={docId === activeDocumentId}
-            index={i}
-            isDragging={draggingId === docId}
-            onDragStart={handleDragStart}
-            isBusy={docId === activeDocumentId && isProcessing}
-            needsRescale={Boolean(documents[docId]?.needsRescale)}
-            // The last plan cannot be closed away — there is no "no document"
-            // state in this app — so it is emptied from the File menu instead.
-            canClose={documentOrder.length > 1}
-            onSelect={onSelect}
-            onClose={onClose}
-            onRename={handleRename}
-          />
-        ))}
+    // The row spans the plan's column, because that width is what the tabs are
+    // measured against — but the strip inside it is only as wide as the plans
+    // it holds. Painting it to the far edge left several hundred px of empty
+    // panel between the last tab and a new-plan button pinned to the corner,
+    // and that button belongs beside the tabs it adds to.
+    <div ref={stripRef} className="flex items-stretch h-[30px] shrink-0">
+      <div className="flex items-stretch min-w-0 bg-panel border-b border-r border-line-soft">
+        <div
+          role="tablist"
+          aria-label="Open plans"
+          onKeyDown={handleKeyDown}
+          className="flex items-stretch min-w-0"
+        >
+          {visible.map((docId, i) => (
+            <PlanTab
+              key={docId}
+              docId={docId}
+              label={labelFor(docId, i)}
+              isActive={docId === activeDocumentId}
+              index={i}
+              isDragging={draggingId === docId}
+              onDragStart={handleDragStart}
+              isBusy={docId === activeDocumentId && isProcessing}
+              needsRescale={Boolean(documents[docId]?.needsRescale)}
+              // The last plan cannot be closed away — there is no "no document"
+              // state in this app — so it is emptied from the File menu instead.
+              // The strip is gone by then, but the rule outlives the strip.
+              canClose={documentOrder.length > 1}
+              onSelect={onSelect}
+              onClose={onClose}
+              onRename={handleRename}
+            />
+          ))}
+        </div>
 
         {hidden.length > 0 && (
           <div className="relative flex items-center shrink-0">
@@ -347,22 +378,22 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
             )}
           </div>
         )}
-      </div>
 
-      <button
-        type="button"
-        onClick={onNew}
-        disabled={documentOrder.length >= MAX_OPEN_DOCUMENTS}
-        aria-label="New plan"
-        title={documentOrder.length >= MAX_OPEN_DOCUMENTS
-          ? `${MAX_OPEN_DOCUMENTS} plans is the maximum`
-          : 'New plan'}
-        className="w-[30px] shrink-0 grid place-items-center text-fg-3
-                   hover:text-fg hover:bg-sunken cursor-pointer
-                   disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
-      >
-        <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-      </button>
+        <button
+          type="button"
+          onClick={onNew}
+          disabled={documentOrder.length >= MAX_OPEN_DOCUMENTS}
+          aria-label="New plan"
+          title={documentOrder.length >= MAX_OPEN_DOCUMENTS
+            ? `${MAX_OPEN_DOCUMENTS} plans is the maximum`
+            : 'New plan'}
+          className="w-[30px] shrink-0 grid place-items-center text-fg-3
+                     hover:text-fg hover:bg-sunken cursor-pointer
+                     disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
+        >
+          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 };
