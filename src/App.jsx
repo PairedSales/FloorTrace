@@ -4,8 +4,6 @@ import Canvas from './components/Canvas';
 import MenuBar from './components/MenuBar';
 import DocumentTabs from './components/DocumentTabs';
 import CommandBar from './components/CommandBar';
-import ContextBar from './components/ContextBar';
-import { TOOL_MODES } from './components/toolModes';
 import ToolRail from './components/ToolRail';
 import MeasurementDock from './components/MeasurementDock';
 import StatusBar from './components/StatusBar';
@@ -56,45 +54,11 @@ import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { forgetFileHandle } from './utils/fileHandles';
 
-// What the status bar calls each mode, and the one-line reminder beside it.
-// Deliberately separate from ContextBar's copy: that bar states the whole
-// instruction, this is the glance version.
-const MODE_LABEL = {
-  select: 'Select',
-  draw: 'Paint outline',
-  vertex: 'Place corners',
-  void: 'Cut out',
-  scale: 'Set scale',
-  line: 'Measure',
-  angle: 'Measure angle',
-  area: 'Draw area',
-  crop: 'Crop',
-  eraser: 'Erase',
-  place: 'Place room',
-  pick: 'Select room',
-};
-
-const MODE_HINT = {
-  select: 'Drag a corner to adjust an outline',
-  draw: 'Paint over the exterior walls',
-  vertex: 'Click each corner of the exterior',
-  void: 'Drag over a courtyard or light well',
-  scale: 'Click both ends of a known length',
-  line: 'Click a start and an end point',
-  angle: 'Drag the arms onto two walls',
-  area: 'Click each corner of the area',
-  crop: 'Drag the region to keep',
-  eraser: 'Drag over clutter to remove it',
-  place: 'Click the room on the plan',
-  pick: 'Click a dimension label to use that room',
-};
-
 // The desktop chrome a top-centre toast has to clear: menu bar 30 + command
-// bar 40 + tab strip 30 + status band 26, and 10 px of air. The context bar is
-// added on top when a tool is running, which is the only one of the five that
-// comes and goes.
+// bar 40 + tab strip 30 + status band 26, and 10 px of air. Every band is
+// permanent now that the context bar has been folded into the status band, so
+// this is a constant rather than a sum computed per render.
 const DESKTOP_CHROME_PX = 30 + 40 + 30 + 26 + 10;
-const CONTEXT_BAR_PX = 36;
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
@@ -308,10 +272,11 @@ function App() {
     };
   }, []);
 
-  // Mode is shown by <ContextBar>, docked under the command bar. It used to be
-  // eight `duration: Infinity` toasts — the app's only persistent mode
-  // indicator, rendered over the canvas, stacking with real notifications, and
-  // carrying the sole documentation of Esc-to-cancel.
+  // Mode is shown by the status bar, which carries the running tool's name,
+  // its instruction, its brush and its way out. Before any of that it was eight
+  // `duration: Infinity` toasts — the app's only persistent mode indicator,
+  // rendered over the canvas, stacking with real notifications, and carrying
+  // the sole documentation of Esc-to-cancel.
   const activeTool = drawModeActive ? 'draw'
     : perimeterVertices !== null ? 'vertex'
       : voidToolActive ? 'void'
@@ -1315,7 +1280,7 @@ function App() {
     setMode('manual');
   }, [activeTool, handleCancelTool, setMode]);
 
-  // The rail speaks the same tool ids as ContextBar, and each maps to the very
+  // The rail speaks the same tool ids as `TOOL_MODES`, and each maps to the very
   // toggle the keyboard already binds — so the two routes into a tool cannot
   // drift apart the way the old panel and the digit map had.
   const handleToolSelect = useCallback((id) => {
@@ -1446,10 +1411,11 @@ function App() {
     />
   );
 
-  // Two shells over one workflow. Desktop: three full-width bands (menu,
-  // command, and the context bar when a tool is running) over a row of dock,
-  // plan and tool rail — with the tab strip and the status bar stacked inside
-  // the plan's own column, so both describe the plan and stop where it does.
+  // Two shells over one workflow. Desktop: two full-width bands (menu,
+  // command) over a row of dock, plan and tool rail — with the tab strip and
+  // the status bar stacked inside the plan's own column, so both describe the
+  // plan and stop where it does. The status bar is also the context bar: a
+  // running tool's instruction and its way out are cells in it.
   // Mobile: a top bar, the plan, and one bar under the thumb — see MobileChrome
   // for why that is a different arrangement rather than the same one scaled
   // down.
@@ -1578,15 +1544,6 @@ function App() {
         onCycleTheme={cycleTheme}
       />
 
-      <ContextBar
-        active={activeTool === 'select' ? null : activeTool}
-        count={contextCount}
-        brushSize={contextBrush}
-        onBrushSizeChange={onContextBrushChange}
-        onCancel={handleCancelTool}
-        onDone={contextDone}
-      />
-
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {dockOpen && (
           <MeasurementDock
@@ -1628,8 +1585,12 @@ function App() {
           />
 
           <StatusBar
-            mode={MODE_LABEL[activeTool] ?? 'Select'}
-            hint={MODE_HINT[activeTool] ?? null}
+            tool={activeTool}
+            count={contextCount}
+            brushSize={contextBrush}
+            onBrushSizeChange={onContextBrushChange}
+            onCancel={handleCancelTool}
+            onDone={contextDone}
             hasImage={!!image}
             onZoomIn={() => handleZoom(1)}
             onZoomOut={() => handleZoom(-1)}
@@ -1693,8 +1654,8 @@ function App() {
       />
 
       {/* Only real notifications now - every "you are in X mode" message moved
-          to the context bar, and every low-stakes confirmation to the status
-          bar. What is left is what actually deserves to interrupt. */}
+          to the status bar, which carries the running mode, and every
+          low-stakes confirmation to the same band. What is left is what actually deserves to interrupt. */}
       {/* Two slots, not sonner's default three. A burst that cannot be read is
           worse than a burst that is truncated, and with every toast now carrying
           a stable id the same condition updates in place instead of stacking. */}
@@ -1703,14 +1664,14 @@ function App() {
         visibleToasts={2}
         closeButton
         // Clears whichever chrome is above it: the desktop stack down to the
-        // status band, or one mobile bar plus whatever the notch takes. Derived
-        // rather than written down, because the context bar comes and goes with
-        // the active tool and a single number is wrong half the time — it was
-        // `116px` for a stack that had already changed twice.
+        // status band, or one mobile bar plus whatever the notch takes. Named
+        // rather than written inline, because it was a hard-coded `116px` for a
+        // stack that had already changed twice — and the bands it counts are
+        // all permanent now, which is the only reason one number is enough.
         style={{
           top: isMobile
             ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : `${DESKTOP_CHROME_PX + (TOOL_MODES[activeTool] ? CONTEXT_BAR_PX : 0)}px`,
+            : `${DESKTOP_CHROME_PX}px`,
         }}
         toastOptions={{
           classNames: {

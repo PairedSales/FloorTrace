@@ -39,10 +39,11 @@ import useWorkspaceStore from '../store/workspaceStore';
  *    nothing would re-write it — the status bar would keep saying a tool needs a
  *    traced outline while the outline sits on the canvas.
  *
- * `short` is the rail's own name for a tool and matches the status bar's
- * MODE_LABEL; `label` stays the fuller phrase and stays the accessible name,
- * and `hint` is both the visible description and the button's
- * `aria-describedby`, so a screen reader hears what a pointer is shown.
+ * `short` is the rail's own name for a tool; `label` stays the fuller phrase and
+ * stays the accessible name, and `hint` is both the visible description and the
+ * button's `aria-describedby`, so a screen reader hears what a pointer is shown.
+ * Once a tool is *running*, the status bar stops printing the hover hint and
+ * prints `TOOL_MODES[id]` instead — the name of the state and its instruction.
  */
 const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
   const setToolHint = useWorkspaceStore((s) => s.setToolHint);

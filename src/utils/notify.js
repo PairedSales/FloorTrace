@@ -9,7 +9,7 @@ import useWorkspaceStore from '../store/workspaceStore';
  *
  *   toast       — the user must know it, and cannot see it
  *   flash()     — confirmation of something they just did
- *   context bar — what the current mode needs
+ *   status bar — what the current mode needs, and its way out
  *   dock        — anything still true, that they may act on later
  *   dialog      — anything that destroys work
  *

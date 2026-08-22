@@ -181,7 +181,7 @@ export function useToolManager() {
 
   return {
     // Exported so the shell can leave whatever tool is on without knowing
-    // which one it was — the rail's Select button and the context bar's
+    // which one it was — the rail's Select button and the status bar's
     // Cancel both mean "no tool", not "toggle this specific flag".
     deactivateAll,
     handleLineToolToggle,

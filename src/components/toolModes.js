@@ -4,8 +4,11 @@ import {
 } from 'lucide-react';
 
 // What each tool mode is called, what it asks the user to do, and how it
-// commits. Data rather than markup, in its own module so ContextBar can stay
-// a pure component export (react-refresh/only-export-components).
+// commits. Data rather than markup, in its own module so the components that
+// read it stay pure component exports (react-refresh/only-export-components).
+// Three read it now: the desktop `StatusBar`, which *is* the context bar, the
+// mobile `MobileToolContext`, and nothing else — `select` is deliberately absent
+// from the table, and both of them treat that absence as "no mode is running".
 // Order matters only for the first match; the tool flags are mutually
 // exclusive by construction (useToolManager.deactivateAll).
 //
