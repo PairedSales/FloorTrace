@@ -33,7 +33,7 @@ const MobileToolContext = ({
       aria-label={mode.name}
     >
       <div className="px-3 pt-2.5">
-        <p className="flex items-center gap-1.5 text-[13.5px] font-semibold text-accent">
+        <p className="flex items-center gap-1.5 text-[13.5px] font-semibold text-accent-strong">
           <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span className="truncate">{mode.name}</span>
           {count > 0 && (

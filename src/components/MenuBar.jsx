@@ -39,7 +39,7 @@ const Menu = ({ id, label, open, onOpen, onClose, children }) => {
         // a real menu bar behaves.
         onMouseEnter={() => { if (!open) onOpen(id, true); }}
         className={`inline-flex h-8 items-center px-2.5 rounded-md text-[12.5px] transition-colors cursor-pointer
-          ${open ? 'bg-accent/12 text-accent' : 'text-fg-2 hover:bg-sunken hover:text-fg'}`}
+          ${open ? 'bg-accent/12 text-accent-strong' : 'text-fg-2 hover:bg-sunken hover:text-fg'}`}
       >
         {label}
       </button>

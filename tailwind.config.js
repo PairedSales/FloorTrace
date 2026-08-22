@@ -34,6 +34,7 @@ export default {
         accent: {
           DEFAULT: token('accent'),
           ink:     token('accent-ink'),
+          strong:  token('accent-strong'),
         },
 
         ok:   token('ok'),
