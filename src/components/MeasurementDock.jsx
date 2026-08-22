@@ -1,164 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Eye, EyeOff, Trash2, ChevronRight, ChevronDown, Crosshair, Copy, Share, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, EyeOff, Trash2, Copy, Share, AlertTriangle } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType, selectWorkspaceArea } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import {
   formatDimensionInput, formatArea, metersToFeet,
   areaDisplayValue, formatAreaValue,
 } from '../utils/unitConverter';
-import {
-  calculateArea, holeRings, isSubtracted, displayedBreakdownTotal,
-} from '../utils/areaCalculator';
-import { qualitySummary, scaleQualitySummary, rankedWarnings } from '../utils/boundaryQuality';
-import { resolveAnchor } from '../utils/warningAnchors';
+import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
+import { qualitySummary, scaleQualitySummary } from '../utils/boundaryQuality';
+import { summariseIssues } from '../utils/traceIssues';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
+import Card from './DockCard';
 import InchesInput from './InchesInput';
 import ScaleSection from './ScaleSection';
 import StageSpine from './StageSpine';
-
-const SEVERITY_DOT = { error: 'bg-crit', warn: 'bg-warn', info: 'bg-fg-dim' };
-
-/* ── warnings ─────────────────────────────────────────────────────────────
-   Full-size prose, not 9px grey. The detector's doubts are the one output
-   this app exists to be honest about; the old panel rendered them at 8-9px
-   and 1.88-2.99:1, smaller and fainter than anything else on screen. */
-const WarningRow = ({ warning, anchor, active, onFocus }) => (
-  <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 py-2 border-t border-line-soft first:border-t-0">
-    <span className={`mt-[6px] w-[7px] h-[7px] rounded-full shrink-0 ${SEVERITY_DOT[warning.severity] ?? SEVERITY_DOT.warn}`} />
-    <div className="min-w-0">
-      <p className="text-[12.5px] font-semibold leading-snug text-fg">{warning.label}</p>
-      <p className="text-[12px] leading-snug text-fg-3 mt-0.5">{warning.detail}</p>
-    </div>
-    {anchor && (
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onFocus(); }}
-        aria-pressed={active}
-        title={active ? 'Hide on the plan' : 'Show on the plan'}
-        className={`inline-flex items-center gap-1 h-[26px] px-2 rounded border text-[12px]
-          shrink-0 transition-colors cursor-pointer
-          ${active
-            ? 'bg-accent text-accent-ink border-accent'
-            : 'bg-panel-2 text-fg-3 border-line hover:text-accent hover:border-accent/50'}`}
-      >
-        <Crosshair className="w-3 h-3" aria-hidden="true" />
-        Show
-      </button>
-    )}
-  </div>
-);
-
-/**
- * The detector's reasons for doubting one trace, ranked and inspectable. The
- * collapsed line is the first entry of the same ranked list the expansion
- * shows, so the two cannot disagree about which warning is worst. Severity is
- * read from the warning rather than the trace: `label-outside` is deliberately
- * gentler on a hand-drawn outline, and must keep reading as a warning there.
- */
-const TraceQuality = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarning, onFocus }) => {
-  const [showNotes, setShowNotes] = useState(false);
-  const ranked = rankedWarnings(quality.warnings);
-  const notes = ranked.filter((w) => w.severity === 'info');
-  const reasons = ranked.filter((w) => w.severity !== 'info');
-  const perFloor = reasons.filter((w) => w.scope !== 'result');
-  const wholeDrawing = reasons.filter((w) => w.scope === 'result');
-
-  const tone = quality.level === 'good' ? 'text-fg-3'
-    : quality.level === 'fair' ? 'text-warn' : 'text-crit';
-  const headline = quality.level === 'good'
-    ? `${ranked.length} note${ranked.length === 1 ? '' : 's'}`
-    : `${quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}`
-      + `${quality.reason ? ` · ${quality.reason}` : ''}`;
-
-  const row = (warning) => (
-    <WarningRow
-      key={warning.index}
-      warning={warning}
-      anchor={resolveAnchor(quality.warnings[warning.index], anchorCtx)}
-      active={focusedWarning?.traceId === trace.id && focusedWarning?.index === warning.index}
-      onFocus={() => onFocus(warning.index)}
-    />
-  );
-
-  return (
-    <div className="mt-1.5">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        className={`flex w-full items-start gap-1 text-left text-[12px] leading-snug
-                    cursor-pointer hover:opacity-80 ${tone}`}
-      >
-        {expanded
-          ? <ChevronDown className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
-          : <ChevronRight className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />}
-        <span className="min-w-0">{headline}</span>
-      </button>
-
-      {expanded && (
-        <div className="mt-1 pl-1">
-          {perFloor.map(row)}
-          {wholeDrawing.length > 0 && (
-            <>
-              <p className="pt-2.5 mt-1.5 border-t border-line text-[10.5px] font-bold uppercase tracking-[.07em] text-fg-dim">
-                This drawing
-              </p>
-              {wholeDrawing.map(row)}
-            </>
-          )}
-          {notes.length > 0 && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setShowNotes((v) => !v); }}
-              className="mt-1.5 text-[12px] text-fg-3 hover:text-fg cursor-pointer"
-            >
-              {showNotes ? '· hide notes' : `· ${notes.length} note${notes.length === 1 ? '' : 's'}`}
-            </button>
-          )}
-          {showNotes && notes.map(row)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// `−2 voids (1 yours)`. A subtraction the user asserted by hand reads
-// differently from one the detector guessed, so a mixed set says which is which.
-// A void the outline moved out from under is counted apart from both: it is no
-// longer subtracted, so folding it into the count would overstate the deduction.
-const VoidNote = ({ holes }) => {
-  const list = holes ?? [];
-  const rings = holeRings(list);
-  const live = list.filter((h, i) => rings[i]?.length >= 3 && isSubtracted(h));
-  const stale = list.filter((h, i) => rings[i]?.length >= 3 && !isSubtracted(h)).length;
-  if (!live.length && !stale) return null;
-  const mine = live.filter((h) => h?.source === 'user').length;
-  const mixed = mine > 0 && mine < live.length;
-  return (
-    <>
-      {live.length > 0 && (
-        <span>
-          −{live.length} {live.length === 1 ? 'void' : 'voids'}{mixed ? ` (${mine} yours)` : ''}
-        </span>
-      )}
-      {stale > 0 && (
-        <span className="text-crit font-semibold" title="Not subtracted — the outline moved out from under it">
-          ⚠ {stale} outside
-        </span>
-      )}
-    </>
-  );
-};
-
-const Card = ({ title, action, children, id }) => (
-  <section className="dock-card" id={id}>
-    <header className="flex items-center gap-2 px-2.5 py-2 border-b border-line-soft">
-      <h3 className="card-heading flex-1">{title}</h3>
-      {action}
-    </header>
-    <div className="p-2.5">{children}</div>
-  </section>
-);
+import StatsWarningsCard from './StatsWarningsCard';
 
 const MeasurementDock = ({
   roomDimensions,
@@ -198,14 +54,10 @@ const MeasurementDock = ({
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
   const calibrationSource = useAppStore((s) => s.calibration?.source);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
-  // Live state the warning anchors are derived from, so a crop or a re-scan
-  // cannot leave a highlight pointing at the wrong part of the image.
+  // The rooms the detector confirmed — how many of them agreed is what the
+  // scale card states as its provenance.
   const rooms = useAppStore((s) => s.rooms);
-  const detectedDimensions = useAppStore((s) => s.detectedDimensions);
-  const focusedWarning = useAppStore((s) => s.focusedWarning);
-  const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
-  const [openQualityTraceId, setOpenQualityTraceId] = useState(null);
 
   const scrollRef = useRef(null);
 
@@ -374,8 +226,20 @@ const MeasurementDock = ({
       title: area > 0 ? 'An area is available' : 'No area yet' },
   ];
 
+  // How much there is to check, counted once for both the chip on the Stats &
+  // warnings card and the line the Area card points at it with.
+  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted);
+
+  // A stage in trouble jumps to where the trouble is explained, not to the card
+  // that would have shown a green tick. PLAN is the one stage with no card of
+  // its own — it is answered by the plan itself — so it lands on the room size,
+  // which is what a loaded plan is measured with. Its `#dock-plan` used to
+  // resolve to nothing and the stage silently did nothing when clicked.
+  const STAGE_CARD = { plan: 'roomsize', scale: 'scale', outline: 'outline', report: 'report' };
   const jumpTo = (id) => {
-    const el = scrollRef.current?.querySelector(`#dock-${id}`);
+    const stage = stages.find((s) => s.id === id);
+    const target = stage?.state === 'warn' ? 'stats' : (STAGE_CARD[id] ?? id);
+    const el = scrollRef.current?.querySelector(`#dock-${target}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
@@ -633,32 +497,26 @@ const MeasurementDock = ({
               {showBreakdown ? 'Copy breakdown as text' : 'Copy area as text'}
             </button>
 
-            {/* Report-level warning. Stated, never auto-corrected — which of the
-                two traces is wrong is the user's call. It sits on the total
-                because that is the number it invalidates. */}
-            {areas.doubleCounted?.length > 0 && (
-              <div className="mt-3 p-2.5 rounded-md bg-warn/12 border border-warn/40">
-                {areas.doubleCounted.map((d) => (
-                  <div key={d.innerId} className="grid grid-cols-[auto_1fr] gap-2 items-start">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-warn shrink-0" aria-hidden="true" />
-                    <p className="text-[12px] leading-snug text-fg-2">
-                      <b className="text-warn font-semibold">{d.innerName} sits inside {d.outerName}</b>
-                      {' — its area is counted twice. Retrace whichever outline is wrong, '}
-                      or change one of their types.
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {scaleNote && area > 0 && (
-              <p
-                title={scaleNote.detail}
-                className={`mt-2.5 text-[12px] leading-snug cursor-help
-                  ${scaleNote.level === 'check' ? 'text-warn' : 'text-fg-3'}`}
+            {/* The reasons this number might be wrong are read in one place at
+                the foot of the panel now, not as three separate marks around
+                the figure they qualify. What must not move is the *fact* that
+                there are some: an area offered clean while the detector doubts
+                it is the failure this app is most prone to, so the count sits
+                on the total, and clicking it goes to the reasons. */}
+            {issues.count > 0 && area > 0 && (
+              <button
+                type="button"
+                onClick={() => jumpTo('stats')}
+                className={`mt-2.5 flex w-full items-start gap-1.5 text-left text-[12px]
+                            leading-snug cursor-pointer hover:underline
+                            ${issues.level === 'error' ? 'text-crit' : 'text-warn'}`}
               >
-                {scaleNote.level === 'check' ? '⚠ ' : ''}{scaleNote.short}
-              </p>
+                <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
+                <span>
+                  {issues.count} {issues.count === 1 ? 'thing' : 'things'} to check — see stats
+                  &amp; warnings
+                </span>
+              </button>
             )}
 
             {showBreakdown && (
@@ -694,11 +552,6 @@ const MeasurementDock = ({
                     ? calculateArea(trace.vertices, feetPerPixel, trace.holes)
                     : 0;
                   const { value: tAreaText } = formatArea(traceArea, unit);
-                  const quality = trace.quality ? qualitySummary(trace.quality) : null;
-                  const chipTone = !quality ? null
-                    : quality.level === 'good' ? 'text-ok bg-ok/12 border-ok/35'
-                      : quality.level === 'fair' ? 'text-warn bg-warn/12 border-warn/35'
-                        : 'text-crit bg-crit/12 border-crit/35';
 
                   return (
                     <div
@@ -762,6 +615,10 @@ const MeasurementDock = ({
                         </button>
                       </div>
 
+                      {/* What this outline *is*. How good it is — its
+                          confidence, its voids and the detector's reasons — is
+                          read on the Stats & warnings card, so this list stays
+                          a list of outlines rather than a list of verdicts. */}
                       <div className="flex items-center gap-2 mt-1.5 pl-[18px] text-[11.5px] text-fg-3">
                         <select
                           value={normalizeTraceType(trace.type)}
@@ -777,37 +634,7 @@ const MeasurementDock = ({
                             <option key={t.id} value={t.id}>{t.label}</option>
                           ))}
                         </select>
-                        {quality && (
-                          <span className={`chip ${chipTone}`}>
-                            <span className="chip-dot" />
-                            {quality.percent !== null ? `${quality.percent}%` : 'unverified'}
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1.5 ml-auto font-mono tabular-nums">
-                          <VoidNote holes={trace.holes} />
-                        </span>
                       </div>
-
-                      {/* A low-confidence outline stays marked as one after it is
-                          on the canvas, and every reason it carries is
-                          inspectable rather than hidden in a tooltip. */}
-                      {quality && (quality.level !== 'good' || quality.warnings.length > 0) && (
-                        <TraceQuality
-                          trace={trace}
-                          quality={quality}
-                          expanded={openQualityTraceId === trace.id}
-                          onToggle={() => setOpenQualityTraceId(
-                            openQualityTraceId === trace.id ? null : trace.id
-                          )}
-                          anchorCtx={{ trace, traces: perimeterTraces, rooms, detectedDimensions }}
-                          focusedWarning={focusedWarning}
-                          onFocus={(index) => setFocusedWarning(
-                            focusedWarning?.traceId === trace.id && focusedWarning?.index === index
-                              ? null
-                              : { traceId: trace.id, index }
-                          )}
-                        />
-                      )}
                     </div>
                   );
                 })}
@@ -817,34 +644,26 @@ const MeasurementDock = ({
         )}
 
         {/* ── Scale ──
-            Last, and small. It is the number every area on this panel is
-            derived from, so it has to be *available* — an unstated scale is how
-            a plan gets measured at someone else's px/ft — but it is not a
+            Small, and near the end. It is the number every area on this panel
+            is derived from, so it has to be *available* — an unstated scale is
+            how a plan gets measured at someone else's px/ft — but it is not a
             number anyone reads to do their job, and it sat at the top in 19 px
-            type for a long time saying otherwise. The chip is the part that
-            matters: it says whether the rooms agreed.
+            type for a long time saying otherwise.
+
+            What is left here is the number, where it came from, and the way to
+            override it. Whether the rooms *agreed* is a verdict, and it now
+            reads on the Stats & warnings card with the rest of them — this card
+            used to carry an `Agrees`/`Check` chip whose whole explanation was
+            in a `title`, which on a phone is nowhere at all.
 
             `#dock-scale` stays this card's id — StageSpine's SCALE stage jumps
-            here, which is where the provenance and the way to override it are.
+            here while the scale is fine, and to the warnings when it is not.
             It used to appear only as `px/ft` inside ScaleSection, which renders
             nothing at all on the normal room-label path — so the number the
             whole measurement rests on was invisible unless you had drawn a
             scale line by hand. */}
         <div id="dock-scale">
-          <Card
-            title="Scale"
-            action={scaleNote && (
-              <span
-                title={scaleNote.detail}
-                className={`chip cursor-help ${scaleNote.level === 'check'
-                  ? 'text-warn bg-warn/12 border-warn/35'
-                  : 'text-ok bg-ok/12 border-ok/35'}`}
-              >
-                <span className="chip-dot" />
-                {scaleNote.level === 'check' ? 'Check' : 'Agrees'}
-              </span>
-            )}
-          >
+          <Card title="Scale">
             <div className="flex items-baseline gap-2">
               <span className="font-mono font-semibold tabular-nums text-[13px] text-fg-2">
                 {pxPerFoot
@@ -869,6 +688,13 @@ const MeasurementDock = ({
             <ScaleSection unit={unit} />
           </Card>
         </div>
+
+        {/* ── Stats & warnings ──
+            Last, because it is what you turn to rather than what you work in.
+            Everything above measures; this says how much of it to believe. It
+            subscribes to the store itself rather than taking the figures as
+            props, so the panel has exactly one derivation of each of them. */}
+        <StatsWarningsCard />
       </div>
     </aside>
   );
