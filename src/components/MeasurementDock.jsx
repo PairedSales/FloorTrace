@@ -324,7 +324,10 @@ const MeasurementDock = ({
       ? 'From a line you drew.'
       : measuredRooms > 0
         ? `From ${measuredRooms} measured ${measuredRooms === 1 ? 'room' : 'rooms'}.`
-        : 'From the room size below.';
+        // Not "below" any more — the room size is its own card above this
+        // one — and not "above" either, so moving a card cannot make it lie a
+        // second time.
+        : 'From the room size you typed.';
 
   const handleCopyArea = () => {
     if (!showBreakdown) {

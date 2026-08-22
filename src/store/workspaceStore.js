@@ -57,6 +57,12 @@ const useWorkspaceStore = create((set, get) => ({
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
   setToolHint: (hint) => set({ toolHint: hint ?? null }),
+
+  // Clearing is by owner, never unconditional. A rail button can vanish under
+  // the pointer — clicking "Clear tools" is what removes the Clear tools
+  // button — and an unmount that fired a blind clear would also wipe the hint
+  // whichever button the pointer landed on next had already set.
+  clearToolHint: (id) => set((s) => (s.toolHint?.id === id ? { toolHint: null } : {})),
   setDockOpen: (v) => set({ dockOpen: v }),
   setShowExportDialog: (v) => set({ showExportDialog: v }),
 

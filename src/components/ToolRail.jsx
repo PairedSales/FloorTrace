@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from 'react';
+import { Fragment, useEffect, useMemo } from 'react';
 import { Trash2 } from 'lucide-react';
 import { TOOL_GROUPS } from './toolCatalog';
 import useWorkspaceStore from '../store/workspaceStore';
@@ -27,6 +27,18 @@ import useWorkspaceStore from '../store/workspaceStore';
  * user most needs — "why can I not measure yet" — would be the only one that
  * stayed silent on hover. The click handler guards instead.
  *
+ * Two things every button that writes a hint has to handle, because a hint has
+ * no timeout and stays until something takes it back:
+ *
+ *  - **It can unmount under the pointer**, which fires no `mouseleave`. Clicking
+ *    "Clear tools" is exactly that: it removes the last measurement, which
+ *    removes the button. Each button clears its own hint on unmount, by id, so a
+ *    late cleanup cannot wipe the hint the next button just set.
+ *  - **Its text can change while the pointer rests on it.** The disabled reason
+ *    is replaced by the tool's description the moment an outline lands, and
+ *    nothing would re-write it — the status bar would keep saying a tool needs a
+ *    traced outline while the outline sits on the canvas.
+ *
  * `short` is the rail's own name for a tool and matches the status bar's
  * MODE_LABEL; `label` stays the fuller phrase and stays the accessible name,
  * and `hint` is both the visible description and the button's
@@ -34,13 +46,26 @@ import useWorkspaceStore from '../store/workspaceStore';
  */
 const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
   const setToolHint = useWorkspaceStore((s) => s.setToolHint);
+  const clearToolHint = useWorkspaceStore((s) => s.clearToolHint);
   const Icon = tool.icon;
   // Disabled, the reason it is disabled is the only description worth having.
   const detail = disabled ? tool.needsArea : tool.hint;
   const describedBy = detail ? `tool-hint-${tool.id}` : undefined;
 
-  const show = () => setToolHint({ name: tool.short, detail, digit: tool.digit });
-  const clear = () => setToolHint(null);
+  const hint = useMemo(
+    () => ({ id: tool.id, name: tool.short, detail, digit: tool.digit }),
+    [tool.id, tool.short, tool.digit, detail],
+  );
+  const show = () => setToolHint(hint);
+  const clear = () => clearToolHint(tool.id);
+
+  // Re-state it if the text changed while this button owns it.
+  useEffect(() => {
+    if (useWorkspaceStore.getState().toolHint?.id === hint.id) setToolHint(hint);
+  }, [hint, setToolHint]);
+
+  // ...and give it up if the button goes away while the pointer is on it.
+  useEffect(() => () => clearToolHint(tool.id), [clearToolHint, tool.id]);
 
   return (
     <button
@@ -88,15 +113,50 @@ const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
   );
 };
 
+const CLEAR_HINT = {
+  id: 'clear',
+  name: 'Clear tools',
+  detail: 'Remove every measurement and shape drawn on this plan',
+};
+
+// Its own component so it can own the unmount cleanup: clicking it is what
+// takes it off screen, and that is the one hover in the rail guaranteed to end
+// without a mouseleave.
+const ClearButton = ({ onClearTools }) => {
+  const setToolHint = useWorkspaceStore((s) => s.setToolHint);
+  const clearToolHint = useWorkspaceStore((s) => s.clearToolHint);
+
+  useEffect(() => () => clearToolHint(CLEAR_HINT.id), [clearToolHint]);
+
+  return (
+    <button
+      type="button"
+      onClick={onClearTools}
+      aria-label="Clear all measurements and shapes"
+      aria-describedby="tool-hint-clear"
+      onMouseEnter={() => setToolHint(CLEAR_HINT)}
+      onMouseLeave={() => clearToolHint(CLEAR_HINT.id)}
+      onFocus={() => setToolHint(CLEAR_HINT)}
+      onBlur={() => clearToolHint(CLEAR_HINT.id)}
+      className="group relative shrink-0 grid place-items-center w-9 h-9
+                 border border-transparent rounded-md cursor-pointer
+                 text-fg-2 hover:bg-crit/12 hover:text-crit transition-colors"
+    >
+      <Trash2 className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
+      <span id="tool-hint-clear" className="sr-only">{CLEAR_HINT.detail}</span>
+    </button>
+  );
+};
+
 const ToolRail = ({
   activeTool, hasArea, hasToolData,
   onSelect, onRotate, onClearTools,
 }) => {
   const setToolHint = useWorkspaceStore((s) => s.setToolHint);
 
-  // The rail goes when the last plan closes, and a button that unmounts under
-  // the pointer fires no mouseleave — the status bar would keep describing a
-  // tool that is no longer on screen.
+  // The rail itself goes when the last plan closes. Its buttons each give up
+  // their own hint on the way out; this is the backstop for a rail that is not
+  // on screen at all.
   useEffect(() => () => setToolHint(null), [setToolHint]);
 
   return (
@@ -135,30 +195,7 @@ const ToolRail = ({
           clear, rather than leaving its rule across an empty row. */}
       {hasToolData && (
         <div className="shrink-0 flex flex-col items-center gap-0.5 border-t border-line py-1.5">
-          <button
-            type="button"
-            onClick={onClearTools}
-            aria-label="Clear all measurements and shapes"
-            aria-describedby="tool-hint-clear"
-            onMouseEnter={() => setToolHint({
-              name: 'Clear tools',
-              detail: 'Remove every measurement and shape drawn on this plan',
-            })}
-            onMouseLeave={() => setToolHint(null)}
-            onFocus={() => setToolHint({
-              name: 'Clear tools',
-              detail: 'Remove every measurement and shape drawn on this plan',
-            })}
-            onBlur={() => setToolHint(null)}
-            className="group relative shrink-0 grid place-items-center w-9 h-9
-                       border border-transparent rounded-md cursor-pointer
-                       text-fg-2 hover:bg-crit/12 hover:text-crit transition-colors"
-          >
-            <Trash2 className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
-            <span id="tool-hint-clear" className="sr-only">
-              Remove every measurement and shape drawn on this plan
-            </span>
-          </button>
+          <ClearButton onClearTools={onClearTools} />
         </div>
       )}
     </div>
