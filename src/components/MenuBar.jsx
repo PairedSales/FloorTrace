@@ -26,7 +26,10 @@ const Menu = ({ id, label, open, onOpen, onClose, children }) => {
   const ref = useRef(null);
 
   return (
-    <div className="relative" ref={ref}>
+    // Full height of the band, so `top-[calc(100%+3px)]` below drops the menu
+    // clear of it rather than 4 px up inside it — the title button is 32 px in
+    // a 40 px row now that the row is shared with the command bar.
+    <div className="relative h-full flex items-center" ref={ref}>
       <button
         type="button"
         aria-haspopup="menu"
@@ -35,7 +38,7 @@ const Menu = ({ id, label, open, onOpen, onClose, children }) => {
         // Hovering another title while a menu is open switches to it, the way
         // a real menu bar behaves.
         onMouseEnter={() => { if (!open) onOpen(id, true); }}
-        className={`px-2.5 py-1 rounded text-[12.5px] transition-colors cursor-pointer
+        className={`inline-flex h-8 items-center px-2.5 rounded-md text-[12.5px] transition-colors cursor-pointer
           ${open ? 'bg-accent/12 text-accent' : 'text-fg-2 hover:bg-sunken hover:text-fg'}`}
       >
         {label}
@@ -76,7 +79,12 @@ const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
  * reaches for when they do not yet know what any of the others do.
  *
  * The status bar used to be slotted into the empty right of this row. It is its
- * own band now, down beside the plan it describes.
+ * own band now, down beside the plan it describes — and with it gone the row
+ * was three titles and a wordmark over 1100 px of nothing, so **there is no
+ * menu row any more**. This renders as the left group of the command bar's
+ * band (`App.jsx`), which is why it owns no height, background or border of
+ * its own: those belong to the one band both halves sit in, and a second set
+ * here would draw a seam through the middle of it.
  */
 const MenuBar = ({
   image,
@@ -140,10 +148,13 @@ const MenuBar = ({
   }, [openId, close]);
 
   return (
-    <header className="flex items-center h-[30px] px-2 bg-panel border-b border-line-soft select-none shrink-0">
-      <span className="flex items-center gap-2 pr-2.5 mr-1 shrink-0 text-[12.5px] font-semibold text-fg">
+    <div className="flex items-center self-stretch shrink-0">
+      {/* The word costs ~66 px of a row that is now shared with every verb, and
+          it is the one thing in it that does nothing. Below 1280 the mark
+          carries the identity alone and the verbs get the width instead. */}
+      <span className="flex items-center gap-2 pr-1.5 xl:pr-2.5 shrink-0 text-[12.5px] font-semibold text-fg">
         <FloorTraceMark className="w-[15px] h-[15px] text-fg-3" />
-        FloorTrace
+        <span className="hidden xl:inline">FloorTrace</span>
       </span>
 
       {/* The swallowed mousedown is scoped to the titles, not the whole row.
@@ -152,7 +163,7 @@ const MenuBar = ({
           over the canvas. Scoped, anything else added to this row keeps
           working. */}
       <div
-        className="flex items-center gap-0.5 shrink-0"
+        className="flex items-center self-stretch gap-0.5 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
       {/* Export sits above the project file, and says what it is for. Almost
@@ -235,7 +246,7 @@ const MenuBar = ({
       </Menu>
 
       </div>
-    </header>
+    </div>
   );
 };
 

@@ -233,11 +233,11 @@ broken once already:
 
 `useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819.98px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
 
-`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the desktop shell — three full-width bands (menu, command, and the context bar while a tool is running) over a row of dock, plan column and tool rail — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
+`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the desktop shell — two full-width bands (the command bar, and the context bar while a tool is running) over a row of dock, plan column and tool rail — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
-**`StatusBar` is a 26 px band of the plan's column**, under the tab strip and over the canvas — not a row of the menu bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
+**`StatusBar` is a 26 px band of the plan's column**, under the tab strip and over the canvas — not a row of the top bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
 
 - **There is exactly one grow cell.** A second would mean two cells truncating and neither readable.
 - **Four claimants, in this order:** `isProcessing` suppresses everything else, then a `statusFlash`, then the tool the pointer is resting on, then `MODE_HINT` for the active tool. A hover above a flash would swallow "Area copied" the moment the pointer crossed the rail; a hover below `MODE_HINT` would never show at all, since every tool has one.
@@ -245,7 +245,9 @@ The mobile bar states **one** verb, derived from the pipeline `StageSpine` alrea
 
 **The tool rail is one width and says what its icons are through that status bar.** Hover or keyboard focus writes `{name, detail, digit}` into `workspaceStore.toolHint`; every tool in `TOOL_GROUPS` therefore needs a `hint`, and three had none while the words could be switched on beside the icon. The `showLabels` preference, its `floortrace:toolLabels` key, its resolver and the two toggles that drove it are gone. Disabled tools are **`aria-disabled`, not `disabled`**: a `disabled` button dispatches no pointer events in Chrome, so the one control whose reason a user most needs — why they cannot measure yet — would be the only one silent on hover.
 
-The menu bar carries **three titles**. Settings and Help each held one short list and were folded into File, with "Shortcuts & tips" at the top of it and the two preferences at the foot. Its swallowed `mousedown` stays scoped to the menu titles rather than the row, so anything else put in that row keeps working.
+The menu carries **three titles**, and **it is not a band of its own**. Settings and Help each held one short list and were folded into File, with "Shortcuts & tips" at the top of it and the two preferences at the foot; once the status bar moved down beside its plan, what was left was a wordmark and three words over ~1100 px of empty row, so `MenuBar` now renders as the left group of the command bar's 40 px band. `App.jsx` owns that band's height, surface and rule — both components render bare, and a background or border added back to either draws a seam through the middle of one row. Its swallowed `mousedown` stays scoped to the menu titles rather than the row, so the command buttons beside them keep working.
+
+**That band is one line of buttons and it is nearly full.** The verbs need ~980 px, so at the desktop minimum they scroll (`overflow-x-auto`), and two things hold that off as long as possible: the titles sit outside the scroll region (`flex-1 min-w-0` on the command half) so a title never scrolls out of reach, and the wordmark is `hidden xl:inline` while the theme control is icon-only. Anything new with a *label* in this row costs one of those back — put it in a menu, or take a label out.
 
 The **browser tab is always titled `FloorTrace`**, from the static `<title>` in `index.html`. There is no `useDocumentTitle` any more: naming the tab after the open plan is a real convenience with two windows open, and it was given up deliberately.
 
@@ -318,7 +320,7 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
 **The icons under `public/` are build output, not artwork.** `npm run icons`
 (`scripts/generateIcons.mjs`) rasterises every favicon, the `.ico`, `icon.svg` and
 the apple-touch/android tiles from `src/components/markGeometry.js` — the same
-coordinates `FloorTraceMark` draws in the menu bar. Edit the geometry and re-run;
+coordinates `FloorTraceMark` draws at the left of the command bar. Edit the geometry and re-run;
 never touch the files, or the tab icon starts quietly disagreeing with the app.
 `android-chrome-*.png` are regenerated with the rest but are still referenced by
 nothing — there is no web manifest.
