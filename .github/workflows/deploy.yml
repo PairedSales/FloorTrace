@@ -18,9 +18,25 @@ permissions:
   pages: write
   id-token: write
 
+# The deploy must stay serialised on "pages": GitHub Pages accepts one
+# deployment at a time, and two racing to publish is a site that ends up
+# showing whichever lost.
+#
+# PR checks must not share that queue, and did until now. A group holds one
+# run and one *pending* run for the whole repository, so a third arrival
+# evicted whoever was waiting — which is a PR check dying at ~6s having never
+# started a job, reported by `gh pr checks` as "no checks reported" rather than
+# as a failure. With three PRs open at once it also meant each waited behind
+# the others *and* behind every master deploy in between. Measured over one
+# afternoon: two evictions in thirty runs, one of them after eight minutes
+# pending.
+#
+# Cancelling in progress is right for a PR and wrong for a deploy, for the same
+# reason: a second push to a branch makes the first run's answer worthless,
+# while a second push to master still has to publish.
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
