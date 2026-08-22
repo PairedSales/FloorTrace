@@ -1670,7 +1670,7 @@ function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,.floorplan"
+        accept="image/*,application/pdf,.pdf,.floorplan"
         multiple
         onChange={handleFileUpload}
         className="hidden"
