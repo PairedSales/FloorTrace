@@ -8,8 +8,18 @@
  * to each shape, which antialiases a 16 px tab icon better than downscaling a
  * large render would.
  *
- * Tile and glyph are the dark theme's `--shell` and `--fg`, matching the
- * `theme-color` meta the browser frames the app with.
+ * The mark is drawn on transparency, with no tile behind it. In the app it is
+ * `currentColor` over whatever surface it sits on and carries no background of
+ * its own; a dark rounded square was the one place the icons disagreed, and at
+ * icon sizes that square is most of what you see.
+ *
+ * Which leaves the colour, and only the SVG can answer it honestly: it carries
+ * both themes' `--fg` behind a `prefers-color-scheme` query, which is the same
+ * thing `currentColor` does in the menu bar. The rasters cannot switch with the
+ * tab bar, so they take one tone that survives both — the midpoint of the two
+ * themes' `--fg-3`, which is the token the menu bar draws the mark in. A glyph
+ * in either theme's `--fg` is invisible against the other, which is the bug
+ * `FloorTraceMark.jsx` documents having already fixed once.
  */
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,15 +29,19 @@ import { MARK_FRAME, MARK_WALLS, MARK_STROKE } from '../src/components/markGeome
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
-const TILE = [0x12, 0x16, 0x1b];
-const GLYPH = [0xed, 0xf1, 0xf5];
+const GLYPH_LIGHT = '#171c22'; // --fg, light theme
+const GLYPH_DARK = '#edf1f5'; // --fg, dark theme
+const GLYPH = [0x77, 0x82, 0x8f]; // between the two themes' --fg-3
 
-// The mark's own frame, not its viewBox, is what gets seated in the tile: the
-// viewBox carries padding of its own, and stacking the two leaves the glyph
-// swimming in a field of background at 16 px.
-const PAD = 0.17;
-const CORNER = 0.22;
+// Blank border, as a fraction of the icon, outside the *stroked* mark — the
+// mark's own frame plus the half stroke that sits outside it. The tile used to
+// need a wide inset to keep the glyph clear of its rounded corners; with the
+// tile gone that inset is just a smaller mark in the same 16 px.
+const MARGIN = 0.06;
 const MIN_STROKE = 1.3;
+
+// What the margin is measured against: the frame with a half stroke on each side.
+const STROKED_SIZE = MARK_FRAME.size + MARK_STROKE;
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -45,21 +59,18 @@ const sdSegment = (px, py, ax, ay, bx, by) => {
   return Math.hypot(px - ax - t * dx, py - ay - t * dy);
 };
 
-const renderIcon = (size, { rounded = true } = {}) => {
-  const pad = size * PAD;
-  const scale = (size - 2 * pad) / MARK_FRAME.size;
-  // Mark space (0..16) → pixels, with the frame's top-left seated at the pad.
-  const to = (u) => pad + (u - MARK_FRAME.x) * scale;
+const renderIcon = (size) => {
+  const margin = size * MARGIN;
+  const scale = (size - 2 * margin) / STROKED_SIZE;
   const stroke = Math.max(MARK_STROKE * scale, MIN_STROKE);
   const half = stroke / 2;
+  // Mark space (0..16) → pixels, with the frame's stroke seated on the margin.
+  const to = (u) => margin + half + (u - MARK_FRAME.x) * scale;
 
   const frameCx = to(MARK_FRAME.x + MARK_FRAME.size / 2);
   const frameHalf = (MARK_FRAME.size * scale) / 2;
   const frameR = MARK_FRAME.r * scale;
   const walls = MARK_WALLS.map(([[x1, y1], [x2, y2]]) => [to(x1), to(y1), to(x2), to(y2)]);
-
-  const tileHalf = size / 2;
-  const tileR = rounded ? size * CORNER : 0;
 
   const png = new PNG({ width: size, height: size });
   for (let y = 0; y < size; y++) {
@@ -67,19 +78,14 @@ const renderIcon = (size, { rounded = true } = {}) => {
       const px = x + 0.5;
       const py = y + 0.5;
 
-      const tileCov = clamp01(0.5 - sdRoundRect(px, py, tileHalf, tileHalf, tileHalf, tileHalf, tileR));
-
       let d = Math.abs(sdRoundRect(px, py, frameCx, frameCx, frameHalf, frameHalf, frameR)) - half;
       for (const [ax, ay, bx, by] of walls) d = Math.min(d, sdSegment(px, py, ax, ay, bx, by) - half);
-      const glyphCov = clamp01(0.5 - d) * tileCov;
 
       const i = (size * y + x) << 2;
-      for (let c = 0; c < 3; c++) {
-        // Over the tile, so a glyph edge blends with the background it sits on
-        // rather than with whatever the browser paints behind the icon.
-        png.data[i + c] = Math.round(TILE[c] * (1 - glyphCov) + GLYPH[c] * glyphCov);
-      }
-      png.data[i + 3] = Math.round(tileCov * 255);
+      // Straight alpha: the glyph colour everywhere, coverage in the alpha, so
+      // an edge blends with whatever the icon is actually shown against.
+      for (let c = 0; c < 3; c++) png.data[i + c] = GLYPH[c];
+      png.data[i + 3] = Math.round(clamp01(0.5 - d) * 255);
     }
   }
   return PNG.sync.write(png);
@@ -108,18 +114,18 @@ const buildIco = (entries) => {
   return Buffer.concat([header, ...entries.map((e) => e.data)]);
 };
 
-const hex = (rgb) => `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
-
-// The same seating the raster path uses: the frame — not the mark's viewBox —
-// takes up `1 - 2 * PAD` of the tile, so the SVG and the PNGs are one icon.
+// The same seating the raster path uses, so the SVG and the PNGs are one icon.
 const svgMarkup = () => {
-  const box = MARK_FRAME.size / (1 - 2 * PAD);
-  const offset = box * PAD - MARK_FRAME.x;
+  const box = STROKED_SIZE / (1 - 2 * MARGIN);
+  const offset = box * MARGIN + MARK_STROKE / 2 - MARK_FRAME.x;
   const r = (n) => +n.toFixed(3);
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${r(box)} ${r(box)}">`,
-    `  <rect width="${r(box)}" height="${r(box)}" rx="${r(box * CORNER)}" fill="${hex(TILE)}" />`,
-    `  <g transform="translate(${r(offset)} ${r(offset)})" fill="none" stroke="${hex(GLYPH)}"`,
+    '  <style>',
+    `    .mark { stroke: ${GLYPH_LIGHT} }`,
+    `    @media (prefers-color-scheme: dark) { .mark { stroke: ${GLYPH_DARK} } }`,
+    '  </style>',
+    `  <g class="mark" transform="translate(${r(offset)} ${r(offset)})" fill="none"`,
     `     stroke-width="${MARK_STROKE}" stroke-linecap="round" stroke-linejoin="round">`,
     `    <rect x="${MARK_FRAME.x}" y="${MARK_FRAME.y}" width="${MARK_FRAME.size}" height="${MARK_FRAME.size}" rx="${MARK_FRAME.r}" />`,
     ...MARK_WALLS.map(([[x1, y1], [x2, y2]]) => `    <path d="M${x1} ${y1}L${x2} ${y2}" />`),
@@ -136,8 +142,7 @@ const write = (name, data) => {
 
 write('favicon-16x16.png', renderIcon(16));
 write('favicon-32x32.png', renderIcon(32));
-// iOS masks this itself, so it ships square and opaque.
-write('apple-touch-icon.png', renderIcon(180, { rounded: false }));
+write('apple-touch-icon.png', renderIcon(180));
 write('android-chrome-192x192.png', renderIcon(192));
 write('android-chrome-512x512.png', renderIcon(512));
 write('favicon.ico', buildIco([16, 32, 48].map((size) => ({ size, data: renderIcon(size) }))));

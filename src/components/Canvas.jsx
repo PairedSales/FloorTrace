@@ -1,4 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, lazy, Suspense } from 'react';
+import { FolderOpen } from 'lucide-react';
 import { useIsTouch } from '../hooks/useViewport';
 
 // The Konva stage and everything under it load on demand. `manualChunks`
@@ -13,7 +14,7 @@ import { useIsTouch } from '../hooks/useViewport';
 const CanvasStage = lazy(() => import('./CanvasStage'));
 
 const Canvas = React.memo(forwardRef((props, ref) => {
-  const { image, isProcessing } = props;
+  const { image, isProcessing, onFileOpen } = props;
   const isTouch = useIsTouch();
   const containerRef = useRef(null);
   // Populated by the lazy module once it mounts. The handle itself is eager so
@@ -66,9 +67,26 @@ const Canvas = React.memo(forwardRef((props, ref) => {
                 Photograph a plan, or open an image, with the buttons below.
               </p>
             ) : (
-              <p className="text-[13px] text-fg-2">
-                Paste an image <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd> or open a file <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+O</kbd>
-              </p>
+              <>
+                {/* A button, not two keybindings. This is the whole screen at
+                    the one moment the app has nothing else to say, and it used
+                    to answer with a pair of chords — which is a dead end for
+                    anyone who does not read them, and the reason Open had to
+                    keep a label up in the top row. It has one here instead. */}
+                <button
+                  type="button"
+                  onClick={onFileOpen}
+                  className="mt-1 inline-flex items-center gap-2 h-9 px-3.5 rounded-md
+                             bg-accent text-accent-ink text-[12.5px] font-semibold
+                             hover:brightness-110 transition-[filter] cursor-pointer"
+                >
+                  <FolderOpen className="w-4 h-4" aria-hidden="true" />
+                  Open a plan
+                </button>
+                <p className="mt-3 text-[13px] text-fg-3">
+                  or drop one here, or paste with <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd>
+                </p>
+              </>
             )}
           </div>
         </div>

@@ -1,6 +1,6 @@
 import {
-  Brush, Spline, SquareDashedBottom, Scaling, Ruler, Compass,
-  Pentagon, Crop, Eraser, MousePointer2, MousePointerClick,
+  Brush, Waypoints, SquareDashedBottom, Scaling, Ruler, Compass,
+  Pentagon, Crop, Eraser, Crosshair, MousePointerClick,
 } from 'lucide-react';
 
 // What each tool mode is called, what it asks the user to do, and how it
@@ -28,7 +28,7 @@ export const TOOL_MODES = {
     doneKey: 'Enter',
   },
   vertex: {
-    icon: Spline,
+    icon: Waypoints,
     name: 'Placing corners',
     hint: 'Click each corner of the exterior. Click the first one again to close.',
     touchHint: 'Tap each corner of the exterior. Tap the first one again to close.',
@@ -80,7 +80,7 @@ export const TOOL_MODES = {
     brush: 'eraser',
   },
   place: {
-    icon: MousePointer2,
+    icon: Crosshair,
     name: 'Placing the room',
     hint: 'Click the room on the plan to place the overlay.',
     touchHint: 'Tap the room on the plan to place the overlay.',

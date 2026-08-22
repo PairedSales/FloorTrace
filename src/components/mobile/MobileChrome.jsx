@@ -67,6 +67,7 @@ const MobileChrome = ({
   onInteriorWallToggle,
   canSwitchWallFace,
   onScaleTool,
+  onSelectRoom,
   // preferences
   showSideLengths,
   onShowSideLengthsChange,
@@ -280,6 +281,7 @@ const MobileChrome = ({
           onDimensionFocus={onDimensionFocus}
           onDimensionBlur={onDimensionBlur}
           onScaleTool={() => { closeSheet(); onScaleTool(); }}
+          onSelectRoom={() => { closeSheet(); onSelectRoom?.(); }}
           onExport={() => { closeSheet(); onExport(); }}
         />
       </BottomSheet>

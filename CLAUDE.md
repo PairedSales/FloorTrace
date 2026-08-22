@@ -84,15 +84,27 @@ switches outlines, so plan switching cannot have those keys.
 **The tab strip is the top row of the plan's own column** (`DocumentTabs.jsx`,
 rendered in `App.jsx` inside the row, not above it), with the `StatusBar` directly
 under it and the canvas under that — so both bands are inset between the
-measurement dock and the tool rail and stop where the plan stops. **The strip must
-not scroll**: tabs share the width and truncate to a ~96 px floor, and whatever no
-longer fits moves into a chevron menu. A strip that scrolls hides plans behind a
-gesture, which is what a tab strip exists to prevent.
+measurement dock and the tool rail and stop where the plan stops.
+
+**It renders only when two or more plans are open.** One tab is 30 px of chrome
+answering a question nobody asked, taken off the plan for the whole of an ordinary
+single-plan session; `File > New plan` (Ctrl+Alt+N) is how the second plan — and
+the strip with it — arrives.
+
+**The strip ends where the last tab does.** A tab is as wide as its own name
+(`flex: 0 1 auto`, floor 96 px, ceiling 200) and the new-plan button follows it
+immediately rather than sitting in the far corner. Tabs that grew to share the
+width put the band's only two controls at opposite ends of an empty panel.
+
+**The strip must
+not scroll**: tabs truncate to a ~96 px floor, and whatever no longer fits moves
+into a chevron menu. A strip that scrolls hides plans behind a gesture, which is
+what a tab strip exists to prevent.
 
 **The chevron is reachable, and that is new.** While the strip spanned the window,
 six tabs at the 96 px floor needed 606 px against a 819.98 px minimum, so nobody
-ever saw it. Inset, the strip is the window less a 320 px dock and a 48 px rail —
-~452 px at the breakpoint, which fits four — so five or six open plans overflow on
+ever saw it. Inset, the strip is measured against the window less a 320 px dock and
+a 48 px rail — ~452 px at the breakpoint, which fits four at the floor — so five or six open plans overflow on
 a real screen. Treat that path as live.
 
 **Its width is re-measured three ways and none is redundant:** a window `resize`,
@@ -223,7 +235,16 @@ broken once already:
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 
-**The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, and **the Scale card last and small**. The two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because `StageSpine`'s SCALE stage jumps to it and the provenance, the agreement chip and the manual override all live there. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
+**The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, then **the Scale card, small**, and **Stats & warnings last**. The first two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because it holds the provenance and both ways to correct the scale — pick a different room, or measure a length you know. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
+
+**Every verdict is on the last card; every card above it measures.** `StatsWarningsCard.jsx` (`#dock-stats`) holds the scale's agreement and its whole explanation, the double-counted-outline warning, the per-outline confidence chip and the detector's ranked reasons with their canvas anchors, plus the counts the measurement rests on. They used to be four separate marks — an `Agrees`/`Check` chip in the Scale card's header, a `⚠ Areas may be off by ~84%` line under the area, a `92%` chip in the outline row and a warning block on the total. Read one at a time none of them said how much there was to check; read together they crowded the numbers they were qualifying. Four things follow:
+
+- **The count is derived once.** `utils/traceIssues.js` owns `summariseIssues`, and both the card's chip and the Area card's `N things to check` line are that one number — a panel that says "2 things to check" beside the area and then lists three is worse than either alone.
+- **The Area card still says that there are some.** Only that, and only as a link to the reasons. An area offered clean while the detector doubts it is the failure this app is most prone to, so the count sits on the total it invalidates; what moved is the explanation, not the alarm.
+- **A `StageSpine` stage in `warn` jumps to `#dock-stats`**, not to the card that would have shown a green tick. `STAGE_CARD` maps the rest, including PLAN — whose `#dock-plan` resolved to nothing, so that stage silently did nothing when clicked.
+- **`info` warnings are not counted.** They describe how an outline was *reached*, not a reason to doubt what it enclosed; a clean plan that also says "only one hypothesis" has to keep reading as clean. They stay reachable behind the `· N notes` toggle.
+
+The detail text is rendered on the page rather than in a `title`. The scale note's entire explanation used to be a tooltip, which on a phone is nowhere at all — and `MeasurementDock` is the same component on both shells, so a tooltip-only fact is a fact half the users cannot reach.
 
 ### `App.jsx` is a thin orchestrator
 
@@ -233,7 +254,7 @@ broken once already:
 
 `useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819.98px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
 
-`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the desktop shell — one full-width band (the menu titles and the command bar share it) over a row of dock, plan column and tool rail — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
+`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the desktop shell — one full-width band (`TopBar`) over a row of dock, plan column and tool rail — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
@@ -245,9 +266,35 @@ The mobile bar states **one** verb, derived from the pipeline `StageSpine` alrea
 
 **The tool rail is one width and says what its icons are through that status bar.** Hover or keyboard focus writes `{name, detail, digit}` into `workspaceStore.toolHint`; every tool in `TOOL_GROUPS` therefore needs a `hint`, and three had none while the words could be switched on beside the icon. The `showLabels` preference, its `floortrace:toolLabels` key, its resolver and the two toggles that drove it are gone. Disabled tools are **`aria-disabled`, not `disabled`**: a `disabled` button dispatches no pointer events in Chrome, so the one control whose reason a user most needs — why they cannot measure yet — would be the only one silent on hover.
 
-The menu carries **three titles**, and **it is not a band of its own**. Settings and Help each held one short list and were folded into File, with "Shortcuts & tips" at the top of it and the two preferences at the foot; once the status bar moved down beside its plan, what was left was a wordmark and three words over ~1100 px of empty row, so `MenuBar` now renders as the left group of the command bar's 40 px band. `App.jsx` owns that band's height, surface and rule — both components render bare, and a background or border added back to either draws a seam through the middle of one row. Its swallowed `mousedown` stays scoped to the menu titles rather than the row, so the command buttons beside them keep working.
+**The top band is one component, `TopBar.jsx`, and it owns its own height, surface and rule.** It was two — `MenuBar` for the titles and `CommandBar` for the verbs, both rendering bare so `App.jsx` could own the band they shared. Fourteen props went to both and the copies had drifted into defects: `MenuBar` was never handed `isProcessing`, so the Trace menu could start a second scan over a running one that the button beside it was disabled to prevent, and the seven-outline cap existed on the button and not on the menu item. One component cannot disagree with itself.
 
-**That band is one line of buttons and it is nearly full.** The verbs need ~980 px, so at the desktop minimum they scroll (`overflow-x-auto`), and two things hold that off as long as possible: the titles sit outside the scroll region (`flex-1 min-w-0` on the command half) so a title never scrolls out of reach, and the wordmark is `hidden xl:inline` while the theme control is icon-only. Anything new with a *label* in this row costs one of those back — put it in a menu, or take a label out.
+**Four groups, three rules, and only the middle group carries words:**
+
+```
+[ mark · File · View ] │ [ Open · Undo · Redo ] │ [ Read dimensions ▾ · Find outline ▾ · Export ] ⋯ │ [ Fit · Panel ]
+```
+
+The labelled things are the pipeline, in job order; everything else is an icon because everything else is a utility. The row used to print five verbs at equal weight — Read dimensions, Select room, Find outline, Paint outline, Add outline, 576 px of it — of which four were also in the Trace menu and one was also in the tool rail.
+
+**The rule that decided what left: the rail owns modes, this row owns commands, and a stage's corrections hang off that stage's own verb.**
+
+- *Paint outline* and *Place corners* are modal tools. They keep their rail buttons and their digits and appear here only in the outline caret, which is the point of the caret — when the automatic trace disappoints you the rescue is under the button that just disappointed you, not on the far side of the window.
+- *Select room to scale from* is in the scale caret **and** on the dock's Scale card. You find out the scale is wrong by reading the dock, and a bad room implies a px/ft that can be 58–90% out, which as scale squared is the most consequential correction the app has. It was a toolbar button disabled until a scan had run, plus a menu item under a title you had to guess.
+- *Add another outline* is in the outline caret and on the dock's Outlines card, both gated at `MAX_TRACES` (`utils/planStage.js`). The old menu item offered an eighth that `addPerimeterTrace` would not give.
+- *Theme* is a session preference and lives in View, named in full.
+- **There is no Trace menu.** Its seven items are the two carets, which is what pays for them.
+
+**Exactly one control carries the filled accent, and it is the stage the plan is at** (`planStage` in `utils/planStage.js`, which the dock's `StageSpine` reads too — they used to disagree about what "outlined" means, the row asking `perimeterOverlay` and the dock counting `perimeterTraces`; the area is computed from the traces, so the traces decide). Read dimensions until there is a scale, Find outline until there is an outline, then **nothing**. Three rules hold it together and each has been broken once:
+
+- **A disabled control is never the primary.** Filled accent at `opacity-40` is 1.76:1, and the old row hard-wired the fill onto Find outline — so first paint over an empty canvas was an unreadable primary.
+- **Export is never filled.** It earns the outlined `-ready` treatment once there is an area and no more: a filled Export over a `fair` trace is a wrong answer that looks green, in the part of the shell read first. `aria-current="step"` carries the same fact for a reader who cannot see the fill.
+- **The primary may not change any control's width.** `.toolbar-btn-stage` carries the weight and the border box permanently; `-primary` and `-ready` only recolour. Otherwise the row reflows as the stage advances, which is a button moving under the cursor by another name.
+
+**The row no longer swaps a slot mid-gesture.** Painting used to replace *Find outline* with *Trace my outline* while `StatusBar` — which is the context bar and owns every running mode — printed a button with that exact string 30 px below it. The status bar holds the Cancel and the brush size, so it kept the commit.
+
+**Four dropdowns hang off the band** — File, View, and a caret on each stage verb — and they share `menuSurface.jsx` so the keybinding column, the danger tone and the disabled treatment cannot drift apart. One is open at a time, and whichever it is writes `workspaceStore.menuOpen`, which `shortcutsBlocked` reads: with a menu open, `1` used to enter draw mode behind it and `O` to toggle the very panel the open View menu was offering to toggle. The swallowed `mousedown` that keeps a dropdown from closing on the press that opened it sits on the **triggers and the panels**, never on a wrapper — on a wrapper it also swallows the plain commands beside them, and `useKeyboardShortcuts` reads mouse buttons 3/4 off that same event.
+
+**That band now fits.** It needed ~980 px against 628 px available at the 819.98 px desktop minimum, so Export and every view control sat behind a horizontal scroll on any window under ~1250 px — and a scrolling row is 32 px of button plus a 9 px scrollbar inside a 40 px `items-center` band, which pushes the buttons off-centre. It is ~580 px now, measured in the browser at 820 px with ~90 px of slack. Anything new with a *label* spends that slack — put it in a menu, or take a label out.
 
 The **browser tab is always titled `FloorTrace`**, from the static `<title>` in `index.html`. There is no `useDocumentTitle` any more: naming the tab after the open plan is a real convenience with two windows open, and it was given up deliberately.
 
@@ -260,9 +307,9 @@ Two rules that fall out of it, both about 452 px — the narrowest this band eve
 
 The vertex count sits outside the live region for the same reason the hover hint does — it changes on every click.
 
-The toast offset is one named constant again (`DESKTOP_CHROME_PX`), because every band it counts is permanent now. It was a hard-coded `116px` for a stack that had already changed twice, then a sum that had to account for a band that came and went.
+The toast's desktop offset (`desktopChromePx`) counts the 40 px top band, the 26 px status band and 10 px of air, plus the tab strip's 30 only when there is a strip — at one plan there is not. It was a hard-coded `116px` for a stack that had already changed twice, then a constant for a stack in which every band was permanent, and then the tab strip stopped being permanent.
 
-**The tool digits run 1–9 straight down `TOOL_GROUPS`.** Both `toolCatalog.js` and `useKeyboardShortcuts.js` claimed to match and did not — the rail read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits were handed out in the order the tools were built and the rail was regrouped around them later. Nothing derives a digit from an index (a mapping that moves with app state is the thing being avoided), so renumbering means editing both lists together, plus the four places that print a digit: the `keys` on the two Trace menu items, the Paint-outline tooltip in `CommandBar`, the `1 – 9` row in `HelpModal`, and the badge in the corner of every rail button (which the status bar then repeats on hover, from the same field).
+**The tool digits run 1–9 straight down `TOOL_GROUPS`.** Both `toolCatalog.js` and `useKeyboardShortcuts.js` claimed to match and did not — the rail read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits were handed out in the order the tools were built and the rail was regrouped around them later. Nothing derives a digit from an index (a mapping that moves with app state is the thing being avoided), so renumbering means editing both lists together, plus the places that print a digit: the `keys` on the outline and scale caret items in `TopBar`, and the badge in the corner of every rail button (which the status bar then repeats on hover, from the same field). `HelpModal`'s `1 – 9` row is no longer one of them — it reads `TOOL_GROUPS` and prints each tool's `short`.
 
 **Touch on the canvas is not free.** Every drag-based tool (brush, eraser, crop, void rectangle, room overlay) was wired to `mousedown`/`mousemove`, and no browser synthesises those during a touch drag — so all of them were dead on a phone. `useToolRouter` now exposes `handleStageTouch{Start,Move,End}` that route into the same `dispatchPointerDown` a mouse does; one finger is a pointer, two are the camera (`usePinchZoom`, wired in `useCameraController`). Three rules that are load-bearing:
 
@@ -337,6 +384,19 @@ coordinates `FloorTraceMark` draws at the left of the command bar. Edit the geom
 never touch the files, or the tab icon starts quietly disagreeing with the app.
 `android-chrome-*.png` are regenerated with the rest but are still referenced by
 nothing — there is no web manifest.
+
+**They are the mark on transparency, and the colour is not one decision but
+two.** The mark in the menu bar is `currentColor` over whatever surface it sits
+on; the icons used to add a `--shell` tile behind it, which at 16 px is most of
+what you see. Without it, `icon.svg` carries *both* themes' `--fg` behind a
+`prefers-color-scheme` query — the same thing `currentColor` does in the app —
+while the PNGs and the `.ico`, which cannot switch with the tab bar, take one
+tone between the two themes' `--fg-3`. Do not "simplify" the rasters onto either
+theme's `--fg`: a near-white glyph on transparency is invisible in a light tab
+bar, which is the bug `FloorTraceMark.jsx` documents having already fixed once,
+in the place where nobody can see that the mark is missing. iOS composites a
+transparent `apple-touch-icon` onto black on the home screen; that black is
+Apple's, not ours.
 
 `vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
 
