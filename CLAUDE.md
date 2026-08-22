@@ -350,6 +350,19 @@ never touch the files, or the tab icon starts quietly disagreeing with the app.
 `android-chrome-*.png` are regenerated with the rest but are still referenced by
 nothing — there is no web manifest.
 
+**They are the mark on transparency, and the colour is not one decision but
+two.** The mark in the menu bar is `currentColor` over whatever surface it sits
+on; the icons used to add a `--shell` tile behind it, which at 16 px is most of
+what you see. Without it, `icon.svg` carries *both* themes' `--fg` behind a
+`prefers-color-scheme` query — the same thing `currentColor` does in the app —
+while the PNGs and the `.ico`, which cannot switch with the tab bar, take one
+tone between the two themes' `--fg-3`. Do not "simplify" the rasters onto either
+theme's `--fg`: a near-white glyph on transparency is invisible in a light tab
+bar, which is the bug `FloorTraceMark.jsx` documents having already fixed once,
+in the place where nobody can see that the mark is missing. iOS composites a
+transparent `apple-touch-icon` onto black on the home screen; that black is
+Apple's, not ours.
+
 `vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
 
 **Splitting is not lazying.** The konva chunk existed for a long time while `App.jsx → Canvas.jsx → react-konva` kept it in the entry's *static* module graph, so `index.html` modulepreloaded it and the browser fetched and compiled all 320 kB before the app could run — the opposite of what the config appeared to say. What actually defers it is `Canvas.jsx`, which lazy-loads the whole `<Stage>` subtree (`CanvasStage.jsx`) behind `React.lazy`; the manual chunks only decide *which file* the deferred code lands in. Two entries are load-bearing for that: React and `commonjsHelpers` are pinned to their own chunks because, left unassigned, rollup folds the dependency shared by konva and the entry *into the konva chunk*, and the entry then statically imports konva to reach it.
