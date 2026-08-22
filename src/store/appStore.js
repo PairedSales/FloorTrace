@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { createFloorSlice } from './floorManager';
 import { newTraceId } from './ids';
-import { createDocumentSlice } from './documentManager';
+import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import {
@@ -879,6 +879,85 @@ export const selectActiveAreaByType = (state) => {
 
 /** Selector to get the combined total area of all visible traces */
 export const selectCombinedArea = (state) => selectActiveAreaByType(state).total;
+
+/**
+ * The property, not the plan.
+ *
+ * An appraiser is paid for a house; the app measures a drawing. The ordinary
+ * two-storey job arrives as one image per level, which since plan tabs is two
+ * plans — and every figure in the app stopped at whichever one was on screen,
+ * so the sum was made on a calculator and typed into the report by hand.
+ *
+ * Only the live plan can be measured here: a parked record is inert by contract
+ * and a restored plan's state is still on disk. So each plan records its own
+ * figures into `documents[id].area` while it is live (`usePlanAreaIndex`), that
+ * rides in the workspace index, and this adds up what every plan last reported
+ * — recomputing the live one, which is the only one that can be stale.
+ */
+export const computeWorkspaceArea = (state, activeArea) => {
+  const live = activeArea ?? computeAreaByType(state);
+  const byType = {};
+  const counts = {};
+  const plans = [];
+  let total = 0;
+
+  state.documentOrder.forEach((docId, index) => {
+    const isActive = docId === state.activeDocumentId;
+    const meta = state.documents[docId] ?? {};
+    const area = isActive ? live : meta.area;
+    if (!area || !(area.total > 0)) return;
+
+    plans.push({
+      docId,
+      index,
+      isActive,
+      label: documentLabel({
+        projectName: isActive ? state.projectName : meta.title,
+        sourceFileName: meta.sourceFileName,
+        index,
+      }),
+      // A plan the workspace has not read back cannot be re-measured, so its
+      // figures are the ones it last reported. Said, not hidden: a total that
+      // silently mixes fresh and remembered numbers is the wrong kind of quiet.
+      fromDisk: meta.hydrated === false,
+      gla: area.gla ?? 0,
+      total: area.total,
+      byType: area.byType ?? {},
+    });
+
+    for (const [type, value] of Object.entries(area.byType ?? {})) {
+      byType[type] = (byType[type] ?? 0) + value;
+      counts[type] = (counts[type] ?? 0) + (area.counts?.[type] ?? 0);
+    }
+    total += area.total;
+  });
+
+  return {
+    plans,
+    byType,
+    counts,
+    gla: byType[DEFAULT_TRACE_TYPE] ?? 0,
+    total,
+    // The whole point of the roll-up, and the test every consumer applies
+    // before showing a property figure at all.
+    isMultiPlan: plans.length > 1,
+  };
+};
+
+let lastWorkspaceArea = null;
+let lastWorkspaceDeps = null;
+
+/** Memoised like its siblings, and for the same reason: it returns an object. */
+export const selectWorkspaceArea = (state) => {
+  const activeArea = selectActiveAreaByType(state);
+  const deps = [activeArea, state.documents, state.documentOrder, state.projectName];
+  if (lastWorkspaceDeps && deps.every((d, i) => d === lastWorkspaceDeps[i])) {
+    return lastWorkspaceArea;
+  }
+  lastWorkspaceDeps = deps;
+  lastWorkspaceArea = computeWorkspaceArea(state, activeArea);
+  return lastWorkspaceArea;
+};
 
 export { AUTOSAVE_FIELDS, PARK_FIELDS, PARK_ONLY_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

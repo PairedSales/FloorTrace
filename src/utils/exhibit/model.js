@@ -6,7 +6,7 @@
 // rule applies to doubt: a trace the detector rated poor, a scale the rooms
 // disagreed about and a void that fell outside its outline all reach the page.
 
-import { computeAreaByType } from '../../store/appStore';
+import { computeAreaByType, computeWorkspaceArea } from '../../store/appStore';
 import {
   calculateArea, getCentroid, holeRings, isSubtracted, displayedBreakdownTotal,
 } from '../areaCalculator';
@@ -211,6 +211,28 @@ export function buildExhibitModel(state, {
     : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
   const glaCount = areas.counts[DEFAULT_TRACE_TYPE] ?? 0;
 
+  // The property this plan belongs to, when it belongs to one. `state` is the
+  // live store for an export and a plain object in tests, so the roll-up is
+  // computed rather than read off a memo — the same reason `computeAreaByType`
+  // has an un-memoised twin.
+  const workspace = state.documentOrder?.length
+    ? computeWorkspaceArea(state, areas)
+    : null;
+  const property = workspace?.isMultiPlan
+    ? {
+      planCount: workspace.plans.length,
+      position: (workspace.plans.findIndex((p) => p.isActive) + 1) || 1,
+      levels: workspace.counts?.[DEFAULT_TRACE_TYPE] ?? 0,
+      gla: formatAreaValue(areaDisplayValue(workspace.gla, unit), unit),
+      total: formatAreaValue(displayedBreakdownTotal(workspace.byType, unit), unit),
+      plans: workspace.plans.map((p) => ({
+        label: p.label,
+        isActive: p.isActive,
+        value: formatAreaValue(areaDisplayValue(p.total, unit), unit).value,
+      })),
+    }
+    : null;
+
   const rows = TRACE_TYPES
     .filter((t) => (areas.byType[t.id] ?? 0) > 0)
     .map((t) => ({
@@ -279,11 +301,17 @@ export function buildExhibitModel(state, {
       caption: noGla
         ? 'No outline is marked as living area'
         : `${glaCount} level${glaCount === 1 ? '' : 's'} · measured to the `
-          + `${state.useInteriorWalls ? 'interior' : 'exterior'} wall face`,
+          + `${state.useInteriorWalls ? 'interior' : 'exterior'} wall face`
+          // A page that reports one plan's figure while the property has more
+          // than one plan reads as the property's figure, and a workfile keeps
+          // both pages side by side. Say which plan this is and what the whole
+          // house comes to, on the page itself.
+          + (property ? ` · this plan is ${property.position} of ${property.planCount}` : ''),
     },
     rows,
     total: total.value,
     totalSuffix: total.suffix,
+    property,
     showBreakdown: rows.length > 1,
     scale: scaleLines(state),
     outlines,

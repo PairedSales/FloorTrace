@@ -54,6 +54,7 @@ import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { useDocumentTitle } from './hooks/useDocumentTitle';
+import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { forgetFileHandle } from './utils/fileHandles';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
@@ -1274,6 +1275,7 @@ function App() {
   });
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
+  usePlanAreaIndex();
   const { theme, cycleTheme } = useTheme();
   // Names beside the rail icons. No toast on change: the rail itself is the
   // feedback, and a notification for a change you are looking at is noise.

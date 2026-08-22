@@ -122,6 +122,10 @@ export function useAutosave() {
         // saved", which is not what a per-plan updatedAt means.
         updatedAt: isActive ? Date.now() : (meta.updatedAt ?? Date.now()),
         hasWork: isActive ? Boolean(state.image) : Boolean(meta.hasWork),
+        // What this plan contributes to the property. Carried here so a plan
+        // whose state is still on disk counts toward the total from the moment
+        // its tab is drawn, rather than only once someone switches to it.
+        area: meta.area ?? null,
       };
     });
     return { order: [...state.documentOrder], activeId: state.activeDocumentId, docs };
@@ -266,6 +270,7 @@ export function useAutosave() {
         sourceFileName: index.docs?.[docId]?.sourceFileName ?? null,
         title: index.docs?.[docId]?.title ?? null,
         hasWork: Boolean(index.docs?.[docId]?.hasWork),
+        area: index.docs?.[docId]?.area ?? null,
         hydrated: docId === activeId,
       },
     })), activeId);
