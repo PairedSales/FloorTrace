@@ -103,11 +103,16 @@ export function assignTypeColors(traces) {
 // colours the user last saw instead of collapsing every floor into one hue.
 // `nameSource` is inferred from the name itself rather than defaulting: a trace
 // still called "2nd Floor" was never renamed, and one called "Guest Wing" was.
+// `typeSource` is inferred the same way: before automatic classification the
+// only way a trace could hold a non-default type was the user picking it, and
+// re-reading the plan must never take that back.
 export function normalizeTraces(traces) {
   if (!Array.isArray(traces)) return traces;
   return assignTypeColors(traces.map((t) => (t && typeof t === 'object' ? {
     ...t,
     type: normalizeTraceType(t.type),
+    typeSource: t.typeSource
+      ?? (normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE ? 'auto' : 'user'),
     colorSource: t.colorSource ?? (t.type ? 'type' : 'user'),
     nameSource: t.nameSource ?? (isAutoTraceName(t.name) ? 'auto' : 'user'),
   } : t)));

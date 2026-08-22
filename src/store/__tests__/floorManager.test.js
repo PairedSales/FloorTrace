@@ -443,3 +443,135 @@ describe('trace naming', () => {
     expect(normalized[1].nameSource).toBe('user');
   });
 });
+
+// A basement reported as living area is the same wrong answer as an outline
+// traced in the wrong place, and nothing else on the page corrects it.
+describe('classifyTraceTypes', () => {
+  const offsetSquare = (x, y, n) => [
+    { x, y }, { x: x + n, y }, { x: x + n, y: y + n }, { x, y: y + n },
+  ];
+  const basementIn = (x, y) => ({
+    type: 'below-grade',
+    keyword: 'basement',
+    text: 'BASEMENT',
+    bbox: { x, y, width: 60, height: 12 },
+  });
+
+  beforeEach(() => {
+    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.setState({ areaLabels: [] });
+  });
+
+  // The reported case: fixtures/ExampleFloorplan2 traces four plans off one
+  // sheet, and the third holds two BASEMENT room labels.
+  it('types the outline the basement labels sit in, and renames it', () => {
+    useAppStore.getState().applyDetectedTraces([
+      offsetSquare(0, 0, 300), offsetSquare(400, 0, 300), offsetSquare(0, 400, 300),
+    ]);
+    useAppStore.setState({ areaLabels: [basementIn(100, 500), basementIn(100, 600)] });
+
+    const changes = useAppStore.getState().classifyTraceTypes();
+
+    expect(traces().map((t) => t.type)).toEqual(['gla', 'gla', 'below-grade']);
+    expect(traces()[2].name).toBe('Basement');
+    expect(traces()[2].typeSource).toBe('detected');
+    expect(traces()[2].typeEvidence.text).toBe('BASEMENT');
+    expect(changes).toEqual([
+      { id: traces()[2].id, name: 'Basement', type: 'below-grade', from: 'gla' },
+    ]);
+  });
+
+  it('reports nothing and touches nothing when the plan has no level names', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    const before = traces();
+
+    expect(useAppStore.getState().classifyTraceTypes()).toEqual([]);
+    expect(traces()).toBe(before);
+  });
+
+  it('never overrules a type the user picked', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    useAppStore.getState().setPerimeterTraceType(traces()[0].id, 'garage');
+    useAppStore.setState({ areaLabels: [basementIn(100, 100)] });
+
+    expect(useAppStore.getState().classifyTraceTypes()).toEqual([]);
+    expect(traces()[0].type).toBe('garage');
+  });
+
+  it('keeps a name the user typed while still retyping the outline', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    useAppStore.getState().renamePerimeterTrace(traces()[0].id, 'Guest Wing');
+    useAppStore.setState({ areaLabels: [basementIn(100, 100)] });
+
+    useAppStore.getState().classifyTraceTypes();
+
+    expect(traces()[0].type).toBe('below-grade');
+    expect(traces()[0].name).toBe('Guest Wing');
+  });
+
+  it('is idempotent — re-running it changes nothing and reports nothing', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    useAppStore.setState({ areaLabels: [basementIn(100, 100)] });
+    useAppStore.getState().classifyTraceTypes();
+    const after = traces();
+
+    expect(useAppStore.getState().classifyTraceTypes()).toEqual([]);
+    expect(traces()).toBe(after);
+  });
+
+  // A detected type is the app's claim about the plan, so it must not outlive
+  // the words it was read from — a crop or a re-scan can take them away.
+  it('puts an outline back to GLA when its label is gone', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    useAppStore.setState({ areaLabels: [basementIn(100, 100)] });
+    useAppStore.getState().classifyTraceTypes();
+    expect(traces()[0].type).toBe('below-grade');
+
+    useAppStore.setState({
+      areaLabels: [{
+        type: 'gla', keyword: 'floor 1', text: 'FLOOR 1',
+        bbox: { x: 900, y: 900, width: 60, height: 12 },
+      }],
+    });
+    const changes = useAppStore.getState().classifyTraceTypes();
+
+    expect(traces()[0].type).toBe(DEFAULT_TRACE_TYPE);
+    expect(traces()[0].typeSource).toBe('auto');
+    expect(traces()[0].typeEvidence).toBeNull();
+    expect(changes).toHaveLength(1);
+  });
+
+  // The re-trace guarantee, now that a type can arrive without the user.
+  it('survives the interior/exterior re-trace that follows it', () => {
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 300)]);
+    useAppStore.setState({ areaLabels: [basementIn(100, 100)] });
+    useAppStore.getState().classifyTraceTypes();
+
+    useAppStore.getState().applyDetectedTraces([offsetSquare(0, 0, 290)]);
+
+    expect(traces()[0].type).toBe('below-grade');
+    expect(traces()[0].typeSource).toBe('detected');
+  });
+
+  it('numbers a second basement rather than colliding with the first', () => {
+    useAppStore.getState().applyDetectedTraces([
+      offsetSquare(0, 0, 300), offsetSquare(400, 0, 300),
+    ]);
+    useAppStore.setState({ areaLabels: [basementIn(100, 100), basementIn(500, 100)] });
+
+    useAppStore.getState().classifyTraceTypes();
+
+    expect(traces().map((t) => t.name)).toEqual(['Basement', 'Basement 2']);
+  });
+
+  // A project saved before classification existed holds a type only because
+  // the user picked it, so reopening it and re-tracing must not take it back.
+  it('treats a type from a project saved before it existed as the user\'s', () => {
+    openProjectWith(['Garage']);
+    useAppStore.setState({
+      perimeterTraces: normalizeTraces(traces().map((t) => ({ ...t, type: 'garage' }))),
+    });
+
+    expect(traces()[0].typeSource).toBe('user');
+  });
+});

@@ -30,6 +30,7 @@
 
 import { parseDimensionLine, inferDominantFormat, formatDimensionText } from './parse.js';
 import { matchExteriorFeature } from './exteriorLabels.js';
+import { matchAreaLabel } from './areaLabels.js';
 import {
   toGray, clahe, unsharp, binarizeInk,
   scaleGray, cropGray, rotateGray90, stretchGray, addBorder, binarizeGray,
@@ -567,6 +568,34 @@ export const detectDimensionsCore = async (imageData, env) => {
     });
   }
 
+  // ---- Area-type labels -----------------------------------------------------
+  // "BASEMENT", "LOWER LEVEL", "2ND FLOOR" — the words that say which reported
+  // subtotal a whole outline belongs to. Collected apart from the exterior
+  // features above because these never carve: a basement is area, just not GLA.
+  const areaLabels = [];
+  const pushAreaLabel = (label) => {
+    if (areaLabels.some((l) => overlapRatio(l.bbox, label.bbox) > 0.5)) return;
+    areaLabels.push(label);
+  };
+  for (const line of lines) {
+    const raw = lineText(line);
+    const match = raw ? matchAreaLabel(raw) : null;
+    if (!match) continue;
+    const bbox = tessBboxToFull(line.bbox, ocrScale);
+    if (!bbox || meanWordConfidence(line) < 35) continue;
+    pushAreaLabel({
+      type: match.type,
+      keyword: match.keyword,
+      text: raw,
+      bbox: {
+        x: Math.round(bbox.x),
+        y: Math.round(bbox.y),
+        width: Math.round(bbox.width),
+        height: Math.round(bbox.height)
+      }
+    });
+  }
+
   // ---- Mine pass-1 output ---------------------------------------------------
   const candidates = [];
   const digitLineRois = [];
@@ -801,6 +830,7 @@ export const detectDimensionsCore = async (imageData, env) => {
 
   const parsedBoxes = [];
   const roiExteriorLabels = [];
+  const roiAreaLabels = [];
   // Widened rescue re-reads jump the main queue: they must not starve behind
   // low-priority leftovers when the time budget runs down.
   const followUps = [];
@@ -877,6 +907,22 @@ export const detectDimensionsCore = async (imageData, env) => {
       if (roiKeyword && read.confidence >= 50) {
         roiExteriorLabels.push({
           keyword: roiKeyword,
+          text: read.text,
+          bbox: {
+            x: Math.round(roi.x),
+            y: Math.round(roi.y),
+            width: Math.round(roi.width),
+            height: Math.round(roi.height)
+          }
+        });
+      }
+      // Same rescue for the level names: "BASEMENT" set over its dimension row
+      // is one blob to the sparse pass and two lines to the zoomed re-read.
+      const roiArea = matchAreaLabel(read.text);
+      if (roiArea && read.confidence >= 50) {
+        roiAreaLabels.push({
+          type: roiArea.type,
+          keyword: roiArea.keyword,
           text: read.text,
           bbox: {
             x: Math.round(roi.x),
@@ -1076,6 +1122,7 @@ export const detectDimensionsCore = async (imageData, env) => {
     if (exteriorLabels.some((l) => overlapRatio(l.bbox, label.bbox) > 0.5)) continue;
     exteriorLabels.push(label);
   }
+  for (const label of roiAreaLabels) pushAreaLabel(label);
   timings.roi = elapsed() - timings.preprocess - timings.spatial - timings.pass1;
 
   // ---- Phase 5: neural rescue (PaddleOCR collage) ---------------------------
@@ -1139,6 +1186,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   const result = {
     dimensions,
     exteriorLabels,
+    areaLabels,
     detectedFormat: inferDominantFormat(dimensions),
     timings,
     truncated

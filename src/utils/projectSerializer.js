@@ -168,6 +168,18 @@ const perimeterTraceSchema = z.object({
   // Whether `name` was generated from the type or typed by the user. A user
   // name outranks a later type change, so it has to survive the round trip.
   nameSource: z.string().optional(),
+  // Where `type` came from: 'user' outranks automatic classification, and
+  // 'detected' is what lets a re-scan revise its own earlier reading without
+  // touching a type the user set. Losing this on reopen would let the next
+  // trace overwrite a hand-picked garage.
+  typeSource: z.string().optional(),
+  // The label 'detected' was read from, so "why is this a basement" stays
+  // answerable long after the toast that said so.
+  typeEvidence: z.object({
+    keyword: z.string().optional(),
+    text: z.string().optional(),
+    from: z.string().optional(),
+  }).nullable().optional(),
 }).catchall(z.any());
 
 const roomSchema = z.object({
@@ -240,6 +252,7 @@ const floorStateSchema = z.object({
   mode: z.string().optional(),
   detectedDimensions: z.array(detectedDimensionSchema).optional(),
   exteriorLabels: z.array(z.any()).optional(),
+  areaLabels: z.array(z.any()).optional(),
   rooms: z.array(roomSchema).optional(),
   imageMimeType: z.string().optional(),
   showSideLengths: z.boolean().optional(),
