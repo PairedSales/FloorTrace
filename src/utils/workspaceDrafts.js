@@ -1,4 +1,4 @@
-import { getDraft, setDraft, removeDraft, isQuotaError } from './draftStorage';
+import { getDraft, setDraft, removeDraft, listDraftKeys, isQuotaError } from './draftStorage';
 import { hashDataUrl } from './hash';
 
 /**
@@ -80,7 +80,7 @@ export const readWorkspaceIndex = async () => {
 };
 
 export const writeWorkspaceIndex = (index) =>
-  setDraft(workspaceKey(getSessionId()), index, null, false);
+  setDraft(workspaceKey(getSessionId()), { ...index, savedAt: Date.now() }, null, false);
 
 export const removeWorkspaceIndex = () => removeDraft(workspaceKey(getSessionId()));
 
@@ -161,5 +161,155 @@ export const removeWorkspace = async (index) => {
   }
   await removeWorkspaceIndex();
 };
+
+/**
+ * Who else is open, asked directly.
+ *
+ * Write age cannot answer this. A tab closed ten seconds ago and a tab open and
+ * idle for ten seconds have written their index equally recently, and the
+ * common case — quit the browser, reopen it, want the work back — lands inside
+ * any window generous enough to protect a live tab. So the tabs are asked
+ * instead: every open one answers `who` with the session it owns, and anything
+ * unclaimed is genuinely abandoned.
+ *
+ * The age check below stays as the fallback for a browser without
+ * `BroadcastChannel`, where being slow to recover beats stealing.
+ */
+const CHANNEL = 'floortrace:workspace';
+const CLAIM_WAIT_MS = 250;
+
+let channel = null;
+let answering = false;
+
+/** Answer other tabs' roll-calls for as long as this one is open. */
+export function claimWorkspaceSession() {
+  if (answering || typeof BroadcastChannel === 'undefined') return;
+  answering = true;
+  channel = channel ?? new BroadcastChannel(CHANNEL);
+  channel.addEventListener('message', (event) => {
+    if (event.data?.type === 'who') {
+      channel.postMessage({ type: 'mine', sessionId: getSessionId() });
+    }
+  });
+}
+
+/** The session ids of every other tab that answers within the window. */
+async function liveSessions() {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  const bus = new BroadcastChannel(CHANNEL);
+  const seen = new Set();
+  bus.addEventListener('message', (event) => {
+    if (event.data?.type === 'mine') seen.add(event.data.sessionId);
+  });
+  bus.postMessage({ type: 'who' });
+  await new Promise((resolve) => { setTimeout(resolve, CLAIM_WAIT_MS); });
+  bus.close();
+  return seen;
+}
+
+/**
+ * Fallback staleness window, used only when `BroadcastChannel` is unavailable.
+ */
+export const STALE_SESSION_MS = 90 * 1000;
+
+/** Long enough that nothing anyone still wants is inside it. */
+export const SWEEP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+const WORKSPACE_PREFIX = 'floortrace:workspace:v1:';
+const DOC_PREFIX = 'floortrace:doc:v1:';
+const HIST_PREFIX = 'floortrace:hist:v1:';
+
+const readIndexAt = async (key) => {
+  const raw = await getDraft(key);
+  return raw && Array.isArray(raw.order) ? raw : null;
+};
+
+/** Every workspace index in the store except this session's, newest first. */
+export async function listOtherWorkspaces() {
+  const mine = workspaceKey(getSessionId());
+  const keys = (await listDraftKeys())
+    .filter((k) => k.startsWith(WORKSPACE_PREFIX) && k !== mine);
+  const found = [];
+  for (const key of keys) {
+    const index = await readIndexAt(key);
+    // `savedAt` is absent on an index written before it existed. Treating that
+    // as epoch makes it eligible, which is right: it cannot belong to a live
+    // tab, because a live tab on this build restamps it.
+    if (index) found.push({ key, index, savedAt: Number(index.savedAt) || 0 });
+  }
+  return found.sort((a, b) => b.savedAt - a.savedAt);
+}
+
+/**
+ * Give this session the workspace a dead one left behind.
+ *
+ * The index is keyed by a `sessionStorage` id so two tabs cannot fight over one
+ * — which is right, and which also meant closing the browser stranded every
+ * plan in it. The records were still on disk; nothing could name them. So on a
+ * startup with no index of our own, the newest abandoned one is adopted under
+ * our key and its old key removed: the work comes back, and the records stop
+ * being garbage nothing can collect.
+ */
+export async function adoptAbandonedWorkspace(now = Date.now()) {
+  const candidates = await listOtherWorkspaces();
+  if (!candidates.length) return null;
+
+  const live = await liveSessions();
+  const abandoned = live
+    // Asked and unclaimed: adopt regardless of how recently it was written.
+    ? candidates.filter((c) => !live.has(c.key.slice(WORKSPACE_PREFIX.length)))
+    // No way to ask, so fall back to age.
+    : candidates.filter((c) => now - c.savedAt > STALE_SESSION_MS);
+  if (!abandoned.length) return null;
+
+  const [{ key, index }] = abandoned;
+  await writeWorkspaceIndex(index);
+  await removeDraft(key);
+  return index;
+}
+
+/**
+ * Delete records no surviving index names.
+ *
+ * Two sources: a plan dropped from an index that was rewritten without it, and
+ * a whole workspace old enough that nothing in it is wanted. Deliberately
+ * conservative — a plan referenced by *any* index, including another tab's, is
+ * never touched, and a workspace is only swept once it is a week cold.
+ */
+export async function sweepOrphans(now = Date.now()) {
+  const keys = await listDraftKeys();
+  const mine = workspaceKey(getSessionId());
+
+  const live = new Set();
+  let sweptWorkspaces = 0;
+  for (const key of keys.filter((k) => k.startsWith(WORKSPACE_PREFIX))) {
+    const index = await readIndexAt(key);
+    if (!index) continue;
+    const savedAt = Number(index.savedAt);
+    // A missing `savedAt` means an index written before the stamp existed, so
+    // its age is unknown — never ancient. It is recovered by adoption instead,
+    // which is what gives it a stamp.
+    const ageKnown = Number.isFinite(savedAt) && savedAt > 0;
+    if (key !== mine && ageKnown && now - savedAt > SWEEP_AFTER_MS) {
+      for (const docId of index.order) await removePlan(docId);
+      await removeDraft(key);
+      sweptWorkspaces += 1;
+      continue;
+    }
+    for (const docId of index.order) live.add(docId);
+  }
+
+  let sweptPlans = 0;
+  for (const key of keys) {
+    let docId = null;
+    if (key.startsWith(DOC_PREFIX)) docId = key.slice(DOC_PREFIX.length).split('::')[0];
+    else if (key.startsWith(HIST_PREFIX)) docId = key.slice(HIST_PREFIX.length);
+    else continue;
+    if (live.has(docId)) continue;
+    await removeDraft(key);
+    sweptPlans += 1;
+  }
+  return { plans: sweptPlans, workspaces: sweptWorkspaces };
+}
 
 export { isQuotaError };

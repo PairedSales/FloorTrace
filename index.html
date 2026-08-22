@@ -29,6 +29,43 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- The entry chunk failing is the one case the app cannot handle itself:
+         no module means no React, so no error boundary exists to catch it. A
+         deploy remints every hashed filename and this file is served with
+         `max-age=600`, so for ten minutes afterwards a cached index can name an
+         entry nobody serves — the request returns a 404 page, nothing mounts,
+         and the screen stays blank with no error a user could report.
+
+         Two triggers, one recovery: a load error on the module tag, and a
+         watchdog for the failures that do not raise one. Reloading against a
+         one-shot query parameter is what makes the browser re-ask the origin;
+         a plain reload is served the same cached index and fails identically.
+         `sessionStorage` keeps it to a single attempt, so a fault that is not a
+         stale build cannot become a reload loop. -->
+    <script>
+      (function () {
+        var KEY = 'floortrace:recovering-stale-build';
+        var recover = function () {
+          try {
+            if (sessionStorage.getItem(KEY)) return;
+            sessionStorage.setItem(KEY, String(Date.now()));
+          } catch (e) { /* storage disabled; one reload still beats a blank page */ }
+          var url = new URL(window.location.href);
+          url.searchParams.set('rebuild', String(Date.now()));
+          window.location.replace(url.toString());
+        };
+        window.addEventListener('error', function (event) {
+          var el = event.target;
+          if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK')) recover();
+        }, true);
+        // Ten seconds is well past a cold parse of the entry on a slow phone,
+        // and the check is for *any* mounted node rather than a healthy app.
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.childElementCount === 0) recover();
+        }, 10000);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

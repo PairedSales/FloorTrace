@@ -32,7 +32,11 @@ const Canvas = React.memo(forwardRef((props, ref) => {
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 2000));
     const cancel = window.cancelIdleCallback ?? clearTimeout;
-    const handle = idle(() => { import('./CanvasStage'); }, { timeout: 4000 });
+    // Caught, not floated: a stale deploy makes this reject, and an unhandled
+    // rejection here is noise on the console at best and a reported "error" at
+    // worst. The real load below is what surfaces the failure, through the
+    // error boundary, at the moment it actually matters.
+    const handle = idle(() => { import('./CanvasStage').catch(() => {}); }, { timeout: 4000 });
     return () => cancel(handle);
   }, []);
 

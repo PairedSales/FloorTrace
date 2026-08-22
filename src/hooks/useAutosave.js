@@ -8,12 +8,16 @@ import {
   readWorkspaceIndex, writeWorkspaceIndex, removeWorkspace,
   writeDocDraft, readDocDraft, removePlan,
   writeHistoryRecord, readHistoryRecord,
+  adoptAbandonedWorkspace, sweepOrphans, claimWorkspaceSession,
   isQuotaError, LEGACY_DRAFT_KEY,
 } from '../utils/workspaceDrafts';
 import { getDraft, removeDraft } from '../utils/draftStorage';
 import { documentLabel, parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
+// Comfortably inside `STALE_SESSION_MS`, so a tab that is merely idle is never
+// mistaken for one that has closed.
+const HEARTBEAT_MS = 30 * 1000;
 const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
 
 // Selector: pick only the autosave-relevant fields from the store.
@@ -84,6 +88,11 @@ export function useAutosave() {
   // preference off must leave nothing behind, and it used to sweep one key.
   const clearAutosavedDraft = useCallback(async () => {
     cancelPendingWrite();
+    // The image records are about to go, so nothing may still claim they are
+    // written. Switching the preference off and back on otherwise rewrites
+    // every plan with `imageChanged: false` against an image that no longer
+    // exists — and the plan is silently dropped on the next reload.
+    writtenImageByDocRef.current.clear();
     const index = await readWorkspaceIndex();
     if (index) await removeWorkspace(index);
     removeDraft(LEGACY_DRAFT_KEY);
@@ -282,10 +291,11 @@ export function useAutosave() {
   useEffect(() => {
     const restore = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
-      // Stated once at startup so the status bar is right before the first
-      // edit: with autosave on and a restored draft, what is on disk already is
-      // the current work; with it off, nothing is being kept at all.
-      useAppStore.getState().setDraftState(saveOnExitEnabled ? 'saved' : 'off');
+      // 'pending' until the read actually finishes, not 'saved' on the way in.
+      // Claiming the outcome first meant that a startup which never got past
+      // its first read reported the draft as safe for the whole session, which
+      // is the most expensive thing this status bar can say wrongly.
+      useAppStore.getState().setDraftState(saveOnExitEnabled ? 'pending' : 'off');
 
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
@@ -297,7 +307,11 @@ export function useAutosave() {
           return;
         }
 
-        const index = await readWorkspaceIndex();
+        // Our own index first; failing that, the newest workspace a dead
+        // session left behind. The session id lives in `sessionStorage`, so
+        // before this every browser restart stranded a whole workspace on disk
+        // — the records were all still there, and nothing could name them.
+        const index = (await readWorkspaceIndex()) ?? (await adoptAbandonedWorkspace());
         // A draft written before the workspace existed. Read once and adopted
         // as the first plan, so upgrading does not look like losing your work.
         const legacy = index ? null : await getDraft(LEGACY_DRAFT_KEY);
@@ -341,13 +355,62 @@ export function useAutosave() {
           setUseInteriorWalls(savedWallModeRaw === 'true');
         }
       } catch (error) {
+        // A failed restore is a plan not reopened. It must never also mean
+        // autosave off for the session, which is what leaving the flag false
+        // does — so the `finally` below sets it whatever happened here.
         console.error('Failed to restore autosaved workspace:', error);
+        notify('Could not read the saved workspace — new work will still be saved.', {
+          type: 'warning', id: 'restore',
+        });
+      } finally {
+        setHasRestoredState(true);
+        const store = useAppStore.getState();
+        if (store.draftState === 'pending') store.setDraftState('saved');
       }
-      setHasRestoredState(true);
     };
 
     restore();
   }, [setHasRestoredState, setUseInteriorWalls, restoreWorkspace]);
+
+  // ── Keep this session's claim fresh, and take out the rubbish ───────────
+  //
+  // The heartbeat is what makes adoption safe: a tab that is still open keeps
+  // restamping its index, so `adoptAbandonedWorkspace` can only ever elect one
+  // whose session is genuinely gone. Without it, opening a second tab would
+  // take the first tab's plans.
+  //
+  // The sweep is the other half of the same problem. Nothing could enumerate
+  // keys before, so a stranded workspace was both unreachable and undeletable,
+  // and every restart added another one.
+  useEffect(() => {
+    if (!saveOnExit) return undefined;
+
+    // Answer other tabs from now on, so none of them adopts this workspace.
+    claimWorkspaceSession();
+
+    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 3000));
+    const cancelIdle = window.cancelIdleCallback ?? clearTimeout;
+    const sweep = idle(() => {
+      sweepOrphans()
+        .then(({ plans, workspaces }) => {
+          if (plans || workspaces) {
+            console.info(`Swept ${plans} orphaned plan record(s) and ${workspaces} dead workspace(s).`);
+          }
+        })
+        .catch((error) => console.warn('Sweeping orphaned drafts failed:', error));
+    }, { timeout: 8000 });
+
+    const beat = setInterval(() => {
+      const state = useAppStore.getState();
+      if (!state._hasRestoredState || !state.documentOrder.length) return;
+      writeWorkspaceIndex(buildIndex()).catch(() => {});
+    }, HEARTBEAT_MS);
+
+    return () => {
+      cancelIdle(sweep);
+      clearInterval(beat);
+    };
+  }, [saveOnExit, buildIndex]);
 
   // Persist wall mode preference independently so it survives when no image
   // draft is present.
@@ -404,8 +467,14 @@ export function useAutosave() {
         const parkedState = parkedStateFor(previousId);
         if (!parkedState?.image) return;
 
-        writtenImageByDocRef.current.set(previousId, parkedState.image);
         writeDocDraft(previousId, parkedState, true)
+          // Only on the success path, the same rule `saveAutosavedDraft` states
+          // above. Recorded before the write, one failed park marks the image
+          // as on disk forever: every later write then passes
+          // `imageChanged: false` and stores a state record whose `imageKey`
+          // points at nothing, the plan reloads without its drawing, and the
+          // `!slice.image` branch removes it.
+          .then(() => { writtenImageByDocRef.current.set(previousId, parkedState.image); })
           .then(() => writeHistoryRecord(previousId, parkedHistoryFor(previousId)))
           .then(() => writeWorkspaceIndex(buildIndex()))
           // Reported, not just on failure: this is the write that saves a plan
