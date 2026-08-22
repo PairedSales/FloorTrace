@@ -7,5 +7,12 @@ import useWorkspaceStore from '../store/workspaceStore';
 export const isTypingInField = (target) =>
   !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
-export const shortcutsBlocked = (target) =>
-  isTypingInField(target) || useWorkspaceStore.getState().showHelpModal;
+// The export dialog is here for the same reason the help modal is: it is a
+// focused surface over the plan, and a key that both drives it and reaches the
+// canvas behind it does two things at once. Delete is the sharp case — it would
+// close a plan and delete a vertex in the same press.
+export const shortcutsBlocked = (target) => {
+  if (isTypingInField(target)) return true;
+  const workspace = useWorkspaceStore.getState();
+  return workspace.showHelpModal || workspace.showExportDialog;
+};

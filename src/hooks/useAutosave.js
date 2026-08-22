@@ -4,10 +4,15 @@ import { notify, flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import { AUTOSAVE_FIELDS } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
-import { hashDataUrl } from '../utils/hash';
-import { getDraft, setDraft, removeDraft } from '../utils/draftStorage';
+import {
+  readWorkspaceIndex, writeWorkspaceIndex, removeWorkspace,
+  writeDocDraft, readDocDraft, removePlan,
+  writeHistoryRecord, readHistoryRecord,
+  isQuotaError, LEGACY_DRAFT_KEY,
+} from '../utils/workspaceDrafts';
+import { getDraft, removeDraft } from '../utils/draftStorage';
+import { documentLabel, parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 
-const LOCAL_DRAFT_STORAGE_KEY = 'floortrace:autosave:v1';
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
 const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
 
@@ -58,8 +63,42 @@ export function useAutosave() {
   });
 
   // ── storage helpers ───────────────────────────────────────────────────────
-  const clearAutosavedDraft = useCallback(() => {
-    removeDraft(LOCAL_DRAFT_STORAGE_KEY);
+
+  // Every plan the workspace holds, not just the one on screen: switching the
+  // preference off must leave nothing behind, and it used to sweep one key.
+  const clearAutosavedDraft = useCallback(async () => {
+    const index = await readWorkspaceIndex();
+    if (index) await removeWorkspace(index);
+    removeDraft(LEGACY_DRAFT_KEY);
+  }, []);
+
+  /**
+   * What the index should say right now. Built from the store rather than
+   * accumulated, so it cannot drift from the plans that actually exist.
+   */
+  const buildIndex = useCallback(() => {
+    const state = useAppStore.getState();
+    const docs = {};
+    state.documentOrder.forEach((docId, i) => {
+      const meta = state.documents[docId] ?? {};
+      const isActive = docId === state.activeDocumentId;
+      docs[docId] = {
+        // A tab has to be drawable before its plan is hydrated, so the label is
+        // resolved now rather than derived from state nobody has loaded yet.
+        title: documentLabel({
+          projectName: isActive ? state.projectName : meta.title,
+          sourceFileName: meta.sourceFileName,
+          index: i,
+        }),
+        sourceFileName: meta.sourceFileName ?? null,
+        // This plan's own timestamp, recorded when it was parked. Stamping
+        // every plan on every write made the field say "the workspace was
+        // saved", which is not what a per-plan updatedAt means.
+        updatedAt: isActive ? Date.now() : (meta.updatedAt ?? Date.now()),
+        hasWork: isActive ? Boolean(state.image) : Boolean(meta.hasWork),
+      };
+    });
+    return { order: [...state.documentOrder], activeId: state.activeDocumentId, docs };
   }, []);
 
   // `withHistory` is off for the recurring debounced write: the undo stack is up
@@ -71,24 +110,22 @@ export function useAutosave() {
   // store hands back the same string until the image itself is replaced, so a
   // pan, a vertex drag or a re-trace all leave it untouched and skip rewriting
   // ~770 kB of base64. Only the image-load and crop paths mint a new one.
-  const writtenImageRef = useRef(null);
+  // Keyed by plan. One slot eventually reports "unchanged" for a plan whose
+  // image record was never written this session, and then skips ~770 kB of
+  // base64 forever — silently reinstating the exact cost the image split exists
+  // to avoid. Deleted when a plan closes, so a leaked entry cannot outlive it.
+  const writtenImageByDocRef = useRef(new Map());
 
-  const saveAutosavedDraft = useCallback(async (snapshot, { withHistory = false } = {}) => {
+  const saveAutosavedDraft = useCallback(async (docId, snapshot, { withHistory = false } = {}) => {
+    if (!docId) return;
     try {
-      const { image, ...stateWithoutImage } = snapshot;
-      const payload = { state: stateWithoutImage };
-      if (withHistory) payload.history = undoManager.getHistoryState();
-      const imageChanged = writtenImageRef.current !== image;
-      await setDraft(
-        LOCAL_DRAFT_STORAGE_KEY,
-        payload,
-        { hash: hashDataUrl(image), dataUrl: image },
-        imageChanged,
-      );
-      // Only on the success path: `setDraft` swallows its IndexedDB failure and
-      // falls back to localStorage, and recording a write that did not happen
-      // would skip the image on every later write.
-      writtenImageRef.current = image;
+      const imageChanged = writtenImageByDocRef.current.get(docId) !== snapshot.image;
+      await writeDocDraft(docId, snapshot, imageChanged);
+      if (withHistory) await writeHistoryRecord(docId, undoManager.getHistoryState());
+      await writeWorkspaceIndex(buildIndex());
+      // Only on the success path: recording a write that did not happen would
+      // skip the image on every later write.
+      writtenImageByDocRef.current.set(docId, snapshot.image);
       useAppStore.getState().setDraftState('saved');
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
@@ -96,16 +133,25 @@ export function useAutosave() {
       // long as it stays true, and the toast fires once because a storage
       // refusal is the one autosave event the user has to act on.
       useAppStore.getState().setDraftState('error');
-      notify('Autosave is unavailable — storage is full or blocked.', { type: 'warning', id: 'autosave' });
+      notify(
+        isQuotaError(error)
+          // Distinguished because the two need different actions from the user:
+          // one is "make room", the other is "this browser will not store".
+          ? 'Autosave stopped — this browser is out of storage. Export before you close the tab.'
+          : 'Autosave is unavailable — storage is full or blocked.',
+        { type: 'warning', id: 'autosave' },
+      );
     }
-  }, []);
+  }, [buildIndex]);
 
   const handleSaveOnExitChange = useCallback((enabled) => {
     setSaveOnExit(enabled);
     localStorage.setItem(SAVE_ON_EXIT_KEY, String(enabled));
     if (!enabled) {
       useAppStore.getState().setDraftState('off');
-      removeDraft(LOCAL_DRAFT_STORAGE_KEY);
+      // Every plan, not just the one on screen. Sweeping one key left the rest
+      // on disk after the user had said to keep nothing.
+      clearAutosavedDraft();
       return;
     }
     // Writes now rather than waiting for the next edit. Switching it on and
@@ -114,57 +160,132 @@ export function useAutosave() {
     const state = useAppStore.getState();
     if (state._hasRestoredState && state.image) {
       state.setDraftState('pending');
-      saveAutosavedDraft(state.getAutosaveState());
+      saveAutosavedDraft(state.activeDocumentId, state.getParkedState());
     } else {
       state.setDraftState('saved');
     }
-  }, [saveAutosavedDraft]);
+  }, [saveAutosavedDraft, clearAutosavedDraft]);
 
-  // ── Restore draft on startup ──────────────────────────────────────────────
+  /**
+   * Rebuild the open plans from the index.
+   *
+   * The active plan is hydrated eagerly because it is about to be rendered;
+   * every other plan is opened with what the index knows — enough to draw a
+   * tab — and hydrated on first switch. Reading seven multi-megabyte images at
+   * startup to show one of them is the wrong trade.
+   *
+   * A plan whose record cannot be read is counted and dropped rather than
+   * silently skipped: an index that names more plans than came back is exactly
+   * the sort of quiet loss this app must not have.
+   */
+  const restoreWorkspace = useCallback(async (index) => {
+    const store = useAppStore.getState();
+    const activeId = index.order.includes(index.activeId) ? index.activeId : index.order[0];
+
+    const activeDraft = await readDocDraft(activeId);
+    if (activeDraft.status === 'missing' || activeDraft.status === 'malformed') {
+      // Nothing to stand on. Better to start clean than to open a workspace
+      // whose visible plan is empty for reasons the user cannot see.
+      return { opened: 0, lost: index.order.length };
+    }
+
+    store.adoptWorkspace(index.order.map((docId) => ({
+      docId,
+      meta: {
+        sourceFileName: index.docs?.[docId]?.sourceFileName ?? null,
+        title: index.docs?.[docId]?.title ?? null,
+        hasWork: Boolean(index.docs?.[docId]?.hasWork),
+        hydrated: docId === activeId,
+      },
+    })), activeId);
+
+    store.restoreFromSaved(activeDraft.state);
+    if (typeof activeDraft.state.useInteriorWalls === 'boolean') {
+      localStorage.setItem(WALL_MODE_KEY, String(activeDraft.state.useInteriorWalls));
+    }
+    writtenImageByDocRef.current.set(activeId, activeDraft.state.image ?? null);
+
+    const savedHistory = await readHistoryRecord(activeId);
+    if (savedHistory) undoManager.setHistoryState(savedHistory);
+    else undoManager.clear();
+
+    // An image record that went missing leaves the traces and calibration
+    // intact and worth showing; the plan simply cannot be edited against ink
+    // that is not there. Counted so the user is told, not silently degraded.
+    const lost = activeDraft.status === 'no-image' ? 1 : 0;
+    return { opened: index.order.length, lost };
+  }, []);
+
+  // ── Restore the workspace on startup ─────────────────────────────────────
   useEffect(() => {
-    const restoreAutosavedDraft = async () => {
+    const restore = async () => {
       const saveOnExitEnabled = localStorage.getItem(SAVE_ON_EXIT_KEY) !== 'false';
       // Stated once at startup so the status bar is right before the first
       // edit: with autosave on and a restored draft, what is on disk already is
       // the current work; with it off, nothing is being kept at all.
       useAppStore.getState().setDraftState(saveOnExitEnabled ? 'saved' : 'off');
+
       try {
         const savedWallModeRaw = localStorage.getItem(WALL_MODE_KEY);
-        const savedData = saveOnExitEnabled ? await getDraft(LOCAL_DRAFT_STORAGE_KEY) : null;
-        if (savedData) {
-          const parsed = savedData;
-          // Support both new wrapped format: { state: ..., history: ... }
-          // and legacy flat format: { image: ..., roomOverlay: ... }
-          const hasWrappedState = parsed && 'state' in parsed;
-          const savedState = hasWrappedState ? parsed.state : parsed;
-          const savedHistory = hasWrappedState ? parsed.history : null;
+        if (!saveOnExitEnabled) {
+          if (savedWallModeRaw === 'true' || savedWallModeRaw === 'false') {
+            setUseInteriorWalls(savedWallModeRaw === 'true');
+          }
+          setHasRestoredState(true);
+          return;
+        }
 
-          if (savedState?.image) {
-            useAppStore.getState().restoreFromSaved(savedState);
-            if (typeof savedState.useInteriorWalls === 'boolean') {
-              localStorage.setItem(WALL_MODE_KEY, String(savedState.useInteriorWalls));
-            }
-            if (savedHistory) {
-              undoManager.setHistoryState(savedHistory);
-            } else {
-              undoManager.clear();
-            }
+        const index = await readWorkspaceIndex();
+        // A draft written before the workspace existed. Read once and adopted
+        // as the first plan, so upgrading does not look like losing your work.
+        const legacy = index ? null : await getDraft(LEGACY_DRAFT_KEY);
+        const legacyState = legacy && ('state' in legacy ? legacy.state : legacy);
+
+        if (legacyState?.image) {
+          useAppStore.getState().restoreFromSaved(legacyState);
+          if (typeof legacyState.useInteriorWalls === 'boolean') {
+            localStorage.setItem(WALL_MODE_KEY, String(legacyState.useInteriorWalls));
+          }
+          const legacyHistory = legacy && 'history' in legacy ? legacy.history : null;
+          if (legacyHistory) undoManager.setHistoryState(legacyHistory);
+          else undoManager.clear();
+          setHasRestoredState(true);
+          flash('Autosaved project restored');
+          return;
+        }
+
+        if (index?.order?.length) {
+          const restored = await restoreWorkspace(index);
+          if (restored.opened > 0) {
             setHasRestoredState(true);
-            flash('Autosaved project restored');
+            // One message with a count, never N toasts. A workspace of seven
+            // plans restoring is one event, not seven.
+            if (restored.lost > 0) {
+              notify(
+                `Restored ${restored.opened} of ${restored.opened + restored.lost} plans — `
+                + `${restored.lost === 1 ? 'one could not be read' : `${restored.lost} could not be read`}.`,
+                { type: 'warning', id: 'restore' },
+              );
+            } else {
+              flash(restored.opened === 1
+                ? 'Autosaved project restored'
+                : `Restored ${restored.opened} plans`);
+            }
             return;
           }
         }
+
         if (savedWallModeRaw === 'true' || savedWallModeRaw === 'false') {
           setUseInteriorWalls(savedWallModeRaw === 'true');
         }
       } catch (error) {
-        console.error('Failed to restore autosaved draft:', error);
+        console.error('Failed to restore autosaved workspace:', error);
       }
       setHasRestoredState(true);
     };
 
-    restoreAutosavedDraft();
-  }, [setHasRestoredState, setUseInteriorWalls]);
+    restore();
+  }, [setHasRestoredState, setUseInteriorWalls, restoreWorkspace]);
 
   // Persist wall mode preference independently so it survives when no image
   // draft is present.
@@ -178,6 +299,41 @@ export function useAutosave() {
     return () => unsub();
   }, []);
 
+  // ── Write a plan when it is parked ────────────────────────────────────────
+  //
+  // The moment a plan leaves the store root is the right time to write it, and
+  // the only time its undo history can be written at all: history lives in
+  // module state that belongs to whichever plan is live, so once another plan
+  // has adopted the stacks there is nothing left to read.
+  //
+  // Without this, only the active plan's history ever reached disk — through
+  // the exit flush — and every background plan came back from a reload with an
+  // empty undo stack. Which is exactly what it did.
+  useEffect(() => {
+    const unsub = useAppStore.subscribe(
+      (state) => state.activeDocumentId,
+      (activeId, previousId) => {
+        if (!previousId || previousId === activeId) return;
+        const state = useAppStore.getState();
+        if (!state._hasRestoredState || !saveOnExit) return;
+
+        // The plan that just left the root, as it was when it left.
+        const parkedState = parkedStateFor(previousId);
+        if (!parkedState?.image) return;
+
+        writtenImageByDocRef.current.set(previousId, parkedState.image);
+        writeDocDraft(previousId, parkedState, true)
+          .then(() => writeHistoryRecord(previousId, parkedHistoryFor(previousId)))
+          .then(() => writeWorkspaceIndex(buildIndex()))
+          .catch((error) => {
+            console.error('Failed to write a parked plan:', error);
+            useAppStore.getState().setDraftState('error');
+          });
+      },
+    );
+    return () => unsub();
+  }, [saveOnExit, buildIndex]);
+
   // ── Debounced autosave on working-state changes ───────────────────────────
   const autosaveTimerRef = useRef(null);
   useEffect(() => {
@@ -187,10 +343,17 @@ export function useAutosave() {
         const state = useAppStore.getState();
         if (!state._hasRestoredState) return;
         if (!saveOnExit) return;
+        // A plan switch replaces every field at once. Without this it reads as
+        // the largest edit the app can make, and the debounced write that
+        // followed would put the *incoming* plan's state under the *outgoing*
+        // plan's key.
+        if (state._swappingDocument) return;
 
         if (!slice.image) {
-          writtenImageRef.current = null;
-          clearAutosavedDraft();
+          // This plan has nothing to keep. Its own records go; the rest of the
+          // workspace is untouched, which is the whole difference from before.
+          writtenImageByDocRef.current.delete(state.activeDocumentId);
+          removePlan(state.activeDocumentId);
           return;
         }
 
@@ -212,8 +375,12 @@ export function useAutosave() {
           clearTimeout(autosaveTimerRef.current);
         }
 
+        // The plan that changed, captured now. Reading the active id when the
+        // timer fires would write the *incoming* plan's state under whichever
+        // key happened to be active two seconds later.
+        const docId = state.activeDocumentId;
         autosaveTimerRef.current = setTimeout(() => {
-          saveAutosavedDraft(useAppStore.getState().getAutosaveState());
+          saveAutosavedDraft(docId, useAppStore.getState().getParkedState());
         }, 2000);
       },
       { equalityFn: shallow },
@@ -244,14 +411,18 @@ export function useAutosave() {
         return;
       }
 
-      const snapshot = state.getAutosaveState();
+      const snapshot = state.getParkedState();
       if (!snapshot.image) {
-        writtenImageRef.current = null;
-        clearAutosavedDraft();
+        writtenImageByDocRef.current.delete(state.activeDocumentId);
+        removePlan(state.activeDocumentId);
         return;
       }
 
-      saveAutosavedDraft(snapshot, { withHistory: true });
+      // Only the active plan needs flushing here: every other open plan was
+      // written in full when it was parked, which is a better moment than this
+      // one — the browser may abandon an IndexedDB transaction once the page is
+      // going away, and parking happens while it is unambiguously alive.
+      saveAutosavedDraft(state.activeDocumentId, snapshot, { withHistory: true });
     };
 
     const handleVisibilityChange = () => {
@@ -260,12 +431,32 @@ export function useAutosave() {
       }
     };
 
+    /**
+     * Warn on close only when closing actually loses something.
+     *
+     * With `saveOnExit` on, the draft is the net and every open plan is on
+     * disk, so a prompt would fire on every close and teach the user to dismiss
+     * it. With it off, nothing is being kept at all, and a plan holding work is
+     * about to be lost — which is the one case worth interrupting for.
+     */
+    const warnIfUnkept = (event) => {
+      if (saveOnExit) return;
+      const state = useAppStore.getState();
+      const anyWork = state.image
+        || state.documentOrder.some((id) => state.documents[id]?.hasWork);
+      if (!anyWork) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
     window.addEventListener('beforeunload', flushAutosaveNow);
+    window.addEventListener('beforeunload', warnIfUnkept);
     window.addEventListener('pagehide', flushAutosaveNow);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('beforeunload', flushAutosaveNow);
+      window.removeEventListener('beforeunload', warnIfUnkept);
       window.removeEventListener('pagehide', flushAutosaveNow);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };

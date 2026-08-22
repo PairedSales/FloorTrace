@@ -1,4 +1,5 @@
 import useAppStore from './appStore';
+import { parkedStateFor, queueForParked } from './documentManager';
 
 /**
  * Ownership for asynchronous work.
@@ -24,19 +25,24 @@ import useAppStore from './appStore';
  * releases it. The token also carries an `AbortController`, so work that can
  * stop early has one standard thing to check.
  *
- * The verdicts `deliver` can return, and why there are three rather than two:
+ * The verdicts `deliver` can return:
  *
- *   'applied' — the owning plan is the live one; the result is written.
+ *   'applied' — the owning plan is the live one; the result is written now.
+ *   'routed'  — the plan is open but parked. The write is held and replayed
+ *               when that plan is next adopted.
  *   'stale'   — the plan still exists but its image has been replaced since the
  *               work began, so the result describes ink that is gone.
  *   'dropped' — the owning plan is gone entirely.
  *
- * A fourth verdict, 'routed', belongs here once a plan can be open without
- * being live: a result for a background plan should reach that plan rather than
- * be thrown away. There is no such state yet — one plan is open and it is
- * always the active one — so routing is deliberately absent rather than stubbed.
- * `resolveOwner` below is the single place that decision is made, and it is
- * where routing will go.
+ * 'routed' is what stops a plan switch from quietly throwing work away. Start a
+ * trace, switch tabs while it runs, and before this existed the result resolved
+ * to 'dropped' and the spinner cleared — you came back to a plan where the
+ * trace simply had not happened, with nothing on screen to say so.
+ *
+ * A routed write is held as the *same closure* that would have run live, and is
+ * run once its plan is back on the store root. That is deliberate: the
+ * alternative is expressing every result twice, once as a live side effect and
+ * once as a patch for a parked record, and those two expressions drift.
  */
 
 /** @type {Map<string, Set<object>>} docId → live tokens */
@@ -97,10 +103,18 @@ function resolveOwner(token) {
   if (!token) return 'dropped';
   if (token.controller.signal.aborted) return 'dropped';
   const state = useAppStore.getState();
-  // Only the active plan exists today, so "not the active plan" means gone.
-  // When a plan can be open in the background this is where 'routed' is
-  // returned instead, and `deliver` gains a branch that writes to it.
-  if (token.docId !== state.activeDocumentId) return 'dropped';
+
+  if (token.docId !== state.activeDocumentId) {
+    // Open but parked: hold the write for when this plan comes back. Closed:
+    // there is nothing to hold it for.
+    if (!state.documents[token.docId]) return 'dropped';
+    // The parked plan's own image, not the live one. A crop it received before
+    // being parked makes this result as stale as it would be live.
+    const parkedImage = parkedStateFor(token.docId)?.image;
+    if (parkedImage !== undefined && parkedImage !== token.image) return 'stale';
+    return 'routed';
+  }
+
   if (token.image !== state.image) return 'stale';
   return 'applied';
 }
@@ -117,9 +131,26 @@ export const isCurrent = (token) => resolveOwner(token) === 'applied';
  * The verdict is returned rather than swallowed so a caller can tell "written"
  * from "deliberately not written" — the two used to be the same silent `return`.
  */
-export function deliver(token, apply) {
+export function deliver(token, apply, { replayable = true } = {}) {
   const verdict = resolveOwner(token);
-  if (verdict === 'applied') apply();
+  if (verdict === 'applied') {
+    apply();
+    return verdict;
+  }
+  if (verdict === 'routed') {
+    // Held, not run. `apply` writes through the store's setters, which address
+    // whichever plan is live — so running it now would write this result onto
+    // somebody else's drawing, which is the exact failure this layer exists to
+    // prevent. It runs at adopt time instead, when those setters mean the plan
+    // the work was about.
+    //
+    // `replayable: false` is for writes that must not survive a switch at all.
+    // A calibration is the case: area goes as scale squared, so a scale applied
+    // late, from evidence the user has moved on from, is a wrong number that
+    // looks like a right one.
+    if (!replayable) return 'refused';
+    queueForParked(token.docId, apply);
+  }
   return verdict;
 }
 

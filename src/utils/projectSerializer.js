@@ -542,7 +542,25 @@ export function deserializeSketch(project) {
 
 // ── Export & Import Orchestration ───────────────────────────────────────────
 
-export async function exportProject(storeState, historyState, isSaveAs = false) {
+/**
+ * The file handle a plan was last saved to, for as long as the page lives.
+ *
+ * Kept in memory rather than in IndexedDB. A `FileSystemFileHandle` is
+ * structured-cloneable and could be persisted, but a handle read back after a
+ * reload has no permission attached — writing through it needs
+ * `requestPermission`, which needs a user gesture, which means a re-grant
+ * prompt on the first save of every restored plan. Within a session there is
+ * no such problem: the grant from `showSaveFilePicker` is still live, so Save
+ * overwrites the file the user chose instead of dropping another dated copy in
+ * Downloads. That is the whole win, and it costs nothing.
+ *
+ * @type {Map<string, FileSystemFileHandle>} docId → handle
+ */
+const fileHandles = new Map();
+
+export const forgetFileHandle = (docId) => fileHandles.delete(docId);
+
+export async function exportProject(storeState, historyState, isSaveAs = false, docId = null) {
   // Sanitize on the way out as well as the way in: a NaN produced in-session
   // otherwise yields a file that fails this module's own importer.
   const project = sanitizeData(serializeSketch(storeState, historyState));
@@ -560,6 +578,22 @@ export async function exportProject(storeState, historyState, isSaveAs = false) 
   const named = (storeState.projectName || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
   const defaultFilename = `${named || 'Sketch'} ${timestamp}.floorplan`;
 
+  // A plan already saved through the picker this session overwrites that file,
+  // rather than asking again or leaving a second dated copy behind.
+  const known = docId ? fileHandles.get(docId) : null;
+  if (!isSaveAs && known) {
+    try {
+      const writable = await known.createWritable();
+      await writable.write(jsonString);
+      await writable.close();
+      return true;
+    } catch (err) {
+      // The file may have been moved, deleted or had permission revoked since.
+      // Fall through to the normal path rather than failing the save.
+      if (err.name !== 'AbortError') fileHandles.delete(docId);
+    }
+  }
+
   // Native showSaveFilePicker flow if Save As is requested and supported
   if (isSaveAs && 'showSaveFilePicker' in window) {
     try {
@@ -575,6 +609,7 @@ export async function exportProject(storeState, historyState, isSaveAs = false) 
       const writable = await handle.createWritable();
       await writable.write(jsonString);
       await writable.close();
+      if (docId) fileHandles.set(docId, handle);
       return true;
     } catch (err) {
       if (err.name === 'AbortError') return false; // user cancelled

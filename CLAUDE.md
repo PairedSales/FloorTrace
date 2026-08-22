@@ -16,6 +16,7 @@ npm run lint        # eslint .
 npm test            # vitest run (all tests)
 npx vitest run <path/to/file.test.js>   # run a single test file
 npm run bench:detection    # detection accuracy against fixtures/ (runs in CI)
+npm run bench:scale        # scale selection against fixtures/ (runs in CI)
 npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path only)
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 ```
@@ -25,6 +26,72 @@ Vitest tests live under `src/utils/**/__tests__/`. There is no browser/e2e test 
 **Always run `npm run bench:detection` before and after a detection change.** It scores polygon shape and square feet, not just bounding boxes — a tracer that returns each building's bounding rectangle passes a box check while discarding every notch and wing. `npm run probe:exterior` prints the same scenarios `exterior-failures.test.js` asserts (wide openings, U-notches, dimension strings, courtyards, legends, garage doors, nested plans, mixed wall thickness) with IoU/area/confidence, which is the fastest way to see what a change did. `npm run probe:exterior draw` does the same for draw mode, re-tracing those scenarios from a synthetic sloppy brush stroke (`strokeAround` in `synthetic.js`) — jitter and brush width should not move the numbers.
 
 ## Architecture
+
+### Two levels: plans and outlines
+
+A **plan** is one image and everything measured from it — its own calibration,
+traces, OCR results, undo history and camera. It is what a tab addresses.
+An **outline** is one polygon *within* one plan.
+
+The terminology is load-bearing because the repo has an inverted collision:
+`floorManager.js` calls an outline a "floor", while the `.floorplan` file's
+`floors[]` array is plan-shaped and always holds exactly one entry. **No new
+code may use "floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
+the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
+switches outlines, so plan switching cannot have those keys.
+
+**The tab strip is its own band**, between the menu bar and the command bar
+(`DocumentTabs.jsx`, inserted in `App.jsx`). It cannot ride in the menu bar row —
+that 30 px row is fully spent by the wordmark, five menu titles and a `StatusBar`
+whose cells are deliberately `shrink-0` and forbidden from scrolling. **The band
+must not scroll either**: tabs share the width and truncate to a ~96 px floor, and
+whatever no longer fits moves into a chevron menu. A strip that scrolls hides plans
+behind a gesture, which is what a tab strip exists to prevent.
+
+**`DocumentTabs` must import nothing from `./canvas/` or `./CanvasStage`.** It lives
+in the eager shell; one such import returns konva to the entry's static module graph
+and puts a `modulepreload` for 320 kB back in `dist/index.html`. Check that file
+after touching the shell — the link is the regression signal.
+
+On mobile the switcher gets **no permanent chrome**: the thumb bar is contractually
+one verb and the canvas claims every touch, so the subject line in the top bar —
+which already names the plan — opens `MobilePlansSheet`, rendering the same list.
+
+**One plan is on the store root at a time; the rest are parked.** `documentManager.js`
+holds parked plans as inert records in a module `Map` — never in the store, because
+putting them there would invite a component subscribing to a plan it is not showing.
+A switch is *park → adopt*, and its correctness rests on three things:
+
+- **`PARK_FIELDS` is not `AUTOSAVE_FIELDS`.** It adds `isDirty`, `drawModeActive`
+  and `traceInteractionMode`. A draft is read back at startup, when those three are
+  meaningless; a park is a round trip within one session, when they are live facts.
+  Parking through the autosave projection silently launders away "this plan has
+  unsaved work", and returns brush strokes with no brush in hand.
+- **`adoptParkedState` is not `loadProject`.** `loadProject` spreads defaults first
+  and force-sets four fields, which is right for *opening* a plan and wrong for
+  *restoring* one. Adopt also deliberately skips `normalizeTraces` — that is a
+  migration for traces coming off disk, and running it rebuilds every trace object,
+  costing the reference identity the area memo compares on.
+- **`<Canvas key={activeDocumentId}>`** is the whole argument for in-progress
+  gestures. The canvas hooks hold state outside the store — a crop rectangle
+  mid-drag, the eraser's starting vertices, a half-dragged vertex index — and none
+  of it is parked, because none of it is a fact about the plan. It dies with the tree.
+
+**Hooks are workspace-level or per-plan, and it matters where they mount.**
+`App.jsx` mounts twelve; the `key` is on `<Canvas>` only, so none of them remount
+today — but before reaching for a keyed subtree, know which is which.
+*Workspace-level, must never sit inside a keyed subtree:* `useAutosave`,
+`useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`, `useToolLabels`,
+`useKeyboardShortcuts`, `useIsMobile`. *Per-plan, state keyed by plan id:*
+`useAutoScale` (its `lastRunByDocRef`), `useToolManager`, `useProjectIO`,
+`useExhibitExport`, `useDragAndDrop`.
+
+**Async results are owned, not inferred.** `documentRequests.js` hands out a token
+at `beginWork` and `deliver` decides what may be written, returning `'applied'`,
+`'stale'` or `'dropped'`. The old `image !== startImage` guard answered two
+questions with one comparison, and got the second wrong in the dangerous direction:
+two plans opened from the same file hold the same data URL, so each passes the
+other's staleness test exactly.
 
 ### State: one Zustand store, snapshot-based undo/autosave
 

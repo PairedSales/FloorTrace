@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
 import MenuBar from './components/MenuBar';
+import DocumentTabs from './components/DocumentTabs';
 import CommandBar from './components/CommandBar';
 import ContextBar from './components/ContextBar';
 import ToolRail from './components/ToolRail';
@@ -23,7 +24,7 @@ import {
   detectAllDimensions,
   terminateOcrWorker,
   releaseOcrWorkersWhenIdle
-} from './utils/DimensionsOCR';
+} from './utils/ocrLazy';
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
@@ -51,6 +52,8 @@ import { useOcrWarmup } from './hooks/useOcrWarmup';
 import { useTheme } from './hooks/useTheme';
 import { useToolLabels } from './hooks/useToolLabels';
 import { useIsMobile } from './hooks/useViewport';
+import { usePlanManager } from './hooks/usePlanManager';
+import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { useDocumentTitle } from './hooks/useDocumentTitle';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
@@ -196,6 +199,8 @@ function App() {
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  const documentOrder = useAppStore((s) => s.documentOrder);
   const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
   const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
@@ -257,6 +262,7 @@ function App() {
 
   // ── Custom hooks ─────────────────────────────────────────────────────────
 
+  const { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan } = usePlanManager();
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave();
   const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr();
   const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
@@ -319,23 +325,32 @@ function App() {
                       : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
                         : 'select';
 
-  // Reset entire application
-  const handleRestart = async () => {
-    if (image) {
-      const confirmed = await confirmToast('Restart and clear the current project?', {
-        confirmLabel: 'Restart',
-      });
-      if (!confirmed) return;
+  // "Close project" split in two once more than one plan can be open: closing
+  // the one you are looking at is a different act from closing everything, and
+  // the old single command silently meant the second.
+  const handleClosePlan = useCallback(async () => {
+    const state = useAppStore.getState();
+    // The last plan does not disappear — there is no "no document" state in
+    // this app — so closing it empties it in place.
+    if (state.documentOrder.length === 1) {
+      if (state.image) {
+        const confirmed = await confirmToast('Close this plan? Its measurements will be discarded.', {
+          confirmLabel: 'Close plan',
+        });
+        if (!confirmed) return;
+      }
+      detachActiveDocument();
+      undoManager.clear();
+      useAppStore.getState().restart();
+      flash('Plan closed');
+      return;
     }
-    clearAutosavedDraft();
-    // Anything still running was about the drawing being closed. Its results
-    // would be refused anyway — the image is about to be null — but aborting
-    // says so now rather than paying for a trace nobody will read.
-    detachActiveDocument();
-    undoManager.clear();
-    useAppStore.getState().restart();
-    flash('Project closed');
-  };
+    await closePlan(state.activeDocumentId);
+  }, [closePlan]);
+
+  const handleCloseAllPlans = useCallback(async () => {
+    if (await closeAllPlans()) clearAutosavedDraft();
+  }, [closeAllPlans, clearAutosavedDraft]);
 
   // OCR found nothing usable: drop a placeholder overlay in the middle of the
   // image for the user to size by hand.
@@ -375,11 +390,16 @@ function App() {
     } else {
       // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
       if (!forceEnter && (roomOverlay || perimeterOverlay)) {
+        // A dialog is an await like any other. The plan it is asking about must
+        // still be the live one when the answer arrives, or the undo point and
+        // the clearing below land on a different drawing.
+        const asking = beginWork('confirm');
         const confirmed = await confirmToast(
           'Entering Manual Mode will clear existing overlays. Continue?',
           { confirmLabel: 'Continue' }
         );
-        if (!confirmed) {
+        settleWork(asking);
+        if (!confirmed || !isCurrent(asking)) {
           return;
         }
         // Save undo state before clearing overlays
@@ -482,13 +502,20 @@ function App() {
   const handleFindRoomSize = useCallback(async () => {
     if (!image) return;
 
+    const asking = beginWork('confirm');
     if (roomOverlay || perimeterOverlay) {
       const confirmed = await confirmToast(
         'Scanning for room size will clear your existing room and perimeter overlays. Continue?',
         { confirmLabel: 'Scan' }
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        settleWork(asking);
+        return;
+      }
     }
+    settleWork(asking);
+    // Same rule as above: everything below clears and re-scans one plan.
+    if (!isCurrent(asking)) return;
 
     undoManager.save();
     
@@ -515,13 +542,14 @@ function App() {
   ]);
 
   const {
-    checkUnsavedChanges,
+    makeRoomForIncoming,
     handleFileOpen,
     handleFileUpload,
     handleSaveProject,
+    handleSaveAllProjects,
     handleSaveProjectNormal,
     handleSaveProjectAs,
-  } = useProjectIO(handleManualMode, fileInputRef);
+  } = useProjectIO(handleManualMode, fileInputRef, openPlan);
 
   const { openExport, closeExport, copyExhibitNow } = useExhibitExport();
 
@@ -529,7 +557,7 @@ function App() {
     handlePasteImage,
     handleDragOver,
     handleDrop,
-  } = useDragAndDrop(handleManualMode, checkUnsavedChanges);
+  } = useDragAndDrop(handleManualMode, makeRoomForIncoming);
 
   // Vertex-by-vertex outline placement. Draw mode is the default fallback now,
   // but placing exact corners is still the right tool when the plan is clean
@@ -706,28 +734,45 @@ function App() {
       });
 
       perfMark(MARKS.traceEnd);
-      if (!isCurrent(work)) return null;
-      // Kept for brush results too: a drawn trace has the same inner/outer
-      // pair, so toggling wall mode afterwards must still work.
-      setTracedBoundaries(traced);
-      const floorCount = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
-      // Runs on the outlines this trace just produced, inside the same undo
-      // step: a basement that arrives typed as living area is the same wrong
-      // answer as one traced in the wrong place.
-      const typeChanges = floorCount
-        ? useAppStore.getState().classifyTraceTypes()
-        : [];
+
+      // One closure, whichever plan it turns out to belong to. Run now if this
+      // plan is live; held and replayed on adopt if the user switched tabs
+      // while the trace ran. Held rather than dropped is the whole point: a
+      // trace is seconds of work, and losing it silently because you looked at
+      // another plan is the kind of nothing-happened that is hard to even
+      // report as a bug.
+      // Captured from the apply, never re-derived. This count is what decides
+      // whether `handleTracePerimeter` falls back to draw mode, and
+      // `applyTracedBoundary` returns the floors it could actually use — which
+      // is not the same as the floors the detector reported.
+      let applied = 0;
+      const applyTrace = () => {
+        // Kept for brush results too: a drawn trace has the same inner/outer
+        // pair, so toggling wall mode afterwards must still work.
+        setTracedBoundaries(traced);
+        const floors = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
+        // Inside the apply and not beside it: the classification reads this
+        // plan's `areaLabels` and retypes the outlines this closure has just
+        // placed, so on the held-and-replayed path both have to be the
+        // adopting plan's, not whichever plan was live when the trace started.
+        const typeChanges = floors ? useAppStore.getState().classifyTraceTypes() : [];
+        // Every trace, not only the one the automatic scan ran: the footprint is
+        // the one check on the scale that survives a majority of bad rooms, and a
+        // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure
+        // selection over rooms already measured, and no-ops unless the scale in
+        // force is still the automatic one.
+        applied = floors;
+        if (floors) reviewAgainstFootprint(tracedAreaPx(traced));
+        reportTrace(traced, floors);
+        reportTraceTypes(typeChanges);
+      };
+
+      const verdict = deliver(work, applyTrace);
+      if (verdict !== 'applied') return null;
+
       perfMark(MARKS.areaReady);
       perfReportRun();
-      // Every trace, not only the one the automatic scan ran: the footprint is
-      // the one check on the scale that survives a majority of bad rooms, and a
-      // toolbar re-trace or a draw-mode pass changes it. It re-runs a pure
-      // selection over rooms already measured, and no-ops unless the scale in
-      // force is still the automatic one.
-      if (floorCount) reviewAgainstFootprint(tracedAreaPx(traced));
-      reportTrace(traced, floorCount);
-      reportTraceTypes(typeChanges);
-      return floorCount ? qualitySummary(traced?.quality).level : 'failed';
+      return applied ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
       // The toast is a claim about the plan on screen — `id: 'trace-result'`
       // means it replaces whatever that plan's own trace had to say — so it is
@@ -1226,7 +1271,15 @@ function App() {
       ? { field: 'eraserBrushSize', setSize: setEraserBrushSize, min: 4, max: 200, step: 4 }
       : null;
 
+  const handleSelectPlan = useCallback((index) => {
+    const order = useAppStore.getState().documentOrder;
+    if (order[index]) switchPlan(order[index]);
+  }, [switchPlan]);
+
   useKeyboardShortcuts({
+    onNewPlan: openPlan,
+    onStepPlan: stepPlan,
+    onSelectPlan: handleSelectPlan,
     onPaste: handlePasteImage,
     onFileOpen: handleFileOpen,
     onSaveProject: handleSaveProject,
@@ -1353,8 +1406,16 @@ function App() {
   // The plan view, built once and handed to whichever shell is on. Same
   // element, same props: nothing about tracing depends on the chrome around it,
   // and a second copy of this list is a second place for them to diverge.
+  // `key` is the entire correctness argument for in-progress gestures across a
+  // plan switch. The canvas hooks hold real state outside the store — a crop
+  // rectangle mid-drag, the eraser's starting vertices, the void tool's target
+  // trace, a half-dragged vertex index, the protractor's live coordinates — and
+  // none of it is parked, because none of it is a fact about the plan. Keying
+  // the subtree on the plan means all of it dies with the tree instead of being
+  // reinterpreted against a different drawing.
   const canvasElement = (
     <Canvas
+      key={activeDocumentId}
       ref={canvasRef}
       image={image}
       roomOverlay={roomOverlay}
@@ -1430,6 +1491,9 @@ function App() {
     >
       {isMobile ? (
         <MobileChrome
+          onSelectPlan={switchPlan}
+          onClosePlan={closePlan}
+          onNewPlan={openPlan}
           activeTool={activeTool}
           hasToolData={hasToolData}
           onMenuFileOpen={handleFileOpen}
@@ -1437,7 +1501,7 @@ function App() {
           onExport={openExport}
           onCopyExhibit={copyExhibitNow}
           onSaveProject={handleSaveProject}
-          onRestart={handleRestart}
+          onRestart={handleClosePlan}
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
@@ -1482,9 +1546,16 @@ function App() {
         onPasteImage={handlePasteImage}
         onSaveProject={handleSaveProject}
         onSaveProjectAs={handleSaveProjectAs}
+        onSaveAllProjects={handleSaveAllProjects}
         onExport={openExport}
         onCopyExhibit={copyExhibitNow}
-        onRestart={handleRestart}
+        onRestart={handleClosePlan}
+        onCloseAllPlans={handleCloseAllPlans}
+        onNewPlan={openPlan}
+        onNextPlan={() => stepPlan(1)}
+        onPrevPlan={() => stepPlan(-1)}
+        planCount={documentOrder.length}
+        canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
         onHelpOpen={handleHelpOpen}
         onFitToWindow={handleFitToWindow}
         onTracePerimeter={handleTracePerimeter}
@@ -1518,6 +1589,17 @@ function App() {
             onExport={openExport}
           />
         )}
+      />
+
+      {/* Its own band. It cannot ride in the menu bar row — that 30 px row is
+          fully spent, and the status bar in it is explicitly forbidden from
+          scrolling. Gated on there being plans, like the tool rail, so the
+          empty app is unchanged. */}
+      <DocumentTabs
+        onSelect={switchPlan}
+        onClose={closePlan}
+        onNew={openPlan}
+        isProcessing={isProcessing}
       />
 
       <CommandBar
@@ -1608,10 +1690,13 @@ function App() {
 
       <ConfirmDialog />
 
+      {/* `multiple`, now that each file can become its own plan. The camera
+          input below stays single — a photo is one plan by definition. */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*,.floorplan"
+        multiple
         onChange={handleFileUpload}
         className="hidden"
       />
@@ -1643,7 +1728,7 @@ function App() {
         style={{
           top: isMobile
             ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : '86px',
+            : '116px',
         }}
         toastOptions={{
           classNames: {

@@ -2,6 +2,7 @@ import { useCallback, useRef, useEffect } from 'react';
 import { createImageSnapAnalyzer } from '../../../utils/imageSnapper';
 import { createWallSnapEngine, wallSnapEngineFromSegments } from '../../../utils/wallSnapEngine';
 import { computeWallSnapSegments } from '../../../utils/detection';
+import { cachedWallSnapEngine, rememberWallSnapEngine } from '../wallSnapEngineCache';
 
 // Build the engine in the detection worker, which already holds this image
 // decoded, and fall back to the main-thread builder if that fails. Building it
@@ -9,12 +10,22 @@ import { computeWallSnapSegments } from '../../../utils/detection';
 // data-URL decode, landing a few frames into the first gesture after every
 // image change (and `image` changes on every crop, so this is not once per
 // session).
-const buildWallSnapEngine = (image) =>
+// Memoised across mounts, keyed by image identity, because this hook remounts
+// on every plan switch — the canvas subtree is keyed on the active plan.
+// Without the memo, autoSnapEnabled defaulting to true means merely switching
+// tabs posts a wallSnapSegments request and rebuilds an engine the app already
+// had, with no user action at all.
+//
+// The cache itself lives in a leaf module so the store can release a closed
+// plan's engine without importing anything under ./canvas/.
+const buildWallSnapEngine = (image) => cachedWallSnapEngine(image) ?? rememberWallSnapEngine(
+  image,
   computeWallSnapSegments(image)
     .then((segments) => (segments
       ? wallSnapEngineFromSegments(segments)
       : createWallSnapEngine(image)))
-    .catch(() => createWallSnapEngine(image));
+    .catch(() => createWallSnapEngine(image)),
+);
 
 export function useSnappingSystem({ autoSnapEnabled, image }) {
   const imageSnapAnalyzerRef = useRef(null);

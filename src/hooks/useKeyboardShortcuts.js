@@ -4,10 +4,16 @@ import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
+import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
 // Trace switching covers the whole trace list, which floorManager caps at seven
 // colours — so it stops at 7 even as the tool row below grows past it.
 const TRACE_DIGIT_COUNT = 7;
+
+// Plan switching stops at the number of plans that can be open, the same way
+// trace switching stops at the colours floorManager hands out. One constant
+// each, so neither drifts from what it is counting.
+const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
 
 /**
  * useKeyboardShortcuts
@@ -35,6 +41,9 @@ const TRACE_DIGIT_COUNT = 7;
  *   press in one frame resolve to the same new size.
  */
 export function useKeyboardShortcuts({
+  onNewPlan,
+  onStepPlan,
+  onSelectPlan,
   onPaste,
   onFileOpen,
   onSaveProject,
@@ -174,6 +183,39 @@ export function useKeyboardShortcuts({
         }
       }
 
+      // ── plan switching ──────────────────────────────────────────────────
+      // Ctrl+Alt, because every obvious chord is owned by the browser and not
+      // preventable from a page: Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab,
+      // Ctrl+PageUp/Down and Ctrl+1–9 all belong to the tab strip above us.
+      // Taking one and having it half-work is worse than not offering it.
+      // Ctrl+Alt+W is avoided too — macOS Safari and Chrome take it.
+      //
+      // `Alt/Shift+1–7` stays on outlines. The two levels are different things
+      // and must not share a key space.
+      if ((e.ctrlKey || e.metaKey) && e.altKey) {
+        const planDigit = /^Digit[1-9]$/.test(e.code || '') ? Number(e.code.slice(5)) : null;
+        if (planDigit) {
+          e.preventDefault();
+          if (planDigit <= PLAN_DIGIT_COUNT) onSelectPlan?.(planDigit - 1);
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          onStepPlan?.(1);
+          return;
+        }
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          onStepPlan?.(-1);
+          return;
+        }
+        if (e.key.toLowerCase() === 'n') {
+          e.preventDefault();
+          onNewPlan?.();
+          return;
+        }
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
 
@@ -222,7 +264,7 @@ export function useKeyboardShortcuts({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onPaste, onFileOpen, onSaveProject, onExport, onCopyExhibit, activeBrush,
-    onRotateCanvas, onFitToWindow, toolDigits]);
+    onRotateCanvas, onFitToWindow, toolDigits, onNewPlan, onStepPlan, onSelectPlan]);
 
   // ── mousedown: side buttons for undo/redo ─────────────────────────────────
   useEffect(() => {

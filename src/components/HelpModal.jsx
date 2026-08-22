@@ -16,7 +16,12 @@ const shortcuts = [
   // Same order as the tool rail reads, top to bottom — that is what the digits
   // now follow, so the two can be learned as one thing.
   { keys: '1 – 9', description: 'Paint outline, Place corners, Cut out, Set scale, Measure, Area, Angle, Crop, Erase' },
-  { keys: 'Alt / Shift + 1 – 7', description: 'Switch perimeter trace' },
+  { keys: 'Alt / Shift + 1 – 7', description: 'Switch outline within this plan' },
+  // Ctrl+Alt rather than the obvious chords: Ctrl+Tab, Ctrl+W and Ctrl+1–9 all
+  // belong to the browser's own tab strip and cannot be taken from a page.
+  { keys: `${mod} + ${alt} + 1 – 6`, description: 'Switch to a plan by number' },
+  { keys: `${mod} + ${alt} + ← / →`, description: 'Previous or next plan' },
+  { keys: `${mod} + ${alt} + N`, description: 'New plan' },
   { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
   { keys: 'Esc', description: 'Cancel the current stroke or tool' },
   { keys: 'Delete', description: 'Delete the selected line, shape, void or vertex' },

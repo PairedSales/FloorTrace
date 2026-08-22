@@ -6,14 +6,14 @@ import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
 
-export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
+export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
   const setImage = useAppStore((s) => s.setImage);
   const setImageMimeType = useAppStore((s) => s.setImageMimeType);
   const resetOverlays = useAppStore((s) => s.resetOverlays);
   const setIsProcessing = useAppStore((s) => s.setIsProcessing);
 
   const handlePasteImage = useCallback(async () => {
-    if (!(await checkUnsavedChanges())) return;
+    if (!makeRoomForIncoming()) return;
 
     try {
       perfResetRun();
@@ -36,22 +36,20 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
       console.error('Error pasting image:', error);
       notify('Nothing to paste — copy an image first.', { type: 'error', id: 'paste' });
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setImage, setImageMimeType]);
+  }, [resetOverlays, handleManualMode, makeRoomForIncoming, setImage, setImageMimeType]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
   }, []);
 
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
+  const openOne = useCallback(async (file) => {
     if (!file) return;
 
     const isFloorplan = file.name.endsWith('.floorplan');
     const isImage = file.type.startsWith('image/');
     if (!isFloorplan && !isImage) return;
 
-    if (!(await checkUnsavedChanges())) return;
+    if (!makeRoomForIncoming()) return;
 
     try {
       if (isFloorplan) {
@@ -69,6 +67,9 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
         useAppStore.getState().loadProject(statePatch);
         undoManager.setHistoryState(historyPatch);
         useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
+        // The image branch below prewarms and this one never did, so opening a
+        // saved project paid for a cold analysis on its first trace.
+        prewarmDetection(statePatch.image);
 
         flash('Project loaded');
       } else {
@@ -92,7 +93,21 @@ export function useDragAndDrop(handleManualMode, checkUnsavedChanges) {
     } finally {
       setIsProcessing(false);
     }
-  }, [resetOverlays, handleManualMode, checkUnsavedChanges, setIsProcessing, setImage, setImageMimeType]);
+  }, [resetOverlays, handleManualMode, makeRoomForIncoming, setIsProcessing, setImage, setImageMimeType]);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    // Every dropped file, each becoming its own plan. Dropping a folder's worth
+    // of elevations and getting only the first one was never the intent; it was
+    // the only thing a single-document app could do.
+    const files = [...(e.dataTransfer?.files ?? [])];
+    for (const file of files) {
+      // Sequential on purpose: each file opens a plan, and opening runs a
+      // scan that must not race the next one for the OCR clock.
+      await openOne(file);
+    }
+  }, [openOne]);
+
 
   return {
     handlePasteImage,

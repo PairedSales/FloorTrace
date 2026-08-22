@@ -44,6 +44,18 @@ function getDB() {
 const imageKeyFor = (key, hash) => `${key}::image::${hash}`;
 
 /**
+ * Whether a storage failure means "out of room" rather than "broken".
+ * Checked by name and by legacy code because browsers disagree: Firefox has
+ * historically thrown code 1014 under a different name.
+ */
+export const isQuotaError = (error) => (
+  error?.name === 'QuotaExceededError'
+  || error?.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+  || error?.code === 22
+  || error?.code === 1014
+);
+
+/**
  * Saves draft data to IndexedDB. Falls back to localStorage if IndexedDB fails.
  *
  * The image is stored as its own record rather than inside the draft, because
@@ -84,6 +96,12 @@ export async function setDraft(key, data, image, imageChanged) {
       transaction.onabort = () => reject(transaction.error);
     });
   } catch (error) {
+    // Quota is the one failure the fallback cannot help with: localStorage is
+    // roughly a tenth the size, so writing there is guaranteed to fail too —
+    // and the attempt costs a synchronous serialisation of a multi-MB payload
+    // on the main thread before it does. Reported so a caller can shed load and
+    // tell the user, rather than swallowed as a fallback that never worked.
+    if (isQuotaError(error)) throw error;
     console.warn('IndexedDB setDraft failed, falling back to localStorage:', error);
     // No transaction and no second record here, so the fallback writes the
     // combined payload. A state record with no image is one `restoreFromSaved`

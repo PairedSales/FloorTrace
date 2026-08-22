@@ -186,6 +186,63 @@ export function clear() {
 }
 
 /**
+ * Set this plan's history aside, whole, so another plan can take the stacks.
+ *
+ * Carries `savedRedoStackForCancel`, which `getHistoryState` does not, and that
+ * omission would be silent: `save()` and `cancelLastSave()` are used as a pair
+ * around actions that may turn out to be no-ops — a vertex drag that does not
+ * move, a dimension field focused and blurred unchanged. A pair straddling a
+ * plan switch would find the slot nulled on return and leave a spurious undo
+ * point behind, with no error and nothing to see.
+ *
+ * The stacks are handed over by reference and then dropped here, so nothing is
+ * copied and nothing stays shared.
+ */
+export function parkHistory() {
+  const parked = {
+    undoStack,
+    redoStack,
+    imagePool: new Map(imagePool),
+    savedRedoStackForCancel,
+  };
+  undoStack = [];
+  redoStack = [];
+  savedRedoStackForCancel = null;
+  imagePool.clear();
+  emit();
+  return parked;
+}
+
+/**
+ * Take a parked history back. The inverse of `parkHistory`; a plan that has
+ * never been parked adopts an empty history rather than keeping whatever the
+ * previous plan left behind.
+ */
+export function adoptHistory(parked) {
+  undoStack = parked?.undoStack ?? [];
+  redoStack = parked?.redoStack ?? [];
+  savedRedoStackForCancel = parked?.savedRedoStackForCancel ?? null;
+  imagePool.clear();
+  if (parked?.imagePool) {
+    for (const [k, v] of parked.imagePool) imagePool.set(k, v);
+  }
+  emit();
+}
+
+/**
+ * Forget that the last `save()` can be cancelled, without touching the stacks.
+ *
+ * `cancelLastSave` pops the undo stack, so it must only ever be reachable by
+ * the code that called `save()` moments earlier. Across a plan switch that
+ * pairing is broken — the save belongs to one plan and the cancel would land on
+ * whichever plan is live — so the switch gives up the option rather than
+ * carrying it.
+ */
+export function cancelPendingSave() {
+  savedRedoStackForCancel = null;
+}
+
+/**
  * Gather the current undo history state for serialization.
  */
 export function getHistoryState() {

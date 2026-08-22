@@ -193,6 +193,34 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
 );
 
 /**
+ * What a plan carries when it is set aside so another can take the store root.
+ *
+ * Deliberately NOT `AUTOSAVE_FIELDS`, and the difference is the whole point.
+ * A draft is written to disk and read back at startup, when three of these are
+ * meaningless — nobody is mid-gesture across a page load. A park is a
+ * round trip within one session, where all three are live facts about the plan
+ * being set aside:
+ *
+ *  - `isDirty` says the plan has unsaved work. It is set by nearly every
+ *    mutation and cleared in exactly one place, and `checkUnsavedChanges`
+ *    reads it. Parking through the autosave projection would silently clear it
+ *    on the way back — switching away and back would launder away the fact
+ *    that a plan has unsaved changes.
+ *  - `drawModeActive` is excluded from autosave as a "transient tool toggle",
+ *    but `drawStrokes` is NOT — so parking one without the other returns a plan
+ *    with brush strokes on it and no brush in the user's hand.
+ *  - `traceInteractionMode` pairs with `perimeterVertices` the same way: the
+ *    vertices come back, the fact that the user was placing them does not.
+ *
+ * Excluded on purpose: `isProcessing` / `processingMessage`, because a plan's
+ * in-flight work is abandoned when it is parked, so returning to a spinner
+ * would be a lie; and `viewportSyncToken`, which is a fresh random per camera
+ * write whose only reader compares it against a ref that is null on mount.
+ */
+const PARK_ONLY_FIELDS = ['isDirty', 'drawModeActive', 'traceInteractionMode'];
+const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
+
+/**
  * Fields written into a saved `.floorplan`. Derived from the same declaration
  * as the other two projections — hand-maintaining this list is how
  * `exteriorLabels` came to be autosaved but not exported, so reopening a
@@ -392,6 +420,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       throw new Error("Invalid calibration scale");
     }
 
+    // Whatever the plan was flagged for is now answered.
+    get().setActiveDocumentMeta({ needsRescale: false });
     set({
       calibration: {
         calibrated: true,
@@ -615,6 +645,42 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   // ── bulk restore (used by autosave restore) ────────────────────────────────
 
+  /** Everything the active plan needs to be restored exactly as it is now. */
+  getParkedState: () => pickFields(get(), PARK_FIELDS),
+
+  /**
+   * Take a parked plan onto the store root.
+   *
+   * Deliberately not `loadProject`, which spreads `workingStateDefaults()`
+   * first and then force-sets four fields. That is right for *opening* a plan —
+   * a file has no opinion about interaction mode — and wrong for *restoring*
+   * one, where the whole point is that nothing was lost. Anything a parked
+   * record does not carry is reset to its default, so the two transient fields
+   * PARK_FIELDS leaves out come back clean rather than stale.
+   */
+  adoptParkedState: (parked) => {
+    const defaults = workingStateDefaults();
+    const patch = {};
+    for (const k of PARK_FIELDS) {
+      patch[k] = k in parked ? parked[k] : defaults[k];
+    }
+    patch.isProcessing = false;
+    patch.processingMessage = '';
+    patch.viewportSyncToken = null;
+    // Deliberately NOT `normalizeTraces` here, unlike `applySnapshot` and
+    // `restoreFromSaved`. That is a migration for traces coming off disk — a
+    // draft or a `.floorplan` written before types existed. A parked record was
+    // live state in this session moments ago, so there is nothing to migrate,
+    // and normalising rebuilds every trace object: the array identity is what
+    // the area memo and every subscribed component compare on, so a switch
+    // would re-render and recompute the whole plan for no reason.
+    const traces = patch.perimeterTraces || [];
+    if (!traces.some((t) => t.id === patch.activeTraceId)) {
+      patch.activeTraceId = traces[0]?.id ?? null;
+    }
+    set(patch);
+  },
+
   restoreFromSaved: (saved) => {
     const patch = {};
     for (const k of AUTOSAVE_FIELDS) {
@@ -821,5 +887,5 @@ export const selectActiveAreaByType = (state) => {
 /** Selector to get the combined total area of all visible traces */
 export const selectCombinedArea = (state) => selectActiveAreaByType(state).total;
 
-export { AUTOSAVE_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
+export { AUTOSAVE_FIELDS, PARK_FIELDS, PARK_ONLY_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

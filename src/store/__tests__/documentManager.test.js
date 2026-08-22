@@ -14,7 +14,7 @@ describe('document identity', () => {
     const s = app();
     expect(s.documentOrder).toHaveLength(1);
     expect(s.documentOrder[0]).toBe(s.activeDocumentId);
-    expect(s.documents[s.activeDocumentId]).toEqual({ sourceFileName: null });
+    expect(s.documents[s.activeDocumentId]).toMatchObject({ sourceFileName: null, hydrated: true });
   });
 
   it('mints unique ids at both levels', () => {
