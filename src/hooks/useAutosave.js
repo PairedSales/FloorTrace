@@ -8,12 +8,16 @@ import {
   readWorkspaceIndex, writeWorkspaceIndex, removeWorkspace,
   writeDocDraft, readDocDraft, removePlan,
   writeHistoryRecord, readHistoryRecord,
+  adoptAbandonedWorkspace, sweepOrphans, claimWorkspaceSession,
   isQuotaError, LEGACY_DRAFT_KEY,
 } from '../utils/workspaceDrafts';
 import { getDraft, removeDraft } from '../utils/draftStorage';
 import { documentLabel, parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 
 const SAVE_ON_EXIT_KEY = 'floortrace:saveOnExit';
+// Comfortably inside `STALE_SESSION_MS`, so a tab that is merely idle is never
+// mistaken for one that has closed.
+const HEARTBEAT_MS = 30 * 1000;
 const WALL_MODE_KEY = 'floortrace:useInteriorWalls';
 
 // Selector: pick only the autosave-relevant fields from the store.
@@ -297,7 +301,11 @@ export function useAutosave() {
           return;
         }
 
-        const index = await readWorkspaceIndex();
+        // Our own index first; failing that, the newest workspace a dead
+        // session left behind. The session id lives in `sessionStorage`, so
+        // before this every browser restart stranded a whole workspace on disk
+        // — the records were all still there, and nothing could name them.
+        const index = (await readWorkspaceIndex()) ?? (await adoptAbandonedWorkspace());
         // A draft written before the workspace existed. Read once and adopted
         // as the first plan, so upgrading does not look like losing your work.
         const legacy = index ? null : await getDraft(LEGACY_DRAFT_KEY);
@@ -348,6 +356,46 @@ export function useAutosave() {
 
     restore();
   }, [setHasRestoredState, setUseInteriorWalls, restoreWorkspace]);
+
+  // ── Keep this session's claim fresh, and take out the rubbish ───────────
+  //
+  // The heartbeat is what makes adoption safe: a tab that is still open keeps
+  // restamping its index, so `adoptAbandonedWorkspace` can only ever elect one
+  // whose session is genuinely gone. Without it, opening a second tab would
+  // take the first tab's plans.
+  //
+  // The sweep is the other half of the same problem. Nothing could enumerate
+  // keys before, so a stranded workspace was both unreachable and undeletable,
+  // and every restart added another one.
+  useEffect(() => {
+    if (!saveOnExit) return undefined;
+
+    // Answer other tabs from now on, so none of them adopts this workspace.
+    claimWorkspaceSession();
+
+    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 3000));
+    const cancelIdle = window.cancelIdleCallback ?? clearTimeout;
+    const sweep = idle(() => {
+      sweepOrphans()
+        .then(({ plans, workspaces }) => {
+          if (plans || workspaces) {
+            console.info(`Swept ${plans} orphaned plan record(s) and ${workspaces} dead workspace(s).`);
+          }
+        })
+        .catch((error) => console.warn('Sweeping orphaned drafts failed:', error));
+    }, { timeout: 8000 });
+
+    const beat = setInterval(() => {
+      const state = useAppStore.getState();
+      if (!state._hasRestoredState || !state.documentOrder.length) return;
+      writeWorkspaceIndex(buildIndex()).catch(() => {});
+    }, HEARTBEAT_MS);
+
+    return () => {
+      cancelIdle(sweep);
+      clearInterval(beat);
+    };
+  }, [saveOnExit, buildIndex]);
 
   // Persist wall mode preference independently so it survives when no image
   // draft is present.

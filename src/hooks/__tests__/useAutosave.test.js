@@ -25,6 +25,9 @@ const drafts = vi.hoisted(() => ({
   readHistoryRecord: vi.fn(async () => null),
   removeHistoryRecord: vi.fn(async () => {}),
   removePlan: vi.fn(async () => {}),
+  adoptAbandonedWorkspace: vi.fn(async () => null),
+  sweepOrphans: vi.fn(async () => ({ plans: 0, workspaces: 0 })),
+  claimWorkspaceSession: vi.fn(),
   isQuotaError: vi.fn(() => false),
   LEGACY_DRAFT_KEY: 'floortrace:autosave:v1',
 }));
@@ -82,6 +85,21 @@ describe('useAutosave', () => {
   it('starts with the workspace restored so later edits are written', async () => {
     await mountAutosave();
     expect(app()._hasRestoredState).toBe(true);
+  });
+
+  // The index is keyed by a `sessionStorage` id, so a browser restart makes
+  // this session's key a miss even though every plan is still on disk. Without
+  // the second lookup the user's whole workspace simply does not come back.
+  it('looks for an abandoned workspace when this session has no index', async () => {
+    drafts.readWorkspaceIndex.mockResolvedValueOnce(null);
+    await mountAutosave();
+    expect(drafts.adoptAbandonedWorkspace).toHaveBeenCalled();
+  });
+
+  it('claims this session so another tab cannot adopt its workspace', async () => {
+    await mountAutosave();
+    await settle(100);
+    expect(drafts.claimWorkspaceSession).toHaveBeenCalled();
   });
 
   it('writes an edit under the plan that made it', async () => {

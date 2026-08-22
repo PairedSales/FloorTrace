@@ -181,6 +181,33 @@ export async function getDraft(key) {
 }
 
 /**
+ * Every key the store holds.
+ *
+ * Exists so a workspace whose session is gone can be found again. Nothing could
+ * enumerate before, so a dead session's plans — images included — were
+ * unreachable *and* undeletable: the index that named them was keyed by a
+ * `sessionStorage` id that died with the browser, and no other record pointed
+ * at them. They accumulated toward the quota with nothing able to sweep them
+ * and nothing able to give them back.
+ *
+ * @returns {Promise<string[]>}
+ */
+export async function listDraftKeys() {
+  try {
+    const db = await getDB();
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const request = transaction.objectStore(STORE_NAME).getAllKeys();
+      request.onsuccess = () => resolve(request.result.map(String));
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    console.warn('IndexedDB listDraftKeys failed:', error);
+    return [];
+  }
+}
+
+/**
  * Deletes a draft from both IndexedDB and localStorage.
  *
  * @param {string} key
