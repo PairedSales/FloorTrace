@@ -7,6 +7,7 @@ import {
   normalizeTraceType,
   traceTypeColor,
 } from '../utils/traceTypes';
+import { classifyTraces } from '../utils/traceClassification';
 // From areaCalculator, not appStore: appStore already imports createFloorSlice
 // from here, so sourcing it there made a cycle that only worked by hoisting.
 import { mergeHoles } from '../utils/areaCalculator';
@@ -62,6 +63,7 @@ export function createFloorSlice(set, get) {
         visible: true,
         locked: false,
         type: DEFAULT_TRACE_TYPE,
+        typeSource: 'auto',
         colorSource: 'type',
         nameSource: 'auto',
         color: traceTypeColor(DEFAULT_TRACE_TYPE),
@@ -157,12 +159,68 @@ export function createFloorSlice(set, get) {
             ? {
               ...t,
               type: nextType,
+              // Pins the type against a later classification, the same way
+              // `nameSource` pins the name against a later type change.
+              typeSource: 'user',
+              typeEvidence: null,
               name: t.nameSource === 'user' ? t.name : autoTraceName(nextType, others),
             }
             : t))
         ),
         isDirty: true,
       });
+    },
+
+    /**
+     * Type each outline from the level names the scan read off the plan, so a
+     * basement stops being reported as living area. Never touches a type the
+     * user picked, and renames on the same rule a manual type change does.
+     *
+     * Callers own the undo snapshot: this is part of the trace that produced
+     * the outlines, not an edit of its own. Returns what it changed, because a
+     * reclassification moves square footage between the reported subtotals and
+     * nothing else on screen announces that.
+     */
+    classifyTraceTypes: () => {
+      const state = get();
+      const labels = state.areaLabels || [];
+      const traces = state.perimeterTraces || [];
+      // No labels is not evidence of anything — a plan that was never scanned,
+      // or one whose level names went unread, must leave every type standing.
+      if (!labels.length || !traces.length) return [];
+
+      const verdicts = new Map(classifyTraces(traces, labels).map((v) => [v.id, v]));
+      const next = traces.slice();
+      const changes = [];
+
+      for (let i = 0; i < next.length; i += 1) {
+        const trace = next[i];
+        if (trace.typeSource === 'user') continue;
+        const verdict = verdicts.get(trace.id);
+        // A detected type must not outlive the label it was read from: a crop
+        // or a re-scan that no longer sees the word puts the outline back.
+        const type = verdict
+          ? normalizeTraceType(verdict.type)
+          : (trace.typeSource === 'detected' ? DEFAULT_TRACE_TYPE : null);
+        if (!type || type === normalizeTraceType(trace.type)) continue;
+
+        const others = next.filter((_, j) => j !== i);
+        const name = trace.nameSource === 'user' ? trace.name : autoTraceName(type, others);
+        next[i] = {
+          ...trace,
+          type,
+          typeSource: verdict ? 'detected' : 'auto',
+          typeEvidence: verdict
+            ? { keyword: verdict.keyword, text: verdict.text, from: verdict.from }
+            : null,
+          name,
+        };
+        changes.push({ id: trace.id, name, type, from: normalizeTraceType(trace.type) });
+      }
+
+      if (!changes.length) return [];
+      set({ perimeterTraces: assignTypeColors(next), isDirty: true });
+      return changes;
     },
 
     /**
@@ -231,6 +289,7 @@ export function createFloorSlice(set, get) {
           visible: true,
           locked: false,
           type: DEFAULT_TRACE_TYPE,
+          typeSource: 'auto',
           colorSource: 'type',
           nameSource: 'auto',
           color: traceTypeColor(DEFAULT_TRACE_TYPE),
@@ -321,6 +380,7 @@ export function createFloorSlice(set, get) {
             visible: true,
             locked: false,
             type: DEFAULT_TRACE_TYPE,
+            typeSource: 'auto',
             colorSource: 'type',
             nameSource: 'auto',
             color: traceTypeColor(DEFAULT_TRACE_TYPE),

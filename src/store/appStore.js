@@ -40,6 +40,7 @@ const workingStateDefaults = () => {
       visible: true,
       locked: false,
       type: DEFAULT_TRACE_TYPE,
+      typeSource: 'auto',
       colorSource: 'type',
       nameSource: 'auto',
       color: traceTypeColor(DEFAULT_TRACE_TYPE),
@@ -61,6 +62,10 @@ const workingStateDefaults = () => {
   processingMessage: '',
   detectedDimensions: [],
   exteriorLabels: [],
+  // Level names the scan read ("BASEMENT", "2ND FLOOR"). Not exteriorLabels:
+  // those carve a region out of a footprint, these type the whole outline they
+  // sit in and remove nothing.
+  areaLabels: [],
   // Every room the detector has placed this session, in original image px.
   // Rooms are known-inside evidence for the boundary stage and the sample set
   // for a robust multi-room scale; a single `roomOverlay` could hold neither.
@@ -335,6 +340,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         visible: true,
         locked: false,
         type: DEFAULT_TRACE_TYPE,
+        typeSource: 'auto',
         colorSource: 'type',
         nameSource: 'auto',
         color: traceTypeColor(DEFAULT_TRACE_TYPE),
@@ -434,6 +440,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
   setDetectedDimensions: (v) => set({ detectedDimensions: v }),
   setExteriorLabels: (v) => set({ exteriorLabels: v }),
+  setAreaLabels: (v) => set({ areaLabels: v }),
   setRooms: (v) => set({ rooms: v }),
   /**
    * Record a detected room. Rooms accumulate: they are the boundary stage's
