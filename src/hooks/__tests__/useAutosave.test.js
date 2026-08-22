@@ -11,7 +11,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useAutosave } from '../useAutosave';
-import { app, oneDocument, addParkedDocument, IMAGE_A, IMAGE_B } from './harness';
+import useAppStore from '../../store/appStore';
+import {
+  app, oneDocument, addParkedDocument, addUnhydratedDocument, IMAGE_A, IMAGE_B,
+} from './harness';
 
 const drafts = vi.hoisted(() => ({
   readWorkspaceIndex: vi.fn(async () => null),
@@ -203,6 +206,53 @@ describe('useAutosave', () => {
 
     expect(drafts.removePlan).toHaveBeenCalledWith(docA);
     expect(drafts.writeDocDraft).not.toHaveBeenCalled();
+  });
+
+  // Closing the active plan of a restored workspace adopts a neighbour whose
+  // state is still on disk, so the root sits at `image: null` through no fault
+  // of that plan. Reading it as "empty" deleted the survivor's records.
+  it('never deletes the records of a plan it has not hydrated', async () => {
+    await mountAutosave();
+    act(() => { app().setImage(IMAGE_A); });
+    await settle();
+
+    // What `closeDocument` -> `adoptDocument` leaves behind when the successor
+    // has nothing parked: its id on the root, and no image.
+    const docB = addUnhydratedDocument();
+    drafts.removePlan.mockClear();
+    act(() => { useAppStore.setState({ activeDocumentId: docB, image: null }); });
+    await settle();
+
+    expect(drafts.removePlan).not.toHaveBeenCalled();
+  });
+
+  // `restoreWorkspace` keeps a plan whose image record went missing, and the
+  // toast tells the user the outlines are intact. The first camera move then
+  // deleted them.
+  it('keeps a plan that restored without its image but kept its outlines', async () => {
+    await mountAutosave();
+    act(() => {
+      useAppStore.setState({
+        image: null,
+        perimeterTraces: [{
+          id: 't1', name: '1st Floor', visible: true, type: 'gla',
+          vertices: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        }],
+      });
+    });
+    await settle();
+
+    expect(drafts.removePlan).not.toHaveBeenCalledWith(docA);
+  });
+
+  it('still clears a plan that really is empty', async () => {
+    await mountAutosave();
+    act(() => { app().setImage(IMAGE_A); });
+    await settle();
+    act(() => { app().restart(); });
+    await settle();
+
+    expect(drafts.removePlan).toHaveBeenCalledWith(docA);
   });
 
   it('rewrites the index when a plan is emptied, so it stops naming it', async () => {

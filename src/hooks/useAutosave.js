@@ -334,6 +334,13 @@ export function useAutosave() {
           const restored = await restoreWorkspace(index);
           if (restored.opened > 0) {
             setHasRestoredState(true);
+            // `restoreWorkspace` drops the plans it could not read, but that
+            // corrected order only reached the store. The `documentOrder`
+            // subscription did fire, and its microtask drained on the next
+            // await — while `_hasRestoredState` was still false, so the write
+            // was skipped. Left alone the index goes on naming a dead plan and
+            // warns about it on every reload, forever.
+            if (restored.lost > 0) queueIndexWrite();
             // One message with a count, never N toasts. A workspace of seven
             // plans restoring is one event, not seven.
             if (restored.lost > 0) {
@@ -370,7 +377,7 @@ export function useAutosave() {
     };
 
     restore();
-  }, [setHasRestoredState, setUseInteriorWalls, restoreWorkspace]);
+  }, [setHasRestoredState, setUseInteriorWalls, restoreWorkspace, queueIndexWrite]);
 
   // ── Keep this session's claim fresh, and take out the rubbish ───────────
   //
@@ -515,11 +522,32 @@ export function useAutosave() {
         if (state._swappingDocument) return;
 
         if (!slice.image) {
-          // This plan has nothing to keep. Its own records go; the rest of the
-          // workspace is untouched, which is the whole difference from before.
-          // Cancel first: closing the last plan empties it in place and keeps
-          // its id, so a write still pending from the edit before the close
-          // would put the records straight back under a key that is live.
+          // No image on the root is three different situations, and only one of
+          // them means "this plan has nothing to keep".
+          //
+          // A plan the workspace has not hydrated has its image on disk, not
+          // here: closing the active plan of a restored workspace adopts an
+          // unhydrated neighbour, and treating that as empty deleted the
+          // *survivor's* records on the next camera move.
+          const meta = state.documents[state.activeDocumentId];
+          if (meta && meta.hydrated === false) return;
+
+          // A plan restored without its image record still carries the traces
+          // and calibration that survived — `restoreWorkspace` keeps them
+          // deliberately and the toast says they are intact. Deleting them on
+          // the first edit makes that message a lie. Fall through and write
+          // what is left instead.
+          //
+          // Geometry, not trace count: `resetPerimeterTraces` always leaves one
+          // empty "1st Floor" behind, so an empty plan has a trace too.
+          const drawn = (state.perimeterTraces ?? []).some((t) => t.vertices?.length >= 3);
+          if (drawn) return;
+
+          // What remains really is an empty plan. Its own records go; the rest
+          // of the workspace is untouched, which is the whole difference from
+          // before. Cancel first: closing the last plan empties it in place and
+          // keeps its id, so a write still pending from the edit before the
+          // close would put the records straight back under a key that is live.
           cancelPendingWrite();
           writtenImageByDocRef.current.delete(state.activeDocumentId);
           removePlan(state.activeDocumentId);
