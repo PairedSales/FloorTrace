@@ -1,5 +1,5 @@
 import {
-  MousePointer2, Ruler, Pentagon, Compass, Spline, SquareDashedBottom,
+  MousePointer2, Ruler, Pentagon, Compass, Waypoints, SquareDashedBottom,
   Crop, Eraser, Scaling, RotateCw, Brush,
 } from 'lucide-react';
 
@@ -60,7 +60,7 @@ export const TOOL_GROUPS = [
     tools: [
       { id: 'draw',    digit: '1',  icon: Brush,              short: 'Paint outline', label: 'Paint the outline',
         hint: 'Paint over the exterior walls and let FloorTrace read them' },
-      { id: 'vertex',  digit: '2',  icon: Spline,             short: 'Place corners', label: 'Place corners',
+      { id: 'vertex',  digit: '2',  icon: Waypoints,          short: 'Place corners', label: 'Place corners',
         hint: 'Place the exterior outline corner by corner' },
       { id: 'void',    digit: '3',  icon: SquareDashedBottom, short: 'Cut out', label: 'Cut out a void',
         hint: 'Punch a courtyard or light well out of an outline',

@@ -1,9 +1,8 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
-import MenuBar from './components/MenuBar';
+import TopBar from './components/TopBar';
 import DocumentTabs from './components/DocumentTabs';
-import CommandBar from './components/CommandBar';
 import ToolRail from './components/ToolRail';
 import MeasurementDock from './components/MeasurementDock';
 import StatusBar from './components/StatusBar';
@@ -483,10 +482,24 @@ function App() {
   const handleFindRoomSize = useCallback(async () => {
     if (!image) return;
 
+    // What the scan is about to discard, named rather than implied. The guard
+    // used to ask only about the two overlays while the body below also cleared
+    // `detectedDimensions` and `rooms` — and `rooms` is the accumulated
+    // confirmed-room evidence the multi-room scale is pooled from, so a user who
+    // had hand-picked three rooms to build a good scale lost all three without
+    // being asked. This command carries the primary weight until a scale exists,
+    // which is exactly when it is easiest to press by accident.
+    const state = useAppStore.getState();
+    const losing = [
+      state.rooms?.length && `${state.rooms.length} room${state.rooms.length === 1 ? '' : 's'} you picked`,
+      state.detectedDimensions?.length && 'the labels already read',
+      (roomOverlay || perimeterOverlay) && 'the room and perimeter overlays',
+    ].filter(Boolean);
+
     const asking = beginWork('confirm');
-    if (roomOverlay || perimeterOverlay) {
+    if (losing.length) {
       const confirmed = await confirmToast(
-        'Scanning for room size will clear your existing room and perimeter overlays. Continue?',
+        `Scanning again will discard ${losing.join(', ')}. Continue?`,
         { confirmLabel: 'Scan' }
       );
       if (!confirmed) {
@@ -561,6 +574,13 @@ function App() {
     // Always enters; the toggle would turn it back off when already on.
     if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
   }, [setPerimeterVertices, setPerimeterOverlay, setDrawStrokes, handleDrawModeToggle]);
+
+  // The two outline *methods*, named for what they do rather than for the
+  // handlers behind them: `handleDrawMode` paints, `handleDrawExterior` places
+  // corners, which reads backwards and has been mis-wired once. Wrapped rather
+  // than passed bare, because `handleDrawMode({ keepStrokes } = {})` would take
+  // a click event as its options object.
+  const handlePaintOutline = useCallback(() => handleDrawMode(), [handleDrawMode]);
 
   // Apply detected boundaries to perimeter traces. Returns the number of
   // floors applied (0 = nothing usable). A single floor updates the active
@@ -1403,6 +1423,7 @@ function App() {
     <Canvas
       key={activeDocumentId}
       ref={canvasRef}
+      onFileOpen={handleFileOpen}
       image={image}
       roomOverlay={roomOverlay}
       perimeterOverlay={perimeterOverlay}
@@ -1497,7 +1518,7 @@ function App() {
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
-          onDrawExterior={() => handleDrawMode()}
+          onDrawExterior={handlePaintOutline}
           onOutlineByVertex={handleDrawExterior}
           onAddFloor={addPerimeterTrace}
           onFitToWindow={handleFitToWindow}
@@ -1517,6 +1538,7 @@ function App() {
           onInteriorWallToggle={handleInteriorWallToggle}
           canSwitchWallFace={canSwitchWallFace}
           onScaleTool={handleScaleToolToggle}
+          onSelectRoom={handleSelectRoom}
           showSideLengths={showSideLengths}
           onShowSideLengthsChange={handleShowSideLengthsChange}
           autoSnapEnabled={autoSnapEnabled}
@@ -1532,37 +1554,39 @@ function App() {
         </MobileChrome>
       ) : (
       <>
-      {/* One band, not two. The menu row was three titles and a wordmark with
-          the rest of the window empty beside them — 30 px of chrome above the
-          plan spent on whitespace. The titles are the left group of the
-          command bar now; both components render bare and this header owns the
-          height, surface and rule. */}
-      <header className="flex items-center h-10 px-2 bg-panel-2 border-b border-line select-none shrink-0">
-      <MenuBar
+      <TopBar
         image={image}
+        isProcessing={isProcessing}
+        hasArea={area > 0}
+        calibrated={!!calibration?.calibrated}
+        perimeterTraces={perimeterTraces}
+        drawModeActive={drawModeActive}
+        planCount={documentOrder.length}
+        canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
         onFileOpen={handleFileOpen}
         onPasteImage={handlePasteImage}
+        onExport={openExport}
+        onCopyExhibit={copyExhibitNow}
         onSaveProject={handleSaveProject}
         onSaveProjectAs={handleSaveProjectAs}
         onSaveAllProjects={handleSaveAllProjects}
-        onExport={openExport}
-        onCopyExhibit={copyExhibitNow}
-        onRestart={handleClosePlan}
-        onCloseAllPlans={handleCloseAllPlans}
         onNewPlan={openPlan}
         onNextPlan={() => stepPlan(1)}
         onPrevPlan={() => stepPlan(-1)}
-        planCount={documentOrder.length}
-        canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
+        onRestart={handleClosePlan}
+        onCloseAllPlans={handleCloseAllPlans}
         onHelpOpen={handleHelpOpen}
-        onFitToWindow={handleFitToWindow}
-        onTracePerimeter={handleTracePerimeter}
-        onDrawExterior={() => handleDrawMode()}
-        onOutlineByVertex={handleDrawExterior}
         onFindRoomSize={handleFindRoomSize}
         onSelectRoom={handleSelectRoom}
         canSelectRoom={detectedDimensions.length > 0}
-        onAddFloor={addPerimeterTrace}
+        onScaleTool={handleScaleToolToggle}
+        onTracePerimeter={handleTracePerimeter}
+        onPaintOutline={handlePaintOutline}
+        onPlaceCorners={handleDrawExterior}
+        onAddOutline={addPerimeterTrace}
+        onFitToWindow={handleFitToWindow}
+        dockOpen={dockOpen}
+        onDockToggle={handleDockToggle}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={handleShowSideLengthsChange}
         autoSnapEnabled={autoSnapEnabled}
@@ -1573,36 +1597,7 @@ function App() {
         onEnhancedOcrChange={handleEnhancedOcrChange}
         theme={theme}
         onCycleTheme={cycleTheme}
-        dockOpen={dockOpen}
-        onDockToggle={handleDockToggle}
       />
-
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
-
-      <CommandBar
-        image={image}
-        isProcessing={isProcessing}
-        onFileOpen={handleFileOpen}
-        onExport={openExport}
-        hasArea={area > 0}
-        onTracePerimeter={handleTracePerimeter}
-        onFitToWindow={handleFitToWindow}
-        onDrawExterior={() => handleDrawMode()}
-        drawModeActive={drawModeActive}
-        onFinishDrawMode={handleFinishDrawMode}
-        perimeterOverlay={perimeterOverlay}
-        onFindRoomSize={handleFindRoomSize}
-        onSelectRoom={handleSelectRoom}
-        canSelectRoom={detectedDimensions.length > 0}
-        selectingRoom={activeTool === 'pick'}
-        onAddFloor={addPerimeterTrace}
-        floorCount={perimeterTraces.length}
-        dockOpen={dockOpen}
-        onDockToggle={handleDockToggle}
-        theme={theme}
-        onCycleTheme={cycleTheme}
-      />
-      </header>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {dockOpen && (
@@ -1621,6 +1616,7 @@ function App() {
             onDimensionFocus={handleDimensionFocus}
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
+            onSelectRoom={handleSelectRoom}
             onExport={openExport}
           />
         )}

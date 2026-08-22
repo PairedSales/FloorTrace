@@ -14,5 +14,7 @@ export const isTypingInField = (target) =>
 export const shortcutsBlocked = (target) => {
   if (isTypingInField(target)) return true;
   const workspace = useWorkspaceStore.getState();
-  return workspace.showHelpModal || workspace.showExportDialog;
+  // An open menu owns the keyboard for the same reason a modal does — and it
+  // is the sharper case, because the menu *prints* the keys it is swallowing.
+  return workspace.showHelpModal || workspace.showExportDialog || workspace.menuOpen;
 };

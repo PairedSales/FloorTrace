@@ -48,6 +48,14 @@ const useWorkspaceStore = create((set, get) => ({
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
+  // Whether a dropdown in the top band is open — any of them, titles and the
+  // stage-verb carets alike. `keyboardGuard` reads it: the menus close on a
+  // window `mousedown` and on Escape and on nothing else, so with one open,
+  // `1` entered draw mode behind it and `O` toggled the very panel the open
+  // View menu was offering to toggle. State rather than listener ordering,
+  // because both listeners are on `window` and both see the key.
+  menuOpen: false,
+
   // Pending destructive confirmation, as {message, detail, confirmLabel,
   // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
   // promise-returning function callable from non-React code while a real
@@ -65,6 +73,7 @@ const useWorkspaceStore = create((set, get) => ({
   clearToolHint: (id) => set((s) => (s.toolHint?.id === id ? { toolHint: null } : {})),
   setDockOpen: (v) => set({ dockOpen: v }),
   setShowExportDialog: (v) => set({ showExportDialog: v }),
+  setMenuOpen: (v) => set({ menuOpen: v }),
 
   requestConfirm: (req) => {
     // A second request while one is open would strand the first promise, so the
