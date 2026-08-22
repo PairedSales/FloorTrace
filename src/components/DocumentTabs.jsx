@@ -1,27 +1,34 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { X, Plus, ChevronDown, Loader2, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
 /**
- * The open plans, as a band of its own between the menu bar and the command bar.
+ * The open plans, as the top row of the plan's own column — under the command
+ * bar, over the status bar, and inset between the measurement dock and the tool
+ * rail so the strip spans exactly the plan it addresses.
  *
- * It cannot ride inside the menu bar row. That 30 px row is fully spent by the
- * wordmark, five menu titles and a status bar whose cells are deliberately
- * `shrink-0` and explicitly forbidden from scrolling — a horizontal scrollbar
- * in a 30 px row eats the row.
+ * **This band must not scroll.** Tabs share the width and truncate, with a floor
+ * below which they stop shrinking; whatever no longer fits moves into a chevron
+ * menu at the end. A tab strip that scrolls hides plans behind a gesture, which
+ * is the thing a tab strip exists to prevent.
  *
- * **This band must not scroll either.** Tabs share the width and truncate, with
- * a floor below which they stop shrinking; whatever no longer fits moves into a
- * chevron menu at the end. A tab strip that scrolls hides plans behind a
- * gesture, which is the thing a tab strip exists to prevent.
+ * **The chevron is reachable now**, which it was not while this band spanned the
+ * window: inset, the strip is the window less a 320 px dock and a 48 px rail, so
+ * at the 819.98 px breakpoint it has ~452 px and fits four tabs — five or six
+ * open plans overflow. It is a real path with real users in it, not the
+ * dead-code guard it used to be.
  *
- * Worth knowing before you go looking for it: **at the current cap the chevron
- * never appears.** Six plans at a 96 px floor need 606 px, and the desktop shell
- * only exists above the 819 px mobile breakpoint — so seven tabs fit at the
- * narrowest desktop width there is. The overflow path is kept because it is what
- * stops a raised `MAX_OPEN_DOCUMENTS` from silently squeezing tabs below their
- * floor, not because anyone can reach it today.
+ * That is also why the width is re-measured three ways, none of them redundant:
+ * on a window `resize`, on a `ResizeObserver` callback, and on the two pieces of
+ * app state that decide the inset — `dockOpen` and whether there is an image
+ * (the tool rail mounts with it). The window listener alone was complete while
+ * this band spanned the window and is not any more. The observer alone is not
+ * enough either: it never fires while `document.hidden` is true, which is the
+ * state of every preview pane and every background tab — so the state deps are
+ * the ones that make the common case deterministic, and the observer is what
+ * catches a width change nothing in this component was told about.
  *
  * **It imports nothing from `./canvas/` or `./CanvasStage`.** This component
  * lives in the eager shell, and one such import would pull konva back into the
@@ -144,6 +151,12 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   const projectName = useAppStore((s) => s.projectName);
   const setProjectName = useAppStore((s) => s.setProjectName);
 
+  // Not read, deliberately: they are what the strip's width is made of, so they
+  // are the layout effect's dependencies. The dock is 320 px of the inset and
+  // the tool rail is the other 48.
+  const dockOpen = useWorkspaceStore((s) => s.dockOpen);
+  const hasImage = useAppStore((s) => !!s.image);
+
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [stripWidth, setStripWidth] = useState(0);
   const [draggingId, setDraggingId] = useState(null);
@@ -200,11 +213,18 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   // Layout phase, so the first paint already knows how many tabs fit rather
   // than showing them all for a frame and then collapsing.
   useLayoutEffect(() => {
-    const measure = () => setStripWidth(stripRef.current?.offsetWidth ?? 0);
+    const el = stripRef.current;
+    const measure = () => setStripWidth(el?.offsetWidth ?? 0);
     measure();
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (ro && el) ro.observe(el);
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [documentOrder.length]);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [documentOrder.length, dockOpen, hasImage]);
 
   useEffect(() => {
     if (!overflowOpen) return undefined;
@@ -248,13 +268,10 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   // `stripWidth` is state fed by the layout effect above, not a layout read in
   // the render body. Reading `offsetWidth` here looked simpler and was wrong
   // twice over: it is 0 on the first render, when the ref is not attached yet,
-  // and — worse — nothing re-renders this component when the window resizes, so
+  // and — worse — nothing re-renders this component when its width changes, so
   // the overflow menu was computed once and then never again. Narrowing the
-  // window left tabs squeezed below their floor with no chevron to reach the
+  // strip left tabs squeezed below their floor with no chevron to reach the
   // rest.
-  //
-  // A window resize listener rather than a ResizeObserver: this band has to
-  // behave identically in the preview pane, where observers do not fire.
   const room = stripWidth > 0
     ? Math.max(1, Math.floor((stripWidth - 30) / TAB_MIN))
     : documentOrder.length;

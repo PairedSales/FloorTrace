@@ -11,7 +11,6 @@ import {
   Check,
   Brush,
   MousePointerClick,
-  Tags,
   Sun,
   Moon,
   MonitorSmartphone,
@@ -32,9 +31,11 @@ const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
  * cursor between one trace and the next.
  *
  * The right end is the view end, ordered by widening scope: one action on the
- * plan, then the two chrome toggles (left to right in the order the things
- * they show sit on screen — the dock is on the left, the tool rail on the
- * right), then the one app-wide preference, furthest from the verbs.
+ * plan, then the one chrome toggle it still carries (the measurement dock),
+ * then the one app-wide preference, furthest from the verbs. The tool-rail
+ * toggle stood beside the dock toggle until the rail became one width — a rail
+ * that says what its icons are when you point at one has nothing left to
+ * switch.
  */
 const CommandBar = ({
   image,
@@ -56,8 +57,6 @@ const CommandBar = ({
   floorCount,
   dockOpen,
   onDockToggle,
-  toolLabels,
-  onToolLabelsToggle,
   theme,
   onCycleTheme,
 }) => {
@@ -211,21 +210,6 @@ const CommandBar = ({
         <PanelLeft className="w-4 h-4" aria-hidden="true" />
       </button>
 
-      {/* Named for the state it shows rather than the action it takes, which
-          is what lets it carry aria-pressed alongside the dock toggle: "Hide
-          tool labels, pressed" was the contradiction that kept it off the
-          button while it lived in the rail. Disabled with no plan open — the
-          rail it controls is not on screen until there is one. */}
-      <button
-        onClick={onToolLabelsToggle}
-        disabled={!image}
-        className={`toolbar-btn px-2 ${toolLabels ? 'toolbar-btn-active' : ''}`}
-        title="Show or hide the tool names"
-        aria-label="Show or hide the tool names"
-        aria-pressed={toolLabels}
-      >
-        <Tags className="w-4 h-4" aria-hidden="true" />
-      </button>
 
       <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
 

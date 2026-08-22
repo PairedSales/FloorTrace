@@ -197,6 +197,12 @@
            transition-colors duration-150 select-text;
   }
 
+  /* The room size, which is the one measurement on the panel a person reads off
+     the plan and checks. It carries the weight the scale figure used to. */
+  .panel-input-lg {
+    @apply py-2 text-[19px];
+  }
+
   /* Segmented control option. 26px — nothing in the shell goes below that. */
   .unit-pill {
     @apply h-[26px] px-2.5 text-[12px] font-medium rounded
@@ -276,6 +282,12 @@
   }
   .touch-dense .panel-input {
     @apply py-2.5 text-[15px];
+  }
+  /* Specificity, not preference: `.touch-dense .panel-input` is (0,2,0) and
+     would otherwise shrink the room size back to 15 px on the phone, where it
+     is the field a thumb has to hit. */
+  .touch-dense .panel-input-lg {
+    @apply text-[21px];
   }
   .touch-dense .chip {
     @apply h-6 px-2.5 text-[12px];

@@ -28,6 +28,14 @@ import {
  * `short` is the compact name and matches the status bar's MODE_LABEL; `label`
  * stays the fuller phrase and stays the accessible name at every density.
  *
+ * **Every tool carries a `hint`.** The rail is icon-only, so hovering or
+ * focusing a button prints `short` and `hint` in the status bar — that is the
+ * only place a tool says what it does now that the labelled density is gone.
+ * `line`, `area` and `crop` had no hint while the words could be switched on
+ * beside the icon; a missing one is now a tool that answers nothing. It says
+ * what the tool is *for*, in contrast to App's MODE_HINT, which says what to do
+ * once the tool is running.
+ *
  * `needsArea` doubles as the disabled reason. Every tool disables in place
  * rather than disappearing, so a button never moves out from under the pointer
  * — the old ToolsPanel gated four of these behind `hasArea` and reflowed a
@@ -62,12 +70,15 @@ export const TOOL_GROUPS = [
       { id: 'scale',   digit: '4',  icon: Scaling,            short: 'Set scale', label: 'Set the scale',
         hint: 'Set the scale from a length you know' },
       { id: 'line',    digit: '5',  icon: Ruler,              short: 'Measure', label: 'Measure a length',
+        hint: 'Measure the distance between two points',
         needsArea: 'Measuring needs a traced outline first.' },
       // Area above Angle: this app exists to produce an area, and an angle is
       // the rarest thing in the rail.
       { id: 'area',    digit: '6',  icon: Pentagon,           short: 'Area', label: 'Draw an area',
+        hint: 'Measure a patio, deck or any shape you outline',
         needsArea: 'Drawing an area needs a traced outline first.' },
       { id: 'angle',   digit: '7',  icon: Compass,            short: 'Angle', label: 'Measure an angle',
+        hint: 'Measure the angle between two walls',
         needsArea: 'Measuring an angle needs a traced outline first.' },
     ],
   },
@@ -75,7 +86,8 @@ export const TOOL_GROUPS = [
     id: 'image',
     title: 'Plan image',
     tools: [
-      { id: 'crop',    digit: '8',  icon: Crop,               short: 'Crop', label: 'Crop the plan' },
+      { id: 'crop',    digit: '8',  icon: Crop,               short: 'Crop', label: 'Crop the plan',
+        hint: 'Keep only the part of the image you drag over' },
       { id: 'eraser',  digit: '9',  icon: Eraser,             short: 'Erase', label: 'Erase clutter',
         hint: 'Remove legends or notes that confuse detection' },
       // The desktop rail rotates the other way on right-click; the mobile sheet

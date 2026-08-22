@@ -1,6 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
 import { TOOL_GROUPS } from './toolCatalog';
+import useWorkspaceStore from '../store/workspaceStore';
 
 /**
  * The tool rail. Three rules the old ToolsPanel broke:
@@ -8,163 +9,160 @@ import { TOOL_GROUPS } from './toolCatalog';
  *  1. Nothing is hidden. Line/Area/Angle/Void used to be gated behind
  *     `hasArea`, so four buttons appeared the moment a trace landed and the
  *     two-column grid reflowed under the cursor. They now disable in place,
- *     with the reason in the tooltip.
+ *     with the reason in the status bar.
  *  2. The order matches the digit map in useKeyboardShortcuts exactly. That
  *     hook already refuses to renumber itself by app state; the panel used to
  *     disagree with it.
- *  3. An icon-only rail is learnable by hover alone, which costs twelve
- *     hovers on the first visit. `showLabels` puts the name and the digit
- *     beside every icon instead — on by default for a new user (see
- *     useToolLabels) and switched from the command bar, alongside the other
- *     control that shows and hides a panel.
+ *  3. **A 48 px icon column says nothing until it is pointed at, so pointing at
+ *     it is what makes it talk.** Hover or keyboard focus writes the tool's
+ *     name and what it does into the status bar; the rail is one width, always.
+ *     This replaces a `showLabels` preference that put the words beside every
+ *     icon at the cost of 108 px of plan, a toggle in two places and a stored
+ *     choice — and that still left the *description* to a floating tooltip.
+ *     The status bar is a fixed place to look, which a tooltip that opens
+ *     wherever the pointer happens to be is not.
+ *
+ * Disabled tools are `aria-disabled`, not `disabled`. A `disabled` button
+ * dispatches no pointer events in Chrome, so the one control whose reason a
+ * user most needs — "why can I not measure yet" — would be the only one that
+ * stayed silent on hover. The click handler guards instead.
  *
  * `short` is the rail's own name for a tool and matches the status bar's
- * MODE_LABEL; `label` stays the fuller phrase, and stays the accessible name
- * in both densities so a screen reader never hears less than it used to.
+ * MODE_LABEL; `label` stays the fuller phrase and stays the accessible name,
+ * and `hint` is both the visible description and the button's
+ * `aria-describedby`, so a screen reader hears what a pointer is shown.
  */
-const TOOLTIP = `pointer-events-none absolute right-[calc(100%+8px)] top-1/2 -translate-y-1/2 z-50
-                 whitespace-nowrap rounded-md border border-line bg-raised px-2.5 py-1.5
-                 text-[12px] text-fg shadow-xl opacity-0
-                 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity`;
-
-const ToolButton = ({ tool, active, disabled, showLabels, onSelect, onRotate }) => {
+const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
+  const setToolHint = useWorkspaceStore((s) => s.setToolHint);
   const Icon = tool.icon;
-  // Compact, the tooltip is the only name the tool has. Labelled, the name and
-  // the keybinding are already on screen, so only a hint or a disabled reason
-  // earns a popup — a tooltip that restates the row is noise.
-  const tip = showLabels
-    ? (disabled ? tool.needsArea : tool.hint ?? null)
-    : (disabled ? tool.needsArea : (tool.hint || tool.label));
+  // Disabled, the reason it is disabled is the only description worth having.
+  const detail = disabled ? tool.needsArea : tool.hint;
+  const describedBy = detail ? `tool-hint-${tool.id}` : undefined;
+
+  const show = () => setToolHint({ name: tool.short, detail, digit: tool.digit });
+  const clear = () => setToolHint(null);
 
   return (
     <button
       type="button"
-      disabled={disabled}
+      aria-disabled={disabled || undefined}
       aria-pressed={active}
       aria-label={tool.label}
+      aria-describedby={describedBy}
       aria-keyshortcuts={tool.digit ?? undefined}
-      onClick={() => (tool.id === 'rotate' ? onRotate('clockwise') : onSelect(tool.id))}
+      onClick={() => {
+        if (disabled) return;
+        if (tool.id === 'rotate') onRotate('clockwise');
+        else onSelect(tool.id);
+      }}
       onContextMenu={tool.id === 'rotate'
         ? (e) => { e.preventDefault(); onRotate('counterclockwise'); }
         : undefined}
-      className={`group relative shrink-0 border rounded-md transition-colors cursor-pointer
-        disabled:opacity-40 disabled:cursor-default
-        ${showLabels
-          ? 'flex items-center gap-2.5 w-full h-8 px-2 text-[12.5px] font-medium'
-          : 'grid place-items-center w-9 h-9'}
+      onMouseEnter={show}
+      onMouseLeave={clear}
+      onFocus={show}
+      onBlur={clear}
+      className={`group relative shrink-0 grid place-items-center w-9 h-9
+        border rounded-md transition-colors cursor-pointer
+        aria-disabled:opacity-40 aria-disabled:cursor-default
         ${active
           ? 'bg-accent text-accent-ink border-accent'
-          : 'border-transparent text-fg-2 hover:bg-sunken hover:text-fg disabled:hover:bg-transparent'}`}
+          : `border-transparent text-fg-2 hover:bg-sunken hover:text-fg
+             aria-disabled:hover:bg-transparent aria-disabled:hover:text-fg-2`}`}
     >
       <Icon className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
 
-      {showLabels ? (
-        <>
-          <span className="flex-1 text-left truncate">{tool.short}</span>
-          {tool.digit && (
-            <span className={`font-mono text-[11px] leading-none shrink-0
-              ${active ? 'text-accent-ink' : 'text-fg-dim'}`}>
-              {tool.digit}
-            </span>
-          )}
-        </>
-      ) : (
-        tool.digit && (
-          <span className={`absolute right-0.5 bottom-0 font-mono text-[10px] leading-none
-            opacity-0 group-hover:opacity-100 transition-opacity
-            ${active ? 'text-accent-ink' : 'text-fg-dim'}`}>
-            {tool.digit}
-          </span>
-        )
-      )}
-
-      {/* A real tooltip, not `title`: compact, it carries the keybinding, which
-          is how the shortcut gets taught at all. Left-hand side — the rail is
-          on the right edge of the window. */}
-      {tip && (
-        <span role="tooltip" className={TOOLTIP}>
-          {tip}
-          {tool.digit && !showLabels && (
-            <span className="ml-2 font-mono text-[11px] text-fg-dim">{tool.digit}</span>
-          )}
+      {tool.digit && (
+        <span className={`absolute right-0.5 bottom-0 font-mono text-[10px] leading-none
+          opacity-0 group-hover:opacity-100 transition-opacity
+          ${active ? 'text-accent-ink' : 'text-fg-dim'}`}>
+          {tool.digit}
         </span>
       )}
+
+      {/* The same sentence the status bar prints, for a reader that is not
+          looking at the status bar. `aria-label` above still supplies the name,
+          so this is a description and never doubles it. */}
+      {detail && <span id={describedBy} className="sr-only">{detail}</span>}
     </button>
   );
 };
 
 const ToolRail = ({
-  activeTool, hasArea, hasToolData, showLabels,
+  activeTool, hasArea, hasToolData,
   onSelect, onRotate, onClearTools,
-}) => (
-  <div
-    role="toolbar"
-    aria-label="Tools"
-    aria-orientation="vertical"
-    className={`flex shrink-0 flex-col bg-panel-2 border-l border-line select-none
-                ${showLabels ? 'w-[156px]' : 'w-12'}`}
-  >
-    <div className={`flex-1 min-h-0 overflow-y-auto flex flex-col py-1.5
-                     ${showLabels ? 'px-1.5 gap-0.5' : 'items-center gap-0.5'}`}>
-      {TOOL_GROUPS.map((group, gi) => (
-        <Fragment key={group.id}>
-          {gi > 0 && !showLabels && <span className="w-6 h-px bg-line my-1.5 shrink-0" />}
-          <div
-            role="group"
-            aria-label={group.title}
-            className={`flex flex-col gap-0.5
-              ${showLabels ? (gi > 0 ? 'mt-2.5' : '') : 'items-center'}`}
-          >
-            {showLabels && (
-              <span className="px-2 pb-0.5 text-[10px] font-bold uppercase tracking-[.07em] text-fg-dim">
-                {group.title}
-              </span>
-            )}
+}) => {
+  const setToolHint = useWorkspaceStore((s) => s.setToolHint);
 
-            {group.tools.map((tool) => (
-              <ToolButton
-                key={tool.id}
-                tool={tool}
-                active={activeTool === tool.id}
-                disabled={!!tool.needsArea && !hasArea}
-                showLabels={showLabels}
-                onSelect={onSelect}
-                onRotate={onRotate}
-              />
-            ))}
-          </div>
-        </Fragment>
-      ))}
-    </div>
+  // The rail goes when the last plan closes, and a button that unmounts under
+  // the pointer fires no mouseleave — the status bar would keep describing a
+  // tool that is no longer on screen.
+  useEffect(() => () => setToolHint(null), [setToolHint]);
 
-    {/* Pinned to the foot, so clearing sits in the same place however long the
-        tool list grows — and the whole strip goes when there is nothing to
-        clear, rather than leaving its rule across an empty row. */}
-    {hasToolData && (
-      <div className={`shrink-0 flex flex-col gap-0.5 border-t border-line py-1.5
-                       ${showLabels ? 'px-1.5' : 'items-center'}`}>
-        <button
-          type="button"
-          onClick={onClearTools}
-          aria-label="Clear all measurements and shapes"
-          className={`group relative shrink-0 border border-transparent rounded-md cursor-pointer
-            text-fg-2 hover:bg-crit/12 hover:text-crit transition-colors
-            ${showLabels
-              ? 'flex items-center gap-2.5 w-full h-8 px-2 text-[12.5px] font-medium'
-              : 'grid place-items-center w-9 h-9'}`}
-        >
-          <Trash2 className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
-          {/* Keyed: both branches are spans in the same slot, so without one
-              React patches the name into the tooltip and the fresh `opacity-0`
-              transitions down from the name's 1 — a tooltip that flashes on
-              screen every time the rail collapses. */}
-          {showLabels
-            ? <span key="name" className="flex-1 text-left truncate">Clear tools</span>
-            : <span key="tip" role="tooltip" className={TOOLTIP}>Clear measurements &amp; shapes</span>}
-        </button>
+  return (
+    <div
+      role="toolbar"
+      aria-label="Tools"
+      aria-orientation="vertical"
+      className="flex w-12 shrink-0 flex-col bg-panel-2 border-l border-line select-none"
+    >
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-0.5 py-1.5">
+        {TOOL_GROUPS.map((group, gi) => (
+          <Fragment key={group.id}>
+            {gi > 0 && <span className="w-6 h-px bg-line my-1.5 shrink-0" />}
+            <div
+              role="group"
+              aria-label={group.title}
+              className="flex flex-col items-center gap-0.5"
+            >
+              {group.tools.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  active={activeTool === tool.id}
+                  disabled={!!tool.needsArea && !hasArea}
+                  onSelect={onSelect}
+                  onRotate={onRotate}
+                />
+              ))}
+            </div>
+          </Fragment>
+        ))}
       </div>
-    )}
-  </div>
-);
+
+      {/* Pinned to the foot, so clearing sits in the same place however long the
+          tool list grows — and the whole strip goes when there is nothing to
+          clear, rather than leaving its rule across an empty row. */}
+      {hasToolData && (
+        <div className="shrink-0 flex flex-col items-center gap-0.5 border-t border-line py-1.5">
+          <button
+            type="button"
+            onClick={onClearTools}
+            aria-label="Clear all measurements and shapes"
+            aria-describedby="tool-hint-clear"
+            onMouseEnter={() => setToolHint({
+              name: 'Clear tools',
+              detail: 'Remove every measurement and shape drawn on this plan',
+            })}
+            onMouseLeave={() => setToolHint(null)}
+            onFocus={() => setToolHint({
+              name: 'Clear tools',
+              detail: 'Remove every measurement and shape drawn on this plan',
+            })}
+            onBlur={() => setToolHint(null)}
+            className="group relative shrink-0 grid place-items-center w-9 h-9
+                       border border-transparent rounded-md cursor-pointer
+                       text-fg-2 hover:bg-crit/12 hover:text-crit transition-colors"
+          >
+            <Trash2 className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
+            <span id="tool-hint-clear" className="sr-only">
+              Remove every measurement and shape drawn on this plan
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default ToolRail;
