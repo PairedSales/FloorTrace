@@ -125,6 +125,20 @@ export function usePlanManager() {
       if (!confirmed) return false;
     }
 
+    // Whoever inherits the root has to arrive with its content. After a
+    // restore every background plan is `hydrated: false` — its state is still
+    // on disk — and `adoptDocument` has nothing parked to adopt, so closing the
+    // active plan used to land the store on an image-less root that the autosave
+    // subscription then read as an empty plan and deleted.
+    if (isActive && state.documentOrder.length > 1) {
+      const order = state.documentOrder;
+      const index = order.indexOf(docId);
+      const successor = order[Math.max(0, index - 1)] === docId
+        ? order[index + 1]
+        : order[Math.max(0, index - 1)];
+      if (successor) await hydrate(successor);
+    }
+
     await removePlan(docId);
     // The Save As grant dies with the plan. Left behind, the handle cached
     // under this id sends the next plan's first Save into the closed plan's
@@ -132,7 +146,7 @@ export function usePlanManager() {
     forgetFileHandle(docId);
     useAppStore.getState().closeDocument(docId);
     return true;
-  }, []);
+  }, [hydrate]);
 
   /**
    * Close every plan.

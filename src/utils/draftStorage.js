@@ -153,8 +153,19 @@ export async function getDraft(key) {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readonly');
       const store = transaction.objectStore(STORE_NAME);
+      // The write paths guard the transaction; this one did not, and it resolves
+      // from inside nested handlers. An exception thrown in an IDB callback does
+      // not abort the transaction and cannot reach the `try` below — the
+      // executor returned long ago — so it left a promise that never settled,
+      // on the path every startup read takes. `store.get` on a connection that
+      // went away and `localStorage.getItem` under blocked site data both throw
+      // exactly there.
+      transaction.onabort = () => reject(transaction.error);
+      transaction.onerror = () => reject(transaction.error);
       const request = store.get(key);
+      request.onerror = () => reject(request.error);
       request.onsuccess = () => {
+       try {
         const val = request.result;
         if (val !== undefined) {
           if (!val?.imageKey) {
@@ -185,8 +196,10 @@ export async function getDraft(key) {
             resolve(null);
           }
         }
+       } catch (error) {
+         reject(error);
+       }
       };
-      request.onerror = () => reject(request.error);
     });
   } catch (error) {
     console.warn('IndexedDB getDraft failed, falling back to localStorage:', error);
