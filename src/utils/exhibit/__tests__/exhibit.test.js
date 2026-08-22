@@ -69,6 +69,13 @@ const textOf = (layout) => layout.ops.filter((o) => o.op === 'text').map((o) => 
 describe('exhibit model', () => {
   beforeEach(() => {
     useAppStore.getState().restart();
+    // `restart` empties the plan on the root; it does not put the workspace
+    // back to a single plan, which anything touching the roll-up needs.
+    const id = useAppStore.getState().activeDocumentId;
+    useAppStore.setState({
+      documents: { [id]: { title: null, sourceFileName: null, hasWork: false, hydrated: true, area: null } },
+      documentOrder: [id],
+    });
   });
 
   it('reports the area the app reports', () => {
@@ -99,6 +106,58 @@ describe('exhibit model', () => {
     expect(rowSum).toBe(600);
     expect(asNumber(model.total)).toBe(rowSum);
     expect(model.total).toBe('600');
+  });
+
+  // A workfile keeps every page. One plan's page stating a figure with nothing
+  // to place it reads as the whole house — which is the number the report
+  // actually needs, and the one this page is not.
+  describe('a plan that is one of several', () => {
+    const twoPlanWorkspace = () => {
+      setUp({ projectName: 'Main level' });
+      const other = 'doc-upper';
+      useAppStore.setState((s) => ({
+        documents: {
+          ...s.documents,
+          [s.activeDocumentId]: { ...s.documents[s.activeDocumentId], title: 'Main level' },
+          [other]: {
+            title: 'Upper level', sourceFileName: null, hasWork: true, hydrated: false,
+            area: { byType: { gla: 6000 }, counts: { gla: 1 }, gla: 6000, total: 6000 },
+          },
+        },
+        documentOrder: [s.activeDocumentId, other],
+      }));
+      return useAppStore.getState();
+    };
+
+    it('says which plan it is, on the page', () => {
+      const model = buildExhibitModel(twoPlanWorkspace());
+      expect(model.headline.caption).toContain('this plan is 1 of 2');
+    });
+
+    it('carries the property total and every plan’s share', () => {
+      const model = buildExhibitModel(twoPlanWorkspace());
+      expect(model.property.planCount).toBe(2);
+      expect(model.property.levels).toBe(2);
+      expect(model.property.gla.value).toBe('16,000');
+      expect(model.property.plans.map((p) => p.label)).toEqual(['Main level', 'Upper level']);
+      expect(model.property.plans.map((p) => p.value)).toEqual(['10,000', '6,000']);
+    });
+
+    it('prints the property block', () => {
+      const model = buildExhibitModel(twoPlanWorkspace());
+      const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
+      const printed = textOf(layout);
+      expect(printed).toContain('PROPERTY');
+      expect(printed.some((t) => t.includes('16,000'))).toBe(true);
+    });
+
+    it('says nothing about a property when there is only one plan', () => {
+      const model = buildExhibitModel(setUp());
+      expect(model.property).toBeNull();
+      expect(model.headline.caption).not.toContain('this plan is');
+      const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
+      expect(textOf(layout)).not.toContain('PROPERTY');
+    });
   });
 
   it('states the wall face the area was measured to', () => {
@@ -240,6 +299,13 @@ describe('filenames', () => {
 describe('page composition', () => {
   beforeEach(() => {
     useAppStore.getState().restart();
+    // `restart` empties the plan on the root; it does not put the workspace
+    // back to a single plan, which anything touching the roll-up needs.
+    const id = useAppStore.getState().activeDocumentId;
+    useAppStore.setState({
+      documents: { [id]: { title: null, sourceFileName: null, hasWork: false, hydrated: true, area: null } },
+      documentOrder: [id],
+    });
   });
 
   it('wraps to the width it is given', () => {

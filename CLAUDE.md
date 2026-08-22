@@ -140,12 +140,14 @@ A switch is *park → adopt*, and its correctness rests on three things:
   of it is parked, because none of it is a fact about the plan. It dies with the tree.
 
 **Hooks are workspace-level or per-plan, and it matters where they mount.**
-`App.jsx` mounts twelve; the `key` is on `<Canvas>` only, so none of them remount
+`App.jsx` mounts thirteen; the `key` is on `<Canvas>` only, so none of them remount
 today — but before reaching for a keyed subtree, know which is which.
 
 *Workspace-level, must never sit inside a keyed subtree:* `useAutosave`,
 `useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`,
-`useKeyboardShortcuts`, `useIsMobile`, and `usePlanManager` —
+`useKeyboardShortcuts`, `useIsMobile`, `usePlanAreaIndex` (it follows whichever
+plan is live, and records what that plan contributes to the property), and
+`usePlanManager` —
 which *performs* the switch, so inside the keyed subtree it would be torn down
 mid-adopt.
 

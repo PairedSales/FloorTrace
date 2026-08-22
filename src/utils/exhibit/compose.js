@@ -311,6 +311,38 @@ export function composeExhibit(ctx, model, {
       ry += Math.round(rowH + 16 * ui);
     }
 
+    // The property, when this plan is one of several. A workfile keeps every
+    // page, and a page stating one plan's figure with nothing to place it reads
+    // as the whole house — which is the number the report actually needs.
+    if (model.property) {
+      ops.push(text('PROPERTY', rightX, ry, headFont, PAPER.ink3));
+      ry += Math.round(19 * ui);
+      for (const plan of model.property.plans) {
+        ops.push(text(
+          plan.isActive ? `${plan.label} (this plan)` : plan.label,
+          rightX, ry, rowFont, PAPER.ink2,
+        ));
+        ops.push(text(plan.value, right, ry, numFont, PAPER.ink, { align: 'right' }));
+        ry += rowH;
+        ops.push({
+          op: 'line', x1: rightX, y1: ry - 4 * ui, x2: right, y2: ry - 4 * ui,
+          color: PAPER.ruleSoft, width: 1,
+        });
+      }
+      const propertyLabel = model.property.levels > 0
+        ? `Property GLA · ${model.property.levels} level${model.property.levels === 1 ? '' : 's'}`
+        : 'Property total';
+      const propertyValue = model.property.levels > 0
+        ? model.property.gla
+        : model.property.total;
+      ops.push(text(propertyLabel, rightX, ry + 3 * ui, sans(Math.round(13.5 * ui), 600), PAPER.ink));
+      ops.push(text(
+        `${propertyValue.value} ${propertyValue.suffix}`, right, ry + 3 * ui,
+        mono(Math.round(13.5 * ui), 700), PAPER.ink, { align: 'right' },
+      ));
+      ry += Math.round(rowH + 16 * ui);
+    }
+
     if (model.outlines.length) {
       ops.push(text('OUTLINES', rightX, ry, headFont, PAPER.ink3));
       ry += Math.round(19 * ui);

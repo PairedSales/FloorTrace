@@ -53,6 +53,7 @@ import { useTheme } from './hooks/useTheme';
 import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
+import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { forgetFileHandle } from './utils/fileHandles';
 
 // What the status bar calls each mode, and the one-line reminder beside it.
@@ -1277,6 +1278,7 @@ function App() {
   });
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
+  usePlanAreaIndex();
   const { theme, cycleTheme } = useTheme();
   const dockOpen = useWorkspaceStore((s) => s.dockOpen);
   const setDockOpen = useWorkspaceStore((s) => s.setDockOpen);
@@ -1672,7 +1674,7 @@ function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,.floorplan"
+        accept="image/*,application/pdf,.pdf,.floorplan"
         multiple
         onChange={handleFileUpload}
         className="hidden"

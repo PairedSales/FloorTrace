@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
-import { parkedStateFor, parkedHistoryFor } from '../store/documentManager';
+import { parkedStateFor, parkedHistoryFor, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 import { readDocDraft, readHistoryRecord } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
 import * as undoManager from '../store/undoManager';
-import { loadImageFromFile } from '../utils/imageLoader';
+import { loadPagesFromFile } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
@@ -71,12 +71,11 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
     // looked like it should do.
     const files = [...(input.files ?? [])];
     for (const file of files) {
-      // At the cap: stop opening, keep what was opened, and let the plan
-      // manager's own message explain why the rest did not appear.
-      if (!makeRoomForIncoming()) break;
-
       try {
         if (file.name.endsWith('.floorplan')) {
+          // At the cap: stop opening, keep what was opened, and let the plan
+          // manager's own message explain why the rest did not appear.
+          if (!makeRoomForIncoming()) break;
           setIsProcessing(true, 'Loading project…');
           const text = await new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -97,24 +96,42 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
 
           flash('Project loaded');
         } else {
-          // Before the load, not after: the base64 round-trip and the decode
-          // inside `loadImageFromFile` are part of the ingest cost.
-          perfResetRun();
-          perfMark(MARKS.imageSet);
-          // Load and validate first — a failed load must leave the current project intact
-          const { dataUrl, mimeType } = await loadImageFromFile(file);
-          resetOverlays();
-          undoManager.clear();
-          setImage(dataUrl);
-          setImageMimeType(mimeType);
-          // The name of the file this plan came from. `useProjectIO` and the
-          // drop handler have both always had it in hand and thrown it away;
-          // it is what names a plan before the user types a subject line.
-          useAppStore.getState().setActiveDocumentMeta({ sourceFileName: file.name });
-          // Not awaited: it runs in the detection worker while the scan below
-          // holds the main thread and the Tesseract pool.
-          prewarmDetection(dataUrl);
-          await handleManualMode(dataUrl, true); // Automatically enter manual mode
+          // Load and validate before claiming a plan: a failed load must leave
+          // the current project intact. A PDF arrives as one entry per page,
+          // which is where a two-page plan set becomes two plans.
+          setIsProcessing(true, 'Reading the plan…');
+          const { pages, skipped } = await loadPagesFromFile(file, {
+            maxPages: MAX_OPEN_DOCUMENTS,
+            onProgress: (n, total) => {
+              if (total > 1) setIsProcessing(true, `Rendering page ${n} of ${total}…`);
+            },
+          });
+
+          for (const page of pages) {
+            if (!makeRoomForIncoming()) break;
+            // Before the writes, not after: the decode and the base64 round
+            // trip are part of what the ingest measurement is measuring.
+            perfResetRun();
+            perfMark(MARKS.imageSet);
+            resetOverlays();
+            undoManager.clear();
+            setImage(page.dataUrl);
+            setImageMimeType(page.mimeType);
+            // The name of the file this plan came from — for a PDF, of the page.
+            // It is what names a plan before the user types a subject line.
+            useAppStore.getState().setActiveDocumentMeta({ sourceFileName: page.name });
+            // Not awaited: it runs in the detection worker while the scan below
+            // holds the main thread and the Tesseract pool.
+            prewarmDetection(page.dataUrl);
+            await handleManualMode(page.dataUrl, true);
+          }
+
+          if (skipped > 0) {
+            notify(
+              `Opened the first ${pages.length} pages — ${skipped} more are in that PDF.`,
+              { type: 'warning', id: 'file-open' },
+            );
+          }
         }
       } catch (error) {
         console.error('Error loading file:', error);

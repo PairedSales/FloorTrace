@@ -111,6 +111,16 @@ export const newDocumentMeta = (patch = {}) => ({
   // a late calibration is a wrong number that looks right; the plan is flagged
   // instead and the user re-runs it.
   needsRescale: false,
+  // What this plan contributes to the property, in square feet, as
+  // `{ byType, counts, gla, total }` or null.
+  //
+  // A property is measured across plans and only one plan is ever live: parked
+  // records are inert by contract, and a restored plan's state sits on disk
+  // until someone switches to it. Neither can be measured from a selector. So
+  // each plan reports its own figures while it *is* live, they ride in the
+  // workspace index, and the roll-up adds up what every plan last reported.
+  // Derived, never authoritative — the live plan is always recomputed.
+  area: null,
   // False for a restored plan whose state is still on disk. Its records are
   // read on first switch rather than at startup — reading every open plan's
   // multi-megabyte image to show one of them is the wrong trade.
