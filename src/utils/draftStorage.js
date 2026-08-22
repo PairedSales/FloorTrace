@@ -1,3 +1,7 @@
+// Long enough that a cold open on a slow disk is never cut short, short enough
+// that a browser which will never answer cannot hold startup indefinitely.
+const OPEN_TIMEOUT_MS = 10000;
+
 const DB_NAME = 'floortrace-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'drafts';
@@ -15,18 +19,36 @@ function getDB() {
       return;
     }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    // An open can settle neither way. `onblocked` fires when another tab holds
+    // an older version open, and there are browser states that fire nothing at
+    // all — and the promise below is awaited by every read the app performs at
+    // startup. A pending promise here does not throw and does not retry: the
+    // restore simply never returns, `_hasRestoredState` is never set, and every
+    // write in the hook is gated off for the rest of the session while the
+    // status bar goes on saying the draft is saved. That is a hang, and it was
+    // indistinguishable from one.
+    let settled = false;
+    const settle = (fn) => (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const fail = settle(reject);
+    const timer = setTimeout(
+      () => fail(new Error('IndexedDB open timed out')),
+      OPEN_TIMEOUT_MS,
+    );
+
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
       }
     };
-    request.onsuccess = (event) => {
-      resolve(event.target.result);
-    };
-    request.onerror = (event) => {
-      reject(event.target.error);
-    };
+    request.onsuccess = (event) => settle(resolve)(event.target.result);
+    request.onerror = (event) => fail(event.target.error);
+    request.onblocked = () => fail(new Error('IndexedDB open blocked by another tab'));
   });
   // Memoise the *connection*, not a failure. A rejected promise cached here
   // was permanent: every later `getDB` returned the same rejection, so one

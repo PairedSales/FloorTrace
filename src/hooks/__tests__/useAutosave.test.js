@@ -45,9 +45,19 @@ vi.mock('../../utils/notify', () => ({
   flash: vi.fn(),
 }));
 
-/** Mount the hook and let its startup restore settle. */
+/**
+ * Mount the hook and let its startup restore settle.
+ *
+ * Tracked so `afterEach` can unmount it. A hook left mounted keeps its store
+ * subscriptions, so the next test runs with two instances reacting to every
+ * change — each with its own `writtenImageByDocRef`, so they disagree about
+ * whether an image is on disk and the assertions start depending on which one
+ * wrote first. That is a test that fails for a reason the product does not have.
+ */
+const mounted = [];
 const mountAutosave = async () => {
   const rendered = renderHook(() => useAutosave());
+  mounted.push(rendered);
   await act(async () => { await Promise.resolve(); });
   return rendered;
 };
@@ -79,6 +89,7 @@ describe('useAutosave', () => {
   });
 
   afterEach(() => {
+    while (mounted.length) mounted.pop().unmount();
     vi.useRealTimers();
   });
 
@@ -102,6 +113,49 @@ describe('useAutosave', () => {
     expect(drafts.claimWorkspaceSession).toHaveBeenCalled();
   });
 
+  // `_hasRestoredState` gates every write in this hook, and every path that
+  // sets it sits downstream of a storage read. A read that fails — or, before
+  // `getDB` was made to always settle, one that never answered — left autosave
+  // silently off for the whole session while the status bar said "saved".
+  it('keeps autosaving even when the workspace cannot be read', async () => {
+    drafts.readWorkspaceIndex.mockRejectedValueOnce(new Error('IndexedDB open timed out'));
+    await mountAutosave();
+
+    expect(app()._hasRestoredState).toBe(true);
+
+    act(() => { app().setImage(IMAGE_A); });
+    await settle();
+    expect(drafts.writeDocDraft.mock.calls.some(([id]) => id === docA)).toBe(true);
+  });
+
+  // The image is written as its own record, and `imageChanged: false` is only
+  // safe if that record provably exists. Recording the write before it happens
+  // makes one failed park permanent: every later write skips the image, the
+  // state record's `imageKey` points at nothing, and the plan comes back
+  // without its drawing — at which point the `!slice.image` branch removes it.
+  it('does not claim a plan’s image is written when the park failed', async () => {
+    await mountAutosave();
+
+    // A's image has never reached disk: the switch happens inside the debounce
+    // window, so the park write is its first and only attempt — and it fails.
+    const docB = addParkedDocument({ image: IMAGE_B });
+    act(() => { app().setImage(IMAGE_A); });
+    drafts.writeDocDraft.mockRejectedValueOnce(new Error('quota'));
+    act(() => { app().switchDocument(docB); });
+    await settle();
+
+    // Back to A and edit: the next write must carry the image, because no
+    // image record for A exists.
+    act(() => { app().switchDocument(docA); });
+    drafts.writeDocDraft.mockClear();
+    act(() => { app().setProjectName('after the failed park'); });
+    await settle();
+
+    const write = drafts.writeDocDraft.mock.calls.find(([id]) => id === docA);
+    expect(write).toBeDefined();
+    expect(write[2]).toBe(true); // imageChanged
+  });
+
   it('writes an edit under the plan that made it', async () => {
     await mountAutosave();
     act(() => { app().setImage(IMAGE_A); });
@@ -117,7 +171,7 @@ describe('useAutosave', () => {
   // put the incoming plan's image, traces and calibration under the outgoing
   // plan's key, while its tab went on showing the outgoing plan's title.
   it('never writes the incoming plan under the outgoing plan\u2019s key', async () => {
-    const { unmount } = await mountAutosave();
+    await mountAutosave();
     act(() => { app().setImage(IMAGE_A); });
 
     const docB = addParkedDocument({ image: IMAGE_B });
@@ -134,7 +188,6 @@ describe('useAutosave', () => {
     // And the plan that was parked was still written — with its own drawing.
     const parkWrite = drafts.writeDocDraft.mock.calls.find(([id]) => id === docA);
     expect(parkWrite?.[1].image).toBe(IMAGE_A);
-    unmount();
   });
 
   // `restart` empties the last plan in place and keeps its id, so the guard
