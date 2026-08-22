@@ -28,11 +28,12 @@ import { hashDataUrl } from './hash';
  * **The session id lives in `sessionStorage`, not `localStorage`.** Two browser
  * tabs of this app share IndexedDB and coordinate through nothing at all — no
  * BroadcastChannel, no storage listener — so each gets its own workspace and
- * they cannot fight over one index. It must not be a `localStorage` key for a
- * second reason: `resolveInitialToolLabels` infers "this browser has used
- * FloorTrace before" from the presence of *any* other `floortrace:` key there,
- * so writing one before first render would silently flip a genuinely new user
- * to the compact tool rail.
+ * they cannot fight over one index. A `localStorage` key would be shared by
+ * both tabs, which is the whole failure. (It also used to be forbidden for a
+ * second reason — `resolveInitialToolLabels` read the mere presence of any
+ * other `floortrace:` key as "this browser has run FloorTrace before" — but
+ * that resolver went with the tool-label preference. The first reason is the
+ * one that was ever load-bearing.)
  */
 
 const SESSION_KEY = 'floortrace:session';

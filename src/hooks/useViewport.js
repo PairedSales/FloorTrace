@@ -6,7 +6,9 @@ import { useSyncExternalStore } from 'react';
  * Two independent questions, deliberately not collapsed into one:
  *
  *  - `isMobile` is about **room**. Below this width the desktop shell cannot
- *    exist: its two docks alone are 476 px, which is wider than the phone.
+ *    exist: the measurement dock and the tool rail are 368 px between them
+ *    before the plan gets a pixel, and the tab strip and status bar inset
+ *    between them need a strip worth reading.
  *  - `isTouch` is about **reach**. A 44 px target and a pinch gesture are right
  *    on a touchscreen laptop too, and wrong on a narrow mouse-driven window.
  *

@@ -67,9 +67,8 @@ beforeEach(() => {
 });
 
 describe('session identity', () => {
-  // resolveInitialToolLabels infers "this browser has used FloorTrace before"
-  // from the presence of any other floortrace: key in localStorage, so writing
-  // the session id there would flip a genuinely new user to the compact rail.
+  // Two tabs of this app share localStorage and coordinate through nothing, so
+  // a session id kept there would be one workspace fought over by both.
   it('keeps the session id out of localStorage', async () => {
     const ws = await loadFresh();
     ws.getSessionId();

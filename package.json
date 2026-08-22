@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "icons": "node scripts/generateIcons.mjs",
     "test": "vitest run",
     "bench:detection": "node scripts/detectionBenchmark.mjs",
     "bench:scale": "node scripts/scaleBenchmark.mjs",

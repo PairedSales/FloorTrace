@@ -20,6 +20,7 @@ npm run bench:scale        # scale selection against fixtures/ (runs in CI)
 npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path only)
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 npm run probe:memory       # what the detection memo retains per image (needs --expose-gc)
+npm run icons              # rasterise public/ icons + favicon from the app mark
 ```
 
 Vitest tests live under `src/utils/**/__tests__/`, `src/store/__tests__/`,
@@ -80,19 +81,30 @@ code may use "floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
-**The tab strip is its own band**, between the menu bar and the command bar
-(`DocumentTabs.jsx`, inserted in `App.jsx`). It cannot ride in the menu bar row —
-that 30 px row is fully spent by the wordmark, five menu titles and a `StatusBar`
-whose cells are deliberately `shrink-0` and forbidden from scrolling. **The band
-must not scroll either**: tabs share the width and truncate to a ~96 px floor, and
-whatever no longer fits moves into a chevron menu. A strip that scrolls hides plans
-behind a gesture, which is what a tab strip exists to prevent.
+**The tab strip is the top row of the plan's own column** (`DocumentTabs.jsx`,
+rendered in `App.jsx` inside the row, not above it), with the `StatusBar` directly
+under it and the canvas under that — so both bands are inset between the
+measurement dock and the tool rail and stop where the plan stops. **The strip must
+not scroll**: tabs share the width and truncate to a ~96 px floor, and whatever no
+longer fits moves into a chevron menu. A strip that scrolls hides plans behind a
+gesture, which is what a tab strip exists to prevent.
 
-At `MAX_OPEN_DOCUMENTS` = 6 no user reaches that chevron: six tabs at the 96 px
-floor need 606 px and the desktop shell only exists above the 819.98 px mobile
-breakpoint. The overflow path is kept so raising the cap cannot silently squeeze
-tabs below their floor — not because anyone sees it. Do not go looking for it in
-the running app.
+**The chevron is reachable, and that is new.** While the strip spanned the window,
+six tabs at the 96 px floor needed 606 px against a 819.98 px minimum, so nobody
+ever saw it. Inset, the strip is the window less a 320 px dock and a 48 px rail —
+~452 px at the breakpoint, which fits four — so five or six open plans overflow on
+a real screen. Treat that path as live.
+
+**Its width is re-measured three ways and none is redundant:** a window `resize`,
+a `ResizeObserver`, and the two pieces of state the inset is made of —
+`dockOpen` and whether an image exists (the tool rail mounts with it), as
+dependencies of the layout effect. The window listener was complete only while
+this band spanned the window. The observer cannot carry it alone either: it never
+fires while `document.hidden` is true, which is every preview pane and every
+background tab — so the state deps are what make the common case deterministic and
+testable, and the observer is the net for a width change nothing told the
+component about. Measuring the window alone is what left tabs squeezed below their
+floor with no chevron to reach the rest.
 
 **Nothing the eager shell reaches may pull konva into the entry's static module
 graph.** One such import puts a `modulepreload` for 320 kB back in
@@ -128,12 +140,14 @@ A switch is *park → adopt*, and its correctness rests on three things:
   of it is parked, because none of it is a fact about the plan. It dies with the tree.
 
 **Hooks are workspace-level or per-plan, and it matters where they mount.**
-`App.jsx` mounts fourteen; the `key` is on `<Canvas>` only, so none of them remount
+`App.jsx` mounts thirteen; the `key` is on `<Canvas>` only, so none of them remount
 today — but before reaching for a keyed subtree, know which is which.
 
 *Workspace-level, must never sit inside a keyed subtree:* `useAutosave`,
-`useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`, `useToolLabels`,
-`useKeyboardShortcuts`, `useIsMobile`, `useDocumentTitle`, and `usePlanManager` —
+`useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`,
+`useKeyboardShortcuts`, `useIsMobile`, `usePlanAreaIndex` (it follows whichever
+plan is live, and records what that plan contributes to the property), and
+`usePlanManager` —
 which *performs* the switch, so inside the keyed subtree it would be torn down
 mid-adopt.
 
@@ -209,6 +223,8 @@ broken once already:
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 
+**The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, and **the Scale card last and small**. The two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because `StageSpine`'s SCALE stage jumps to it and the provenance, the agreement chip and the manual override all live there. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
+
 ### `App.jsx` is a thin orchestrator
 
 `src/App.jsx` wires the store to components and owns cross-cutting workflow logic (mode transitions between `normal`/`manual`, calibration math from room dimensions + overlay, toast notifications). Most reusable interaction logic is factored into `src/hooks/*` (autosave, keyboard shortcuts, tool manager, project import/export, drag-and-drop) — new cross-component behavior should generally go in a hook, not directly in `App.jsx`.
@@ -217,13 +233,25 @@ broken once already:
 
 `useIsMobile()` (`src/hooks/useViewport.js`, `max-width: 819.98px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks the *targets*. They are separate queries on purpose — a touchscreen laptop wants 44 px handles and pinch-zoom while keeping the docked desktop layout, and a narrow mouse-driven window wants the opposite.
 
-`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the five desktop bands — the tab strip became one of them — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
+`App.jsx` still owns every workflow decision. It builds the `<Canvas>` element once (`canvasElement`) and hands it to whichever shell renders: the desktop shell — three full-width bands (menu, command, and the context bar while a tool is running) over a row of dock, plan column and tool rail — or `<MobileChrome>` (`src/components/mobile/`), which is a top bar, the plan, one thumb-height bar, and four sheets (menu, tools, measurement, plans) over a shared `BottomSheet`. Do not fork behaviour across the two — the mobile measurement sheet renders the *same* `MeasurementDock` with `mobile`, re-sized from outside by the `.touch-dense` scope in `index.css`, and the tool sheet reads the same `TOOL_GROUPS` (`components/toolCatalog.js`) the desktop rail does.
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
-`StatusBar` is one of those bands only in the sense that it is a row of the menu bar: `App.jsx` passes it to `MenuBar` as `status` and it renders in the empty right of that row, not along the foot of the window. It therefore has no chrome of its own — no background, no border, no height beyond the header's 30 px — and it may not be a `<footer>`, which HTML forbids inside a `<header>`. Only the hint cell truncates; nothing scrolls, because a horizontal scrollbar in a 30 px row eats the row. Two consequences worth knowing: the menu bar's swallowed `mousedown` is scoped to the menu titles alone (on the whole row it also swallowed the status bar's own buttons, so zooming with a menu open left the menu hanging), and the command bar's right end now carries the theme toggle and the tool-label toggle that used to live in the menu bar and the tool rail.
+**`StatusBar` is a 26 px band of the plan's column**, under the tab strip and over the canvas — not a row of the menu bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
 
-**The tool digits run 1–9 straight down `TOOL_GROUPS`.** Both `toolCatalog.js` and `useKeyboardShortcuts.js` claimed to match and did not — the rail read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits were handed out in the order the tools were built and the rail was regrouped around them later. Nothing derives a digit from an index (a mapping that moves with app state is the thing being avoided), so renumbering means editing both lists together, plus the three places that print a digit: the `keys` on the two Trace menu items, the Paint-outline tooltip in `CommandBar`, and the `1 – 9` row in `HelpModal`.
+- **There is exactly one grow cell.** A second would mean two cells truncating and neither readable.
+- **Four claimants, in this order:** `isProcessing` suppresses everything else, then a `statusFlash`, then the tool the pointer is resting on, then `MODE_HINT` for the active tool. A hover above a flash would swallow "Area copied" the moment the pointer crossed the rail; a hover below `MODE_HINT` would never show at all, since every tool has one.
+- **The hover text renders outside the `role="status"` live region.** That region is `aria-atomic`, so anything inside it re-announces mode *and* hint together — a pointer crossing twelve rail buttons would fire two dozen announcements. The rail's own `aria-describedby` says the same sentence to a screen reader, once, on focus.
+
+**The tool rail is one width and says what its icons are through that status bar.** Hover or keyboard focus writes `{name, detail, digit}` into `workspaceStore.toolHint`; every tool in `TOOL_GROUPS` therefore needs a `hint`, and three had none while the words could be switched on beside the icon. The `showLabels` preference, its `floortrace:toolLabels` key, its resolver and the two toggles that drove it are gone. Disabled tools are **`aria-disabled`, not `disabled`**: a `disabled` button dispatches no pointer events in Chrome, so the one control whose reason a user most needs — why they cannot measure yet — would be the only one silent on hover.
+
+The menu bar carries **three titles**. Settings and Help each held one short list and were folded into File, with "Shortcuts & tips" at the top of it and the two preferences at the foot. Its swallowed `mousedown` stays scoped to the menu titles rather than the row, so anything else put in that row keeps working.
+
+The **browser tab is always titled `FloorTrace`**, from the static `<title>` in `index.html`. There is no `useDocumentTitle` any more: naming the tab after the open plan is a real convenience with two windows open, and it was given up deliberately.
+
+The toast offset is **derived, not written down** (`DESKTOP_CHROME_PX` plus the context bar when a tool is running). It was one hard-coded `116px` for a stack that had already changed twice.
+
+**The tool digits run 1–9 straight down `TOOL_GROUPS`.** Both `toolCatalog.js` and `useKeyboardShortcuts.js` claimed to match and did not — the rail read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits were handed out in the order the tools were built and the rail was regrouped around them later. Nothing derives a digit from an index (a mapping that moves with app state is the thing being avoided), so renumbering means editing both lists together, plus the four places that print a digit: the `keys` on the two Trace menu items, the Paint-outline tooltip in `CommandBar`, the `1 – 9` row in `HelpModal`, and the badge in the corner of every rail button (which the status bar then repeats on hover, from the same field).
 
 **Touch on the canvas is not free.** Every drag-based tool (brush, eraser, crop, void rectangle, room overlay) was wired to `mousedown`/`mousemove`, and no browser synthesises those during a touch drag — so all of them were dead on a phone. `useToolRouter` now exposes `handleStageTouch{Start,Move,End}` that route into the same `dispatchPointerDown` a mouse does; one finger is a pointer, two are the camera (`usePinchZoom`, wired in `useCameraController`). Three rules that are load-bearing:
 
@@ -286,6 +314,14 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
   Tesseract's runtime assets are self-hosted (no jsdelivr at runtime): the worker script and core WASM come straight from `node_modules` via Vite `?url` imports — see the `configureTesseract` block in `DimensionsOCR.js`, which also does the SIMD probe — so they track the installed tesseract.js version automatically. The language data lives at `public/tesseract/eng.traineddata.gz`; regenerate it by gzipping the `eng.traineddata` that a Node benchmark run caches in the repo root.
 
 ### Build
+
+**The icons under `public/` are build output, not artwork.** `npm run icons`
+(`scripts/generateIcons.mjs`) rasterises every favicon, the `.ico`, `icon.svg` and
+the apple-touch/android tiles from `src/components/markGeometry.js` — the same
+coordinates `FloorTraceMark` draws in the menu bar. Edit the geometry and re-run;
+never touch the files, or the tab icon starts quietly disagreeing with the app.
+`android-chrome-*.png` are regenerated with the rest but are still referenced by
+nothing — there is no web manifest.
 
 `vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
 

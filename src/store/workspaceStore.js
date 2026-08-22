@@ -37,6 +37,14 @@ const useWorkspaceStore = create((set, get) => ({
   // `.floorplan` or be restored by an undo.
   dockOpen: true,
 
+  // The tool the pointer or keyboard focus is resting on, as
+  // {name, detail, digit}, or null. The rail is icon-only, so this is how a
+  // tool says what it is: the status bar prints it while the pointer is on the
+  // button. Unlike `statusFlash` it has a real end — mouseleave/blur — so it is
+  // a plain set/clear pair with no timer, and it lives here rather than in
+  // React state because App re-renders the whole shell and a hover must not.
+  toolHint: null,
+
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
@@ -48,6 +56,7 @@ const useWorkspaceStore = create((set, get) => ({
 
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
+  setToolHint: (hint) => set({ toolHint: hint ?? null }),
   setDockOpen: (v) => set({ dockOpen: v }),
   setShowExportDialog: (v) => set({ showExportDialog: v }),
 

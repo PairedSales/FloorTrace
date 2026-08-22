@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { decimalToFeetInches } from '../utils/unitConverter';
 import { useIsTouch } from '../hooks/useViewport';
 
-const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
+const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false }) => {
   const isTouch = useIsTouch();
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
@@ -83,7 +83,9 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id }) => {
     <div
       className={`relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line font-mono
                  focus-within:ring-2 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text
-                 ${isTouch ? 'min-h-[44px] text-[15px]' : 'text-[13px]'}`}
+                 ${large
+                   ? (isTouch ? 'min-h-[52px] text-[21px]' : 'py-2 text-[19px]')
+                   : (isTouch ? 'min-h-[44px] text-[15px]' : 'text-[13px]')}`}
       // The whole box is the target, not just the two number fields. Each is
       // `1ch` wide when empty — 9 px, which a fingertip cannot land on — and the
       // guard used to be `e.target === e.currentTarget`, so a tap that hit the

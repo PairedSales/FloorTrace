@@ -2,10 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- The real favicons, which have always shipped and were referenced by
-         nothing. `logo.svg` was pointed at both of these slots and is a 41 kB
-         SVG whose whole body is one base64 PNG — 31 kB gzipped, fetched on
-         every cold load, to draw a 16 px tab icon. -->
+    <!-- Every one of these is rasterised from the mark the menu bar draws, by
+         `npm run icons` (scripts/generateIcons.mjs) — never edited by hand.
+         The SVG is what Chrome and Firefox actually use; the PNGs and the .ico
+         are for the browsers and the pinned-tab/desktop surfaces that cannot
+         read one. `logo.svg`, which used to sit in these slots, was a 41 kB SVG
+         whose whole body was one base64 PNG — 31 kB gzipped, fetched on every
+         cold load, to draw a 16 px tab icon. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
