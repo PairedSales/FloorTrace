@@ -118,7 +118,10 @@ const ConfirmDialog = () => {
             ref={confirmRef}
             type="button"
             onClick={() => resolve(true)}
-            className={`rounded-md border border-crit bg-crit font-semibold text-white
+            // `accent-ink`, not `white`: dark `--crit` is a light salmon tuned to
+            // read as text on a dark ground, so white on it is 2.54:1. The ink
+            // token is already white in the light theme, where crit is dark.
+            className={`rounded-md border border-crit bg-crit font-semibold text-accent-ink
                         hover:brightness-110 transition-[filter] cursor-pointer
                         ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-8 px-3.5 text-[12.5px]'}`}
           >

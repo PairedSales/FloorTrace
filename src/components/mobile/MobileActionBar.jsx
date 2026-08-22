@@ -42,7 +42,7 @@ const MobileActionBar = ({
           className={`tap-target flex-col gap-0.5 w-[62px] shrink-0 rounded-xl text-[10.5px]
                       font-semibold transition-colors
                       ${toolsActive
-                        ? 'bg-accent/12 text-accent'
+                        ? 'bg-accent/12 text-accent-strong'
                         : 'text-fg-3 active:bg-sunken active:text-fg'}`}
         >
           <SlidersHorizontal className="w-[21px] h-[21px]" aria-hidden="true" />

@@ -54,6 +54,12 @@
 
     --accent:     46 107 230;
     --accent-ink: 255 255 255;
+    /* Accent text standing on an accent *tint*. `bg-accent/12 text-accent`
+       moves the ground toward the text, so the pattern eats its own contrast:
+       #2E6BE6 is 4.81:1 on white but 4.10:1 on its own 12% tint and 3.53:1 on
+       the 10% tint the status bar runs. This is the same hue darkened until
+       the worst of those grounds clears AA — 5.67:1 there, 6.59:1 on the /12. */
+    --accent-strong: 33 80 159;
 
     --ok:         21 115 71;
     --warn:       166 82 0;
@@ -82,6 +88,10 @@
 
     --accent:     91 155 255;
     --accent-ink: 11 17 25;
+    /* Lightened rather than darkened here, for the same reason — see the light
+       block. Dark survives the /10 and /12 tints already; it is the /20 hover
+       that drops to 4.03:1, and this clears it at 5.05:1. */
+    --accent-strong: 124 176 253;
 
     --ok:         74 222 128;
     --warn:       251 191 87;
@@ -206,7 +216,7 @@
      say nothing. It is also the only accent Export ever gets — a filled Export
      over a `fair` trace is a wrong answer that looks green. */
   .toolbar-btn-ready {
-    @apply border-accent/55 text-accent hover:bg-accent/12 hover:text-accent;
+    @apply border-accent/55 text-accent hover:bg-accent/12 hover:text-accent-strong;
   }
 
   .panel-input {

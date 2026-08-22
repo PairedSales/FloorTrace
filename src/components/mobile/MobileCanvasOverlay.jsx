@@ -47,9 +47,14 @@ const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
 
       {draftRisk && (
         <span
+          // Opaque, not a `warn` tint: this chip floats on the *plan*, which is
+          // white paper in both themes, so a translucent warn ground put the
+          // dark theme's light `--warn` at 1.53:1. `--panel-2` gives it a
+          // surface of its own — 9.44:1 dark, 5.49:1 light — and at full
+          // opacity the plan's own ink cannot bleed through and eat it.
           className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 h-8 px-3
-                     rounded-full bg-warn/15 border border-warn/40 text-[12px] font-semibold
-                     text-warn backdrop-blur-sm"
+                     rounded-full bg-panel-2 border border-warn text-[12px] font-semibold
+                     text-warn shadow-sm"
         >
           {draftState === 'error'
             ? <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />

@@ -150,7 +150,7 @@ const StatusBar = ({
           rather than cutting across whatever is being read. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="contents">
         {isProcessing ? (
-          <Cell className="text-accent font-semibold">
+          <Cell className="text-accent-strong font-semibold">
             <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
             {processingMessage || 'Working…'}
           </Cell>
@@ -159,7 +159,7 @@ const StatusBar = ({
           // 452 px — the narrowest this band is — a brush mode wants a slider,
           // a Cancel and a Done, and something has to give; the icon and the
           // accent tint still say which mode this is when the words run out.
-          <Cell grow className="text-accent font-semibold">
+          <Cell grow className="text-accent-strong font-semibold">
             {Icon && <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
             <span className="min-w-0 truncate">{name}</span>
           </Cell>

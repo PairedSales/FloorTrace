@@ -108,7 +108,10 @@ const DimensionOverlay = ({
               rotation={-canvasRotation}
               text={labelText}
               fontSize={fs}
-              fill="#ffffff"
+              // Dracula Background on Dracula Orange, 8.36:1. White on this pill
+              // was 1.70:1 — the least legible label in the app, on the tap
+              // target the project's scale is taken from.
+              fill="#282A36"
               fontFamily={OCR_PILL_FONT_FAMILY}
               fontStyle={OCR_PILL_FONT_STYLE}
               align="center"
