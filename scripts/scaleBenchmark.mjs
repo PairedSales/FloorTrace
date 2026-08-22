@@ -164,15 +164,20 @@ const run = async () => {
         floor?.outer ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
       ), 0);
 
-    // The batch the worker runs: one shared cacheKey, no scale prior.
+    // The batch the worker runs: one shared cacheKey, no scale prior, and every
+    // other label on the page passed to every room as a place it is not — all
+    // three are properties of measuring the labels together, and this is the
+    // path the app's scale actually comes from.
     const t0 = Date.now();
     const rooms = [];
-    for (const label of labels) {
+    for (let i = 0; i < labels.length; i += 1) {
+      const label = labels[i];
       const room = detectRoomFromClickCore(imageData, label.point, {
         cacheKey: file,
         labelBbox: label.labelBbox,
         labelDims: label.labelDims,
         pixelsPerFoot: null,
+        foreignPoints: labels.filter((_, j) => j !== i).map((l) => l.point),
       });
       if (room) rooms.push({ ...room, labelId: label.id, labelDims: label.labelDims });
     }

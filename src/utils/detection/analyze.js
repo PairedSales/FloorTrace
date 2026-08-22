@@ -47,10 +47,101 @@ const estimateStrokeThickness = (mask, width, height) => {
   return best;
 };
 
+// The page's own tone: the modal grey of everything that is not ink. Anything
+// meaningfully below it is screened — drawn, but lighter than the ink
+// threshold. Same reading of a grey fill `nonGla.js` takes for shaded pockets.
+const SCREEN_MARGIN = 12;
+
+// Window glazing drawn as a screened band across the full thickness of a wall.
+// Returns a mask of the bands, or null when there are none.
+const findGlazing = (gray, ink, wallMask, width, height, wallThickness) => {
+  if (!gray) return null;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < ink.length; i += 1) if (!ink[i]) hist[gray[i]] += 1;
+  let pageMode = 255;
+  let bestMass = -1;
+  for (let v = 1; v < 255; v += 1) {
+    const mass = hist[v - 1] + hist[v] * 2 + hist[v + 1];
+    if (mass > bestMass) {
+      bestMass = mass;
+      pageMode = v;
+    }
+  }
+  const threshold = pageMode - SCREEN_MARGIN;
+  const screened = new Uint8Array(ink.length);
+  let count = 0;
+  for (let i = 0; i < ink.length; i += 1) {
+    if (!ink[i] && gray[i] < threshold) {
+      screened[i] = 1;
+      count += 1;
+    }
+  }
+  // A band is at least half a wall thick and three walls long, so nothing
+  // smaller than that can qualify and the labelling is not worth running.
+  const minMinor = Math.max(2, Math.round(wallThickness * 0.5));
+  const minMajor = Math.max(3 * wallThickness, 12);
+  if (count < minMinor * minMajor) return null;
+
+  const { labels, components } = labelComponents(screened, width, height);
+  const tol = Math.max(2, Math.round(wallThickness * 0.34));
+  let found = null;
+
+  for (const comp of components) {
+    const w = comp.bbox.maxX - comp.bbox.minX + 1;
+    const h = comp.bbox.maxY - comp.bbox.minY + 1;
+    const minor = Math.min(w, h);
+    if (minor < minMinor || minor > Math.round(wallThickness * 1.8)) continue;
+    if (Math.max(w, h) < minMajor) continue;
+    // Glazing fills its box; a halo along a stroke or a gradient tail does not.
+    if (comp.size < 0.55 * w * h) continue;
+
+    const horizontal = w >= h;
+    const lo = horizontal ? comp.bbox.minY : comp.bbox.minX;
+    const hi = horizontal ? comp.bbox.maxY : comp.bbox.maxX;
+    const mid = (lo + hi) >> 1;
+    const minorLimit = (horizontal ? height : width) - 1;
+    const majorLimit = (horizontal ? width : height) - 1;
+    // The wall's cross-section just past one end of the band, measured on the
+    // band's own minor axis: the same faces mean the same wall.
+    const alignedAt = (pos) => {
+      const at = (m) => (horizontal ? m * width + pos : pos * width + m);
+      if (!wallMask[at(mid)]) return false;
+      let faceLo = mid;
+      let faceHi = mid;
+      while (faceLo > 0 && wallMask[at(faceLo - 1)]) faceLo -= 1;
+      while (faceHi < minorLimit && wallMask[at(faceHi + 1)]) faceHi += 1;
+      return Math.abs(faceLo - lo) <= tol && Math.abs(faceHi - hi) <= tol;
+    };
+    // Every position within a wall's reach of the end, not the first one that
+    // is wall: the first is usually the window's own rail, a line running the
+    // length of the opening whose "cross-section" is the window, not the wall.
+    const reach = Math.max(3, Math.round(wallThickness * 0.6));
+    const aligned = (start, step) => {
+      for (let d = 1; d <= reach; d += 1) {
+        const pos = start + step * d;
+        if (pos < 0 || pos > majorLimit) return false;
+        if (alignedAt(pos)) return true;
+      }
+      return false;
+    };
+    if (!aligned(horizontal ? comp.bbox.minX : comp.bbox.minY, -1)) continue;
+    if (!aligned(horizontal ? comp.bbox.maxX : comp.bbox.maxY, 1)) continue;
+
+    if (!found) found = new Uint8Array(ink.length);
+    for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+      const row = y * width;
+      for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+        if (labels[row + x] === comp.id) found[row + x] = 1;
+      }
+    }
+  }
+  return found;
+};
+
 export const analyzeFloorplan = (imageData, options = {}) => {
   const maxDimension = options.maxDimension ?? 1400;
   const scaled = binarizeToWorkingScale(imageData, maxDimension);
-  const { width, height, ink } = scaled;
+  const { width, height, ink, gray } = scaled;
   const longest = Math.max(width, height);
 
   // Drop small components: text glyphs, window tick marks, arrows, dots.
@@ -189,6 +280,28 @@ export const analyzeFloorplan = (imageData, options = {}) => {
       }
     }
   }
+
+  // Screened glazing: a window drawn as a grey band filling the wall it sits
+  // in, rather than as two black rails with the page showing between them.
+  // Above the ink threshold the band is not there at all, so the wall has a
+  // hole in it the width of the window — and on an exterior wall the flood
+  // comes in through the glazing and takes the rooms behind it with it,
+  // leaving an outline that follows real wall the whole way round and is
+  // missing a bedroom. `bridgeRunsGuarded` cannot be relied on to weld the
+  // hole shut: a window that runs up to within a wall thickness of a corner
+  // leaves a stub too short to anchor a weld, and the stub is short for a
+  // reason no scan line can see.
+  //
+  // Rescued only where the band *is* the wall: screened rather than merely
+  // tinted, no thicker than the wall, and, at both ends, continuing into a
+  // wall whose cross-section is the band's own. That last test is what
+  // separates a window from everything else drawn in the same grey — a stair
+  // tread runs *between* two walls, so the wall it meets crosses it instead
+  // of lining up with it. `nonGla.js` throws these bands away by name ("thin
+  // dark strips are window glazing bands, not terraces") and nothing else was
+  // looking at them.
+  const glazing = findGlazing(gray, ink, wallMask, width, height, wallThickness);
+  if (glazing) orMasks(boundaryMask, glazing);
 
   // Thick-stroke evidence: survives an opening proportional to the dominant
   // wall thickness. Distinguishes walls from fixture/counter lines when the

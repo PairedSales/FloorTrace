@@ -417,6 +417,39 @@ export const windowedHouse = (gap) => {
   };
 };
 
+// A rectangular house whose bottom wall carries a window drawn as a screened
+// band filling the wall, rather than as two black rails with the page showing
+// between them. Above the ink threshold the band is not there at all, so the
+// wall has a `span`-wide hole in it — and the window stops 5px short of the
+// east wall, so all the ink left beyond it on that scan row is that 5px plus
+// the east wall's own cross-section: 15px, where a colinear weld needs two
+// thicknesses. Windows are drawn up against corners on real plans all the
+// time. The building is unchanged, so the truth is the same rectangle whatever
+// the window does.
+//
+// `strayBand` puts the identical tone somewhere no wall runs — a stair tread,
+// a shaded strip — which must be left exactly where it is.
+export const glazedHouse = (span, { tone = 190, strayBand = false } = {}) => {
+  const img = createImage(800, 560);
+  const t = 10;
+  const h = Math.floor(t / 2);
+  wallRect(img, 100, 80, 700, 480, t);
+  if (span > 0) {
+    const gapHi = 700 - h - 1 - 5;
+    const gapLo = gapHi - span + 1;
+    fillRect(img, gapLo, 480 - h, gapHi, 480 - h + t - 1, 255);
+    wall(img, gapLo, 480, gapHi, 480, t, tone);
+  }
+  if (strayBand) {
+    // Same tone, same thickness, well inside the house and in line with
+    // nothing: three treads of a stair.
+    for (let i = 0; i < 3; i += 1) {
+      fillRect(img, 300 + i * 24, 200, 300 + i * 24 + t - 1, 380, tone);
+    }
+  }
+  return { img, truth: outerFaceRect(100, 80, 700, 480, t) };
+};
+
 // Two complete, separately sealed plans side by side, each with a labelled
 // room, and one stray label in the gutter between them. Remediation must not
 // weld them into one building to satisfy the stray: two outlines that each

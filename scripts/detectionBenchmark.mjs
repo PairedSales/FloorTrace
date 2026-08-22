@@ -254,6 +254,11 @@ const run = () => {
     // project measured a flow the user never has after the first click.
     const roomResults = [];
     const scaleSamples = [];
+    // The other labels on the page, as places a room is not. Both app paths
+    // supply them — the scan's batch and a click on a dimension pill — so a
+    // benchmark that withheld them would be scoring a flow the app has not had
+    // since rooms started being measured together.
+    const clicks = (truth?.rooms ?? []).filter((r) => r.click);
     for (const room of truth?.rooms ?? []) {
       const robust = scaleSamples.length >= 4 ? robustScale(scaleSamples) : null;
       const hint = robust && robust.spread <= 2 ? { x: robust.value, y: robust.value } : null;
@@ -263,6 +268,9 @@ const run = () => {
           : undefined,
         labelDims: room.dims ? { width: room.dims[0], height: room.dims[1] } : undefined,
         pixelsPerFoot: hint,
+        foreignPoints: clicks
+          .filter((other) => other !== room)
+          .map((other) => ({ x: other.click[0], y: other.click[1] })),
       };
       const t1 = Date.now();
       const result = detectRoomFromClickCore(imageData, { x: room.click[0], y: room.click[1] }, opts);

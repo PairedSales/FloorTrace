@@ -1,0 +1,47 @@
+{
+  "_provenance": "Second floor of Example8.floorplan (the .floorplan project the PNG was extracted from). Every figure below is read off the drawing's own wall faces, not off a detector run: the exterior faces from the first/last dark pixel on each scan line, the room faces from the ink runs crossing each room.",
+  "scale": {
+    "pixelsPerFoot": 17.0,
+    "tolerance": 0.04,
+    "provenance": "Four independent hand measurements of a printed dimension against the wall faces it spans: LAUNDRY 6'5\" over x=244-353 (16.99), BEDROOM-left 12'1\" over x=30-234 (16.97), BEDROOM-right 12'2\" over x=363-570 (17.10) and 12'5\" over y=35-245 (16.99)."
+  },
+  "boundary": {
+    "outerBbox": [20, 26, 580, 314],
+    "outerPolygon": [
+      [20, 26], [546, 26], [546, 76], [580, 76], [580, 186],
+      [546, 186], [546, 255], [428, 255], [428, 314], [20, 314]
+    ],
+    "floors": [[20, 26, 580, 314]]
+  },
+  "rooms": [
+    {
+      "name": "BEDROOM (left)",
+      "click": [131, 192],
+      "labelBbox": [93, 187, 76, 10],
+      "dims": [12.0833, 12.3333],
+      "rect": [30, 107, 234, 305]
+    },
+    {
+      "name": "LAUNDRY",
+      "_comment": "A closet with bi-fold doors: its south side is drawn as two door arcs, so the bottom edge is the one the label places rather than one the ink states.",
+      "click": [299, 114],
+      "labelBbox": [269, 109, 61, 10],
+      "dims": [6.4167, 5.3333],
+      "rect": [244, 35, 353, 126]
+    },
+    {
+      "name": "BEDROOM (right)",
+      "_comment": "The printed width includes the bay: 363-570 is 17.01 px/ft against 12'2\", where stopping at the main east wall (536) would imply 14.2.",
+      "click": [452, 133],
+      "labelBbox": [415, 128, 75, 11],
+      "dims": [12.1667, 12.4167],
+      "rect": [363, 35, 570, 245],
+      "minIou": 0.9
+    }
+  ],
+  "ocr": [
+    { "name": "BEDROOM (left)", "w": 12.0833, "h": 12.3333 },
+    { "name": "LAUNDRY", "w": 6.4167, "h": 5.3333 },
+    { "name": "BEDROOM (right)", "w": 12.1667, "h": 12.4167 }
+  ]
+}

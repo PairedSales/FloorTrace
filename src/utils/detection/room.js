@@ -278,6 +278,14 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
   const cands = {};
   for (const side of SIDES) cands[side.key] = candidatesFor(side);
 
+  // Labels this room is not: every other parsed dimension label on the page,
+  // in working px, minus any that already sit inside the rectangle growth
+  // settled on — that one is an open plan sharing a space, or two labels for
+  // one room, and neither is evidence of a leak.
+  const foreign = (options.foreignPoints ?? []).filter((p) => !(
+    p.x > rect.left && p.x < rect.right && p.y > rect.top && p.y < rect.bottom
+  ));
+
   // Offer the walls Phase A passed over — but only once the ordinary search has
   // been tried and still cannot produce a rectangle the label agrees with.
   //
@@ -353,6 +361,17 @@ export const growRoomRect = (analysis, footprintInfo, point, options = {}) => {
       // between other candidates (counters, a neighbouring room) is not it.
       if (px < left - 2 || px > right + 2 || py < top - 2 || py > bottom + 2) {
         return Infinity;
+      }
+      // And it must not contain somebody else's. A room is not named twice, so
+      // a rectangle holding another label's dimensions is one that grew through
+      // a wall — the shape the label wants, assembled out of two rooms. Only
+      // the batch supplies these: a single click knows of no other label, and
+      // behaves exactly as it did.
+      for (const other of foreign) {
+        if (other.x > left + 2 && other.x < right - 2
+          && other.y > top + 2 && other.y < bottom - 2) {
+          return Infinity;
+        }
       }
       const aspect = w / h;
       const err = Math.min(

@@ -402,6 +402,9 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   const room = growRoomRect(analysis, footprintInfo, workPoint, {
     labelBbox,
     labelDims: options.labelDims,
+    foreignPoints: (options.foreignPoints ?? []).map((p) => ({
+      x: p.x * analysis.scaleX, y: p.y * analysis.scaleY,
+    })),
     pixelsPerFoot: hint?.x > 0 && hint?.y > 0
       ? { x: hint.x * analysis.scaleX, y: hint.y * analysis.scaleY }
       : null,

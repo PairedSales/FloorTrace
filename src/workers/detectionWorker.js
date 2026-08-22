@@ -157,12 +157,17 @@ self.onmessage = async (event) => {
       // does move `confidence`, and confidence is what decides which rooms the
       // scale is taken from. Threading a running prior through the loop would
       // make that selection depend on the order OCR happened to return labels.
-      data = (payload.labels ?? []).map((label) => {
+      const labels = payload.labels ?? [];
+      data = labels.map((label, index) => {
         const room = detectRoomFromClickCore(imageData, label.point, {
           ...options,
           labelBbox: label.labelBbox,
           labelDims: label.labelDims,
           pixelsPerFoot: null,
+          // The other labels on the page, as places this room is not. Available
+          // only because the batch measures them together, and order-independent
+          // — unlike a running scale prior, every label is passed to every room.
+          foreignPoints: labels.filter((_, i) => i !== index).map((l) => l.point),
         });
         if (!room) return null;
         return {
