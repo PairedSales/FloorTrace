@@ -1,6 +1,11 @@
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 const MAX_IMAGE_DIMENSION = 4000; // px
 
+/** By type when the browser gives one, by name when it does not. */
+export const isPdfFile = (file) => (
+  file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name ?? '')
+);
+
 const fileOrBlobToDataUrl = (fileOrBlob) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -70,6 +75,28 @@ export const loadImageFromFile = async (file) => {
     dataUrl: await maybeDownscaleDataUrl(dataUrl, file.type),
     mimeType: file.type,
   };
+};
+
+/**
+ * A file as the page images it contains.
+ *
+ * One entry for an image; one per page for a PDF, which is what makes a
+ * two-page plan set two plans. The PDF path is behind a dynamic import so
+ * pdf.js stays out of the entry chunk, and it is handed `MAX_IMAGE_DIMENSION`
+ * so a vector page is rendered at the largest size the app will keep rather
+ * than at pdf.js's 72 dpi default.
+ *
+ * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string}>, skipped: number}>}
+ */
+export const loadPagesFromFile = async (file, options = {}) => {
+  if (isPdfFile(file)) {
+    // Only for a PDF. Reaching into the module to ask *whether* it is one would
+    // fetch pdf.js's chunk on every image drop, for a question answerable here.
+    const { pdfToPageImages } = await import('./pdfLoader');
+    return pdfToPageImages(file, { ...options, maxDimension: MAX_IMAGE_DIMENSION });
+  }
+  const { dataUrl, mimeType } = await loadImageFromFile(file);
+  return { pages: [{ dataUrl, mimeType, name: file.name }], skipped: 0 };
 };
 
 // Load image from clipboard

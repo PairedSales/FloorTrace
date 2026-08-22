@@ -7,11 +7,12 @@ import useWorkspaceStore from '../../store/workspaceStore';
  * What the desktop status bar says, said where a phone has room for it: over
  * the plan, and only while it is true.
  *
- * The status bar is a 26 px strip of permanent chrome carrying four cells. On a
- * 390 px screen that strip costs more than it tells — the scale and the zoom
- * are both readable from the plan itself, and mode has its own bar. What cannot
- * be dropped is the pair the app is honest about: that something is running,
- * and that the draft is *not* being kept. Both appear only in that state.
+ * On the desktop the status bar is a 26 px band above the plan carrying five
+ * cells. On a 390 px screen that strip costs more than it tells — the scale and
+ * the zoom are both readable from the plan itself, and mode has its own bar.
+ * What cannot be dropped is the pair the app is honest about: that something is
+ * running, and that the draft is *not* being kept. Both appear only in that
+ * state.
  */
 const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
   const isProcessing = useAppStore((s) => s.isProcessing);

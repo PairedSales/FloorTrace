@@ -26,13 +26,22 @@ const DRAFT_CELL = {
   },
 };
 
-// `grow` is only ever the hint: it is the one cell whose text is expendable, so
-// it truncates and every other cell keeps its full width. Nothing here scrolls
-// — a horizontal scrollbar inside the 30px menu bar row would eat the row.
-const Cell = ({ children, grow = false, className = '' }) => (
-  <span className={`inline-flex items-center gap-1.5 h-[25px] px-2.5 whitespace-nowrap
-                    border-l border-line-soft first:border-l-0
-                    ${grow ? 'min-w-0 shrink' : 'shrink-0'} ${className}`}>
+// `grow` is only ever the hint — the mode's, or the tool the pointer is on: it
+// is the one cell whose text is expendable, so it truncates and every other
+// cell keeps its full width. **There is exactly one grow cell.** Two would both
+// truncate and neither would be readable, which is why the hover hint takes
+// this cell over rather than claiming a second one.
+//
+// Nothing here scrolls. The band is 26 px and a horizontal scrollbar would eat
+// it — and inset between the dock and the tool rail it has *less* room than it
+// did in the menu bar, not more.
+const Cell = ({ children, grow = false, className = '', ...rest }) => (
+  <span
+    className={`inline-flex items-center gap-1.5 h-[26px] px-2.5 whitespace-nowrap
+                border-l border-line-soft first:border-l-0
+                ${grow ? 'min-w-0 shrink' : 'shrink-0'} ${className}`}
+    {...rest}
+  >
     {children}
   </span>
 );
@@ -43,10 +52,19 @@ const Cell = ({ children, grow = false, className = '' }) => (
  * is my work saved". Before this, mode lived only in eight `duration: Infinity`
  * toasts over the canvas and zoom was not displayed anywhere at all.
  *
- * It rides in the menu bar row rather than along the bottom of the window —
- * hence a plain element with no chrome of its own, sized and coloured by the
- * header it is slotted into. A footer would also be invalid there: `<header>`
- * and `<footer>` may not contain one another.
+ * It is a band of its own, directly under the tab strip and directly above the
+ * plan it describes — inset between the measurement dock and the tool rail, so
+ * it spans the plan and nothing else. It rode inside the menu bar row until the
+ * shell was reordered; that put it beside five menu titles and as far from the
+ * plan as a line of text can be, and it left the row with no way to grow.
+ *
+ * It carries one thing the menu bar version could not: with the tool rail now
+ * icon-only, hovering or focusing a tool prints that tool's name and what it
+ * does here (`toolHint`, workspaceStore). That text is **outside** the live
+ * region below — `aria-atomic` re-announces the whole region on any change, so
+ * a pointer crossing twelve rail buttons would fire two dozen announcements of
+ * the mode and the hint together. The rail's own `aria-describedby` is what
+ * says the same thing to a screen reader, once, on focus.
  *
  * Live cursor coordinates are deliberately absent. `currentMousePos` is local
  * state inside useToolRouter, and lifting it here would put a store write on
@@ -59,6 +77,7 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
   const draftState = useAppStore((s) => s.draftState);
+  const toolHint = useWorkspaceStore((s) => s.toolHint);
 
   // Low-stakes confirmations land here rather than as a toast over the plan.
   const flash = useWorkspaceStore((s) => s.statusFlash);
@@ -78,7 +97,8 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
   const zoomPct = zoomScale > 0 ? Math.round(zoomScale * 100) : 100;
 
   return (
-    <div className="flex items-center flex-1 min-w-0 h-[25px] overflow-hidden
+    <div className="flex items-center w-full min-w-0 h-[26px] shrink-0 overflow-hidden
+                    bg-panel border-b border-line-soft
                     text-[11.5px] text-fg-3 select-none">
       {/* The one live region in the app. Acknowledgements moved off toasts and
           into `flash`, and sonner announces its own toasts but this channel had
@@ -95,12 +115,24 @@ const StatusBar = ({ mode, hint, onZoomIn, onZoomOut, hasImage, onExport }) => {
           <Cell className="text-accent font-semibold">{mode}</Cell>
         )}
 
-        {shownFlash
-          ? <Cell className="text-ok font-semibold">{shownFlash}</Cell>
-          : hint && !isProcessing && (
-            <Cell grow><span className="truncate">{hint}</span></Cell>
-          )}
+        {shownFlash && <Cell className="text-ok font-semibold">{shownFlash}</Cell>}
       </div>
+
+      {/* One cell, three claimants, in this order: a flash the user just earned
+          beats a tool they are only pointing at, and both beat the standing
+          reminder for the active mode. Working… suppresses all three — the
+          progress message is already saying what is happening. */}
+      {!isProcessing && !shownFlash && (toolHint ? (
+        <Cell grow aria-hidden="true">
+          <b className="shrink-0 font-semibold text-fg-2">{toolHint.name}</b>
+          {toolHint.detail && <span className="min-w-0 truncate">{toolHint.detail}</span>}
+          {toolHint.digit && (
+            <span className="shrink-0 font-mono text-fg-dim">{toolHint.digit}</span>
+          )}
+        </Cell>
+      ) : hint && (
+        <Cell grow><span className="min-w-0 truncate">{hint}</span></Cell>
+      ))}
 
       <span className="flex-1 min-w-[10px]" />
 

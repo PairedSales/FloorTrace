@@ -1,3 +1,5 @@
+import { MARK_BOX, MARK_FRAME, MARK_WALLS, MARK_STROKE } from './markGeometry';
+
 /**
  * The app's mark, as inline geometry.
  *
@@ -11,25 +13,34 @@
  * is `247 248 250` — so the mark was invisible in light mode and nobody could
  * see that it was missing.
  *
- * The shape is the one the empty state already uses for "a plan": an outline
- * with interior walls. Kept to three strokes because it is rendered at 15 px.
+ * The shape is an outline with interior walls, kept to three strokes because it
+ * is rendered at 15 px. The coordinates live in `markGeometry.js` because the
+ * favicons are rasterised from them (`npm run icons`) — a mark redrawn by hand
+ * for the tab is a mark that quietly stops matching the one in the menu bar.
  */
 const FloorTraceMark = ({ className = '', title }) => (
   <svg
-    viewBox="0 0 16 16"
+    viewBox={`0 0 ${MARK_BOX} ${MARK_BOX}`}
     className={className}
     fill="none"
     stroke="currentColor"
-    strokeWidth="1.5"
+    strokeWidth={MARK_STROKE}
     strokeLinecap="round"
     strokeLinejoin="round"
     role={title ? 'img' : 'presentation'}
     aria-hidden={title ? undefined : 'true'}
   >
     {title && <title>{title}</title>}
-    <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1.5" />
-    <path d="M6.75 2v5.25" />
-    <path d="M6.75 7.25h7.5" />
+    <rect
+      x={MARK_FRAME.x}
+      y={MARK_FRAME.y}
+      width={MARK_FRAME.size}
+      height={MARK_FRAME.size}
+      rx={MARK_FRAME.r}
+    />
+    {MARK_WALLS.map(([[x1, y1], [x2, y2]]) => (
+      <path key={`${x1},${y1},${x2},${y2}`} d={`M${x1} ${y1}L${x2} ${y2}`} />
+    ))}
   </svg>
 );
 

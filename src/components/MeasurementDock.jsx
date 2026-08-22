@@ -324,7 +324,10 @@ const MeasurementDock = ({
       ? 'From a line you drew.'
       : measuredRooms > 0
         ? `From ${measuredRooms} measured ${measuredRooms === 1 ? 'room' : 'rooms'}.`
-        : 'From the room size below.';
+        // Not "below" any more — the room size is its own card above this
+        // one — and not "above" either, so moving a card cannot make it lie a
+        // second time.
+        : 'From the room size you typed.';
 
   const handleCopyArea = () => {
     if (!showBreakdown) {
@@ -414,50 +417,16 @@ const MeasurementDock = ({
       >
         <StageSpine stages={stages} onSelect={jumpTo} />
 
-        {/* ── Scale ──
-            The scale and where it came from, stated where it is questioned.
-            It used to appear only as `px/ft` inside ScaleSection, which renders
-            nothing at all on the normal room-label path — so the number the
-            whole measurement rests on was invisible unless you had drawn a
-            scale line by hand. */}
-        <div id="dock-scale">
-          <Card
-            title="Scale"
-            action={scaleNote && (
-              <span
-                title={scaleNote.detail}
-                className={`chip cursor-help ${scaleNote.level === 'check'
-                  ? 'text-warn bg-warn/12 border-warn/35'
-                  : 'text-ok bg-ok/12 border-ok/35'}`}
-              >
-                <span className="chip-dot" />
-                {scaleNote.level === 'check' ? 'Check' : 'Agrees'}
-              </span>
-            )}
-          >
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono font-semibold tabular-nums text-[19px] text-fg">
-                {pxPerFoot
-                  ? (anisotropic
-                    ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
-                    : `1 ft = ${pxPerFoot.x.toFixed(1)} px`)
-                  : 'Not set'}
-              </span>
-            </div>
-            <p className="mt-1 text-[12px] text-fg-3">{scaleProvenance}</p>
-
-            <button
-              type="button"
-              onClick={onScaleTool}
-              className="mt-2.5 w-full h-8 rounded-md border border-line bg-panel-2
-                         text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
-                         transition-colors cursor-pointer"
-            >
-              Set from a length you know
-            </button>
-
-            <div className="mt-3 pt-3 border-t border-line-soft">
-              <h4 className="card-heading mb-2">Room size</h4>
+        {/* ── Room size ──
+            The first card, and the biggest numbers in the panel. This is a
+            measurement of the building, checked against the plan by eye and
+            corrected by hand; the scale it implies is arithmetic the app does
+            afterwards. They used to be one card with those weights the other
+            way round — a 19 px `1 ft = 91.0 px` over two 13 px fields — which
+            printed the derived, technical number as the headline and the
+            checkable one as its footnote. */}
+        <div id="dock-roomsize">
+          <Card title="Room size">
             <div className="grid grid-cols-2 gap-2">
               {['width', 'height'].map((field) => (
                 <div key={field}>
@@ -470,6 +439,7 @@ const MeasurementDock = ({
                   {unit === 'inches' ? (
                     <InchesInput
                       id={`dim-${field}`}
+                      large
                       value={localDimensions[field]}
                       onChange={(v) => handleDimensionChange(field, v)}
                       onFocus={() => handleFocus(field)}
@@ -483,7 +453,7 @@ const MeasurementDock = ({
                       onChange={(e) => handleDimensionChange(field, e.target.value)}
                       onFocus={() => handleFocus(field)}
                       onBlur={() => handleBlur(field)}
-                      className="panel-input select-text"
+                      className="panel-input panel-input-lg select-text"
                       placeholder={unit === 'metric' ? '0.00 m' : '0.0 ft'}
                     />
                   )}
@@ -491,15 +461,12 @@ const MeasurementDock = ({
               ))}
             </div>
 
-              {mode === 'manual' && ocrFailed && !isProcessing && (
-                <p className="mt-2.5 px-2.5 py-2 bg-warn/10 border border-warn/30 rounded-md
-                              text-[12px] text-warn font-medium">
-                  Could not read any dimensions — type a room size here instead.
-                </p>
-              )}
-
-              <ScaleSection unit={unit} />
-            </div>
+            {mode === 'manual' && ocrFailed && !isProcessing && (
+              <p className="mt-2.5 px-2.5 py-2 bg-warn/10 border border-warn/30 rounded-md
+                            text-[12px] text-warn font-medium">
+                Could not read any dimensions — type a room size here instead.
+              </p>
+            )}
           </Card>
         </div>
 
@@ -848,6 +815,60 @@ const MeasurementDock = ({
             </Card>
           </div>
         )}
+
+        {/* ── Scale ──
+            Last, and small. It is the number every area on this panel is
+            derived from, so it has to be *available* — an unstated scale is how
+            a plan gets measured at someone else's px/ft — but it is not a
+            number anyone reads to do their job, and it sat at the top in 19 px
+            type for a long time saying otherwise. The chip is the part that
+            matters: it says whether the rooms agreed.
+
+            `#dock-scale` stays this card's id — StageSpine's SCALE stage jumps
+            here, which is where the provenance and the way to override it are.
+            It used to appear only as `px/ft` inside ScaleSection, which renders
+            nothing at all on the normal room-label path — so the number the
+            whole measurement rests on was invisible unless you had drawn a
+            scale line by hand. */}
+        <div id="dock-scale">
+          <Card
+            title="Scale"
+            action={scaleNote && (
+              <span
+                title={scaleNote.detail}
+                className={`chip cursor-help ${scaleNote.level === 'check'
+                  ? 'text-warn bg-warn/12 border-warn/35'
+                  : 'text-ok bg-ok/12 border-ok/35'}`}
+              >
+                <span className="chip-dot" />
+                {scaleNote.level === 'check' ? 'Check' : 'Agrees'}
+              </span>
+            )}
+          >
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono font-semibold tabular-nums text-[13px] text-fg-2">
+                {pxPerFoot
+                  ? (anisotropic
+                    ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
+                    : `1 ft = ${pxPerFoot.x.toFixed(1)} px`)
+                  : 'Not set'}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] text-fg-3">{scaleProvenance}</p>
+
+            <button
+              type="button"
+              onClick={onScaleTool}
+              className="mt-2.5 w-full h-8 rounded-md border border-line bg-panel-2
+                         text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
+                         transition-colors cursor-pointer"
+            >
+              Set from a length you know
+            </button>
+
+            <ScaleSection unit={unit} />
+          </Card>
+        </div>
       </div>
     </aside>
   );

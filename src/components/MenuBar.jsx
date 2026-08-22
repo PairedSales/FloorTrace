@@ -26,7 +26,10 @@ const Menu = ({ id, label, open, onOpen, onClose, children }) => {
   const ref = useRef(null);
 
   return (
-    <div className="relative" ref={ref}>
+    // Full height of the band, so `top-[calc(100%+3px)]` below drops the menu
+    // clear of it rather than 4 px up inside it — the title button is 32 px in
+    // a 40 px row now that the row is shared with the command bar.
+    <div className="relative h-full flex items-center" ref={ref}>
       <button
         type="button"
         aria-haspopup="menu"
@@ -35,7 +38,7 @@ const Menu = ({ id, label, open, onOpen, onClose, children }) => {
         // Hovering another title while a menu is open switches to it, the way
         // a real menu bar behaves.
         onMouseEnter={() => { if (!open) onOpen(id, true); }}
-        className={`px-2.5 py-1 rounded text-[12.5px] transition-colors cursor-pointer
+        className={`inline-flex h-8 items-center px-2.5 rounded-md text-[12.5px] transition-colors cursor-pointer
           ${open ? 'bg-accent/12 text-accent' : 'text-fg-2 hover:bg-sunken hover:text-fg'}`}
       >
         {label}
@@ -68,9 +71,20 @@ const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
  * different act from closing every plan, and a single "Close project" silently
  * meant the second once more than one could be open.
  *
- * `status` is the status bar, slotted into the empty right of this row instead
- * of running along the foot of the window. The row was three quarters air and
- * the status line was the furthest thing on screen from the plan it describes.
+ * **Three titles, not five.** Settings and Help each held one small list, and a
+ * menu title is a lookup a user has to guess right first time: both were folded
+ * into File, which is where a user who cannot find something opens first.
+ * Preferences sit at the foot of that list, past the close commands, and
+ * "Shortcuts & tips" sits at the very top, above Open — it is the item someone
+ * reaches for when they do not yet know what any of the others do.
+ *
+ * The status bar used to be slotted into the empty right of this row. It is its
+ * own band now, down beside the plan it describes — and with it gone the row
+ * was three titles and a wordmark over 1100 px of nothing, so **there is no
+ * menu row any more**. This renders as the left group of the command bar's
+ * band (`App.jsx`), which is why it owns no height, background or border of
+ * its own: those belong to the one band both halves sit in, and a second set
+ * here would draw a seam through the middle of it.
  */
 const MenuBar = ({
   image,
@@ -101,8 +115,6 @@ const MenuBar = ({
   onShowSideLengthsChange,
   autoSnapEnabled,
   onAutoSnapChange,
-  toolLabels,
-  onToolLabelsChange,
   saveOnExit,
   onSaveOnExitChange,
   enhancedOcr,
@@ -111,7 +123,6 @@ const MenuBar = ({
   onCycleTheme,
   dockOpen,
   onDockToggle,
-  status,
 }) => {
   const [openId, setOpenId] = useState(null);
   const hoverMode = useRef(false);
@@ -137,17 +148,22 @@ const MenuBar = ({
   }, [openId, close]);
 
   return (
-    <header className="flex items-center h-[30px] px-2 bg-panel border-b border-line-soft select-none shrink-0">
-      <span className="flex items-center gap-2 pr-2.5 mr-1 shrink-0 text-[12.5px] font-semibold text-fg">
+    <div className="flex items-center self-stretch shrink-0">
+      {/* The word costs ~66 px of a row that is now shared with every verb, and
+          it is the one thing in it that does nothing. Below 1280 the mark
+          carries the identity alone and the verbs get the width instead. */}
+      <span className="flex items-center gap-2 pr-1.5 xl:pr-2.5 shrink-0 text-[12.5px] font-semibold text-fg">
         <FloorTraceMark className="w-[15px] h-[15px] text-fg-3" />
-        FloorTrace
+        <span className="hidden xl:inline">FloorTrace</span>
       </span>
 
       {/* The swallowed mousedown is scoped to the titles, not the whole row.
-          On the row it also swallowed the status bar's buttons, so zooming
-          with a menu open left the menu hanging over the canvas. */}
+          On the row it swallowed every other control in it — the status bar
+          used to sit here, and zooming with a menu open left the menu hanging
+          over the canvas. Scoped, anything else added to this row keeps
+          working. */}
       <div
-        className="flex items-center gap-0.5 shrink-0"
+        className="flex items-center self-stretch gap-0.5 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
       {/* Export sits above the project file, and says what it is for. Almost
@@ -155,6 +171,10 @@ const MenuBar = ({
           image of the finished measurement is the document — the `.floorplan`
           is the copy you keep only if you mean to come back to it. */}
       <Menu id="file" label="File" open={openId === 'file'} onOpen={open} onClose={close}>
+        {/* First, because it is what someone opens this menu for when they do
+            not yet know the names of anything else in it. */}
+        <MenuItem label="Shortcuts & tips" onSelect={onHelpOpen} close={close} />
+        <Sep />
         <MenuItem label="Open plan or project…" keys={`${mod}+O`} onSelect={onFileOpen} close={close} />
         <MenuItem label="Paste plan from clipboard" keys={`${mod}+V`} onSelect={onPasteImage} close={close} />
         <Sep />
@@ -171,6 +191,20 @@ const MenuBar = ({
         <Sep />
         <MenuItem label="Close this plan" danger disabled={!image} onSelect={onRestart} close={close} />
         <MenuItem label="Close all plans" danger disabled={planCount < 2} onSelect={onCloseAllPlans} close={close} />
+        <Sep />
+        {/* The two settings, at the foot of the list. Both are session-wide
+            preferences rather than anything done to a file, so they sit past
+            the close commands where nothing lands on them by accident. */}
+        <MenuItem
+          label={`${saveOnExit ? '✓ ' : ''}Save work on exit`}
+          onSelect={() => onSaveOnExitChange(!saveOnExit)}
+          close={close}
+        />
+        <MenuItem
+          label={`${enhancedOcr ? '✓ ' : ''}Enhanced dimension reading`}
+          onSelect={() => onEnhancedOcrChange(!enhancedOcr)}
+          close={close}
+        />
       </Menu>
 
       <Menu id="view" label="View" open={openId === 'view'} onOpen={open} onClose={close}>
@@ -178,11 +212,6 @@ const MenuBar = ({
         <MenuItem
           label={`${dockOpen ? 'Hide' : 'Show'} measurement panel`}
           onSelect={onDockToggle}
-          close={close}
-        />
-        <MenuItem
-          label={`${toolLabels ? '✓ ' : ''}Show tool labels`}
-          onSelect={() => onToolLabelsChange(!toolLabels)}
           close={close}
         />
         <Sep />
@@ -216,27 +245,8 @@ const MenuBar = ({
         <MenuItem label="Add another outline" disabled={!image} onSelect={onAddFloor} close={close} />
       </Menu>
 
-      <Menu id="settings" label="Settings" open={openId === 'settings'} onOpen={open} onClose={close}>
-        <MenuItem
-          label={`${saveOnExit ? '✓ ' : ''}Save work on exit`}
-          onSelect={() => onSaveOnExitChange(!saveOnExit)}
-          close={close}
-        />
-        <MenuItem
-          label={`${enhancedOcr ? '✓ ' : ''}Enhanced dimension reading`}
-          onSelect={() => onEnhancedOcrChange(!enhancedOcr)}
-          close={close}
-        />
-      </Menu>
-
-      <Menu id="help" label="Help" open={openId === 'help'} onOpen={open} onClose={close}>
-        <MenuItem label="Shortcuts & tips" onSelect={onHelpOpen} close={close} />
-      </Menu>
       </div>
-
-      {status && <span className="w-px h-4 bg-line mx-2 shrink-0" />}
-      {status}
-    </header>
+    </div>
   );
 };
 

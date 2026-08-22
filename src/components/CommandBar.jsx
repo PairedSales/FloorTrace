@@ -11,7 +11,6 @@ import {
   Check,
   Brush,
   MousePointerClick,
-  Tags,
   Sun,
   Moon,
   MonitorSmartphone,
@@ -24,17 +23,26 @@ const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
 
 /**
  * The stage verbs, plus history and view. Everything here also has a home in
- * the menu bar — this row is the shortcut, not the only route, which is what
- * lets it stay short enough to read.
+ * the menu — this half of the row is the shortcut, not the only route, which
+ * is what lets it stay short enough to read.
+ *
+ * It shares one 40 px band with `MenuBar`, which renders as the left group of
+ * it, so this component carries no height, background or border: `App.jsx`
+ * owns the band. `flex-1 min-w-0` is what keeps the menu titles fixed and
+ * scrolls only the verbs when the window is too narrow for them — a title you
+ * have to scroll to reach is worse than a verb you do, because the verb has a
+ * home in the titles and the titles have none.
  *
  * Commands disable rather than disappear: the old toolbar hid Add Floor,
  * Draw Exterior and Find Room Size behind state, so buttons moved under the
  * cursor between one trace and the next.
  *
  * The right end is the view end, ordered by widening scope: one action on the
- * plan, then the two chrome toggles (left to right in the order the things
- * they show sit on screen — the dock is on the left, the tool rail on the
- * right), then the one app-wide preference, furthest from the verbs.
+ * plan, then the one chrome toggle it still carries (the measurement dock),
+ * then the one app-wide preference, furthest from the verbs. The tool-rail
+ * toggle stood beside the dock toggle until the rail became one width — a rail
+ * that says what its icons are when you point at one has nothing left to
+ * switch.
  */
 const CommandBar = ({
   image,
@@ -56,8 +64,6 @@ const CommandBar = ({
   floorCount,
   dockOpen,
   onDockToggle,
-  toolLabels,
-  onToolLabelsToggle,
   theme,
   onCycleTheme,
 }) => {
@@ -66,7 +72,7 @@ const CommandBar = ({
   const hasOutline = !!perimeterOverlay?.vertices?.length;
 
   return (
-    <div className="flex items-center gap-1 h-10 px-2 bg-panel-2 border-b border-line select-none shrink-0 overflow-x-auto">
+    <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto">
       <button
         onClick={onFileOpen}
         disabled={isProcessing}
@@ -77,7 +83,7 @@ const CommandBar = ({
         <span>Open</span>
       </button>
 
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+      <div className="w-px h-5 bg-line mx-1 shrink-0" />
 
       <button
         onClick={undoManager.undo}
@@ -98,7 +104,7 @@ const CommandBar = ({
         <Redo2 className="w-4 h-4" aria-hidden="true" />
       </button>
 
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+      <div className="w-px h-5 bg-line mx-1 shrink-0" />
 
       <button
         onClick={onFindRoomSize}
@@ -171,7 +177,7 @@ const CommandBar = ({
         <span>Add outline</span>
       </button>
 
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+      <div className="w-px h-5 bg-line mx-1 shrink-0" />
 
       {/* The last step of the job, and the only one most sessions ever need to
           reach twice. It stays put and stays enabled from the moment a plan is
@@ -199,7 +205,7 @@ const CommandBar = ({
         <Maximize className="w-4 h-4" aria-hidden="true" />
       </button>
 
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+      <div className="w-px h-5 bg-line mx-1 shrink-0" />
 
       <button
         onClick={onDockToggle}
@@ -211,31 +217,20 @@ const CommandBar = ({
         <PanelLeft className="w-4 h-4" aria-hidden="true" />
       </button>
 
-      {/* Named for the state it shows rather than the action it takes, which
-          is what lets it carry aria-pressed alongside the dock toggle: "Hide
-          tool labels, pressed" was the contradiction that kept it off the
-          button while it lived in the rail. Disabled with no plan open — the
-          rail it controls is not on screen until there is one. */}
-      <button
-        onClick={onToolLabelsToggle}
-        disabled={!image}
-        className={`toolbar-btn px-2 ${toolLabels ? 'toolbar-btn-active' : ''}`}
-        title="Show or hide the tool names"
-        aria-label="Show or hide the tool names"
-        aria-pressed={toolLabels}
-      >
-        <Tags className="w-4 h-4" aria-hidden="true" />
-      </button>
 
-      <div className="w-px h-5 bg-line mx-1.5 shrink-0" />
+      <div className="w-px h-5 bg-line mx-1 shrink-0" />
 
+      {/* Icon only, like the two view controls beside it. The word cost ~40 px
+          of a row that now also carries the menu titles, and the theme is
+          named in full in View — an icon that changes with the setting says
+          the same thing in the space this row actually has. */}
       <button
         onClick={onCycleTheme}
-        className="toolbar-btn"
+        className="toolbar-btn px-2"
         title={`Theme: ${THEME_LABEL[theme]} — click to change`}
+        aria-label={`Theme: ${THEME_LABEL[theme]} — click to change`}
       >
         <ThemeIcon className="w-4 h-4" aria-hidden="true" />
-        <span>{THEME_LABEL[theme]}</span>
       </button>
     </div>
   );
