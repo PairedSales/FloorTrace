@@ -1,5 +1,9 @@
 # Dimension OCR — performance analysis
 
+> **A dated record, not a live plan.** This is the measurement pass that produced the 1.8×
+> speed-up, kept because the numbers and the two benchmarked-shut "free wins" in §6 are the
+> reason not to re-attempt them. Later changes are not folded back in; CLAUDE.md is current.
+
 Scope: `detectAllDimensions` / `detectDimensionsCore` (`src/utils/dimensions/`). Accuracy is
 currently good; this is about the ~6–9s it takes. All numbers below are measured on this machine
 (16 cores) via `scripts/ocrBenchmark.mjs` and standalone probes, not estimated.
@@ -199,7 +203,7 @@ Phase 4 came down **3.1×**; a scan is **1.8×** faster end to end. Verified in 
 
 ### What the report got right
 
-- **R1** is the main event, as predicted. Pool size is `min(4, cores/2)`, preset-affine (a `line`
+- **R1** is the main event, as predicted. Pool size was `min(4, cores/2)` when this was measured (it is `max(1, min(cap, cores/2))` now, with `cap` 8 only on a 16-core machine reporting ≥ 8 GiB), preset-affine (a `line`
   waiter prefers a worker already in `line` mode) so the ladder's mode switches don't thrash
   `setParameters`. Boots are kicked off at the *start of phase 2* — booting them lazily on the first
   ROI read cost ~1 s of the phase they exist to accelerate.
