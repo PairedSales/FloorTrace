@@ -1,4 +1,4 @@
-// How much there is to check, counted once. The Stats & warnings card's chip
+// How much there is to check, counted once. The Checks card's chip
 // and the line the Area card points at it with are both this number, so the
 // panel cannot say "2 things to check" beside the area and list three.
 
