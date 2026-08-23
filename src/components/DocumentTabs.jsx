@@ -5,9 +5,14 @@ import useWorkspaceStore from '../store/workspaceStore';
 import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
 /**
- * The open plans, as the top row of the plan's own column — under the command
- * bar, over the status bar, and inset between the measurement dock and the tool
- * rail so the strip is measured against exactly the plan it addresses.
+ * The open plans, as the last row before the plan itself — under the status
+ * band, sitting on the canvas, and inset between the measurement dock and the
+ * tool rail so the strip is measured against exactly the plan it addresses.
+ *
+ * **Under the status band, not over it.** A tab addresses the plan, so it
+ * belongs against the plan. Above the band it was separated from its own
+ * subject by a row of unrelated readings, and read as another piece of window
+ * furniture rather than as the label on what is directly below it.
  *
  * **Two plans or it does not render.** A strip with one tab in it is 30 px of
  * chrome answering a question nobody asked, and it took that height from the

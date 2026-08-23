@@ -85,10 +85,15 @@ own `floors[]`, which is a version seam and stays. **No new code may use
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
-**The tab strip is the top row of the plan's own column** (`DocumentTabs.jsx`,
-rendered in `App.jsx` inside the row, not above it), with the `StatusBar` directly
-under it and the canvas under that — so both bands are inset between the
-measurement dock and the tool rail and stop where the plan stops.
+**The tab strip is the last row before the canvas** (`DocumentTabs.jsx`,
+rendered in `App.jsx` inside the row, not above it), with the `StatusBar` above it
+and directly under the top band — so both bands are inset between the measurement
+dock and the tool rail and stop where the plan stops.
+
+**The tabs are under the status band, not over it.** A tab addresses the plan, so
+it sits against the plan; over the band it was separated from its own subject by a
+row of unrelated readings — scale, zoom, draft state — and read as window furniture
+rather than as the label on what is directly below it.
 
 **It renders only when two or more plans are open.** One tab is 30 px of chrome
 answering a question nobody asked, taken off the plan for the whole of an ordinary
@@ -267,7 +272,7 @@ The detail text is rendered on the page rather than in a `title`. The scale note
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
-**`StatusBar` is a 26 px band of the plan's column**, under the tab strip and over the canvas — not a row of the top bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
+**`StatusBar` is a 26 px band of the plan's column**, directly under the top band and over the tab strip — not a row of the top bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
 
 - **There is exactly one grow cell.** A second would mean two cells truncating and neither readable.
 - **Four claimants, in this order:** `isProcessing` suppresses everything else, then a `statusFlash`, then the tool the pointer is resting on, then the running mode's own instruction. A hover above a flash would swallow "Area copied" the moment the pointer crossed the rail; a hover below the instruction would never show at all, since every mode has one.
