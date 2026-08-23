@@ -13,12 +13,13 @@
  *   1 = fallback  — corrupted-symbol reconstruction ("102" → 10'2")
  */
 
+import { METERS_TO_FEET } from '../unitConverter.js';
+
 const MIN_FEET = 1;
 const MAX_FEET = 250;
 // Corrupted-symbol fallbacks reconstruct room labels; rooms beyond this are
 // far less likely than a misread, so cap them tighter than MAX_FEET.
 const MAX_FALLBACK_FEET = 99;
-const METERS_TO_FEET = 3.28084;
 
 const isReasonableFeet = (v) =>
   Number.isFinite(v) && v >= MIN_FEET && v <= MAX_FEET;

@@ -10,10 +10,8 @@
 // cumulative bound. Regions are first-class objects so the result can say what
 // was excluded and why.
 
-import { bridgeRuns, dilateRect, labelComponents, openRect } from './raster.js';
+import { bboxAreaOf, bridgeRuns, dilateRect, labelComponents, openRect } from './raster.js';
 import { findGarageCavities } from './garage.js';
-
-const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);

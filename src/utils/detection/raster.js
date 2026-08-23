@@ -56,7 +56,22 @@ const histOf = (gray) => {
   return hist;
 };
 
-// Fill-aware ink threshold (mirrors dimensions/raster.js inkOtsu). On
+// Fill-aware ink threshold. Deliberately a second implementation of
+// `dimensions/raster.js`'s `inkOtsu`, and **the duplication is the decision**:
+// measured over 4,020 histograms (degenerate, random multi-modal, and all nine
+// fixtures) the two cores agree on every input, so unifying them is byte-safe
+// — but they are tuned against different corpora, gated by different
+// benchmarks (`bench:detection` + `probe:exterior` here, `bench:ocr` there),
+// and no single command runs both. Sharing the constants would let an OCR
+// tuning change move a reported square footage, which today it provably
+// cannot. Twenty-five duplicated lines are cheaper than that coupling.
+//
+// The real difference is in the callers, not here: `binarizeToWorkingScale`
+// clamps the result to [60, 220] and the OCR side auto-inverts instead. Note
+// the clamp is load-bearing — for a perfectly bi-level input this returns the
+// lower mode's index, i.e. 0, which would classify nothing as ink.
+//
+// On
 // colour-styled plans plain Otsu settles between the tinted room fills and
 // the page white, turning whole floors into one ink slab — walls, cavities
 // and text all disappear into it. When the dark class is implausibly large
@@ -478,6 +493,14 @@ export const labelComponents = (mask, width, height, narrow = false) => {
 
   return { labels, components };
 };
+
+// The pixel count a component bbox covers. Inclusive on both ends, because a
+// bbox is a range of pixel indices and not a pair of continuous bounds: a
+// one-pixel component has minX === maxX and covers one pixel, not zero. Every
+// ratio taken against it in the search (seal, coverage, network independence)
+// is calibrated to that convention, so it lives here once — beside the
+// `labelComponents` that mints the bboxes — rather than once per consumer.
+export const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 // Flood the background reachable from the image border (4-connected).
 export const floodOutside = (mask, width, height) => {

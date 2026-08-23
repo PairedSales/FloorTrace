@@ -2,7 +2,7 @@
 // interior voids as holes, and an interior envelope inset per edge by the wall
 // that edge is actually drawn with.
 
-import { erodeRect, labelComponents, openRect } from './raster.js';
+import { bboxAreaOf, erodeRect, labelComponents, openRect } from './raster.js';
 import {
   simplifyRing,
   fitRing,
@@ -11,8 +11,6 @@ import {
 } from './polygon.js';
 import { traceFramedBoundary } from './labelFrame.js';
 import { collectNonGlaRegions, arbitrateRegions, applyRegions, componentMask } from './nonGla.js';
-
-const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);

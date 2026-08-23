@@ -3,11 +3,14 @@ import fs from 'fs';
 import { PNG } from 'pngjs';
 import { traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
 import { polygonArea } from '../src/utils/detection/polygon.js';
+import { readPng, imageDataOf } from './lib/benchUtils.mjs';
 
 const file = process.argv[2];
 const out = process.argv[3];
-const png = PNG.sync.read(fs.readFileSync(file));
-const imageData = { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
+// The decoded PNG is kept as well as the pixels: the overlay is painted into
+// it and written back out, and `imageDataOf` copies, so the trace sees clean ink.
+const png = readPng(file);
+const imageData = imageDataOf(png);
 
 const opts = {};
 if (process.argv[4]) {

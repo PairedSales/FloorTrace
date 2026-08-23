@@ -5,6 +5,7 @@
 // footprints, and selection happens later against evidence (see scoring.js).
 
 import {
+  bboxAreaOf,
   bridgeRuns,
   closeRect,
   floodOutside,
@@ -14,8 +15,6 @@ import {
 } from './raster.js';
 import { extractWallSegments, segmentSpanMask, bridgedSpan } from './wallEvidence.js';
 import { framedComponentMask } from './labelFrame.js';
-
-const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 // Ink extent of a mask, or null when it is empty.
 const inkBounds = (mask, width, height) => {

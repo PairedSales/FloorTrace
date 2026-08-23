@@ -170,3 +170,16 @@ export const pointToLineDistance = (point, lineStart, lineEnd) => {
   
   return Math.sqrt(dpx * dpx + dpy * dpy);
 };
+
+// A round hit target of `radius`, for a shape whose *drawn* radius is smaller.
+// Declared once because it was declared three times: AngleOverlay's handles,
+// PerimeterLayer's vertices and RoomOverlayLayer's corners all need a finger to
+// land within ~44 screen px of something drawn at a fraction of that. Callers
+// pass their own radius `/scale`, and they do not agree on it — room corners
+// take 24 where the other two take 22 — so the number stays at the call site.
+export const circleHit = (radius) => (ctx, shape) => {
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.fillStrokeShape(shape);
+};

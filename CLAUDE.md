@@ -367,6 +367,24 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
 
   This pipeline core (`detectDimensionsCore` in `pipeline.js`) is deliberately environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`) so the identical code path runs in the browser (`DimensionsOCR.js`'s `browserEnv()`) and in the Node benchmark harness (`scripts/ocrBenchmark.mjs`, which stubs `toOcrInput` with a PNG encoder and skips the PaddleOCR step). When changing pipeline behavior, prefer running the benchmark script over `fixtures/ExampleFloorplan.png` to check detection rate/accuracy/timings before/after.
 
+  **OpenCV stays, and this is the settled answer.** `@techstark/opencv-js` is the
+  largest thing the app ships — `dist/assets/opencv.*.js` is 15.5 MB raw, 3.9 MB
+  gzipped, four times the Tesseract cores — and its whole job is CLAHE plus a
+  3x3 median blur, both of which have working pure-JS fallbacks in `raster.js`.
+  Two separate reviews have proposed dropping it. Re-measured 2026-08-22 across
+  all nine fixtures it is worth **+1 detection and -2 false positives** (61/2
+  against 62/4), which is the original figure to the digit. It stays because of
+  *which* half of that matters: a false-positive dimension is a sample
+  `scale.js` pools, the project scale multiplies every reported area, and area
+  goes as scale squared — so halving them buys correctness on the number the
+  whole app exists to produce. Bundle size does not outrank that. Reproduce the
+  comparison with `FLOORTRACE_NO_OPENCV=1 node scripts/ocrBenchmark.mjs
+  fixtures/ExampleFloorplan*.png`. It is correctly deferred — reached only
+  through `await import()` inside `loadOpenCv`, never at mount, and
+  `dist/index.html` preloads only `interop` and `react` — so the cost lands on
+  the first scan, not on first paint. **Do not re-open this without new
+  numbers.**
+
   PaddleOCR model weights are committed under `public/models/ocr-det` and `public/models/ocr-rec` (`model.json` + `chunk_N.dat` — one chunk under `ocr-det`, two under `ocr-rec`, 11.9 MB committed). They are checked in deliberately — the app must work offline and on first paint — but note that regenerating them adds another copy to git history, so replace rather than accumulate.
 
   Tesseract's runtime assets are self-hosted (no jsdelivr at runtime): the worker script and core WASM come straight from `node_modules` via Vite `?url` imports — see the `configureTesseract` block in `DimensionsOCR.js`, which also does the SIMD probe — so they track the installed tesseract.js version automatically. The language data lives at `public/tesseract/eng.traineddata.gz`; regenerate it by gzipping the `eng.traineddata` that a Node benchmark run caches in the repo root.

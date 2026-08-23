@@ -1,31 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore, { PARK_FIELDS, PARK_ONLY_FIELDS, AUTOSAVE_FIELDS } from '../appStore';
-import { clearParked, parkedCount, newDocumentId, newDocumentMeta } from '../documentManager';
-import { resetRequests } from '../documentRequests';
+import { parkedCount } from '../documentManager';
 import { newTraceId } from '../ids';
 import * as undoManager from '../undoManager';
+import { app, oneDocument, IMAGE_A, IMAGE_B } from '../../hooks/__tests__/harness';
 
-const app = () => useAppStore.getState();
 const history = () => undoManager.getHistoryState();
-
-const IMAGE_A = 'data:image/png;base64,PLAN-A';
-const IMAGE_B = 'data:image/png;base64,PLAN-B';
-
-/** Put the store back to exactly one, empty, active plan. */
-const oneDocument = () => {
-  clearParked();
-  resetRequests();
-  undoManager.clear();
-  app().restart();
-  const id = newDocumentId();
-  useAppStore.setState({
-    documents: { [id]: newDocumentMeta() },
-    documentOrder: [id],
-    activeDocumentId: id,
-    _swappingDocument: false,
-  });
-  return id;
-};
 
 const trace = (name, vertices) => ({
   id: newTraceId(), name, vertices, holes: [], visible: true, closed: true,

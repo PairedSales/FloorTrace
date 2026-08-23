@@ -50,6 +50,25 @@ const parked = new Map();
  */
 export const MAX_OPEN_DOCUMENTS = 6;
 
+/**
+ * Free everything keyed by a plan's image, before the record that names it is
+ * dropped: the decoded page in the worker, its detection memo, its decoded
+ * bitmap on the main thread, and its wall-snap engine. Afterwards nothing knows
+ * the image, so nothing can release it.
+ *
+ * Exported because there are two ways a plan stops being that plan and only one
+ * of them went through `closeDocument`. Closing the *last* plan empties it in
+ * place via `restart()`, which keeps the id and freed none of this — so a
+ * session that opened and closed plans one at a time held every image it had
+ * ever decoded.
+ */
+export const releaseImageResources = (image) => {
+  if (!image) return;
+  disposeDetectionImage(image);
+  forgetImage(image);
+  forgetWallSnapEngine(image);
+};
+
 /** Test seam, and what a full reset needs. */
 export const clearParked = () => parked.clear();
 
@@ -337,18 +356,9 @@ export function createDocumentSlice(set, get) {
       if (index === -1) return false;
 
       detachDocument(docId);
-      // Free what this plan held before forgetting where it was: the decoded
-      // page in the worker, its detection memo, its decoded bitmap on the main
-      // thread and its wall-snap engine are all keyed by the image, and after
-      // the record is dropped nothing knows the image to release.
-      const closingImage = docId === state.activeDocumentId
+      releaseImageResources(docId === state.activeDocumentId
         ? state.image
-        : parked.get(docId)?.state?.image;
-      if (closingImage) {
-        disposeDetectionImage(closingImage);
-        forgetImage(closingImage);
-        forgetWallSnapEngine(closingImage);
-      }
+        : parked.get(docId)?.state?.image);
       parked.delete(docId);
 
       const remaining = order.filter((id) => id !== docId);

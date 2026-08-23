@@ -6,6 +6,7 @@ import {
   autoTraceName,
   makeTrace,
   normalizeTraceType,
+  ordinalSuffix,
 } from '../utils/traceTypes';
 import { classifyTraces } from '../utils/traceClassification';
 // From areaCalculator, not appStore: appStore already imports createFloorSlice
@@ -21,9 +22,6 @@ import { markStaleHoles } from '../utils/geometryValidation';
  * Legacy floor properties are removed from active Zustand state. Compatibility
  * translation is encapsulated inside the serialization layer.
  */
-
-const ordinalSuffix = (num) =>
-  num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
 
 // Minted in `ids.js`, which imports nothing: this module sits in a cycle with
 // appStore and undoManager, and appStore mints a default trace id at module

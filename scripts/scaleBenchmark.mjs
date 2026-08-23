@@ -36,7 +36,7 @@ import { resolveRoomScale } from '../src/utils/detection/validate.js';
 import {
   selectProjectScale, CONSENSUS_SPREAD_LIMIT, MIN_CONSENSUS_ROOMS,
 } from '../src/utils/detection/scale.js';
-import { loadPng, pct } from './lib/benchUtils.mjs';
+import { loadPng, pct, toOcrInput } from './lib/benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -76,23 +76,10 @@ const labelsFromTruth = (truth) => (truth?.rooms ?? [])
   }));
 
 const labelsFromOcr = async (file) => {
-  const { PNG } = await import('pngjs');
+  // The dimension pipeline stays behind a dynamic import: the default run
+  // never scans, and loading that graph costs it nothing.
   const { detectDimensionsCore } = await import('../src/utils/dimensions/pipeline.js');
-  const png = PNG.sync.read(fs.readFileSync(file));
-  const image = { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
-  // `env.toOcrInput` receives a gray `{data, width, height}`; pngjs wants RGBA.
-  const toOcrInput = (gray) => {
-    const out = new PNG({ width: gray.width, height: gray.height });
-    const rgba = Buffer.allocUnsafe(gray.width * gray.height * 4);
-    for (let i = 0, j = 0; i < gray.data.length; i += 1, j += 4) {
-      rgba[j] = gray.data[i];
-      rgba[j + 1] = gray.data[i];
-      rgba[j + 2] = gray.data[i];
-      rgba[j + 3] = 255;
-    }
-    out.data = rgba;
-    return PNG.sync.write(out);
-  };
+  const image = loadPng(file);
   const result = await detectDimensionsCore(image, { toOcrInput, budgetMs: 6000 });
   return {
     labels: result.dimensions.map((d) => ({

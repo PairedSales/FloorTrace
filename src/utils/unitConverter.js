@@ -1,5 +1,12 @@
-/** Conversion factor: 1 foot = 0.3048 meters */
+/** Conversion factor: 1 foot = 0.3048 meters (exact, by definition) */
 const FEET_TO_METERS = 0.3048;
+/**
+ * The reciprocal, exported because `dimensions/parse.js` needs it too and used
+ * to carry its own `3.28084` — a rounded copy of this, differing in the sixth
+ * significant figure. A metric plan was parsed with one constant and
+ * redisplayed with the other.
+ */
+export const METERS_TO_FEET = 1 / FEET_TO_METERS;
 /** Conversion factor: 1 square foot = 0.092903 square meters */
 const SQ_FEET_TO_SQ_METERS = FEET_TO_METERS * FEET_TO_METERS;
 

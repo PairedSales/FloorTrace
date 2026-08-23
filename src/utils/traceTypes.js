@@ -30,7 +30,7 @@ const TYPE_NOUN = {
 };
 
 const FLOOR_NAME = /^(\d+)(?:st|nd|rd|th) Floor$/;
-const ordinalSuffix = (n) => (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+export const ordinalSuffix = (n) => (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
 
 const NOUNS = Object.values(TYPE_NOUN).join('|');
 const AUTO_NAME = new RegExp(`^(?:\\d+(?:st|nd|rd|th) Floor|(?:${NOUNS})(?: \\d+)?)$`);

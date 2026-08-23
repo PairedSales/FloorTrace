@@ -279,8 +279,9 @@ const unsupportedRuns = (polygon, ctx, step = 2) => {
   return { kind: 'segment', runs: runs.slice(0, 6) };
 };
 
-// An inclusive integer bbox as a closed 4-point ring. `bboxAreaOf` uses
-// `max - min + 1`, so the +1 is that same convention, not a fudge.
+// An inclusive integer bbox as a closed 4-point ring. `bboxAreaOf`
+// (raster.js) uses `max - min + 1`, so the +1 is that same convention, not a
+// fudge.
 export const bboxRing = (b) => (b ? [
   { x: b.minX, y: b.minY },
   { x: b.maxX + 1, y: b.minY },

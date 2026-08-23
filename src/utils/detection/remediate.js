@@ -29,7 +29,7 @@
 // deliberate exclusion (scoring.js and validate.js both already soften for it);
 // re-searching would talk the tracer out of the answer it was given.
 
-import { bridgeRuns } from './raster.js';
+import { bboxAreaOf, bridgeRuns } from './raster.js';
 import { netSelfSeals } from './candidates.js';
 import { rectCoverage, warning } from './scoring.js';
 import { constraintFactor } from './validate.js';
@@ -53,8 +53,6 @@ const MAX_PASSES = 4;
 // scoreConstraints uses, and deliberately the same number: the search and the
 // adjudication must not disagree about whether a room is inside.
 const ROOM_COVER = 0.9;
-
-const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 const pointInMask = (mask, width, height, x, y) => {
   const px = Math.round(x);

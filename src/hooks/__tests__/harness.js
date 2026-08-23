@@ -1,15 +1,16 @@
-// Shared setup for the hook tests.
+// Shared store setup for the hook tests and the store suites that stand a plan
+// up the same way (`parkAdopt`, `planLifecycle`).
 //
-// The store-level suites (`src/store/__tests__/`) already cover park/adopt and
-// the projections. What they cannot reach is the logic that lives inside a
-// hook's effects — a debounced write that has to name the right plan, a
-// subscription that has to fire on close — and that is precisely where the
-// multi-plan defects were. These run the real hook against the real store, with
-// only the persistence layer replaced, so a test failure means the decision was
-// wrong rather than that a mock drifted.
+// The store-level suites cover park/adopt and the projections. What they cannot
+// reach is the logic that lives inside a hook's effects — a debounced write that
+// has to name the right plan, a subscription that has to fire on close — and
+// that is precisely where the multi-plan defects were. Those run the real hook
+// against the real store, with only the persistence layer replaced, so a test
+// failure means the decision was wrong rather than that a mock drifted.
 //
-// Files that use this need `// @vitest-environment happy-dom` at the top. The
-// default environment stays node deliberately: the detection suites are
+// Nothing here touches the DOM, so a node-environment suite may import it. The
+// *hook* tests need `// @vitest-environment happy-dom` at the top; the default
+// environment stays node deliberately, because the detection suites are
 // CPU-bound pure-JS pipelines that gain nothing from a DOM and would pay for it.
 
 import useAppStore from '../../store/appStore';
