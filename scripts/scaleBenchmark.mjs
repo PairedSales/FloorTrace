@@ -32,7 +32,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
 import { ringSetArea } from '../src/utils/detection/polygon.js';
-import { resolveRoomScale, robustScale } from '../src/utils/detection/validate.js';
+import { resolveRoomScale } from '../src/utils/detection/validate.js';
 import {
   selectProjectScale, CONSENSUS_SPREAD_LIMIT, MIN_CONSENSUS_ROOMS,
 } from '../src/utils/detection/scale.js';

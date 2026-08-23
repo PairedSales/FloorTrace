@@ -56,7 +56,7 @@ const Toggle = ({ icon, label, detail, checked, onToggle }) => (
 const MobileMenuSheet = ({
   open, onClose, image, hasArea,
   onFileOpen, onTakePhoto, onExport, onCopyExhibit, onSaveProject, onRestart,
-  onFindRoomSize, onTracePerimeter, onDrawExterior, onOutlineByVertex, onAddFloor,
+  onFindRoomSize, onTracePerimeter, onDrawExterior, onOutlineByVertex, onAddFloor, canAddOutline,
   onFitToWindow, showSideLengths, onShowSideLengthsChange,
   autoSnapEnabled, onAutoSnapChange,
   saveOnExit, onSaveOnExitChange, enhancedOcr, onEnhancedOcrChange,
@@ -110,10 +110,15 @@ const MobileMenuSheet = ({
             onSelect={onOutlineByVertex}
             close={onClose}
           />
+          {/* Gated on `canAddOutline`, not just `image`: `addPerimeterTrace`
+              has no cap of its own, so the seven-outline ceiling lives entirely
+              in the UI and every surface offering the verb has to carry it.
+              This one did not, and outlines past the seventh are unreachable by
+              the Alt/Shift+1–7 switcher. */}
           <Row
             icon={Layers}
             label="Add another outline"
-            disabled={!image}
+            disabled={!image || !canAddOutline}
             onSelect={onAddFloor}
             close={onClose}
           />

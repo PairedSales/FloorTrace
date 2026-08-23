@@ -285,5 +285,11 @@ export function setHistoryState(history) {
       imagePool.set(k, v);
     }
   }
+  // The cap above is what frees the *slots*; this is what frees the images.
+  // The pool arrives from the file holding an entry for every snapshot the file
+  // carried, including the ones just trimmed off the far end — and nothing can
+  // ever restore those, so without this the multi-megabyte data URLs behind
+  // them sit in the pool for the rest of the session.
+  pruneImagePool();
   emit();
 }

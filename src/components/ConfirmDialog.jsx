@@ -31,20 +31,12 @@ const ConfirmDialog = () => {
         resolve(false);
         return;
       }
-      // Focus trap. Only two controls, so Tab simply alternates.
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const focusables = Array.from(
-          e.currentTarget?.querySelectorAll?.('button') ?? []
-        );
-        const list = focusables.length ? focusables : [];
-        if (!list.length) return;
-        const i = list.indexOf(document.activeElement);
-        const next = e.shiftKey
-          ? list[(i - 1 + list.length) % list.length]
-          : list[(i + 1) % list.length];
-        next?.focus();
-      }
+      // Tab is not handled here. This listener is on `window`, so
+      // `e.currentTarget` is `window`, which has no `querySelectorAll` — the
+      // copy that lived here could only ever `preventDefault()` and fall
+      // through. The focus trap that works is the `onKeyDown` on the dialog
+      // element below, where `currentTarget` is the element holding the
+      // buttons.
     };
     // Capture: the dialog must see Escape before the tool-cancel handler does,
     // or cancelling the dialog would also cancel whatever tool is active.

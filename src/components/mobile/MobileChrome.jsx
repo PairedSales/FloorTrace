@@ -4,6 +4,7 @@ import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
 import { qualitySummary, scaleQualitySummary } from '../../utils/boundaryQuality';
+import { planStage } from '../../utils/planStage';
 import MeasurementDock from '../MeasurementDock';
 import BottomSheet from './BottomSheet';
 import MobilePlansSheet from './MobilePlansSheet';
@@ -101,7 +102,14 @@ const MobileChrome = ({
   const areas = useAppStore(selectActiveAreaByType);
   const documentOrder = useAppStore((s) => s.documentOrder);
 
-  const hasOutline = (perimeterTraces || []).some((t) => t.vertices?.length >= 3);
+  // Read from `planStage`, not re-derived. This shell is the third surface to
+  // ask "is this plan outlined", and the first two answering it differently is
+  // the reason that helper exists — the seven-outline ceiling it also owns was
+  // missing here, so the menu offered an eighth that nothing else would.
+  const { canAddOutline, tracedCount } = planStage({
+    image, calibrated, perimeterTraces, area: areas.total,
+  });
+  const hasOutline = tracedCount > 0;
   const noGla = areas.gla === 0 && areas.total > 0;
   // The same arithmetic the dock and the exhibit do, because the thumb bar and
   // the measurement sheet are on screen together: a total summed from the raw
@@ -234,6 +242,7 @@ const MobileChrome = ({
         onDrawExterior={onDrawExterior}
         onOutlineByVertex={onOutlineByVertex}
         onAddFloor={onAddFloor}
+        canAddOutline={canAddOutline}
         onFitToWindow={onFitToWindow}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={onShowSideLengthsChange}

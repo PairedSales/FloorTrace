@@ -43,7 +43,7 @@ const MobilePlansSheet = ({ open, onClose, onSelect, onClosePlan, onNew }) => {
             <div
               key={docId}
               className={`flex items-center gap-2 border-b border-line-soft
-                          ${isActive ? 'bg-accent/8' : ''}`}
+                          ${isActive ? 'bg-accent/12' : ''}`}
             >
               <button
                 type="button"
