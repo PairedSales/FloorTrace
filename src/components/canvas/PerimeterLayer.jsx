@@ -3,7 +3,8 @@ import { Line, Circle, Rect, Text, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
 import {
-  measureSideLenWidth, pointToLineDistance, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
+  circleHit, measureSideLenWidth, pointToLineDistance,
+  SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
 } from './canvasUtils';
 import { calculateArea, getCentroid, holeRings, holeKey } from '../../utils/areaCalculator';
 import { useIsTouch } from '../../hooks/useViewport';
@@ -23,12 +24,6 @@ const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
 
 /** Enlarge a circular handle's hit region without touching what is drawn. */
-const circleHit = (radius) => (ctx, shape) => {
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.fillStrokeShape(shape);
-};
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
@@ -344,13 +339,6 @@ const PerimeterLayer = ({
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
   const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
-
-  // Dev-only Render metrics
-  const renderCountRef = useRef(0);
-  if (import.meta.env?.DEV) {
-    renderCountRef.current += 1;
-    console.log(`[PerimeterLayer] Render count: ${renderCountRef.current}`);
-  }
 
   // Ref tracking drag coordinates, current drag index, and animation frame ID
   const draggingVertexIndexRef = useRef(null);

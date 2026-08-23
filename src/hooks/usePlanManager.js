@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
-import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
+import * as undoManager from '../store/undoManager';
+import { MAX_OPEN_DOCUMENTS, releaseImageResources } from '../store/documentManager';
+import { detachDocument } from '../store/documentRequests';
 import { readDocDraft, readHistoryRecord, removePlan } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
 import { confirmToast } from '../utils/confirmToast';
@@ -123,6 +125,24 @@ export function usePlanManager() {
         { confirmLabel: 'Close plan' },
       );
       if (!confirmed) return false;
+    }
+
+    // The last plan does not disappear — this app has no "no document" state —
+    // so closing it empties it in place. That branch lived in `App.jsx`, which
+    // is how it came to duplicate the confirm copy above and to skip the cache
+    // release the multi-plan path gets from `closeDocument`: `restart()` keeps
+    // the plan's id, so nothing about it looks like a close.
+    if (state.documentOrder.length === 1) {
+      detachDocument(docId);
+      undoManager.clear();
+      releaseImageResources(state.image);
+      // The Save As grant dies with the plan here too, and here it is easiest
+      // to miss: the id survives `restart()`, so a handle left cached against
+      // it sends the next plan's first Ctrl+S into the file just closed.
+      forgetFileHandle(docId);
+      useAppStore.getState().restart();
+      flash('Plan closed');
+      return true;
     }
 
     // Whoever inherits the root has to arrive with its content. After a

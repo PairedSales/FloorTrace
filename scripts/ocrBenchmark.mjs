@@ -10,9 +10,9 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PNG } from 'pngjs';
 import { detectDimensionsCore } from '../src/utils/dimensions/pipeline.js';
 import { terminateOcrWorker } from '../src/utils/dimensions/ocrTesseract.js';
+import { loadPng, toOcrInput } from './lib/benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -31,32 +31,6 @@ const EXAMPLE_GROUND_TRUTH = [
   { name: 'LIVING ROOM', w: 19 + 9 / 12, h: 12 + 11 / 12 },
   { name: 'FAMILY ROOM', w: 14 + 10 / 12, h: 14 + 1 / 12 }
 ];
-
-const loadPng = (filePath) => {
-  const png = PNG.sync.read(fs.readFileSync(filePath));
-  return {
-    width: png.width,
-    height: png.height,
-    data: new Uint8ClampedArray(png.data)
-  };
-};
-
-// The pipeline hands `env.toOcrInput` a gray `{data, width, height}`; pngjs
-// wants w*h*4 RGBA, so the expansion the browser encoder no longer needs
-// happens here instead.
-const toOcrInput = (gray) => {
-  const { width, height, data } = gray;
-  const png = new PNG({ width, height });
-  const rgba = Buffer.allocUnsafe(width * height * 4);
-  for (let i = 0, j = 0; i < data.length; i += 1, j += 4) {
-    rgba[j] = data[i];
-    rgba[j + 1] = data[i];
-    rgba[j + 2] = data[i];
-    rgba[j + 3] = 255;
-  }
-  png.data = rgba;
-  return PNG.sync.write(png);
-};
 
 const matches = (dim, gt, tol = 0.05) => {
   const straight = Math.abs(dim.width - gt.w) <= tol && Math.abs(dim.height - gt.h) <= tol;
@@ -98,14 +72,8 @@ const run = async () => {
       ? (roi, variants) => {
         console.log(`   dump roi (${roi.x},${roi.y},${roi.width},${roi.height}) p=${roi.priority}`);
         variants.forEach((v, i) => {
-          const png = new PNG({ width: v.width, height: v.height });
-          for (let j = 0; j < v.data.length; j += 1) {
-            png.data[j * 4] = v.data[j];
-            png.data[j * 4 + 1] = v.data[j];
-            png.data[j * 4 + 2] = v.data[j];
-            png.data[j * 4 + 3] = 255;
-          }
-          fs.writeFileSync(`dbg_bench_${Math.round(roi.x)}_${Math.round(roi.y)}_v${i}.png`, PNG.sync.write(png));
+          // A dumped variant is the same gray→RGBA PNG the pipeline is handed.
+          fs.writeFileSync(`dbg_bench_${Math.round(roi.x)}_${Math.round(roi.y)}_v${i}.png`, toOcrInput(v));
         });
       }
       : undefined;

@@ -7,7 +7,12 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['**/dist/**', '.claude/**', '.ocrperf/**', '.perfprobe/**']),
   {
-    files: ['**/*.{js,jsx}'],
+    // `.mjs` is in the glob because it was not, and that left every file under
+    // `scripts/` — the two benchmarks CI gates each PR on included — with
+    // literally zero rules applied. `eslint .` walked them and `--print-config`
+    // returned an empty `rules` block. An unused import sat in
+    // `scaleBenchmark.mjs` undetected because of it.
+    files: ['**/*.{js,jsx,mjs}'],
     extends: [
       js.configs.recommended,
       reactHooks.configs['recommended-latest'],
@@ -32,5 +37,13 @@ export default defineConfig([
         message: 'TypedArray.from with a mapper is ~20x slower than a plain loop over a preallocated array.',
       }],
     },
+  },
+  // The Node harnesses. They run under `node`, not in a browser, so they get
+  // Node's globals — `process`, `Buffer`, `global`. Declared as its own block
+  // rather than by loosening `no-undef` above, which is the rule that would
+  // have caught a genuine typo in the detection cores these scripts share.
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
 ])

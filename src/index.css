@@ -281,7 +281,6 @@
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
   }
-  .mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
 
   /* The canvas owns every gesture that starts on it: no page pan, no page
      pinch, no double-tap zoom, no iOS text selection from a long press. This

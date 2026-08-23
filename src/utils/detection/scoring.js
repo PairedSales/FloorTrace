@@ -17,7 +17,7 @@ import { regionFit } from './brush.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-export const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
+const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
   const ring = traceFramedBoundary(entry, width, height);
   if (ring.length < 3) return null;
   const simplified = simplifyRing(ring, epsilon);
@@ -93,10 +93,8 @@ export const scoreConstraints = (entry, analysis, constraints) => {
   return {
     fit: total ? hits / total : 1,
     rooms: rooms.length,
-    roomHits,
     roomMisses,
     points: points.length,
-    pointHits,
     pointMisses,
   };
 };
@@ -193,7 +191,6 @@ export const scoreCandidate = (candidate, ctx) => {
     support,
     coverage,
     completeness,
-    economy,
     annex,
     constraintScore,
     brushFit,
@@ -282,8 +279,9 @@ const unsupportedRuns = (polygon, ctx, step = 2) => {
   return { kind: 'segment', runs: runs.slice(0, 6) };
 };
 
-// An inclusive integer bbox as a closed 4-point ring. `bboxAreaOf` uses
-// `max - min + 1`, so the +1 is that same convention, not a fudge.
+// An inclusive integer bbox as a closed 4-point ring. `bboxAreaOf`
+// (raster.js) uses `max - min + 1`, so the +1 is that same convention, not a
+// fudge.
 export const bboxRing = (b) => (b ? [
   { x: b.minX, y: b.minY },
   { x: b.maxX + 1, y: b.minY },

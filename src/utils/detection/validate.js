@@ -186,7 +186,7 @@ export const validateBoundaryResult = (result, context = {}) => {
 
 // How far apart one room's two scales may be before the room, not the drawing,
 // is what is wrong.
-export const ISOTROPY_TOLERANCE = 0.05;
+const ISOTROPY_TOLERANCE = 0.05;
 
 // Which way round a label's two numbers go. A label states a room's two sides
 // but not which one runs across the page: vertical labels are rotated, and
@@ -269,7 +269,7 @@ export const resolveRoomScale = (dimWidth, dimHeight, boxWidth, boxHeight, sampl
 // 13.97 to 16.36 px/ft). Beyond this a room has not been measured differently,
 // it has been measured wrong. Same reasoning and value as room.js's own
 // SCALE_TOLERANCE, kept separate so neither is tuned by accident.
-export const PLAN_SPREAD_TOLERANCE = 0.22;
+const PLAN_SPREAD_TOLERANCE = 0.22;
 
 // The scale the whole project should use once this room has been measured, and
 // how much to trust it. Two independent things can be wrong, and the app can
@@ -423,7 +423,7 @@ export const resolveScaleUpdate = ({
 // How far off axis a line may run and still be read as one axis's length. The
 // error that admits is worth stating rather than hiding: a line 5° off axis,
 // read as an axis length, is 1/cos(5°) = 0.4% long, and 1.5% at 10°.
-export const AXIS_TOLERANCE_DEG = 5;
+const AXIS_TOLERANCE_DEG = 5;
 
 // Click precision is ~2 image px, so a 40 px line carries ±5% into the scale
 // and a 400 px line ±0.5%. A floor, not a measurement — zooming in before

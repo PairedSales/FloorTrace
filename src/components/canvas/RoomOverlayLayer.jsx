@@ -1,6 +1,7 @@
 import React from 'react';
 import { Rect, Line, Circle } from 'react-konva';
 import { useIsTouch } from '../../hooks/useViewport';
+import { circleHit } from './canvasUtils';
 
 // Same rule as the perimeter vertex handles: what is drawn stays small enough
 // to read the rectangle under it, what is grabbable is a fingertip wide. This
@@ -8,12 +9,6 @@ import { useIsTouch } from '../../hooks/useViewport';
 // cannot be adjusted on a phone is a scale that cannot be corrected there.
 const TOUCH_HIT_RADIUS = 24;
 
-const circleHit = (radius) => (ctx, shape) => {
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.fillStrokeShape(shape);
-};
 
 /**
  * RoomOverlayLayer renders the room detection rectangle, its corner drag handles,

@@ -38,7 +38,7 @@ export const holeKey = (hole, index) =>
 // punched is their assertion about the building and outlives a re-trace — the
 // interior/exterior wall toggle reaches both merge sites in one click and does
 // not look destructive. Lives here beside the other hole helpers rather than in
-// appStore, which floorManager cannot import from without making a cycle.
+// appStore, which traceManager cannot import from without making a cycle.
 export const mergeHoles = (existing, incoming) =>
   [...(existing ?? []).filter((h) => h?.source === 'user'), ...(incoming ?? [])];
 

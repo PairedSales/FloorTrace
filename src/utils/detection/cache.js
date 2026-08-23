@@ -32,14 +32,13 @@ export const getCachedAnalysis = (cacheKey, maxDimension, analyzeOptions, comput
 };
 
 // Memo for the boundary search (wall networks + every closing-ladder rung).
-// Deliberately one image deep, not an LRU like the analysis above: a rung holds
-// a page-sized label array, so a handful of images' worth of ladders is tens of
-// megabytes in a worker. One entry is all the sharing that is needed — the
-// clamp trace behind a room click and the perimeter trace that follows it are
-// always the same image.
-// Keyed like the analysis memo, and bounded the same way. One entry was right
-// while one image was ever in play; with two plans open, alternating between
-// them meant the ladder was rebuilt from scratch on every switch.
+// Keyed like the analysis memo above and bounded the same way, but far
+// shallower: a rung holds a page-sized label array, so a handful of images'
+// worth of ladders is tens of megabytes in a worker. Two, because the sharing
+// that pays for itself is within one image — the clamp trace behind a room
+// click and the perimeter trace that follows it — and across the pair of plans
+// a user alternates between. One entry was right while one image was ever in
+// play; with two plans open, every switch rebuilt the ladder from scratch.
 const MAX_SEARCH_CACHES = 2;
 /** @type {Map<string, SearchCache>} */
 const searchCaches = new Map();

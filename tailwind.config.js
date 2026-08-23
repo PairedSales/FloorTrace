@@ -5,6 +5,11 @@
 const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 
 export default {
+  // No `dark:` variant is used anywhere today — theming runs entirely through
+  // the CSS custom properties below, so this line currently does nothing. It
+  // stays because deleting it is not neutral: Tailwind would fall back to
+  // `media`, and the first `dark:` anyone writes would then key off
+  // `prefers-color-scheme` and quietly disagree with the theme toggle.
   darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     "./index.html",
@@ -51,7 +56,6 @@ export default {
         12: '0.12',
         15: '0.15',
         35: '0.35',
-        45: '0.45',
       },
       // Only `fade-in` survives the docked shell: `slide-in-left` belonged to
       // the two panels that used to fly in over the canvas, `toast-in` to the

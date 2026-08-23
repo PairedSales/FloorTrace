@@ -21,7 +21,6 @@ import { useSyncExternalStore } from 'react';
 
 const MOBILE_QUERY = '(max-width: 819.98px)';
 const TOUCH_QUERY = '(pointer: coarse)';
-const SHORT_QUERY = '(max-height: 460px)';
 
 // One MediaQueryList per query, shared by every caller: a fresh `subscribe`
 // identity per render makes useSyncExternalStore tear down and re-add a
@@ -68,13 +67,3 @@ export const useIsMobile = () => useMedia(MOBILE_QUERY);
 /** True when the primary pointer is a finger — targets, gestures, no hover. */
 export const useIsTouch = () => useMedia(TOUCH_QUERY);
 
-/** True for a phone held in landscape: wide enough, but almost no height. */
-export const useIsShort = () => useMedia(SHORT_QUERY);
-
-/**
- * Non-reactive read for code outside React (event handlers, imperative canvas
- * setup). Prefer the hooks in components — this exists because the Konva hit
- * geometry is computed inside handlers that never re-render.
- */
-export const isTouchDevice = () => entry(TOUCH_QUERY).getSnapshot()
-  || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);

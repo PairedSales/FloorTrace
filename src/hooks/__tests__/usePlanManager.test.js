@@ -23,6 +23,15 @@ vi.mock('../../utils/workspaceDrafts', () => drafts);
 vi.mock('../../utils/confirmToast', () => ({ confirmToast: vi.fn(async () => true) }));
 vi.mock('../../utils/notify', () => ({ notify: vi.fn(), flash: vi.fn() }));
 
+// What the plan was holding, so the last-plan branch can be shown to free it:
+// the decoded bitmap is keyed by the image and unreachable once the record is
+// gone, and `restart()` leaves the record looking untouched.
+const released = vi.hoisted(() => []);
+vi.mock('../../components/canvas/imageCache', async (orig) => ({
+  ...(await orig()),
+  forgetImage: vi.fn((url) => { released.push(url); }),
+}));
+
 const handle = (name) => ({ name });
 
 describe('usePlanManager', () => {
@@ -31,6 +40,7 @@ describe('usePlanManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    released.length = 0;
     docA = oneDocument();
     act(() => { app().setImage(IMAGE_A); });
     docB = addParkedDocument({ image: IMAGE_B });
@@ -72,5 +82,43 @@ describe('usePlanManager', () => {
     const { result } = renderHook(() => usePlanManager());
     await act(async () => { await result.current.closePlan(docB, { confirmFirst: false }); });
     expect(drafts.removePlan).toHaveBeenCalledWith(docB);
+  });
+  // Closing the *last* plan is structurally different — the plan does not go
+  // away, it is emptied in place and keeps its id — and that branch lived in
+  // `App.jsx`, out of reach of any test, until it moved here. It is the branch
+  // most able to leak, precisely because nothing about it looks like a close.
+  describe('closing the last plan', () => {
+    beforeEach(async () => {
+      const { result } = renderHook(() => usePlanManager());
+      await act(async () => { await result.current.closePlan(docB, { confirmFirst: false }); });
+      expect(app().documentOrder).toEqual([docA]);
+      released.length = 0;
+    });
+
+    it('empties the plan in place, keeping exactly one open', async () => {
+      const { result } = renderHook(() => usePlanManager());
+      await act(async () => { await result.current.closePlan(docA, { confirmFirst: false }); });
+
+      expect(app().documentOrder).toHaveLength(1);
+      expect(app().image).toBeNull();
+    });
+
+    it('drops its file handle even though the id survives', async () => {
+      rememberFileHandle(docA, handle('Property A.floorplan'));
+      const { result } = renderHook(() => usePlanManager());
+
+      await act(async () => { await result.current.closePlan(docA, { confirmFirst: false }); });
+
+      // `restart()` keeps the id, so an id check alone would say nothing
+      // changed — which is how the next Ctrl+S landed in the closed file.
+      expect(getFileHandle(docA)).toBeUndefined();
+    });
+
+    it('releases the image the plan was holding', async () => {
+      const { result } = renderHook(() => usePlanManager());
+      await act(async () => { await result.current.closePlan(docA, { confirmFirst: false }); });
+
+      expect(released).toContain(IMAGE_A);
+    });
   });
 });

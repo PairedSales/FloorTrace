@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { internKey } from './hash';
-import { DEFAULT_TRACE_TYPE, normalizeTraces, traceTypeColor } from './traceTypes';
+import { makeTrace, normalizeTraces } from './traceTypes';
 import { newTraceId } from '../store/ids';
 import { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 import { getFileHandle, rememberFileHandle, forgetFileHandle } from './fileHandles';
@@ -258,7 +258,6 @@ const floorStateSchema = z.object({
   showSideLengths: z.boolean().optional(),
   useInteriorWalls: z.boolean().optional(),
   autoSnapEnabled: z.boolean().optional(),
-  manualEntryMode: z.boolean().optional(),
   ocrFailed: z.boolean().optional(),
   unit: z.string().optional(),
   measurementLines: z.array(measurementLineSchema).optional(),
@@ -483,23 +482,13 @@ export function deserializeSketch(project) {
 
   let perimeterTraces = normalizeTraces(state.perimeterTraces || []);
   if (perimeterTraces.length === 0) {
-    perimeterTraces = [
-      {
-        // Minted, not the old `'trace-default'` constant: this is a second,
-        // independent place a default trace was created, so a file with no
-        // traces opened alongside a fresh plan gave both the same trace id.
-        id: newTraceId(),
-        name: '1st Floor',
-        vertices: [],
-        closed: false,
-        visible: true,
-        locked: false,
-        type: DEFAULT_TRACE_TYPE,
-        colorSource: 'type',
-        nameSource: 'auto',
-        color: traceTypeColor(DEFAULT_TRACE_TYPE),
-      }
-    ];
+    // Minted, not the old `'trace-default'` constant: this is a second,
+    // independent place a default trace is created, so a file with no traces
+    // opened alongside a fresh plan gave both the same trace id.
+    //
+    // Through `makeTrace` because the hand-written copy that used to sit here
+    // had already lost `typeSource: 'auto'`, which every other copy set.
+    perimeterTraces = [makeTrace({ id: newTraceId() })];
   }
 
   const activeTraceId = state.activeTraceId || perimeterTraces[0].id;

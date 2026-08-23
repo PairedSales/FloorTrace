@@ -13,12 +13,13 @@
  *   1 = fallback  — corrupted-symbol reconstruction ("102" → 10'2")
  */
 
+import { METERS_TO_FEET } from '../unitConverter.js';
+
 const MIN_FEET = 1;
 const MAX_FEET = 250;
 // Corrupted-symbol fallbacks reconstruct room labels; rooms beyond this are
 // far less likely than a misread, so cap them tighter than MAX_FEET.
 const MAX_FALLBACK_FEET = 99;
-const METERS_TO_FEET = 3.28084;
 
 const isReasonableFeet = (v) =>
   Number.isFinite(v) && v >= MIN_FEET && v <= MAX_FEET;
@@ -385,7 +386,7 @@ const parseTokenStripRight = (token) => {
 // ---------------------------------------------------------------------------
 
 /** Reconcile units across the pair (e.g. "3.5 x 2.8 m" — left side is meters too). */
-const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
+const buildPair = (lp, rp, textNorm, opts = {}) => {
   let left = { ...lp };
   let right = { ...rp };
 
@@ -519,7 +520,7 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
   const extremeAspect = ratio > 7 ? 10 : 0;
   const penalty =
     (3 - quality) * 7 + strippedCount * 4 + weakStripped * 8 + oversize * 8 +
-    extremeAspect + (separatorMissing ? 6 : 0);
+    extremeAspect;
 
   return {
     width: left.value,
@@ -530,7 +531,7 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
     penalty,
     mixedPair: hyphenMixed,
     hyphenUpgraded,
-    score: left.quality + right.quality - strippedCount - (separatorMissing ? 1 : 0)
+    score: left.quality + right.quality - strippedCount
   };
 };
 
@@ -575,7 +576,7 @@ export const parseDimensionLine = (line, opts = {}) => {
       const rp = parseTokenStripRight(right);
       if (!rp) continue;
 
-      const pair = buildPair(lp, rp, norm, false, opts);
+      const pair = buildPair(lp, rp, norm, opts);
       if (pair && (!best || pair.score > best.score)) best = pair;
     }
     return best;

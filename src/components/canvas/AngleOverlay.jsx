@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Group, Line, Circle, Arc, Rect, Text } from 'react-konva';
 import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen, findVertexNeighbors } from '../../utils/angleMath';
-import { measureSideLenWidth, CANVAS_FONT_FAMILY } from './canvasUtils';
+import { circleHit, measureSideLenWidth, CANVAS_FONT_FAMILY } from './canvasUtils';
 import { useIsTouch } from '../../hooks/useViewport';
 
 // The protractor's three handles are 5-6 px of drawn radius, and two of them
@@ -9,12 +9,6 @@ import { useIsTouch } from '../../hooks/useViewport';
 // Same split as the perimeter vertices: what is drawn stays readable, what is
 // grabbable is a fingertip wide.
 const TOUCH_HIT_RADIUS = 22;
-const circleHit = (radius) => (ctx, shape) => {
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.fillStrokeShape(shape);
-};
 
 /**
  * AngleOverlay renders the interactive protractor overlay for angle measurement.
@@ -34,7 +28,6 @@ const AngleOverlay = ({
   onDragStateChange, // Notify parent when dragging to disable stage pan
 }) => {
   const isTouch = useIsTouch();
-  const groupRef = useRef(null);
   const line1Ref = useRef(null);
   const line2Ref = useRef(null);
   const arcRef = useRef(null);
@@ -390,7 +383,7 @@ const AngleOverlay = ({
   const borderStrokeWidth = 1 / scale;
 
   return (
-    <Group ref={groupRef}>
+    <Group>
       {/* Visual protractor sweep arc */}
       <Arc
         ref={arcRef}

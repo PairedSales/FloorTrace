@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
 import {
   beginWork, settleWork, deliver, isCurrent, signalOf,
-  detachDocument, detachActiveDocument, workCount, resetRequests,
+  detachDocument, detachActiveDocument, workCount, resetRequests, ownerVerdict,
 } from '../documentRequests';
 import { clearParked, parkedInboxSize } from '../documentManager';
 
@@ -90,18 +90,28 @@ describe('documentRequests', () => {
       expect(app().projectName).toBe('traced while away');
     });
 
-    it('refuses a write that must not survive a switch', () => {
+    // The caller that must not have its write replayed asks rather than
+    // delivers. It used to call `deliver` with an empty closure and
+    // `replayable: false`, which needed a fifth verdict to describe a delivery
+    // that was never a delivery.
+    it('answers a caller who must not be replayed, without queueing anything', () => {
       useAppStore.setState({ image: IMAGE_A });
       const work = beginWork('measure');
       app().openDocument();
 
-      let ran = false;
-      const verdict = deliver(work, () => { ran = true; }, { replayable: false });
-
       // A calibration is the case: area goes as scale squared, so applying one
       // late is a wrong number wearing the same green as a right one.
-      expect(verdict).toBe('refused');
-      expect(ran).toBe(false);
+      expect(ownerVerdict(work)).toBe('routed');
+      expect(parkedInboxSize(work.docId)).toBe(0);
+    });
+
+    it('is a question, not a delivery — it queues nothing however often it is asked', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      const work = beginWork('measure');
+      app().openDocument();
+
+      expect(ownerVerdict(work)).toBe('routed');
+      expect(ownerVerdict(work)).toBe('routed');
       expect(parkedInboxSize(work.docId)).toBe(0);
     });
 

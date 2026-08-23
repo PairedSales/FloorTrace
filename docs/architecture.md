@@ -5,10 +5,10 @@
 FloorTrace is a single-page React app with all image processing in-browser. The architecture separates UI interaction from compute-heavy geometry extraction:
 
 - `src/App.jsx`: application state orchestration and workflow control.
-- `src/components/*`: rendering and interactions (toolbar, panels, canvas overlays).
+- `src/components/*`: rendering and interactions — the top band (`TopBar.jsx`), the tool rail, the measurement dock (`MeasurementDock.jsx`, shared with the mobile shell), and the canvas overlays under `canvas/`.
 - `src/utils/DimensionsOCR.js`: public API for room-dimension extraction (detect, warm-up, parser re-exports).
 - `src/utils/dimensions/*`: the dimension-OCR engine — text parsing (`parse.js`), raster preprocessing (`raster.js`), glyph-cluster spatial analysis (`regions.js`), Tesseract/PaddleOCR/OpenCV wrappers, and the multi-pass pipeline (`pipeline.js`). PaddleOCR models are served locally from `public/models/`. `scripts/ocrBenchmark.mjs` runs the pipeline in Node against ground-truth images.
-- `src/utils/detection/*`: wall/region/boundary extraction pipeline (pure-JS cores shared by the worker and the Node benchmark `scripts/detectionBenchmark.mjs`; see `docs/technical.md` for the stage breakdown).
+- `src/utils/detection/*`: wall/region/boundary extraction pipeline (pure-JS cores shared by the worker and the Node benchmark `scripts/detectionBenchmark.mjs`; see the "Two independent, worker-backed CV pipelines" section of `CLAUDE.md` for the stage breakdown).
 - `src/workers/detectionWorker.js`: off-main-thread execution for detection tasks. Its transport is a **whitelist**: the pipeline's quality signals must reach the UI.
 
 ## Detection Flow
@@ -21,7 +21,7 @@ FloorTrace is a single-page React app with all image processing in-browser. The 
 6. User runs perimeter trace (also triggered automatically after a room is placed), with the rooms placed so far and the parsed dimension labels passed in as constraints.
 7. Worker generates several candidate footprints per wall network, scores them against wall evidence and those constraints, and returns the winner with `quality: {confidence, warnings[]}` alongside the inner and outer polygons and any enclosed voids.
 8. If that winner is doubtful, or leaves a constrained room outside itself, the worker searches again (`remediate.js`) and keeps whichever attempt holds more of what is known without trusting itself less.
-9. App chooses active boundary based on wall mode toggle, computes area, and reports the trace at its measured confidence — a doubtful outline is announced as one to check, with a one-click **Draw Exterior** fallback.
+9. App chooses active boundary based on wall mode toggle, computes area, and reports the trace at its measured confidence — a doubtful outline is announced as one to check, and a trace the detector itself rates `poor` or `failed` puts the user straight into draw mode with the brush in hand rather than handing over an answer.
 
 ## Quality Model
 

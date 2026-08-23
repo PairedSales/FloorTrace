@@ -1,16 +1,15 @@
 // Inspect the candidate search for one image: networks, candidates, scores,
 // what was picked and why, plus the non-GLA arbitration outcome.
 import fs from 'fs';
-import { PNG } from 'pngjs';
 import { analyzeFloorplan } from '../src/utils/detection/analyze.js';
 import { traceBoundary, partitionWallNetworks } from '../src/utils/detection/boundary.js';
 import { polygonArea } from '../src/utils/detection/polygon.js';
+import { loadPng } from './lib/benchUtils.mjs';
 
 const file = process.argv[2];
 const truthPath = file.replace(/\.png$/i, '.truth.json');
 const truth = fs.existsSync(truthPath) ? JSON.parse(fs.readFileSync(truthPath, 'utf8')) : null;
-const png = PNG.sync.read(fs.readFileSync(file));
-const imageData = { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
+const imageData = loadPng(file);
 
 const analysis = analyzeFloorplan(imageData, { maxDimension: 1400 });
 console.log(`working ${analysis.width}x${analysis.height} scale=${analysis.scaleX.toFixed(3)} wallThickness=${analysis.wallThickness}`);

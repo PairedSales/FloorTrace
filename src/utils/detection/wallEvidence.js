@@ -173,11 +173,10 @@ export const createEvidence = (analysis, netMask, assertedMask = null) => {
  */
 export const contourSupport = (polygon, evidence, tol, step = 2) => {
   if (!polygon || polygon.length < 3) {
-    return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0, longestGapSpan: null };
+    return { mean: 0, longestGap: 0, total: 0, longestGapSpan: null };
   }
   let total = 0;
   let weighted = 0;
-  let unsupported = 0;
   let gap = 0;
   let longestGap = 0;
   // Where the longest unsupported run was. Recorded, not computed: these are
@@ -201,7 +200,6 @@ export const contourSupport = (polygon, evidence, tol, step = 2) => {
       weighted += level * seg;
       if (level <= 0) {
         if (gap === 0) { fromX = x; fromY = y; }
-        unsupported += seg;
         gap += seg;
         if (gap > longestGap) {
           longestGap = gap;
@@ -214,11 +212,10 @@ export const contourSupport = (polygon, evidence, tol, step = 2) => {
     }
   }
   if (total <= 0) {
-    return { mean: 0, unsupportedFrac: 1, longestGap: 0, total: 0, longestGapSpan: null };
+    return { mean: 0, longestGap: 0, total: 0, longestGapSpan: null };
   }
   return {
     mean: weighted / total,
-    unsupportedFrac: unsupported / total,
     longestGap,
     total,
     longestGapSpan: longestGap > 0

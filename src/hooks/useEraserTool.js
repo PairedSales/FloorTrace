@@ -1,21 +1,8 @@
 import { useRef, useCallback } from 'react';
-
-const distancePointToSegment = (point, a, b) => {
-  const abx = b.x - a.x;
-  const aby = b.y - a.y;
-  const apx = point.x - a.x;
-  const apy = point.y - a.y;
-  const abLenSq = abx * abx + aby * aby;
-
-  if (abLenSq === 0) {
-    return Math.hypot(point.x - a.x, point.y - a.y);
-  }
-
-  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
-  const closestX = a.x + abx * t;
-  const closestY = a.y + aby * t;
-  return Math.hypot(point.x - closestX, point.y - closestY);
-};
+// The same clamped point-to-segment projection this file used to declare
+// privately. `canvasUtils` imports only `unitConverter`, so reaching it from a
+// hook pulls no konva into the graph.
+import { pointToLineDistance } from '../components/canvas/canvasUtils';
 
 export function useEraserTool({
   perimeterOverlay,
@@ -26,7 +13,6 @@ export function useEraserTool({
 }) {
   const isErasingRef = useRef(false);
   const eraserStartPosRef = useRef(null);
-  const eraserLastPosRef = useRef(null);
   const eraserAxisRef = useRef(null);
   const eraserPathRef = useRef([]);
 
@@ -41,7 +27,6 @@ export function useEraserTool({
 
     isErasingRef.current = true;
     eraserStartPosRef.current = pos;
-    eraserLastPosRef.current = pos;
     eraserAxisRef.current = null;
     eraserPathRef.current = [pos];
 
@@ -77,7 +62,6 @@ export function useEraserTool({
 
     const next = { x: drawX, y: drawY };
     eraserPathRef.current.push(next);
-    eraserLastPosRef.current = next;
 
     return true;
   }, [getCanvasCoords]);
@@ -87,7 +71,6 @@ export function useEraserTool({
 
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
-    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
 
     const vertices = initialVerticesRef.current;
@@ -103,7 +86,7 @@ export function useEraserTool({
           minDistance = Math.hypot(vertices[i].x - path[0].x, vertices[i].y - path[0].y);
         } else {
           for (let j = 0; j < path.length - 1; j++) {
-            const dist = distancePointToSegment(vertices[i], path[j], path[j + 1]);
+            const dist = pointToLineDistance(vertices[i], path[j], path[j + 1]);
             if (dist < minDistance) {
               minDistance = dist;
             }
@@ -143,7 +126,6 @@ export function useEraserTool({
 
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
-    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
     eraserPathRef.current = [];
 

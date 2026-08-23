@@ -107,3 +107,21 @@ describe('rankedWarnings', () => {
     expect(warningLabel('some-future-code')).toBe('Some future code');
   });
 });
+
+// The detector re-searches a trace below `REMEDIATION_CONFIDENCE`, and the UI
+// calls a trace `good` at or above `QUALITY_GOOD`. They are deliberately the
+// same line — a trace the detector was willing to accept is a trace the user is
+// shown as finished — and `remediate.js` says so in a comment.
+//
+// Asserted rather than shared. Importing `boundaryQuality` into `remediate`
+// would put presentation code in the worker's graph, and importing the other
+// way would drag the whole remediation graph into the UI chunk. Neither edge is
+// worth one number, but a comment claiming two literals agree is not worth
+// anything either.
+describe('the remediation and quality thresholds', () => {
+  it('are the same number', async () => {
+    const { QUALITY_GOOD } = await import('../boundaryQuality');
+    const { REMEDIATION_CONFIDENCE } = await import('../detection/remediate.js');
+    expect(REMEDIATION_CONFIDENCE).toBe(QUALITY_GOOD);
+  });
+});

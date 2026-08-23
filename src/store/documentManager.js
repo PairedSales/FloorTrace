@@ -5,8 +5,8 @@
  * A *document* here is one image and everything measured from it: its own
  * calibration, traces, OCR results, undo history and camera. It is the level a
  * tab will address. Note the terminology carefully, because this repo has a
- * collision waiting: `floorManager.js` calls a polygon *within* one image a
- * "floor", and the `.floorplan` file format has a `floors[]` array that is
+ * collision waiting: the `.floorplan` file format calls a polygon *within* one
+ * image a "floor", and its `floors[]` array is
  * document-shaped and always holds exactly one entry. The two meanings are
  * inverted. Nothing new may use "floor" for this level.
  *
@@ -49,6 +49,25 @@ const parked = new Map();
  * shown at the cap, so raising it is a one-line change.
  */
 export const MAX_OPEN_DOCUMENTS = 6;
+
+/**
+ * Free everything keyed by a plan's image, before the record that names it is
+ * dropped: the decoded page in the worker, its detection memo, its decoded
+ * bitmap on the main thread, and its wall-snap engine. Afterwards nothing knows
+ * the image, so nothing can release it.
+ *
+ * Exported because there are two ways a plan stops being that plan and only one
+ * of them went through `closeDocument`. Closing the *last* plan empties it in
+ * place via `restart()`, which keeps the id and freed none of this — so a
+ * session that opened and closed plans one at a time held every image it had
+ * ever decoded.
+ */
+export const releaseImageResources = (image) => {
+  if (!image) return;
+  disposeDetectionImage(image);
+  forgetImage(image);
+  forgetWallSnapEngine(image);
+};
 
 /** Test seam, and what a full reset needs. */
 export const clearParked = () => parked.clear();
@@ -165,27 +184,6 @@ export function createDocumentSlice(set, get) {
     setActiveDocumentMeta: (patch) => {
       const { activeDocumentId, setDocumentMeta } = get();
       if (activeDocumentId) setDocumentMeta(activeDocumentId, patch);
-    },
-
-    /** The active plan's metadata, never undefined. */
-    activeDocumentMeta: () => {
-      const state = get();
-      return state.documents[state.activeDocumentId] ?? newDocumentMeta();
-    },
-
-    /**
-     * What the active plan is called. Resolved through `documentLabel` so the
-     * window title and a tab cannot disagree.
-     */
-    activeDocumentLabel: () => {
-      const state = get();
-      const meta = state.documents[state.activeDocumentId] ?? newDocumentMeta();
-      const index = Math.max(0, state.documentOrder.indexOf(state.activeDocumentId));
-      return documentLabel({
-        projectName: state.projectName,
-        sourceFileName: meta.sourceFileName,
-        index,
-      });
     },
 
     /**
@@ -358,18 +356,9 @@ export function createDocumentSlice(set, get) {
       if (index === -1) return false;
 
       detachDocument(docId);
-      // Free what this plan held before forgetting where it was: the decoded
-      // page in the worker, its detection memo, its decoded bitmap on the main
-      // thread and its wall-snap engine are all keyed by the image, and after
-      // the record is dropped nothing knows the image to release.
-      const closingImage = docId === state.activeDocumentId
+      releaseImageResources(docId === state.activeDocumentId
         ? state.image
-        : parked.get(docId)?.state?.image;
-      if (closingImage) {
-        disposeDetectionImage(closingImage);
-        forgetImage(closingImage);
-        forgetWallSnapEngine(closingImage);
-      }
+        : parked.get(docId)?.state?.image);
       parked.delete(docId);
 
       const remaining = order.filter((id) => id !== docId);

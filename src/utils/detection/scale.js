@@ -27,7 +27,7 @@ import { roomIsNonGla } from '../dimensions/exteriorLabels.js';
 // noise. ExampleFloorplan's open-plan KITCHEN reads +107% at confidence 0.70,
 // which is why the gate alone is not the last line of defence — see the
 // footprint cross-check below.
-export const SCALE_CONFIDENCE_FLOOR = 0.5;
+const SCALE_CONFIDENCE_FLOOR = 0.5;
 
 // Two rooms are a second opinion; three are a majority that can outvote one
 // bad rectangle. Fewer than this still produces a scale — the app always
@@ -49,7 +49,7 @@ export const CONSENSUS_SPREAD_LIMIT = 0.45;
 // footprint's square footage *down*, and that is the direction majority
 // contamination actually pushes. The high side would need every room to be
 // labelled to mean anything, and OCR routinely finds half of them.
-export const MIN_FOOTPRINT_TO_LABELS = 0.7;
+const MIN_FOOTPRINT_TO_LABELS = 0.7;
 
 /**
  * @param {Array} candidates rooms from detectRoomsFromLabels, each

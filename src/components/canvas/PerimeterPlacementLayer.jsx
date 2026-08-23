@@ -11,7 +11,6 @@ const PerimeterPlacementLayer = ({
   currentMousePos,
   lineToolActive,
   drawAreaActive,
-  manualEntryMode,
   scale,
   isPreviewInvalid = false,
 }) => {
@@ -21,7 +20,7 @@ const PerimeterPlacementLayer = ({
   // a triangle. It also no longer requires a room overlay — drawing the
   // exterior by hand is a valid first move when auto-detection is not trusted.
   if (traceInteractionMode !== 'drawing' || !perimeterVertices || !perimeterVertices.length
-    || lineToolActive || drawAreaActive || manualEntryMode) {
+    || lineToolActive || drawAreaActive) {
     return null;
   }
 

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
 import TopBar from './components/TopBar';
@@ -38,7 +38,7 @@ import useAppStore, {
 } from './store/appStore';
 import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
-import { beginWork, settleWork, deliver, isCurrent, detachActiveDocument } from './store/documentRequests';
+import { beginWork, settleWork, deliver, isCurrent } from './store/documentRequests';
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -52,7 +52,6 @@ import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
-import { forgetFileHandle } from './utils/fileHandles';
 
 // The desktop chrome a top-centre toast has to clear: one top band of 40 (the
 // menu titles and the command bar share it) + the status band's 26 + 10 px of
@@ -165,7 +164,6 @@ function App() {
   const showSideLengths = useAppStore((s) => s.showSideLengths);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
-  const manualEntryMode = useAppStore((s) => s.manualEntryMode);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
   const unit = useAppStore((s) => s.unit);
   const lineToolActive = useAppStore((s) => s.lineToolActive);
@@ -208,7 +206,6 @@ function App() {
   const setExteriorLabels = useAppStore((s) => s.setExteriorLabels);
   const setAreaLabels = useAppStore((s) => s.setAreaLabels);
   const setRooms = useAppStore((s) => s.setRooms);
-  const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -294,39 +291,28 @@ function App() {
               : drawAreaActive ? 'area'
                 : cropToolActive ? 'crop'
                   : eraserToolActive ? 'eraser'
-                    : manualEntryMode ? 'place'
                       // Pills on screen is a mode, even though no tool flag
                       // says so: `mode` is what renders them and what a click
                       // on one acts through.
                       : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
                         : 'select';
 
-  // "Close project" split in two once more than one plan can be open: closing
-  // the one you are looking at is a different act from closing everything, and
-  // the old single command silently meant the second.
-  const handleClosePlan = useCallback(async () => {
-    const state = useAppStore.getState();
-    // The last plan does not disappear — there is no "no document" state in
-    // this app — so closing it empties it in place.
-    if (state.documentOrder.length === 1) {
-      if (state.image) {
-        const confirmed = await confirmToast('Close this plan? Its measurements will be discarded.', {
-          confirmLabel: 'Close plan',
-        });
-        if (!confirmed) return;
-      }
-      detachActiveDocument();
-      undoManager.clear();
-      // `restart` empties this plan in place and deliberately keeps its id, so
-      // the Save As grant cached against that id would carry into whatever is
-      // opened next and overwrite the file just closed.
-      forgetFileHandle(useAppStore.getState().activeDocumentId);
-      useAppStore.getState().restart();
-      flash('Plan closed');
-      return;
-    }
-    await closePlan(state.activeDocumentId);
-  }, [closePlan]);
+  // The old "Close project" split in two once more than one plan could be
+  // open: closing the one you are looking at is a different act from closing
+  // everything, and the single command silently meant the second. Both shells
+  // now print "Close plan" for this one and "Close all plans" for the other —
+  // the desktop said "Close this plan" and the phone still said "Close
+  // project", for the same handler.
+  //
+  // Both the last plan and any other go through one path. The last-plan
+  // branch used to live here, where it duplicated `closePlan`'s confirm copy
+  // and — because `restart()` keeps the plan's id and so looks like nothing
+  // closed — never released the plan's decoded page, detection memo, bitmap or
+  // wall-snap engine.
+  const handleClosePlan = useCallback(
+    () => closePlan(useAppStore.getState().activeDocumentId),
+    [closePlan],
+  );
 
   const handleCloseAllPlans = useCallback(async () => {
     if (await closeAllPlans()) clearAutosavedDraft();
@@ -365,7 +351,6 @@ function App() {
       undoManager.save();
       setMode('normal');
       setDetectedDimensions([]);
-      setManualEntryMode(false);
       setOcrFailed(false);
     } else {
       // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
@@ -396,7 +381,6 @@ function App() {
       
       setIsProcessing(true, 'Scanning for dimensions…');
       setMode('manual');
-      setManualEntryMode(false);
       setOcrFailed(false);
       
       // Owns `imgSrc`, not "whatever is loaded": this is handed an image and
@@ -476,7 +460,7 @@ function App() {
         releaseOcrWorkersWhenIdle(60000);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -841,21 +825,22 @@ function App() {
   // runs as well as the current one; re-applying `tracedBoundaries` is only the
   // fallback for drafts saved before the pair was stored, and it can move
   // nothing but the most recent run.
-  const handleInteriorWallToggle = (value) => {
+  const handleInteriorWallToggle = useCallback((value) => {
     undoManager.save();
     setUseInteriorWalls(value);
     const switched = useAppStore.getState().setWallFaceMode(value);
     if (!switched && tracedBoundaries) {
       applyTracedBoundary(tracedBoundaries, value);
     }
-  };
+  }, [setUseInteriorWalls, tracedBoundaries, applyTracedBoundary]);
 
-  // Handle fit to window
-  const handleFitToWindow = () => {
-    if (canvasRef.current) {
-      canvasRef.current.fitToWindow();
-    }
-  };
+  // Memoised, like `activeBrush` below, because `useKeyboardShortcuts` lists
+  // both in the dependency array of its window `keydown` effect. As bare
+  // literals they were fresh on every App render, so the global listener was
+  // torn down and re-registered on every state change in the app.
+  const handleFitToWindow = useCallback(() => {
+    canvasRef.current?.fitToWindow();
+  }, []);
 
   const handleRotateCanvas = useCallback((direction) => {
     canvasRef.current?.rotateCanvas(direction);
@@ -1050,7 +1035,6 @@ function App() {
     // interior points, so the labels stay in the store either way, but the user
     // sees which room was chosen while the exterior is still being traced.
     if (showAutoScaleRoom(decision)) {
-      setManualEntryMode(false);
       setMode('normal');
     }
 
@@ -1058,8 +1042,7 @@ function App() {
     // — and equally on every later re-trace, which used to leave the verdict
     // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
-  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom,
-    setManualEntryMode, setMode]);
+  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom, setMode]);
 
   useEffect(() => {
     afterScanRef.current = runAutoScale;
@@ -1160,7 +1143,6 @@ function App() {
     updateScale(dimStrings, overlay, { pinned: true });
 
     setPerimeterVertices(null);
-    setManualEntryMode(false);
     setMode('normal');
 
     // The labels are kept, not cleared. `setMode('normal')` above is what puts
@@ -1170,7 +1152,7 @@ function App() {
     // style along with it.
     await autoTraceExterior();
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
-    setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
+    setPerimeterVertices, setMode, autoTraceExterior]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback((dimension) => {
@@ -1185,21 +1167,6 @@ function App() {
       labelId: labelKeyOf(dimension),
     });
   }, [placeRoom]);
-
-  // Handle canvas click for manual overlay placement
-  const handleCanvasClick = useCallback((clickPoint) => {
-    if (!manualEntryMode || !roomDimensions.width || !roomDimensions.height) return;
-
-    const width = parseFloat(roomDimensions.width);
-    const height = parseFloat(roomDimensions.height);
-    if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      notify('Enter a room width and height first.', { type: 'error', id: 'no-dims' });
-      return;
-    }
-
-    undoManager.save();
-    placeRoom({ point: clickPoint, dims: { width, height } });
-  }, [manualEntryMode, roomDimensions, placeRoom]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -1277,11 +1244,11 @@ function App() {
   // ── Keyboard shortcuts (wired after stable callbacks are defined) ─────────
   // Whichever brush [ and ] currently resize. Draw mode wins when both are
   // somehow on, but the tool manager makes them mutually exclusive anyway.
-  const activeBrush = drawModeActive
+  const activeBrush = useMemo(() => (drawModeActive
     ? { field: 'drawBrushSize', setSize: setDrawBrushSize, min: 8, max: 400, step: 6 }
     : eraserToolActive
       ? { field: 'eraserBrushSize', setSize: setEraserBrushSize, min: 4, max: 200, step: 4 }
-      : null;
+      : null), [drawModeActive, eraserToolActive, setDrawBrushSize, setEraserBrushSize]);
 
   const handleSelectPlan = useCallback((index) => {
     const order = useAppStore.getState().documentOrder;
@@ -1328,11 +1295,10 @@ function App() {
   const handleCancelTool = useCallback(() => {
     deactivateAll();
     setPerimeterVertices(null);
-    setManualEntryMode(false);
     // Only when the picker is the mode being shown: cancelling the eraser must
     // not also put away pills the user opened before reaching for it.
     if (activeTool === 'pick') setMode('normal');
-  }, [activeTool, deactivateAll, setPerimeterVertices, setManualEntryMode, setMode]);
+  }, [activeTool, deactivateAll, setPerimeterVertices, setMode]);
 
   // Put the read labels back on screen so the user can pick the room the
   // automatic selection got wrong. Deliberately not a re-scan: OCR is the
@@ -1439,8 +1405,6 @@ function App() {
       onDimensionSelect={handleDimensionSelect}
       showSideLengths={showSideLengths}
       feetPerPixel={calibration.feetPerPixel}
-      manualEntryMode={manualEntryMode}
-      onCanvasClick={handleCanvasClick}
       unit={unit}
       lineToolActive={lineToolActive}
       onLineToolToggle={handleLineToolToggle}
@@ -1464,7 +1428,6 @@ function App() {
       onCancelUndoSave={handleCancelUndoSave}
       eraserToolActive={eraserToolActive}
       eraserBrushSize={eraserBrushSize}
-      onEraserBrushSizeChange={setEraserBrushSize}
       cropToolActive={cropToolActive}
       onCropToolToggle={handleCropToolToggle}
       onImageUpdate={handleImageUpdate}
@@ -1514,7 +1477,7 @@ function App() {
           onExport={openExport}
           onCopyExhibit={copyExhibitNow}
           onSaveProject={handleSaveProject}
-          onRestart={handleClosePlan}
+          onCloseActivePlan={handleClosePlan}
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
@@ -1573,7 +1536,7 @@ function App() {
         onNewPlan={openPlan}
         onNextPlan={() => stepPlan(1)}
         onPrevPlan={() => stepPlan(-1)}
-        onRestart={handleClosePlan}
+        onCloseActivePlan={handleClosePlan}
         onCloseAllPlans={handleCloseAllPlans}
         onHelpOpen={handleHelpOpen}
         onFindRoomSize={handleFindRoomSize}

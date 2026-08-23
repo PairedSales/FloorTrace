@@ -5,7 +5,7 @@
  *
  * This module imports nothing, on purpose. Both minters are called from
  * `workingStateDefaults()`, which `appStore` evaluates at module load, and
- * `appStore` sits in an import cycle with `undoManager` and `floorManager`.
+ * `appStore` sits in an import cycle with `undoManager` and `traceManager`.
  * Minting from inside that cycle meant the first module to enter it decided
  * whether `newTraceId` was initialised yet — importing the serializer first
  * produced "newTraceId is not a function" at import time, from a file that had

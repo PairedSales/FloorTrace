@@ -9,18 +9,16 @@
 // wrong. Producing one polygon from one sealing heuristic gave a wrong answer
 // no second-best and no way to be recognised as wrong.
 
-import { dilateRect, labelComponents, openRect } from './raster.js';
-import { polygonArea, polygonBounds, pointInPolygon } from './polygon.js';
+import { bboxAreaOf, dilateRect, labelComponents, openRect } from './raster.js';
+import { pointInPolygon } from './polygon.js';
 import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
-  generateCandidates, footprintEntry, sealMetrics, measureFootprint, netSelfSeals,
+  generateCandidates, footprintEntry, measureFootprint, netSelfSeals,
 } from './candidates.js';
 import { scoreCandidate, pickCandidate, candidateConfidence, warning, bboxRing } from './scoring.js';
 import { buildFloor } from './footprint.js';
 import { brushNetworks, strokeRegion } from './brush.js';
 import { remediateTrace, shouldRemediate } from './remediate.js';
-
-const bboxAreaOf = (bbox) => (bbox.maxX - bbox.minX + 1) * (bbox.maxY - bbox.minY + 1);
 
 const inkCount = (mask) => {
   let n = 0;
@@ -649,5 +647,3 @@ export const traceBoundary = (analysis, options = {}) => {
       assembleFloors(analysis, passOptions, passNets, cache, searchScope, passKey),
   });
 };
-
-export { polygonArea, polygonBounds, sealMetrics };

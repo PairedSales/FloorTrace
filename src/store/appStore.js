@@ -1,15 +1,15 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createFloorSlice } from './floorManager';
+import { createTraceSlice } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import {
   DEFAULT_TRACE_TYPE,
+  makeTrace,
   normalizeTraceType,
   normalizeTraces,
-  traceTypeColor,
 } from '../utils/traceTypes';
 
 /**
@@ -31,21 +31,7 @@ const workingStateDefaults = () => {
   image: null,
   imageMimeType: 'image/png',
   roomOverlay: null,
-  perimeterTraces: [
-    {
-      id: defaultTraceId,
-      name: '1st Floor',
-      vertices: [],
-      closed: false,
-      visible: true,
-      locked: false,
-      type: DEFAULT_TRACE_TYPE,
-      typeSource: 'auto',
-      colorSource: 'type',
-      nameSource: 'auto',
-      color: traceTypeColor(DEFAULT_TRACE_TYPE),
-    }
-  ],
+  perimeterTraces: [makeTrace({ id: defaultTraceId })],
   traceInteractionMode: 'idle',
   activeTraceId: defaultTraceId,
   roomDimensions: { width: '', height: '' },
@@ -73,7 +59,6 @@ const workingStateDefaults = () => {
   showSideLengths: true,
   useInteriorWalls: false,
   autoSnapEnabled: true,
-  manualEntryMode: false,
   ocrFailed: false,
   unit: 'decimal',
   lineToolActive: false,
@@ -315,7 +300,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...createDocumentSlice(set, get),
 
   // ── floor management ───────────────────────────────────────────────────────
-  ...createFloorSlice(set, get),
+  ...createTraceSlice(set, get),
 
   // ── setters (thin wrappers so call-sites remain terse) ─────────────────────
   setImage: (v) => set({ image: v }),
@@ -329,22 +314,14 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     if (!activeId) {
       // Create a default first trace if none exists
       const newId = newTraceId();
-      const newTrace = {
+      const newTrace = makeTrace({
         id: newId,
-        name: '1st Floor',
         vertices: v?.vertices || [],
         holes: v?.holes ?? [],
         quality: v?.quality ?? null,
         wallFaces: v?.wallFaces ?? null,
         closed: true,
-        visible: true,
-        locked: false,
-        type: DEFAULT_TRACE_TYPE,
-        typeSource: 'auto',
-        colorSource: 'type',
-        nameSource: 'auto',
-        color: traceTypeColor(DEFAULT_TRACE_TYPE),
-      };
+      });
       set({
         perimeterTraces: [newTrace],
         activeTraceId: newId,
@@ -466,7 +443,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   setShowSideLengths: (v) => set({ showSideLengths: v }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
   setAutoSnapEnabled: (v) => set({ autoSnapEnabled: v }),
-  setManualEntryMode: (v) => set({ manualEntryMode: v }),
   setOcrFailed: (v) => set({ ocrFailed: v }),
   setUnit: (v) => set({ unit: v }),
   setLineToolActive: (v) => set({ lineToolActive: v }),
@@ -543,12 +519,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   addDrawStroke: (stroke) => set((state) => (
     stroke?.points?.length ? { drawStrokes: [...state.drawStrokes, stroke] } : {}
   )),
-  setZoomScale: (v) => set({ zoomScale: v }),
-  setStagePosition: (pos) => set({ stageX: pos.x, stageY: pos.y }),
   setViewportTransform: (scale, pos, token) => set({ zoomScale: scale, stageX: pos.x, stageY: pos.y, viewportSyncToken: token }),
   setCanvasRotation: (v) => set({ canvasRotation: v }),
   setIsDirty: (v) => set({ isDirty: v }),
-  setProjectId: (v) => set({ projectId: v }),
   loadProject: (projectState) => set({
     ...workingStateDefaults(),
     ...projectState,
@@ -590,7 +563,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       lightweight.image = state.image;
     }
     // Shared, not cloned: setTracedBoundaries always replaces the whole result
-    // and every reader (getFloorBoundariesForMode, tracedAreaPx) only reads it,
+    // and every reader (tracedAreaPx, the wall-face switch) only reads it,
     // so a snapshot taken before a re-trace still holds the result it was taken
     // with. It stays snapshotted because undo must restore the trace the wall
     // mode toggle re-applies — dropping it let an undone trace come back.
@@ -631,12 +604,15 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   /**
    * Full restart: clear image and all working state, reset to a single floor.
-   * The trace reset runs last — applied first, the working-state spread put
-   * the stale default trace straight back.
+   *
+   * The trace reset that used to follow this spread is gone: it dated from when
+   * `WORKING_STATE_DEFAULTS` was a literal sharing one `'trace-default'` id, so
+   * the spread handed back a stale trace. `workingStateDefaults()` is a
+   * function now and mints the id per call, so the spread is the reset — the
+   * second call only minted an id that was immediately discarded.
    */
   restart: () => {
     set(workingStateDefaults());
-    get().resetPerimeterTraces();
     // The tab is the same tab, so its identity survives — but nothing it knew
     // about the old plan may, or a closed project leaves its filename behind to
     // name the empty one that replaces it.

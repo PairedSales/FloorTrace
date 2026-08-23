@@ -40,7 +40,7 @@ const baseProps = {
   onNewPlan: noop,
   onNextPlan: noop,
   onPrevPlan: noop,
-  onRestart: noop,
+  onCloseActivePlan: noop,
   onCloseAllPlans: noop,
   onHelpOpen: noop,
   onFindRoomSize: noop,

@@ -55,10 +55,19 @@ export const warmupOcrEngines = () => {
   load().then((mod) => mod.warmupOcrEngines()).catch(() => {});
 };
 
-/** The same, for the opt-in neural rescue pass. */
-export const warmupNeuralOcr = () => {
-  load().then((mod) => mod.warmupNeuralOcr()).catch(() => {});
-};
+/**
+ * The same, for the opt-in neural rescue pass — but this one **returns its
+ * promise**, and that is the difference between it and its three siblings.
+ *
+ * `useEnhancedOcr` chains `.then()` on the result to report whether Paddle came
+ * up, so a braced body that dropped the promise made every call throw
+ * `TypeError: … reading 'then'` before either branch ran: the warm-up still
+ * started, but the "ready" confirmation and the failure notice were both
+ * unreachable and the throw escaped into an idle callback. Resolves to `null`
+ * rather than rejecting, so the caller's failure branch is the one that runs.
+ */
+export const warmupNeuralOcr = () =>
+  load().then((mod) => mod.warmupNeuralOcr()).catch(() => null);
 
 /** Release the worker pool once the user has clearly moved on. */
 export const releaseOcrWorkersWhenIdle = (ms) => {

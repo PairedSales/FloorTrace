@@ -7,6 +7,7 @@ import {
   sanitizeData,
   importProject,
   planStateForSave,
+  PERSISTENT_FLOOR_FIELDS,
 } from '../projectSerializer';
 import { hashDataUrl } from '../hash';
 
@@ -721,5 +722,48 @@ describe('planStateForSave', () => {
   it('refuses to invent a plan when there is no record', () => {
     expect(planStateForSave(live, null)).toBeNull();
     expect(planStateForSave(live, undefined)).toBeNull();
+  });
+});
+
+// A field that used to be persisted and has since been removed from the app.
+// `manualEntryMode` is the concrete case — it was in PERSISTENT_FLOOR_FIELDS,
+// so every .floorplan written before its removal still carries it — but the
+// property under test is general: dropping a persisted field must degrade an
+// existing file quietly, not reject it.
+describe('a persisted field removed from the app', () => {
+  const fileCarryingRemovedField = () => ({
+    fileType: 'floorplan',
+    version: 1,
+    metadata: {
+      projectId: 'p-1',
+      projectName: 'Written before the field was removed',
+      createdAt: '2026-06-07T12:00:00.000Z',
+      updatedAt: '2026-06-07T12:00:00.000Z',
+    },
+    globalSettings: { canvasRotation: 0 },
+    floors: [{
+      id: 'floor-1',
+      name: '1st Floor',
+      state: {
+        roomDimensions: { width: '10', height: '12' },
+        calibration: { calibrated: true, feetPerPixel: { x: 1, y: 1 } },
+        perimeterTraces: [],
+        manualEntryMode: true,
+      },
+    }],
+    activeFloorId: 'floor-1',
+  });
+
+  it('still validates — the schema strips unknown keys rather than rejecting', () => {
+    expect(() => validateProjectSchema(fileCarryingRemovedField())).not.toThrow();
+  });
+
+  it('does not carry the removed field into store state', () => {
+    const state = deserializeSketch(fileCarryingRemovedField());
+    expect(Object.prototype.hasOwnProperty.call(state, 'manualEntryMode')).toBe(false);
+  });
+
+  it('is out of the save projection, so the next save drops it for good', () => {
+    expect(PERSISTENT_FLOOR_FIELDS).not.toContain('manualEntryMode');
   });
 });

@@ -16,6 +16,7 @@ import {
 } from '../unitConverter';
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
 import { qualitySummary, scaleQualitySummary } from '../boundaryQuality';
+import { liveVoids, staleVoidCount } from '../traceIssues';
 
 export const EXHIBIT_DEFAULTS = {
   sideLengths: true,
@@ -71,11 +72,14 @@ const edgeLabels = (vertices, feetPerPixel, unit, unitStyle) => {
   });
 };
 
+// Through `traceIssues`, not re-derived: CLAUDE.md makes "the count is derived
+// once" an invariant for this exact quantity, and the exhibit printing a
+// different number of stale voids from the dock is the failure that rule
+// exists to prevent.
 const voidNote = (holes, feetPerPixel, unit) => {
-  const list = holes ?? [];
-  const rings = holeRings(list);
-  const live = list.filter((h, i) => rings[i]?.length >= 3 && isSubtracted(h));
-  const stale = list.filter((h, i) => rings[i]?.length >= 3 && !isSubtracted(h)).length;
+  const trace = { holes: holes ?? [] };
+  const live = liveVoids(trace);
+  const stale = staleVoidCount(trace);
   if (!live.length && !stale) return null;
   const deducted = live.reduce((sum, h) => {
     const ring = holeRings([h])[0];
@@ -143,10 +147,8 @@ const buildFlags = (state, areas, outlines) => {
     });
   }
 
-  const staleVoids = (state.perimeterTraces ?? []).reduce((sum, t) => {
-    const holes = t.holes ?? [];
-    return sum + holeRings(holes).filter((ring, i) => ring?.length >= 3 && !isSubtracted(holes[i])).length;
-  }, 0);
+  const staleVoids = (state.perimeterTraces ?? [])
+    .reduce((sum, t) => sum + staleVoidCount(t), 0);
   if (staleVoids > 0) {
     flags.push({
       severity: 'warn',

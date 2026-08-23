@@ -5,7 +5,7 @@ import useWorkspaceStore from '../store/workspaceStore';
 /**
  * The one place the app decides how loudly to speak.
  *
- * The routing rule, from docs/messaging-audit.md:
+ * The routing rule:
  *
  *   toast       — the user must know it, and cannot see it
  *   flash()     — confirmation of something they just did
@@ -64,9 +64,6 @@ export function notify(message, { type, id, duration, action } = {}) {
     ...(action ? { action } : {}),
   });
 }
-
-/** Dismiss a toast raised earlier under `id`. */
-export const dismiss = (id) => toast.dismiss(id);
 
 let anchorTimer = null;
 

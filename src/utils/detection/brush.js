@@ -32,8 +32,7 @@ const paintSegment = (mask, width, height, a, b) => {
  * @param {Array<{points: Array<{x,y}>}>} strokes in original image px
  * @param {number} radius brush radius in original image px
  * @param {object} analysis the shared analysis (supplies working size + scale)
- * @returns {{corridor: Uint8Array, ribbon: Uint8Array, painted: Uint8Array,
- *   radius: number} | null}
+ * @returns {{corridor: Uint8Array, ribbon: Uint8Array, radius: number} | null}
  */
 export const rasterizeBrush = (strokes, radius, analysis) => {
   const { width, height, scaleX, scaleY, wallThickness } = analysis;
@@ -56,7 +55,6 @@ export const rasterizeBrush = (strokes, radius, analysis) => {
   // to within a pixel), so one radius keeps the brush round.
   const workRadius = Math.max(2, Math.round(radius * (scaleX + scaleY) / 2));
   return {
-    painted,
     corridor: dilateRect(painted, width, height, workRadius),
     ribbon: dilateRect(painted, width, height, Math.max(2, Math.round(wallThickness))),
     radius: workRadius,

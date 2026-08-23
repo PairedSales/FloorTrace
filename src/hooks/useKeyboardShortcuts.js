@@ -5,13 +5,14 @@ import useWorkspaceStore from '../store/workspaceStore';
 import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
 import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
+import { TOOL_GROUPS } from '../components/toolCatalog';
 
-// Trace switching covers the whole trace list, which floorManager caps at seven
+// Trace switching covers the whole trace list, which traceManager caps at seven
 // colours — so it stops at 7 even as the tool row below grows past it.
 const TRACE_DIGIT_COUNT = 7;
 
 // Plan switching stops at the number of plans that can be open, the same way
-// trace switching stops at the colours floorManager hands out. One constant
+// trace switching stops at the colours traceManager hands out. One constant
 // each, so neither drifts from what it is counting.
 const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
 
@@ -67,22 +68,37 @@ export function useKeyboardShortcuts({
   // currently showing: a mapping that moves with app state is worse than one
   // that occasionally says why it did nothing.
   //
-  // This list is TOOL_GROUPS read top to bottom, and the two are kept in step
-  // by hand — see the note there. `label` is documentation only; it names the
-  // tool the way the rail and the status bar name it, which the digits' first
-  // draft did not (it still said "Line" and "Draw Exterior" long after the
-  // shell had renamed both).
-  const toolDigits = useMemo(() => [
-    { digit: '1', label: 'Paint outline', toggle: onDrawExterior, available: true },
-    { digit: '2', label: 'Place corners', toggle: onOutlineByVertex, available: true },
-    { digit: '3', label: 'Cut out', toggle: onVoidToolToggle, available: hasArea, unavailable: 'Cutting a void needs a traced outline first.' },
-    { digit: '4', label: 'Set scale', toggle: onScaleToolToggle, available: true },
-    { digit: '5', label: 'Measure', toggle: onLineToolToggle, available: hasArea, unavailable: 'Measuring needs a traced outline first.' },
-    { digit: '6', label: 'Area', toggle: onDrawAreaToggle, available: hasArea, unavailable: 'Drawing an area needs a traced outline first.' },
-    { digit: '7', label: 'Angle', toggle: onAngleToolToggle, available: hasArea, unavailable: 'Measuring an angle needs a traced outline first.' },
-    { digit: '8', label: 'Crop', toggle: onCropToolToggle, available: true },
-    { digit: '9', label: 'Erase', toggle: onEraserToolToggle, available: true },
-  ], [
+  // Derived from TOOL_GROUPS rather than restated. This list used to be that
+  // one retyped — the same nine digits, the same nine names and four
+  // word-for-word copies of the disabled reasons — under a comment saying the
+  // two were "kept in step by hand", which they twice had not been: the digits
+  // disagreed with the rail's order, and the labels still said "Line" and
+  // "Draw Exterior" long after the shell renamed both.
+  //
+  // Only the handler is genuinely local, so only the handler is written here.
+  const toolDigits = useMemo(() => {
+    const toggles = {
+      draw: onDrawExterior,
+      vertex: onOutlineByVertex,
+      void: onVoidToolToggle,
+      scale: onScaleToolToggle,
+      line: onLineToolToggle,
+      area: onDrawAreaToggle,
+      angle: onAngleToolToggle,
+      crop: onCropToolToggle,
+      eraser: onEraserToolToggle,
+    };
+    return TOOL_GROUPS
+      .flatMap((group) => group.tools)
+      .filter((tool) => tool.digit)
+      .map((tool) => ({
+        digit: tool.digit,
+        label: tool.short,
+        toggle: toggles[tool.id],
+        available: tool.needsArea ? hasArea : true,
+        unavailable: tool.needsArea,
+      }));
+  }, [
     hasArea,
     onLineToolToggle,
     onDrawAreaToggle,

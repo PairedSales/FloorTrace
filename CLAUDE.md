@@ -74,10 +74,14 @@ A **plan** is one image and everything measured from it — its own calibration,
 traces, OCR results, undo history and camera. It is what a tab addresses.
 An **outline** is one polygon *within* one plan.
 
-The terminology is load-bearing because the repo has an inverted collision:
-`floorManager.js` calls an outline a "floor", while the `.floorplan` file's
-`floors[]` array is plan-shaped and always holds exactly one entry. **No new
-code may use "floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
+The terminology is load-bearing because the file format has an inverted
+collision: the `.floorplan`'s `floors[]` array is plan-shaped and always holds
+exactly one entry, while a "floor" everywhere else means an outline. The store
+side of that collision is gone — `floorManager.js` / `createFloorSlice`, which
+called an outline a "floor", are now `traceManager.js` / `createTraceSlice`,
+matching the trace-centric API they always had. What remains is the format's
+own `floors[]`, which is a version seam and stays. **No new code may use
+"floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
@@ -170,14 +174,19 @@ mid-adopt.
 them nothing, and keeping them out of one buys nothing either.
 
 **Async results are owned, not inferred.** `documentRequests.js` hands out a token
-at `beginWork` and `deliver` decides what may be written, returning one of **five**
+at `beginWork` and `deliver` decides what may be written, returning one of **four**
 verdicts: `'applied'` (the plan is live), `'routed'` (open but parked — the write
 is held and replayed on adopt), `'stale'` (the plan exists but its image changed),
-`'dropped'` (the plan is gone), or `'refused'` — a write passed `replayable: false`,
-held for nobody because replaying it would be wrong. Calibration is the only caller:
-area goes as scale squared, so a scale applied late from evidence the user has moved
-on from is a wrong number that looks right. That plan is flagged `needsRescale`
-(`documentManager.js`) and the tab draws a warning triangle instead.
+or `'dropped'` (the plan is gone).
+
+A caller whose result must *not* be replayed when its plan comes back does not go
+through `deliver` at all — it asks **`ownerVerdict(token)`** and handles `'routed'`
+itself. Calibration is the only such caller: area goes as scale squared, so a scale
+applied late from evidence the user has moved on from is a wrong number that looks
+right. That plan is flagged `needsRescale` (`documentManager.js`) and the tab draws
+a warning triangle instead. There was a fifth verdict, `'refused'`, reached by
+passing `replayable: false` to `deliver` along with an empty closure — a delivery
+that delivered nothing, and a verdict that existed only to describe it.
 
 The old `image !== startImage` guard answered two questions with one comparison,
 and got the second wrong in the dangerous direction: two plans opened from the same file hold the same data URL, so each
@@ -231,7 +240,7 @@ broken once already:
   error in the measurement.
 - `src/store/undoManager.js` interns image data URLs into a pool keyed by `internKey` (`utils/hash.js`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step. **It must be `internKey`, never `hashDataUrl`:** the latter folds an 8 KB prefix plus the length into 32 bits, so two images can share a key — and this key is what undo resolves back into `image`, so a collision restores the wrong drawing with nothing looking wrong. `internKey` picks the bucket by hash and then string-compares the occupant.
 - **The undo stacks are module state, so a plan switch hands them over explicitly.** `parkHistory`/`adoptHistory` are the `PARK_FIELDS` of the history — a plan that has never been parked adopts an empty one rather than inheriting the last plan's. `cancelLastSave` deliberately does not survive the switch (`cancelPendingSave` gives it up): the save belongs to one plan and the cancel would pop whichever is live. `setHistoryState` copies the caller's arrays and caps them, because a `.floorplan` is the one path that can arrive deeper than the app ever creates and would then pin every image it references in the pool.
-- `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
+- `src/store/traceManager.js` (mixed into the store via `createTraceSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 
@@ -366,6 +375,24 @@ The exterior stage is a **hypothesise-and-score search**, the same shape as room
   A scan is ~90% Tesseract inference, so the speed levers are all about the calls: `ocrTesseract.js` keeps a **worker pool** (`max(1, min(cap, cores/2))`, where `cap` is 8 only when `hardwareConcurrency >= 16` *and* `deviceMemory >= 8`, else 4 — each worker holds the 5.2 MB traineddata plus a WASM heap, so the cap is a memory decision and an unknown `deviceMemory` counts as "not enough"; reads are bit-identical at any pool size. Preset-affine, torn down on a 60 s idle timer rather than after every scan) and phase 4 reads ROIs concurrently across it, while the speculative ROI tier (priority below `SPECULATIVE_PRIORITY` = 7 — spatial clusters nothing corroborates) gets two zoom rungs instead of the full ladder, and is capped in count as well as depth (`MAX_SPECULATIVE_ROIS` 12, `MAX_SPECULATIVE_VERTICAL_ROIS` 6; the overall `MAX_ROIS` bounds the queue but not its composition). `detectAllDimensions` runs through `scanQueue.js` — pure and testable, deliberately outside `DimensionsOCR.js`, which cannot load outside a browser. Three behaviours: a **four-entry LRU** keyed by data-URL identity rather than one slot (one slot is right only while one image is in play; with two plans open every scan went cold); **de-duplication**, so two callers asking for one image wait on one scan; and **serialisation**, which is the load-bearing one. The pipeline's budget is wall clock, so two scans running together do not each take twice as long — they each return *fewer dimensions*, with nothing in either result saying so, and fewer dimensions is a worse scale, and the scale multiplies every reported area. Failures are never memoised: an empty result would otherwise be served forever as "this plan has no labels". Two things that look like free wins are **not**, and are benchmarked shut: running CLAHE before the pre-OCR upscale instead of after (bilinear zoom is what creates the gradients CLAHE exists to flatten — costs six detections), and lowering `UPSCALE_MAX`/`TARGET_GLYPH_PX` (flat detection rate, more false positives).
 
   This pipeline core (`detectDimensionsCore` in `pipeline.js`) is deliberately environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`) so the identical code path runs in the browser (`DimensionsOCR.js`'s `browserEnv()`) and in the Node benchmark harness (`scripts/ocrBenchmark.mjs`, which stubs `toOcrInput` with a PNG encoder and skips the PaddleOCR step). When changing pipeline behavior, prefer running the benchmark script over `fixtures/ExampleFloorplan.png` to check detection rate/accuracy/timings before/after.
+
+  **OpenCV stays, and this is the settled answer.** `@techstark/opencv-js` is the
+  largest thing the app ships — `dist/assets/opencv.*.js` is 15.5 MB raw, 3.9 MB
+  gzipped, four times the Tesseract cores — and its whole job is CLAHE plus a
+  3x3 median blur, both of which have working pure-JS fallbacks in `raster.js`.
+  Two separate reviews have proposed dropping it. Re-measured 2026-08-22 across
+  all nine fixtures it is worth **+1 detection and -2 false positives** (61/2
+  against 62/4), which is the original figure to the digit. It stays because of
+  *which* half of that matters: a false-positive dimension is a sample
+  `scale.js` pools, the project scale multiplies every reported area, and area
+  goes as scale squared — so halving them buys correctness on the number the
+  whole app exists to produce. Bundle size does not outrank that. Reproduce the
+  comparison with `FLOORTRACE_NO_OPENCV=1 node scripts/ocrBenchmark.mjs
+  fixtures/ExampleFloorplan*.png`. It is correctly deferred — reached only
+  through `await import()` inside `loadOpenCv`, never at mount, and
+  `dist/index.html` preloads only `interop` and `react` — so the cost lands on
+  the first scan, not on first paint. **Do not re-open this without new
+  numbers.**
 
   PaddleOCR model weights are committed under `public/models/ocr-det` and `public/models/ocr-rec` (`model.json` + `chunk_N.dat` — one chunk under `ocr-det`, two under `ocr-rec`, 11.9 MB committed). They are checked in deliberately — the app must work offline and on first paint — but note that regenerating them adds another copy to git history, so replace rather than accumulate.
 

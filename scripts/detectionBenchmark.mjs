@@ -242,7 +242,7 @@ const run = () => {
             + `(held ${remediation.before.held}->${remediation.after.held}/${remediation.after.of})`
           : '  no retry needed'));
       const cScore = scoreBoundary(constrained, truth.boundary, ppf);
-      out.push(...cScore.lines.map((l) => l.replace(/^   /, '   c ')));
+      out.push(...cScore.lines.map((l) => l.replace(/^ {3}/, '   c ')));
       for (const ok of cScore.checks) {
         totalChecks += 1;
         if (ok) totalPass += 1;

@@ -1,26 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
-import { clearParked, newDocumentId, newDocumentMeta, MAX_OPEN_DOCUMENTS } from '../documentManager';
-import { resetRequests } from '../documentRequests';
+import { newDocumentId, MAX_OPEN_DOCUMENTS } from '../documentManager';
 import * as undoManager from '../undoManager';
+import { app, oneDocument } from '../../hooks/__tests__/harness';
 
-const app = () => useAppStore.getState();
 const IMAGE = 'data:image/png;base64,PLAN';
-
-const oneDocument = () => {
-  clearParked();
-  resetRequests();
-  undoManager.clear();
-  app().restart();
-  const id = newDocumentId();
-  useAppStore.setState({
-    documents: { [id]: newDocumentMeta() },
-    documentOrder: [id],
-    activeDocumentId: id,
-    _swappingDocument: false,
-  });
-  return id;
-};
 
 describe('plan lifecycle', () => {
   let docA;

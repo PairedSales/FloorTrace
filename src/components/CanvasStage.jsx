@@ -45,8 +45,6 @@ const CanvasStage = React.memo(({
   onDimensionSelect,
   showSideLengths,
   feetPerPixel,
-  manualEntryMode,
-  onCanvasClick,
   unit,
   lineToolActive,
   measurementLines,
@@ -86,11 +84,6 @@ const CanvasStage = React.memo(({
   onVoidToolToggle,
 }) => {
   const stageRef = useRef(null);
-  const renderCountRef = useRef(0);
-  if (import.meta.env?.DEV) {
-    renderCountRef.current += 1;
-    console.log(`[Canvas] Render count: ${renderCountRef.current}`);
-  }
   const backgroundImageLayerRef = useRef(null);
   const contentLayerRef = useRef(null);
   const prevImageDimsRef = useRef(null);
@@ -145,7 +138,6 @@ const CanvasStage = React.memo(({
     stageX,
     stageY,
     viewportSyncToken,
-    manualEntryMode,
     eraserToolActive,
     drawModeActive,
     cropToolActive,
@@ -241,7 +233,6 @@ const CanvasStage = React.memo(({
     angleToolActive,
     drawModeActive,
     scaleToolActive,
-    manualEntryMode,
     traceInteractionMode,
     autoSnapEnabled,
     viewportSyncTokenRef: camera.viewportSyncTokenRef,
@@ -304,7 +295,6 @@ const CanvasStage = React.memo(({
     onDrawAreaToggle,
     onAngleToolToggle,
     roomOverlay,
-    onCanvasClick,
   });
 
   // ── 9. Keep refs in sync after every render ────────────────────────────────
@@ -390,28 +380,6 @@ const CanvasStage = React.memo(({
       hasInitializedRef.current = false;
     }
   }, [angleToolActive, angleToolState, onAngleToolStateChange, camera.scaleRef]);
-
-  // Dev-only Konva draw-call instrumentation
-  useEffect(() => {
-    if (import.meta.env?.DEV) {
-      const bLayer = backgroundImageLayerRef.current;
-      if (bLayer) {
-        const origDraw = bLayer.draw;
-        bLayer.draw = function(...args) {
-          console.log('[Konva] Background Image Layer Draw Call');
-          return origDraw.apply(this, args);
-        };
-      }
-      const cLayer = contentLayerRef.current;
-      if (cLayer) {
-        const origDraw = cLayer.draw;
-        cLayer.draw = function(...args) {
-          console.log('[Konva] Content Layer Draw Call');
-          return origDraw.apply(this, args);
-        };
-      }
-    }
-  }, [camera.isImageReady]);
 
   // Both layers are React.memo'd, and a freshly-allocated arrow prop defeats
   // the memo on every render — which is every pointer event during an eraser,
@@ -635,7 +603,6 @@ const CanvasStage = React.memo(({
               currentMousePos={router.currentMousePos}
               lineToolActive={lineToolActive}
               drawAreaActive={drawAreaActive}
-              manualEntryMode={manualEntryMode}
               scale={camera.scale}
               isPreviewInvalid={perimeter.isPreviewInvalid}
             />
@@ -682,7 +649,6 @@ const CanvasStage = React.memo(({
               scale={camera.scale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
-              unitStyle={unitStyle}
               selectedCustomShapeIndex={shape.selectedCustomShapeIndex}
               onCustomShapeSelect={shape.handleCustomShapeSelect}
               onCustomShapeDragEnd={shape.handleCustomShapeDragEnd}
