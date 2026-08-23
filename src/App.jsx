@@ -1778,17 +1778,11 @@ function App() {
             reason vertically, or the canvas cannot shrink to the leftover and
             the bottom of the plan is clipped with no scrollbar.
 
+            The status band is first and the tabs sit directly on the canvas.
             Both bands must be *siblings* of the canvas box, never inside it:
             Canvas' root is `absolute inset-0`, so it would paint over them and
             the Konva stage would swallow their clicks. */}
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          <DocumentTabs
-            onSelect={switchPlan}
-            onClose={closePlan}
-            onNew={openPlan}
-            isProcessing={isProcessing}
-          />
-
           <StatusBar
             tool={activeTool}
             count={contextCount}
@@ -1800,6 +1794,17 @@ function App() {
             onZoomIn={() => handleZoom(1)}
             onZoomOut={() => handleZoom(-1)}
             onExport={openExport}
+          />
+
+          {/* Under the status band rather than over it: a tab addresses the
+              plan, so it sits on the plan. Above the band it was separated
+              from its own subject by a row of unrelated readings, and its 30 px
+              of chrome read as part of the window's furniture instead. */}
+          <DocumentTabs
+            onSelect={switchPlan}
+            onClose={closePlan}
+            onNew={openPlan}
+            isProcessing={isProcessing}
           />
 
           {/* Nothing floats over the plan any more - the old panels sat on its

@@ -85,10 +85,15 @@ own `floors[]`, which is a version seam and stays. **No new code may use
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
-**The tab strip is the top row of the plan's own column** (`DocumentTabs.jsx`,
-rendered in `App.jsx` inside the row, not above it), with the `StatusBar` directly
-under it and the canvas under that — so both bands are inset between the
-measurement dock and the tool rail and stop where the plan stops.
+**The tab strip is the last row before the canvas** (`DocumentTabs.jsx`,
+rendered in `App.jsx` inside the row, not above it), with the `StatusBar` above it
+and directly under the top band — so both bands are inset between the measurement
+dock and the tool rail and stop where the plan stops.
+
+**The tabs are under the status band, not over it.** A tab addresses the plan, so
+it sits against the plan; over the band it was separated from its own subject by a
+row of unrelated readings — scale, zoom, draft state — and read as window furniture
+rather than as the label on what is directly below it.
 
 **It renders only when two or more plans are open.** One tab is 30 px of chrome
 answering a question nobody asked, taken off the plan for the whole of an ordinary
@@ -244,13 +249,13 @@ broken once already:
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 
-**The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, then **the Scale card, small**, and **Stats & warnings last**. The first two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because it holds the provenance and both ways to correct the scale — pick a different room, or measure a length you know. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
+**The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, then **the Scale card, small**, and **Checks last**. The first two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because it holds the provenance and both ways to correct the scale — pick a different room, or measure a length you know. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
 
-**Every verdict is on the last card; every card above it measures.** `StatsWarningsCard.jsx` (`#dock-stats`) holds the scale's agreement and its whole explanation, the double-counted-outline warning, the per-outline confidence chip and the detector's ranked reasons with their canvas anchors, plus the counts the measurement rests on. They used to be four separate marks — an `Agrees`/`Check` chip in the Scale card's header, a `⚠ Areas may be off by ~84%` line under the area, a `92%` chip in the outline row and a warning block on the total. Read one at a time none of them said how much there was to check; read together they crowded the numbers they were qualifying. Four things follow:
+**Every verdict is on the last card; every card above it measures.** `ChecksCard.jsx` (`#dock-checks`) holds the scale's agreement and its whole explanation, the double-counted-outline warning, the per-outline confidence chip and the detector's ranked reasons with their canvas anchors, plus the counts the measurement rests on. They used to be four separate marks — an `Agrees`/`Check` chip in the Scale card's header, a `⚠ Areas may be off by ~84%` line under the area, a `92%` chip in the outline row and a warning block on the total. Read one at a time none of them said how much there was to check; read together they crowded the numbers they were qualifying. Four things follow:
 
 - **The count is derived once.** `utils/traceIssues.js` owns `summariseIssues`, and both the card's chip and the Area card's `N things to check` line are that one number — a panel that says "2 things to check" beside the area and then lists three is worse than either alone.
 - **The Area card still says that there are some.** Only that, and only as a link to the reasons. An area offered clean while the detector doubts it is the failure this app is most prone to, so the count sits on the total it invalidates; what moved is the explanation, not the alarm.
-- **A `StageSpine` stage in `warn` jumps to `#dock-stats`**, not to the card that would have shown a green tick. `STAGE_CARD` maps the rest, including PLAN — whose `#dock-plan` resolved to nothing, so that stage silently did nothing when clicked.
+- **A `StageSpine` stage in `warn` jumps to `#dock-checks`**, not to the card that would have shown a green tick. `STAGE_CARD` maps the rest, including PLAN — whose `#dock-plan` resolved to nothing, so that stage silently did nothing when clicked.
 - **`info` warnings are not counted.** They describe how an outline was *reached*, not a reason to doubt what it enclosed; a clean plan that also says "only one hypothesis" has to keep reading as clean. They stay reachable behind the `· N notes` toggle.
 
 The detail text is rendered on the page rather than in a `title`. The scale note's entire explanation used to be a tooltip, which on a phone is nowhere at all — and `MeasurementDock` is the same component on both shells, so a tooltip-only fact is a fact half the users cannot reach.
@@ -267,7 +272,7 @@ The detail text is rendered on the page rather than in a `title`. The scale note
 
 The mobile bar states **one** verb, derived from the pipeline `StageSpine` already models (plan → scale → outline → report), rather than the desktop's seven at equal weight.
 
-**`StatusBar` is a 26 px band of the plan's column**, under the tab strip and over the canvas — not a row of the top bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
+**`StatusBar` is a 26 px band of the plan's column**, directly under the top band and over the tab strip — not a row of the top bar, which is where it lived until the shell was reordered, and not a window footer. Only the hint cell truncates and nothing scrolls: a horizontal scrollbar in a 26 px band eats the band, and inset it has *less* room than it had in the menu bar, not more. Three things about that one truncating cell:
 
 - **There is exactly one grow cell.** A second would mean two cells truncating and neither readable.
 - **Four claimants, in this order:** `isProcessing` suppresses everything else, then a `statusFlash`, then the tool the pointer is resting on, then the running mode's own instruction. A hover above a flash would swallow "Area copied" the moment the pointer crossed the rail; a hover below the instruction would never show at all, since every mode has one.

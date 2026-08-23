@@ -1,8 +1,8 @@
 // How much there is to check, derived once — and the list under it, derived
 // from the same pass. Four surfaces used to answer this question separately and
-// disagree in both directions: the dock's chip, the Area card's line, the
-// exhibit's flag list and the mobile bar's warning triangle. `summariseIssues`
-// is now the only producer; everything else renders `issues`.
+// disagree in both directions: the Checks card's chip, the Area card's line,
+// the exhibit's flag list and the mobile bar's warning triangle.
+// `summariseIssues` is now the only producer; everything else renders `issues`.
 
 import { holeRings, isSubtracted } from './areaCalculator';
 import { rankedWarnings, qualitySummary, RESULT_SCOPED_CODES } from './boundaryQuality';

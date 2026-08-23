@@ -209,7 +209,7 @@ const TraceBlock = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarn
  * figure on it is read straight from the same state the cards above measure
  * from, so there is no path by which the two can drift.
  */
-const StatsWarningsCard = () => {
+const ChecksCard = () => {
   const image = useAppStore((s) => s.image);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const rooms = useAppStore((s) => s.rooms);
@@ -264,9 +264,9 @@ const StatsWarningsCard = () => {
     : `${issues.count} to check`;
 
   return (
-    <div id="dock-stats">
+    <div id="dock-checks">
       <Card
-        title="Stats & warnings"
+        title="Checks"
         action={(
           <span className={`chip ${CHIP_TONE[issues.level] ?? CHIP_TONE.ok}`}>
             <span className="chip-dot" />
@@ -397,4 +397,4 @@ const StatsWarningsCard = () => {
   );
 };
 
-export default StatsWarningsCard;
+export default ChecksCard;

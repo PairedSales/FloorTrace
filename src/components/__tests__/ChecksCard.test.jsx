@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
-import StatsWarningsCard from '../StatsWarningsCard';
+import ChecksCard from '../ChecksCard';
 import useAppStore from '../../store/appStore';
 import { warning } from '../../utils/detection/scoring.js';
 import { WARNING_CODES, warningLabel, detailText } from '../../utils/boundaryQuality';
@@ -38,15 +38,15 @@ const base = {
 beforeEach(() => useAppStore.setState(base));
 afterEach(cleanup);
 
-describe('StatsWarningsCard with nothing to say', () => {
+describe('ChecksCard with nothing to say', () => {
   it('renders nothing at all before a plan is open', () => {
     useAppStore.setState({ image: null });
-    const { container } = render(<StatsWarningsCard />);
+    const { container } = render(<ChecksCard />);
     expect(container.firstChild).toBeNull();
   });
 
   it('says nothing has been measured, rather than that everything is fine', () => {
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Nothing yet')).toBeTruthy();
     expect(view.getByText(/Nothing measured yet/)).toBeTruthy();
   });
@@ -56,14 +56,14 @@ describe('StatsWarningsCard with nothing to say', () => {
       calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
       perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('All clear')).toBeTruthy();
     expect(view.getByText(/Nothing to check/)).toBeTruthy();
     expect(view.getByText('92% wall match')).toBeTruthy();
   });
 });
 
-describe('StatsWarningsCard statistics', () => {
+describe('ChecksCard statistics', () => {
   it('counts what the plan is measured from, read off the live store', () => {
     useAppStore.setState({
       rooms: [{}, {}, {}, {}, {}],
@@ -71,7 +71,7 @@ describe('StatsWarningsCard statistics', () => {
       calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
       perimeterTraces: [outline(), outline({ id: 'trace-2', name: '2nd Floor', vertices: [] })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Dimension labels read').nextSibling.textContent).toBe('3');
     expect(view.getByText('Rooms measured').nextSibling.textContent).toBe('5');
     // An outline that exists but has never been traced is said as a fraction
@@ -86,12 +86,12 @@ describe('StatsWarningsCard statistics', () => {
         holes: [{ ring: square, source: 'user' }, { ring: square }],
       })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Voids subtracted').nextSibling.textContent).toBe('2 (1 yours)');
   });
 });
 
-describe('StatsWarningsCard on the scale', () => {
+describe('ChecksCard on the scale', () => {
   const roomInternal = {
     calibrated: true,
     feetPerPixel: { x: 0.011, y: 0.011 },
@@ -100,7 +100,7 @@ describe('StatsWarningsCard on the scale', () => {
 
   it('states the whole explanation on the page, not in a tooltip', () => {
     useAppStore.setState({ calibration: roomInternal });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Areas may be off by ~84%')).toBeTruthy();
     expect(view.getByText(/The scale was set from the average of the two/)).toBeTruthy();
     expect(view.getByText('1 to check')).toBeTruthy();
@@ -115,13 +115,13 @@ describe('StatsWarningsCard on the scale', () => {
       },
       perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Scale from 5 rooms')).toBeTruthy();
     expect(view.getByText('All clear')).toBeTruthy();
   });
 });
 
-describe('StatsWarningsCard on the outlines', () => {
+describe('ChecksCard on the outlines', () => {
   const doubtful = {
     confidence: 0.62,
     warnings: [warning('bridged-opening', { px: 34 }), warning('no-inner', { floor: 0 })],
@@ -129,14 +129,14 @@ describe('StatsWarningsCard on the outlines', () => {
 
   it('counts every reason it lists', () => {
     useAppStore.setState({ perimeterTraces: [outline({ quality: doubtful })] });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('2 to check')).toBeTruthy();
     expect(view.getByText(/2 to check · a 34px opening was bridged/)).toBeTruthy();
   });
 
   it('keeps its reasons folded until asked, then names each one', () => {
     useAppStore.setState({ perimeterTraces: [outline({ quality: doubtful })] });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.queryByText('A gap was closed for you')).toBeNull();
     fireEvent.click(view.getByText(/2 to check · /));
     expect(view.getByText('A gap was closed for you')).toBeTruthy();
@@ -156,7 +156,7 @@ describe('StatsWarningsCard on the outlines', () => {
         }),
       ],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('Outline never closed')).toBeTruthy();
     expect(view.queryByText('No interior outline')).toBeNull();
   });
@@ -168,7 +168,7 @@ describe('StatsWarningsCard on the outlines', () => {
         quality: { confidence: 0.92, warnings: [] },
       })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     expect(view.getByText('1 to check')).toBeTruthy();
     expect(view.getByText(/1 void is no longer inside this outline/)).toBeTruthy();
     expect(view.getByText('Voids left outside').nextSibling.textContent).toBe('1');
@@ -180,7 +180,7 @@ describe('StatsWarningsCard on the outlines', () => {
         quality: { confidence: 0.62, warnings: [warning('no-inner', { floor: 0 })] },
       })],
     });
-    const view = render(<StatsWarningsCard />);
+    const view = render(<ChecksCard />);
     fireEvent.click(view.getByText(/1 to check · /));
     fireEvent.click(view.getByText('Show'));
     expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
@@ -222,7 +222,7 @@ describe('every warning code the detector can emit', () => {
         calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
         perimeterTraces: [outline({ quality: { confidence: 0.6, warnings: [emitted] } })],
       });
-      const view = render(<StatsWarningsCard />);
+      const view = render(<ChecksCard />);
       // The collapsed headline is the toggle. An `info` code produces the
       // "N notes" line instead of "N to check", so accept either.
       const toggle = view.queryByText(/\d+ to check · /) ?? view.queryByText(/^\d+ notes?$/);

@@ -15,7 +15,7 @@ import InchesInput from './InchesInput';
 import ScaleSection from './ScaleSection';
 import StageSpine from './StageSpine';
 import { planStage, MAX_TRACES } from '../utils/planStage';
-import StatsWarningsCard from './StatsWarningsCard';
+import ChecksCard from './ChecksCard';
 
 const MeasurementDock = ({
   roomDimensions,
@@ -241,7 +241,7 @@ const MeasurementDock = ({
   const STAGE_CARD = { plan: 'roomsize', scale: 'scale', outline: 'outline', report: 'report' };
   const jumpTo = (id) => {
     const stage = stages.find((s) => s.id === id);
-    const target = stage?.state === 'warn' ? 'stats' : (STAGE_CARD[id] ?? id);
+    const target = stage?.state === 'warn' ? 'checks' : (STAGE_CARD[id] ?? id);
     const el = scrollRef.current?.querySelector(`#dock-${target}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
@@ -490,7 +490,7 @@ const MeasurementDock = ({
             {issues.count > 0 && area > 0 && (
               <button
                 type="button"
-                onClick={() => jumpTo('stats')}
+                onClick={() => jumpTo('checks')}
                 className={`mt-2.5 flex w-full items-start gap-1.5 text-left text-[12px]
                             leading-snug cursor-pointer hover:underline
                             ${issues.level === 'error' ? 'text-crit' : 'text-warn'}`}
@@ -628,7 +628,7 @@ const MeasurementDock = ({
 
                       {/* What this outline *is*. How good it is — its
                           confidence, its voids and the detector's reasons — is
-                          read on the Stats & warnings card, so this list stays
+                          read on the Checks card, so this list stays
                           a list of outlines rather than a list of verdicts. */}
                       <div className="flex items-center gap-2 mt-1.5 pl-[18px] text-[11.5px] text-fg-3">
                         <select
@@ -668,7 +668,7 @@ const MeasurementDock = ({
 
             What is left here is the number, where it came from, and the way to
             override it. Whether the rooms *agreed* is a verdict, and it now
-            reads on the Stats & warnings card with the rest of them — this card
+            reads on the Checks card with the rest of them — this card
             used to carry an `Agrees`/`Check` chip whose whole explanation was
             in a `title`, which on a phone is nowhere at all.
 
@@ -744,12 +744,12 @@ const MeasurementDock = ({
           </Card>
         </div>
 
-        {/* ── Stats & warnings ──
+        {/* ── Checks ──
             Last, because it is what you turn to rather than what you work in.
             Everything above measures; this says how much of it to believe. It
             subscribes to the store itself rather than taking the figures as
             props, so the panel has exactly one derivation of each of them. */}
-        <StatsWarningsCard />
+        <ChecksCard />
       </div>
     </aside>
   );
