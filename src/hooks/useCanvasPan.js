@@ -16,7 +16,6 @@ import useAppStore from '../store/appStore';
  * @param {boolean}         opts.draggingRoom
  * @param {*}               opts.draggingRoomCorner
  * @param {*}               opts.draggingVertex
- * @param {boolean}         opts.manualEntryMode
  * @param {boolean}         opts.eraserToolActive
  * @param {boolean}         opts.drawModeActive
  * @param {boolean}         opts.cropToolActive
@@ -35,7 +34,6 @@ export function useCanvasPan({
   draggingRoomCorner,
   draggingVertex,
   draggingAngle,
-  manualEntryMode,
   eraserToolActive,
   drawModeActive,
   cropToolActive,
@@ -93,7 +91,7 @@ export function useCanvasPan({
    */
   const canPanCanvas = useMemo(() => {
     if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
-    if (manualEntryMode || eraserToolActive || drawModeActive || cropToolActive) return false;
+    if (eraserToolActive || drawModeActive || cropToolActive) return false;
     if (voidToolActive) return false; // a void rectangle is a drag; panning would eat it
     if (traceInteractionMode === 'drawing') return false; // vertex placement mode
     // A pinch is the camera moving under two fingers; Konva's own stage drag
@@ -104,7 +102,6 @@ export function useCanvasPan({
     draggingRoomCorner,
     draggingVertex,
     draggingAngle,
-    manualEntryMode,
     eraserToolActive,
     drawModeActive,
     cropToolActive,

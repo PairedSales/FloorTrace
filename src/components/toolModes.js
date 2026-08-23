@@ -1,6 +1,6 @@
 import {
   Brush, Waypoints, SquareDashedBottom, Scaling, Ruler, Compass,
-  Pentagon, Crop, Eraser, Crosshair, MousePointerClick,
+  Pentagon, Crop, Eraser, MousePointerClick,
 } from 'lucide-react';
 
 // What each tool mode is called, what it asks the user to do, and how it
@@ -78,12 +78,6 @@ export const TOOL_MODES = {
     name: 'Erasing',
     hint: 'Drag over legends or notes that confuse detection.',
     brush: 'eraser',
-  },
-  place: {
-    icon: Crosshair,
-    name: 'Placing the room',
-    hint: 'Click the room on the plan to place the overlay.',
-    touchHint: 'Tap the room on the plan to place the overlay.',
   },
   // Not a tool flag: this one is on whenever the read labels are on screen as
   // pills, which is the state the automatic scale leaves behind only when it

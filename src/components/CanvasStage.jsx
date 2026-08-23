@@ -45,8 +45,6 @@ const CanvasStage = React.memo(({
   onDimensionSelect,
   showSideLengths,
   feetPerPixel,
-  manualEntryMode,
-  onCanvasClick,
   unit,
   lineToolActive,
   measurementLines,
@@ -145,7 +143,6 @@ const CanvasStage = React.memo(({
     stageX,
     stageY,
     viewportSyncToken,
-    manualEntryMode,
     eraserToolActive,
     drawModeActive,
     cropToolActive,
@@ -241,7 +238,6 @@ const CanvasStage = React.memo(({
     angleToolActive,
     drawModeActive,
     scaleToolActive,
-    manualEntryMode,
     traceInteractionMode,
     autoSnapEnabled,
     viewportSyncTokenRef: camera.viewportSyncTokenRef,
@@ -304,7 +300,6 @@ const CanvasStage = React.memo(({
     onDrawAreaToggle,
     onAngleToolToggle,
     roomOverlay,
-    onCanvasClick,
   });
 
   // ── 9. Keep refs in sync after every render ────────────────────────────────
@@ -635,7 +630,6 @@ const CanvasStage = React.memo(({
               currentMousePos={router.currentMousePos}
               lineToolActive={lineToolActive}
               drawAreaActive={drawAreaActive}
-              manualEntryMode={manualEntryMode}
               scale={camera.scale}
               isPreviewInvalid={perimeter.isPreviewInvalid}
             />

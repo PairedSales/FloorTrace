@@ -165,7 +165,6 @@ function App() {
   const showSideLengths = useAppStore((s) => s.showSideLengths);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
-  const manualEntryMode = useAppStore((s) => s.manualEntryMode);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
   const unit = useAppStore((s) => s.unit);
   const lineToolActive = useAppStore((s) => s.lineToolActive);
@@ -208,7 +207,6 @@ function App() {
   const setExteriorLabels = useAppStore((s) => s.setExteriorLabels);
   const setAreaLabels = useAppStore((s) => s.setAreaLabels);
   const setRooms = useAppStore((s) => s.setRooms);
-  const setManualEntryMode = useAppStore((s) => s.setManualEntryMode);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
   const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
@@ -294,7 +292,6 @@ function App() {
               : drawAreaActive ? 'area'
                 : cropToolActive ? 'crop'
                   : eraserToolActive ? 'eraser'
-                    : manualEntryMode ? 'place'
                       // Pills on screen is a mode, even though no tool flag
                       // says so: `mode` is what renders them and what a click
                       // on one acts through.
@@ -365,7 +362,6 @@ function App() {
       undoManager.save();
       setMode('normal');
       setDetectedDimensions([]);
-      setManualEntryMode(false);
       setOcrFailed(false);
     } else {
       // Entering manual mode - check if overlays exist (skip confirmation when force-entering from image load)
@@ -396,7 +392,6 @@ function App() {
       
       setIsProcessing(true, 'Scanning for dimensions…');
       setMode('manual');
-      setManualEntryMode(false);
       setOcrFailed(false);
       
       // Owns `imgSrc`, not "whatever is loaded": this is handed an image and
@@ -476,7 +471,7 @@ function App() {
         releaseOcrWorkersWhenIdle(60000);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setManualEntryMode, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -1050,7 +1045,6 @@ function App() {
     // interior points, so the labels stay in the store either way, but the user
     // sees which room was chosen while the exterior is still being traced.
     if (showAutoScaleRoom(decision)) {
-      setManualEntryMode(false);
       setMode('normal');
     }
 
@@ -1058,8 +1052,7 @@ function App() {
     // — and equally on every later re-trace, which used to leave the verdict
     // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
-  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom,
-    setManualEntryMode, setMode]);
+  }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom, setMode]);
 
   useEffect(() => {
     afterScanRef.current = runAutoScale;
@@ -1160,7 +1153,6 @@ function App() {
     updateScale(dimStrings, overlay, { pinned: true });
 
     setPerimeterVertices(null);
-    setManualEntryMode(false);
     setMode('normal');
 
     // The labels are kept, not cleared. `setMode('normal')` above is what puts
@@ -1170,7 +1162,7 @@ function App() {
     // style along with it.
     await autoTraceExterior();
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
-    setPerimeterVertices, setManualEntryMode, setMode, autoTraceExterior]);
+    setPerimeterVertices, setMode, autoTraceExterior]);
 
   // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback((dimension) => {
@@ -1185,21 +1177,6 @@ function App() {
       labelId: labelKeyOf(dimension),
     });
   }, [placeRoom]);
-
-  // Handle canvas click for manual overlay placement
-  const handleCanvasClick = useCallback((clickPoint) => {
-    if (!manualEntryMode || !roomDimensions.width || !roomDimensions.height) return;
-
-    const width = parseFloat(roomDimensions.width);
-    const height = parseFloat(roomDimensions.height);
-    if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      notify('Enter a room width and height first.', { type: 'error', id: 'no-dims' });
-      return;
-    }
-
-    undoManager.save();
-    placeRoom({ point: clickPoint, dims: { width, height } });
-  }, [manualEntryMode, roomDimensions, placeRoom]);
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
@@ -1328,11 +1305,10 @@ function App() {
   const handleCancelTool = useCallback(() => {
     deactivateAll();
     setPerimeterVertices(null);
-    setManualEntryMode(false);
     // Only when the picker is the mode being shown: cancelling the eraser must
     // not also put away pills the user opened before reaching for it.
     if (activeTool === 'pick') setMode('normal');
-  }, [activeTool, deactivateAll, setPerimeterVertices, setManualEntryMode, setMode]);
+  }, [activeTool, deactivateAll, setPerimeterVertices, setMode]);
 
   // Put the read labels back on screen so the user can pick the room the
   // automatic selection got wrong. Deliberately not a re-scan: OCR is the
@@ -1439,8 +1415,6 @@ function App() {
       onDimensionSelect={handleDimensionSelect}
       showSideLengths={showSideLengths}
       feetPerPixel={calibration.feetPerPixel}
-      manualEntryMode={manualEntryMode}
-      onCanvasClick={handleCanvasClick}
       unit={unit}
       lineToolActive={lineToolActive}
       onLineToolToggle={handleLineToolToggle}

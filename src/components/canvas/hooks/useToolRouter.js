@@ -19,7 +19,6 @@ export function useToolRouter({
   angleToolActive,
   drawModeActive,
   scaleToolActive,
-  manualEntryMode,
   traceInteractionMode,
   autoSnapEnabled,
 
@@ -85,7 +84,6 @@ export function useToolRouter({
   onDrawAreaToggle,
   onAngleToolToggle,
   roomOverlay,
-  onCanvasClick,
 }) {
   const [roomStart, setRoomStart] = useState(null);
   const [draggingRoom, setDraggingRoom] = useState(false);
@@ -603,7 +601,6 @@ export function useToolRouter({
     setSelectedVertexIndex?.(null);
     
     const needsSingleClickHandling = 
-      (manualEntryMode && onCanvasClick) ||
       (traceInteractionMode === 'drawing' && !lineToolActive && !drawAreaActive && handleAddPerimeterVertex && perimeterVertices !== null) ||
       (lineToolActive && onMeasurementLineUpdate) ||
       scaleToolActive ||
@@ -640,11 +637,6 @@ export function useToolRouter({
       const clickPoint = getCanvasCoords(stage);
       if (!clickPoint) return;
       
-      if (manualEntryMode && onCanvasClick) {
-        onCanvasClick(clickPoint);
-        return;
-      }
-
       // ── scale line placement ────────────────────────────────────────────
       // Ahead of perimeter vertex placement: an explicitly activated tool
       // beats a mode that was merely left on. Corner snapping is what "click
@@ -748,7 +740,6 @@ export function useToolRouter({
       }
     }, 50);
   }, [
-    manualEntryMode,
     traceInteractionMode,
     lineToolActive,
     drawAreaActive,
@@ -757,7 +748,6 @@ export function useToolRouter({
     findVertexSnapPoint,
     handleAddPerimeterVertex,
     handleClosePerimeter,
-    onCanvasClick,
     onMeasurementLineUpdate,
     onAddMeasurementLine,
     onCustomShapeUpdate,
@@ -824,7 +814,7 @@ export function useToolRouter({
       return;
     }
 
-    if (!perimeterOverlay || drawAreaActive || manualEntryMode || lineToolActive
+    if (!perimeterOverlay || drawAreaActive || lineToolActive
       || drawModeActive || scaleToolActive) return;
     
     const targetType = e.target.getType();
@@ -842,7 +832,6 @@ export function useToolRouter({
     drawAreaActive,
     drawModeActive,
     perimeterOverlay,
-    manualEntryMode,
     handleInsertPerimeterVertex,
     onAddMeasurementLine,
     onMeasurementLineUpdate,
@@ -938,10 +927,6 @@ export function useToolRouter({
       // ── end scale line ──────────────────────────────────────────────────
       } else if (perimeterVertices !== null) {
         useAppStore.getState().setPerimeterVertices(null);
-      } else if (manualEntryMode) {
-        // Without this, Esc left the user in overlay-placement mode with only
-        // the standing toast to say so.
-        useAppStore.getState().setManualEntryMode(false);
       } else if (useAppStore.getState().mode === 'manual') {
         // Leaving the room picker. `mode` is the only thing that renders the
         // pills, so nothing else here can put them away.
@@ -1011,7 +996,6 @@ export function useToolRouter({
     selectedVertexIndex,
     setSelectedVertexIndex,
     onDeletePerimeterVertex,
-    manualEntryMode,
     voidToolActive,
     voidTool,
     onVoidToolToggle,

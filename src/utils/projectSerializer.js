@@ -258,7 +258,6 @@ const floorStateSchema = z.object({
   showSideLengths: z.boolean().optional(),
   useInteriorWalls: z.boolean().optional(),
   autoSnapEnabled: z.boolean().optional(),
-  manualEntryMode: z.boolean().optional(),
   ocrFailed: z.boolean().optional(),
   unit: z.string().optional(),
   measurementLines: z.array(measurementLineSchema).optional(),
