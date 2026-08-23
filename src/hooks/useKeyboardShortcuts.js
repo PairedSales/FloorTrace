@@ -6,12 +6,12 @@ import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
 import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 
-// Trace switching covers the whole trace list, which floorManager caps at seven
+// Trace switching covers the whole trace list, which traceManager caps at seven
 // colours — so it stops at 7 even as the tool row below grows past it.
 const TRACE_DIGIT_COUNT = 7;
 
 // Plan switching stops at the number of plans that can be open, the same way
-// trace switching stops at the colours floorManager hands out. One constant
+// trace switching stops at the colours traceManager hands out. One constant
 // each, so neither drifts from what it is counting.
 const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
 

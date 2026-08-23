@@ -1,5 +1,5 @@
 // The trace taxonomy, owned by one module because four consumers read it:
-// floorManager, the area selector, LeftPanel and the serializer's normalizer.
+// traceManager, the area selector, the dock and the serializer's normalizer.
 // Array order is load-bearing twice — it is the order breakdown rows appear in,
 // and the reading order a report expects (GLA first, non-living last).
 export const TRACE_TYPES = [
@@ -122,7 +122,7 @@ export function normalizeTraces(traces) {
  * One perimeter trace, with every field a new trace is born with.
  *
  * Written six times before this existed — twice in `appStore`, three times in
- * `floorManager`, once in `projectSerializer` — and the copies had already
+ * `traceManager`, once in `projectSerializer` — and the copies had already
  * begun to drift: the serializer's omitted `typeSource: 'auto'`, which is the
  * provenance flag that decides whether re-reading a plan may overwrite the
  * user's own classification. That is the field least able to afford a sixth

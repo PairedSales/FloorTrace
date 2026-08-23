@@ -5,8 +5,8 @@
  * A *document* here is one image and everything measured from it: its own
  * calibration, traces, OCR results, undo history and camera. It is the level a
  * tab will address. Note the terminology carefully, because this repo has a
- * collision waiting: `floorManager.js` calls a polygon *within* one image a
- * "floor", and the `.floorplan` file format has a `floors[]` array that is
+ * collision waiting: the `.floorplan` file format calls a polygon *within* one
+ * image a "floor", and its `floors[]` array is
  * document-shaped and always holds exactly one entry. The two meanings are
  * inverted. Nothing new may use "floor" for this level.
  *

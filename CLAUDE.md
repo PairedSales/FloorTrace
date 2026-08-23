@@ -74,10 +74,14 @@ A **plan** is one image and everything measured from it — its own calibration,
 traces, OCR results, undo history and camera. It is what a tab addresses.
 An **outline** is one polygon *within* one plan.
 
-The terminology is load-bearing because the repo has an inverted collision:
-`floorManager.js` calls an outline a "floor", while the `.floorplan` file's
-`floors[]` array is plan-shaped and always holds exactly one entry. **No new
-code may use "floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
+The terminology is load-bearing because the file format has an inverted
+collision: the `.floorplan`'s `floors[]` array is plan-shaped and always holds
+exactly one entry, while a "floor" everywhere else means an outline. The store
+side of that collision is gone — `floorManager.js` / `createFloorSlice`, which
+called an outline a "floor", are now `traceManager.js` / `createTraceSlice`,
+matching the trace-centric API they always had. What remains is the format's
+own `floors[]`, which is a version seam and stays. **No new code may use
+"floor" for the plan level.** `newDocumentId()` (`store/ids.js`) is
 the plan level; `newTraceId()` beside it is the outline level. `Alt/Shift+1–7`
 switches outlines, so plan switching cannot have those keys.
 
@@ -231,7 +235,7 @@ broken once already:
   error in the measurement.
 - `src/store/undoManager.js` interns image data URLs into a pool keyed by `internKey` (`utils/hash.js`) so repeated undo snapshots of an unchanged image share one copy in memory instead of deep-cloning multi-MB data URLs per step. **It must be `internKey`, never `hashDataUrl`:** the latter folds an 8 KB prefix plus the length into 32 bits, so two images can share a key — and this key is what undo resolves back into `image`, so a collision restores the wrong drawing with nothing looking wrong. `internKey` picks the bucket by hash and then string-compares the occupant.
 - **The undo stacks are module state, so a plan switch hands them over explicitly.** `parkHistory`/`adoptHistory` are the `PARK_FIELDS` of the history — a plan that has never been parked adopts an empty one rather than inheriting the last plan's. `cancelLastSave` deliberately does not survive the switch (`cancelPendingSave` gives it up): the save belongs to one plan and the cancel would pop whichever is live. `setHistoryState` copies the caller's arrays and caps them, because a `.floorplan` is the one path that can arrive deeper than the app ever creates and would then pin every image it references in the pool.
-- `src/store/floorManager.js` (mixed into the store via `createFloorSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
+- `src/store/traceManager.js` (mixed into the store via `createTraceSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
 

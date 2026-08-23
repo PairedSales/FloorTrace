@@ -9,7 +9,7 @@ import {
   ordinalSuffix,
 } from '../utils/traceTypes';
 import { classifyTraces } from '../utils/traceClassification';
-// From areaCalculator, not appStore: appStore already imports createFloorSlice
+// From areaCalculator, not appStore: appStore already imports createTraceSlice
 // from here, so sourcing it there made a cycle that only worked by hoisting.
 import { mergeHoles } from '../utils/areaCalculator';
 import { markStaleHoles } from '../utils/geometryValidation';
@@ -41,7 +41,7 @@ const cloneFaceHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
 // Naming lives in traceTypes.js, which owns the taxonomy the names come from.
 const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
 
-export function createFloorSlice(set, get) {
+export function createTraceSlice(set, get) {
   return {
     /**
      * Add a new empty perimeter trace and select it.

@@ -1,6 +1,6 @@
 import { qualitySummary } from './boundaryQuality';
 
-// floorManager hands out seven trace colours, so seven is the ceiling. Written
+// traceManager hands out seven trace colours, so seven is the ceiling. Written
 // here because three surfaces gate on it and two of them used to disagree: the
 // command bar refused an eighth outline, the Trace menu offered it, and the
 // dock's `+` hid itself.

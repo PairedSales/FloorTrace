@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createFloorSlice } from './floorManager';
+import { createTraceSlice } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
@@ -300,7 +300,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...createDocumentSlice(set, get),
 
   // ── floor management ───────────────────────────────────────────────────────
-  ...createFloorSlice(set, get),
+  ...createTraceSlice(set, get),
 
   // ── setters (thin wrappers so call-sites remain terse) ─────────────────────
   setImage: (v) => set({ image: v }),
