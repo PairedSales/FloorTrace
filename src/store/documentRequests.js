@@ -127,11 +127,26 @@ function resolveOwner(token) {
 export const isCurrent = (token) => resolveOwner(token) === 'applied';
 
 /**
+ * Who owns this token's result, without doing anything about it.
+ *
+ * For a caller whose answer must NOT be replayed when its plan comes back.
+ * Calibration is the case and the only one: area goes as scale squared, so a
+ * scale applied late, from evidence the user has moved on from, is a wrong
+ * number wearing the same green as a right one — such a plan is flagged for
+ * re-measuring instead. That caller used to reach this through
+ * `deliver(work, () => {}, { replayable: false })`, which is a delivery that
+ * delivers nothing, answered by a verdict — `'refused'` — that existed only to
+ * describe the empty closure. Asking the question directly says the same thing
+ * with one fewer verdict and no pretend delivery.
+ */
+export const ownerVerdict = (token) => resolveOwner(token);
+
+/**
  * Run `apply` only if the result may still be written, and say what happened.
  * The verdict is returned rather than swallowed so a caller can tell "written"
  * from "deliberately not written" — the two used to be the same silent `return`.
  */
-export function deliver(token, apply, { replayable = true } = {}) {
+export function deliver(token, apply) {
   const verdict = resolveOwner(token);
   if (verdict === 'applied') {
     apply();
@@ -144,11 +159,9 @@ export function deliver(token, apply, { replayable = true } = {}) {
     // prevent. It runs at adopt time instead, when those setters mean the plan
     // the work was about.
     //
-    // `replayable: false` is for writes that must not survive a switch at all.
-    // A calibration is the case: area goes as scale squared, so a scale applied
-    // late, from evidence the user has moved on from, is a wrong number that
-    // looks like a right one.
-    if (!replayable) return 'refused';
+    // A caller whose result must not survive the switch at all does not come
+    // through here at all — it asks `ownerVerdict` and handles `'routed'`
+    // itself.
     queueForParked(token.docId, apply);
   }
   return verdict;

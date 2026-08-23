@@ -5,7 +5,7 @@ import { isUserAsserted } from '../utils/detection/validate.js';
 import { notify, flash } from '../utils/notify';
 import { perfMark, MARKS } from '../utils/perfMarks';
 import useAppStore from '../store/appStore';
-import { beginWork, settleWork, deliver } from '../store/documentRequests';
+import { beginWork, settleWork, ownerVerdict } from '../store/documentRequests';
 import * as undoManager from '../store/undoManager';
 
 /**
@@ -101,8 +101,8 @@ export function useAutoScale() {
     // user has since moved on from, onto a plan they are not looking at — is a
     // wrong number wearing the same green as a right one. The plan is flagged
     // instead, and re-measuring is one click.
-    const verdict = deliver(work, () => {}, { replayable: false });
-    if (verdict === 'refused') {
+    const verdict = ownerVerdict(work);
+    if (verdict === 'routed') {
       useAppStore.getState().setDocumentMeta(work.docId, { needsRescale: true });
       return null;
     }

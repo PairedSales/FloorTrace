@@ -174,14 +174,19 @@ mid-adopt.
 them nothing, and keeping them out of one buys nothing either.
 
 **Async results are owned, not inferred.** `documentRequests.js` hands out a token
-at `beginWork` and `deliver` decides what may be written, returning one of **five**
+at `beginWork` and `deliver` decides what may be written, returning one of **four**
 verdicts: `'applied'` (the plan is live), `'routed'` (open but parked — the write
 is held and replayed on adopt), `'stale'` (the plan exists but its image changed),
-`'dropped'` (the plan is gone), or `'refused'` — a write passed `replayable: false`,
-held for nobody because replaying it would be wrong. Calibration is the only caller:
-area goes as scale squared, so a scale applied late from evidence the user has moved
-on from is a wrong number that looks right. That plan is flagged `needsRescale`
-(`documentManager.js`) and the tab draws a warning triangle instead.
+or `'dropped'` (the plan is gone).
+
+A caller whose result must *not* be replayed when its plan comes back does not go
+through `deliver` at all — it asks **`ownerVerdict(token)`** and handles `'routed'`
+itself. Calibration is the only such caller: area goes as scale squared, so a scale
+applied late from evidence the user has moved on from is a wrong number that looks
+right. That plan is flagged `needsRescale` (`documentManager.js`) and the tab draws
+a warning triangle instead. There was a fifth verdict, `'refused'`, reached by
+passing `replayable: false` to `deliver` along with an empty closure — a delivery
+that delivered nothing, and a verdict that existed only to describe it.
 
 The old `image !== startImage` guard answered two questions with one comparison,
 and got the second wrong in the dangerous direction: two plans opened from the same file hold the same data URL, so each
