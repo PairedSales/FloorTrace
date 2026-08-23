@@ -43,6 +43,9 @@ const DEMO_CSS = `
 .ft-demo { width: 100%; max-width: 360px; margin-inline: auto; }
 .ft-demo svg { display: block; width: 100%; height: auto; }
 
+/* The iteration count has to stay infinite. The last frame of ft-cycle is the
+   blank page the next pass draws onto, so a finite count would settle the demo
+   on nothing at all — give it a resting frame first if that ever changes. */
 .ft-demo .ft-a {
   animation-duration: 11s;
   animation-iteration-count: infinite;
@@ -128,7 +131,9 @@ const DEMO_CSS = `
    safe insets for the phone's two bars. One ladder for both either shrank the
    demo on a 768 px desktop that had 190 px to spare, or left it full size on a
    667 px phone that was 30 px short. Measured at 375x667, 360x640 and 820x768;
-   the container's own overflow-y-auto is the net for the sizes that were not. */
+   the container's own overflow-y-auto is the net for the sizes that were not.
+   The last rung drops it rather than shrinking a third time: below ~240 px the
+   dimension labels are under 7 px and the demo stops showing the pipeline. */
 @media (min-width: 820px) and (max-height: 700px) { .ft-demo { max-width: 300px; } }
 @media (min-width: 820px) and (max-height: 640px) { .ft-demo { max-width: 240px; } }
 @media (min-width: 820px) and (max-height: 580px) { .ft-demo { display: none; } }
