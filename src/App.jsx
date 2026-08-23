@@ -17,6 +17,7 @@ import {
   getFloorBoundaryFaces,
   traceFloorplanBoundary,
   terminateDetectionWorker,
+  prewarmDetection,
 } from './utils/detection';
 import {
   detectAllDimensions,
@@ -32,7 +33,8 @@ import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
 import { DEFAULT_TRACE_TYPE, traceTypeLabel } from './utils/traceTypes';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
-import { perfMark, perfReportRun, MARKS } from './utils/perfMarks';
+import { loadExamplePlan } from './utils/examplePlan';
+import { perfMark, perfReportRun, perfResetRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
   selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
 } from './store/appStore';
@@ -204,6 +206,8 @@ function App() {
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
+  const setImageMimeType = useAppStore((s) => s.setImageMimeType);
+  const resetOverlays = useAppStore((s) => s.resetOverlays);
   const setRoomOverlay = useAppStore((s) => s.setRoomOverlay);
   const setPerimeterOverlay = useAppStore((s) => s.setPerimeterOverlay);
   const setRoomDimensions = useAppStore((s) => s.setRoomDimensions);
@@ -562,6 +566,43 @@ function App() {
     handleDragOver,
     handleDrop,
   } = useDragAndDrop(handleManualMode, makeRoomForIncoming);
+
+  /**
+   * The bundled plan, opened in one click. A first-run user usually has no
+   * drawing to hand and cannot judge the app without one.
+   *
+   * The sequence is `handlePasteImage`'s, and every step of it is load-bearing:
+   * `makeRoomForIncoming` first (a refusal must leave the current plan alone),
+   * then the overlays and the undo stack cleared *before* the image lands — an
+   * image set over a live plan keeps that plan's calibration and its history,
+   * and undo then walks back into a drawing that is no longer on screen.
+   */
+  const handleOpenExample = useCallback(async () => {
+    if (!makeRoomForIncoming()) return;
+
+    setIsProcessing(true, 'Loading the example plan…');
+    try {
+      const { dataUrl, mimeType } = await loadExamplePlan();
+      perfResetRun();
+      perfMark(MARKS.imageSet);
+      resetOverlays();
+      undoManager.clear();
+      setImage(dataUrl);
+      setImageMimeType(mimeType);
+      // Named rather than left null: this plan does have a source, and an
+      // unnamed one reads as "Untitled 1" in the tab and on the exhibit.
+      useAppStore.getState().setActiveDocumentMeta({ sourceFileName: 'Example plan.png' });
+      prewarmDetection(dataUrl);
+      await handleManualMode(dataUrl, true);
+    } catch (error) {
+      console.error('Error loading example plan:', error);
+      notify(error?.message || 'Could not load the example plan.', {
+        type: 'error', id: 'example-plan',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [makeRoomForIncoming, resetOverlays, setImage, setImageMimeType, setIsProcessing, handleManualMode]);
 
   // Vertex-by-vertex outline placement. Draw mode is the default fallback now,
   // but placing exact corners is still the right tool when the plan is clean
@@ -1571,6 +1612,7 @@ function App() {
       key={activeDocumentId}
       ref={canvasRef}
       onFileOpen={handleFileOpen}
+      onTryExample={handleOpenExample}
       image={image}
       roomOverlay={roomOverlay}
       perimeterOverlay={perimeterOverlay}
