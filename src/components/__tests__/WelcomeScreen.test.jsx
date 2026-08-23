@@ -85,3 +85,61 @@ describe('WelcomeScreen', () => {
     expect(view.getByRole('button', { name: /open a plan/i })).toBeTruthy();
   });
 });
+
+/**
+ * Nothing here renders with layout, so the demo itself cannot be verified by a
+ * program — but its *wiring* can, and every failure mode of that wiring is
+ * silent. An element carrying `ft-outline` without `ft-a` never animates and
+ * sits at its authored `stroke-dashoffset` forever: the outline is simply
+ * always drawn, which looks like a design choice rather than a broken beat.
+ */
+describe('the demo timeline is wired end to end', () => {
+  const css = () => render(<WelcomeScreen {...props()} />).container
+    .querySelector('.ft-demo style').textContent;
+
+  const animatedEls = (container) =>
+    [...container.querySelectorAll('.ft-demo [class*="ft-"]')]
+      .map((el) => ({ el, beats: [...el.classList].filter((c) => /^ft-(?!a$|demo$|draw$|transient$|wall$|scan$|chip$|label$|area$)/.test(c)) }))
+      .filter((e) => e.beats.length > 0);
+
+  it('every element with a beat class also carries ft-a', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    for (const { el, beats } of animatedEls(view.container)) {
+      expect(el.classList.contains('ft-a'), `${beats.join(' ')} is not animated`).toBe(true);
+    }
+  });
+
+  it('every beat class resolves to an animation-name and a @keyframes', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    const sheet = css();
+    for (const { beats } of animatedEls(view.container)) {
+      for (const beat of beats) {
+        expect(sheet, `.${beat} has no animation-name rule`)
+          .toContain(`.ft-demo .${beat} { animation-name: ${beat}; }`);
+        expect(sheet, `@keyframes ${beat} is missing`).toContain(`@keyframes ${beat}`);
+      }
+    }
+  });
+
+  it('declares no keyframes nothing uses', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    const used = new Set(animatedEls(view.container).flatMap((e) => e.beats));
+    const declared = [...css().matchAll(/@keyframes (ft-[\w-]+)/g)].map((m) => m[1]);
+    expect(declared.length).toBeGreaterThan(0);
+    for (const name of declared) {
+      expect(used.has(name), `@keyframes ${name} is dead`).toBe(true);
+    }
+  });
+
+  // The still that a reduced-motion user gets is the *finished* picture, not
+  // whatever the 0% keyframe happens to say — which for the outline is an
+  // undrawn one. Only the two things that never had a resting state are held
+  // back.
+  it('the reduced-motion block renders the finished picture', () => {
+    const sheet = css();
+    const block = sheet.slice(sheet.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toContain('animation: none !important');
+    expect(block).toContain('stroke-dashoffset: 0');
+    expect(block).toContain('.ft-transient { opacity: 0 !important; }');
+  });
+});
