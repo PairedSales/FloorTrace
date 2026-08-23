@@ -4,9 +4,14 @@ import { useRef, useCallback } from 'react';
 // hook pulls no konva into the graph.
 import { pointToLineDistance } from '../components/canvas/canvasUtils';
 
-export function useEraserTool({
+// Deletes the *outline's* corners, never a pixel of the plan. It carried the
+// name "Erase clutter" for a long time, which is what the image eraser
+// (`useImageEraser`) does; this one is gated on its own flag so the two cannot
+// both be on, and so this one can be disabled with a reason before a trace
+// exists rather than silently returning false.
+export function useCornerEraser({
   perimeterOverlay,
-  eraserToolActive,
+  cornerEraserActive,
   eraserBrushSize,
   onPerimeterUpdate,
   getCanvasCoords,
@@ -20,7 +25,7 @@ export function useEraserTool({
   const activeVerticesRef = useRef(null);
 
   const handleEraserMouseDown = useCallback((stage) => {
-    if (!eraserToolActive || !perimeterOverlay?.vertices?.length) return false;
+    if (!cornerEraserActive || !perimeterOverlay?.vertices?.length) return false;
 
     const pos = getCanvasCoords(stage);
     if (!pos) return false;
@@ -34,7 +39,7 @@ export function useEraserTool({
     activeVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
 
     return true;
-  }, [eraserToolActive, perimeterOverlay, getCanvasCoords]);
+  }, [cornerEraserActive, perimeterOverlay, getCanvasCoords]);
 
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
     if (!isErasingRef.current || !activeVerticesRef.current) return false;
@@ -121,8 +126,11 @@ export function useEraserTool({
     return true;
   }, [eraserBrushSize, onPerimeterUpdate]);
 
+  // Same boolean contract as the image eraser's: "there was a stroke to drop",
+  // which is what an Escape handler needs to decide between dropping the stroke
+  // and leaving the tool.
   const cancelErase = useCallback(() => {
-    if (!isErasingRef.current) return;
+    if (!isErasingRef.current) return false;
 
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
@@ -131,6 +139,7 @@ export function useEraserTool({
 
     initialVerticesRef.current = null;
     activeVerticesRef.current = null;
+    return true;
   }, []);
 
   return {

@@ -44,12 +44,52 @@ export const MIN_CONSENSUS_ROOMS = 3;
 // before trimming span 129%.
 export const CONSENSUS_SPREAD_LIMIT = 0.45;
 
-// A building cannot be smaller than the rooms it contains. Only the low side is
-// checked: a leaked rectangle drives the scale *up*, which drives the
-// footprint's square footage *down*, and that is the direction majority
-// contamination actually pushes. The high side would need every room to be
-// labelled to mean anything, and OCR routinely finds half of them.
+// A building cannot be smaller than the rooms it contains. A leaked rectangle
+// drives the scale *up*, which drives the footprint's square footage *down*,
+// and that is the direction majority contamination pushes.
 const MIN_FOOTPRINT_TO_LABELS = 0.7;
+
+// The other direction is the one nothing else in the app can see. Every failure
+// that *inflates* GLA — a garage the carve missed, a flood into the plan next
+// to it on the sheet — leaves the rooms agreeing with each other perfectly and
+// only the footprint too big, so confidence stays green while the number the
+// app exists to produce is wrong.
+//
+// The bound is loose because it is bounded by *coverage*, not by geometry: OCR
+// finds the labels it finds, and the unlabelled half of the house is real area
+// the ratio has to allow for. Measured over the fixtures with four or more
+// accepted rooms the ratio runs 1.34 / 1.41 / 2.40 / 2.58, so the 2.5 this
+// check was first specified at would fire on ExampleFloorplan6 — whose scale is
+// right to 0.7%. 3.5 keeps 36% of headroom over the worst honest fixture and
+// still catches a footprint that swallowed a second plan, which doubles it.
+const MAX_FOOTPRINT_TO_LABELS = 3.5;
+
+// Below this the ratio is measuring coverage rather than the building:
+// ExampleFloorplan7 states 5.64 from two labels for a whole house.
+const MIN_COVERAGE_ROOMS = 4;
+
+// A room in a house is not three feet across. When the labels themselves read
+// that small the plan is dimensioned in metres and being read as feet, which is
+// the one failure `areaRatio` is blind to by construction — a uniform unit
+// error cancels exactly in a ratio of two areas derived from it. What is left
+// is perfect room-to-room consensus, a green verdict, and a GLA 10.8x wrong.
+// Warned about, never corrected: the app does not know the plan's units, and
+// switching them on a suspicion would be the same wrong answer in reverse.
+//
+// Two conditions, because either alone cries wolf. The median catches a page
+// whose rooms are all small; the widest room is what makes that mean metres
+// rather than a page where OCR happened to read the bathroom, the closet and
+// the hall — a house has *a* room 12 ft across, and 12 metres is 39 ft.
+const MIN_PLAUSIBLE_LABEL_SIDE_FT = 8;
+const MIN_PLAUSIBLE_WIDEST_SIDE_FT = 12;
+const MIN_UNIT_CHECK_ROOMS = 3;
+
+const medianOf = (values) => {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
 
 /**
  * @param {Array} candidates rooms from detectRoomsFromLabels, each
@@ -103,6 +143,8 @@ export const selectProjectScale = (candidates = [], context = {}) => {
       reason: 'no-rooms',
       roomCount: 0,
       spread: 0,
+      areaRatio: null,
+      acceptedCount: 0,
       contributors: [],
       rejected,
     };
@@ -150,11 +192,42 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     : 0;
   const areaRatio = footprintSqFt > 0 && labelSqFt > 0 ? footprintSqFt / labelSqFt : null;
 
+  // Every side the accepted labels state, as a population: one long room proves
+  // nothing, a page of them is the unit. Counted per *room*, because a room can
+  // be accepted on its measured px/ft while stating no dimensions at all — three
+  // such rooms with one dimensioned between them is one room's two sides, which
+  // is the population the gate below is written to refuse.
+  const sides = [];
+  let dimensionedRooms = 0;
+  for (const room of accepted) {
+    const dims = room.labelDims;
+    if (!(dims?.width > 0) || !(dims.height > 0)) continue;
+    sides.push(dims.width, dims.height);
+    dimensionedRooms += 1;
+  }
+  const medianSideFt = medianOf(sides);
+  const widestSideFt = sides.length ? Math.max(...sides) : null;
+
   let level = 'ok';
   let reason = 'auto-consensus';
-  if (areaRatio !== null && areaRatio < MIN_FOOTPRINT_TO_LABELS) {
+  if (
+    dimensionedRooms >= MIN_UNIT_CHECK_ROOMS
+    && medianSideFt < MIN_PLAUSIBLE_LABEL_SIDE_FT
+    && widestSideFt < MIN_PLAUSIBLE_WIDEST_SIDE_FT
+  ) {
+    // First, because it invalidates every other verdict below it — including
+    // the two area checks, which a unit error passes cleanly.
+    level = 'check';
+    reason = 'labels-look-metric';
+  } else if (areaRatio !== null && areaRatio < MIN_FOOTPRINT_TO_LABELS) {
     level = 'check';
     reason = 'area-implausible';
+  } else if (
+    areaRatio !== null && areaRatio > MAX_FOOTPRINT_TO_LABELS
+    && accepted.length >= MIN_COVERAGE_ROOMS
+  ) {
+    level = 'check';
+    reason = 'footprint-implausible';
   } else if (spread > CONSENSUS_SPREAD_LIMIT) {
     level = 'check';
     reason = 'rooms-disagree';
@@ -170,7 +243,16 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     reason,
     roomCount: contributors.length,
     spread,
+    // The area cross-check, reported rather than only tested: it is the one
+    // number in the app that can see a footprint too big, and a panel that says
+    // "the building measures 3.1x what its labelled rooms add up to" is a
+    // reviewable claim where a bare confidence is not.
     areaRatio,
+    acceptedCount: accepted.length,
+    labelSqFt: labelSqFt > 0 ? labelSqFt : null,
+    footprintSqFt: footprintSqFt > 0 ? footprintSqFt : null,
+    medianSideFt,
+    widestSideFt,
     contributors: contributors.map(({ room, axes }) => ({
       name: room.labelId ?? room.name ?? null,
       rect: room.rect,

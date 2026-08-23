@@ -12,18 +12,42 @@
 
 import { closeRect, dilateRect, floodOutside, labelComponents } from './raster.js';
 
+// A stroke that never meets the page is dropped whole, because the clamp below
+// would otherwise project it onto the nearest border and hand the search a band
+// along an edge nobody painted near — a footprint where the honest answer is
+// none. Deliberately a bbox test: a loop drawn *around* the sheet has a bbox
+// containing it, and that loop is the case the clamp exists for.
+const touchesRaster = (pts, width, height) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return minX <= width - 1 && maxX >= 0 && minY <= height - 1 && maxY >= 0;
+};
+
 // Bresenham-free line rasterisation: step along the segment at sub-pixel
 // resolution. Strokes arrive as mouse samples, so segments are short and the
 // cost is negligible next to the dilation that follows.
+//
+// Off-page samples are clamped to the edge, not dropped. Dropping them made
+// draw mode useless on a plan drawn tight to its own sheet: a loop painted 4px
+// outside a page-edge wall lost whole sides, so the corridor came back as open
+// arcs and the trace returned `no-boundary` at every brush radius from 10 to 34
+// (measured on ExampleFloorplan6).
 const paintSegment = (mask, width, height, a, b) => {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
   for (let s = 0; s <= steps; s += 1) {
     const t = s / steps;
-    const x = Math.round(a.x + dx * t);
-    const y = Math.round(a.y + dy * t);
-    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    const x = Math.min(width - 1, Math.max(0, Math.round(a.x + dx * t)));
+    const y = Math.min(height - 1, Math.max(0, Math.round(a.y + dy * t)));
     mask[y * width + x] = 1;
   }
 };
@@ -42,6 +66,7 @@ export const rasterizeBrush = (strokes, radius, analysis) => {
   const painted = new Uint8Array(width * height);
   for (const stroke of usable) {
     const pts = stroke.points.map((p) => ({ x: p.x * scaleX, y: p.y * scaleY }));
+    if (!touchesRaster(pts, width, height)) continue;
     if (pts.length === 1) {
       paintSegment(painted, width, height, pts[0], pts[0]);
       continue;

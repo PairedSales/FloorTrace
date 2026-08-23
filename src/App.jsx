@@ -61,6 +61,12 @@ import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 // was permanent.
 const desktopChromePx = (planCount) => 40 + (planCount > 1 ? 30 : 0) + 26 + 10;
 
+// One string for both trace entry points, matching the button that starts it.
+// The toolbar said "Detecting exterior boundary…" and the post-scan path said
+// "Tracing exterior walls…", so a user who watched one of them fail had no way
+// to tell it was the same operation as the button labelled Find outline.
+const FIND_OUTLINE_MESSAGE = 'Finding the outline…';
+
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).
 const nonGlaExcludeRegions = () =>
@@ -165,6 +171,7 @@ function App() {
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
+  const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
   const unit = useAppStore((s) => s.unit);
   const lineToolActive = useAppStore((s) => s.lineToolActive);
   const measurementLines = useAppStore((s) => s.measurementLines);
@@ -180,6 +187,7 @@ function App() {
   const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
   const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const cornerEraserActive = useAppStore((s) => s.cornerEraserActive);
   const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
   const cropToolActive = useAppStore((s) => s.cropToolActive);
   const voidToolActive = useAppStore((s) => s.voidToolActive);
@@ -214,6 +222,7 @@ function App() {
   const setCustomShapes = useAppStore((s) => s.setCustomShapes);
   const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
+  const setLastTraceOutcome = useAppStore((s) => s.setLastTraceOutcome);
   const setAngleToolState = useAppStore((s) => s.setAngleToolState);
   const setShowHelpModal = useWorkspaceStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
@@ -240,7 +249,7 @@ function App() {
   const { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan } = usePlanManager();
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave();
   const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr();
-  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
+  const { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale } = useAutoScale();
   // The scan runs before the exterior trace is even defined in this file, and
   // the automatic path needs both. A ref rather than a reordering: moving
   // handleManualMode below the tracer would drag handleFindRoomSize and its
@@ -251,6 +260,7 @@ function App() {
     handleLineToolToggle,
     handleDrawAreaToggle,
     handleEraserToolToggle,
+    handleCornerEraserToggle,
     handleCropToolToggle,
     handleAngleToolToggle,
     handleDrawModeToggle,
@@ -290,6 +300,7 @@ function App() {
             : angleToolActive ? 'angle'
               : drawAreaActive ? 'area'
                 : cropToolActive ? 'crop'
+                  : cornerEraserActive ? 'cornerEraser'
                   : eraserToolActive ? 'eraser'
                       // Pills on screen is a mode, even though no tool flag
                       // says so: `mode` is what renders them and what a click
@@ -337,12 +348,16 @@ function App() {
       setRoomOverlay({
         x1: centerX - 100, y1: centerY - 100, x2: centerX + 100, y2: centerY + 100,
       });
-      setPerimeterVertices([]);
+      // Deliberately no `setPerimeterVertices([])`. That resolved `activeTool`
+      // to `'vertex'`, so the status bar answered a failed *scan* with "Click
+      // each corner of the exterior" — a third instruction, for a different
+      // stage, on top of the toast and the box this drops on the plan. The
+      // failure path has no business entering a modal outline tool.
       setMode('normal');
     };
     img.onerror = () => settleWork(work);
     img.src = imgSrc;
-  }, [setRoomOverlay, setPerimeterVertices, setMode]);
+  }, [setRoomOverlay, setMode]);
 
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
@@ -397,25 +412,36 @@ function App() {
         const result = await detectAllDimensions(imgSrc);
         perfMark(MARKS.scanEnd);
 
-        if (!isCurrent(work)) return;
-
         const dimensions = result.dimensions || result || [];
         const detectedFormat = result.detectedFormat;
 
-        // Garage/porch/patio/deck/balcony labels: kept for perimeter tracing
-        // so non-GLA features get carved out of the footprint.
-        setExteriorLabels(result.exteriorLabels || []);
-        // Level names ("BASEMENT", "2ND FLOOR"): kept so each traced outline
-        // can be typed from what the plan calls it.
-        setAreaLabels(result.areaLabels || []);
-        setDetectedDimensions(dimensions);
+        // Held and replayed on adopt, exactly like a trace — not dropped.
+        // This path used to bail on `!isCurrent(work)` while the failure path
+        // twenty lines below correctly went through `deliver`, so a scan that
+        // finished while the user glanced at another plan threw away seconds
+        // of OCR and left the plan looking unscanned.
+        const applyScan = () => {
+          // Garage/porch/patio/deck/balcony labels: kept for perimeter tracing
+          // so non-GLA features get carved out of the footprint.
+          setExteriorLabels(result.exteriorLabels || []);
+          // Level names ("BASEMENT", "2ND FLOOR"): kept so each traced outline
+          // can be typed from what the plan calls it.
+          setAreaLabels(result.areaLabels || []);
+          setDetectedDimensions(dimensions);
+          setOcrFailed(dimensions.length === 0);
+        };
+        const verdict = deliver(work, applyScan);
+        // The automatic measure → calibrate → trace pipeline below only makes
+        // sense for the plan on screen. A routed scan keeps its labels and its
+        // dimensions — the expensive part — and the user traces when they
+        // return; running the pipeline into a plan they are not looking at is
+        // how one drawing's numbers land on another.
+        if (verdict !== 'applied') return;
 
         if (dimensions.length === 0) {
-          setOcrFailed(true);
           notify('No printed dimensions found — type a room size, or set the scale from a known length.', { type: 'warning', id: 'scan' });
           placeCentredOverlay(imgSrc);
         } else {
-          setOcrFailed(false);
           const count = dimensions.length;
           // Auto-switch unit based on detected format. The parser's vocabulary
           // is {inches, decimal, meters} and the UI's is {inches, decimal,
@@ -543,20 +569,48 @@ function App() {
   const handleDrawExterior = useCallback(() => {
     undoManager.save();
     setDrawModeActive(false);
-    setPerimeterOverlay(null);
+    // The user's own voids ride across: they are assertions about the building,
+    // not the detector's geometry, and passing `null` here discarded every one
+    // of them silently — while the help text promises they survive a re-trace.
+    const active = useAppStore.getState().perimeterTraces
+      ?.find((t) => t.id === useAppStore.getState().activeTraceId);
+    const keptHoles = (active?.holes ?? []).filter((h) => h?.source === 'user');
+    setPerimeterOverlay(keptHoles.length ? { vertices: [], holes: keptHoles } : null);
     setPerimeterVertices([]); // activate manual vertex placement
   }, [setDrawModeActive, setPerimeterOverlay, setPerimeterVertices]);
 
-  // Draw mode: paint roughly over the exterior walls and let the tracer read
-  // the strokes as a corridor. This is the fallback whenever auto-detection
-  // fails, so it is entered from the failure path as well as from the toolbar.
-  const handleDrawMode = useCallback(({ keepStrokes = false } = {}) => {
+  /**
+   * Draw mode: paint roughly over the exterior walls and let the tracer read
+   * the strokes as a corridor. The fallback whenever auto-detection fails, so
+   * it is entered from the failure path as well as from the toolbar.
+   *
+   * `keepOutline` is what makes the failure path a proposal rather than a
+   * seizure: the rejected outline stays on the canvas as the thing to paint
+   * over, with its warnings still readable, instead of being deleted out from
+   * under the toast that is telling the user to check it.
+   *
+   * `keepStrokes` defaults to "whatever is already painted", because the only
+   * routes back into the brush all ran `setDrawStrokes([])` and destroyed the
+   * work the user was coming back to add to.
+   *
+   * `reason` is raised through `notify` with the trace-result id, so it
+   * *replaces* the "check it" toast rather than sitting under a message about
+   * an outline that no longer exists. It was previously passed as `{ message }`
+   * to a function that never had that parameter, and has never been rendered.
+   */
+  const handleDrawMode = useCallback(({
+    keepStrokes, keepOutline = false, reason = null,
+  } = {}) => {
     undoManager.save();
     setPerimeterVertices(null);
-    setPerimeterOverlay(null);
-    if (!keepStrokes) setDrawStrokes([]);
+    if (!keepOutline) setPerimeterOverlay(null);
+    const painted = useAppStore.getState().drawStrokes?.length > 0;
+    if (keepStrokes === false || (keepStrokes === undefined && !painted)) setDrawStrokes([]);
     // Always enters; the toggle would turn it back off when already on.
     if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
+    if (reason) {
+      notify(reason, { type: 'warning', id: 'trace-result', duration: DURATION.LONG });
+    }
   }, [setPerimeterVertices, setPerimeterOverlay, setDrawStrokes, handleDrawModeToggle]);
 
   // The two outline *methods*, named for what they do rather than for the
@@ -565,6 +619,50 @@ function App() {
   // than passed bare, because `handleDrawMode({ keepStrokes } = {})` would take
   // a click event as its options object.
   const handlePaintOutline = useCallback(() => handleDrawMode(), [handleDrawMode]);
+
+  /**
+   * Adopt the search's next-best footprint for the active outline.
+   *
+   * The commonest correctable failure is a tie-break: two candidates within
+   * `SCORE_EPSILON` (0.015) of each other and the wrong one won. The right
+   * geometry has already been computed and scored — this hands it over instead
+   * of asking the user to paint the whole outline again. The rejected one goes
+   * onto the trace's attempt history, so it is one undo away either direction.
+   */
+  // Offered only on an outline the detector produced and the user has not
+  // since edited: once the geometry is theirs, a runner-up scored against the
+  // detector's own is no longer an alternative to it.
+  const alternativeCount = useMemo(() => {
+    const t = perimeterTraces?.find((x) => x.id === activeTraceId);
+    return t?.quality?.edited ? 0 : (t?.quality?.alternatives?.length ?? 0);
+  }, [perimeterTraces, activeTraceId]);
+
+  const handleUseAlternative = useCallback(() => {
+    const state = useAppStore.getState();
+    const trace = state.perimeterTraces?.find((t) => t.id === state.activeTraceId);
+    const next = trace?.quality?.alternatives?.[0];
+    if (!next?.polygon?.length) return;
+    undoManager.save();
+    const rest = trace.quality.alternatives.slice(1);
+    setPerimeterOverlay({
+      vertices: next.polygon.map((p) => ({ x: p.x, y: p.y })),
+      // The score it was ranked on is the detector's, so it stays the
+      // detector's answer — but the warnings belonged to the outline this
+      // replaces, and describing the new geometry with the old one's reasons
+      // would be worse than saying nothing. Re-tracing is what re-earns them.
+      quality: {
+        ...trace.quality,
+        confidence: null,
+        edited: false,
+        warnings: [],
+        alternatives: rest,
+        adoptedAlternative: true,
+      },
+    });
+    flash(rest.length
+      ? `Using the next-best outline — ${rest.length} more to try`
+      : 'Using the next-best outline');
+  }, [setPerimeterOverlay]);
 
   // Apply detected boundaries to perimeter traces. Returns the number of
   // floors applied (0 = nothing usable). A single floor updates the active
@@ -603,6 +701,12 @@ function App() {
           source,
           confidence: floor.confidence,
           warnings: floor.warnings,
+          // The runner-up footprints the search already scored. Kept on the
+          // trace so the commonest correctable failure — a tie-break inside
+          // SCORE_EPSILON picking the wrong one of two near-equal candidates —
+          // costs a click rather than repainting the whole outline. Geometry
+          // only; they are not offered once the user has edited the outline.
+          alternatives: floor.alternatives ?? [],
           // Page-level, so every floor of a re-searched sheet carries the same
           // record — the same way the `remediated` warning is result-scoped.
           // Kept because it is the only durable answer to "why is this outline
@@ -635,22 +739,32 @@ function App() {
     const drawn = traced?.quality?.source === 'drawn';
     // A drawn trace that went wrong is corrected by painting again, not by
     // switching to a different tool, so the offer differs from the auto path's.
+    // `keepStrokes` on both: the strokes are the work, and the button offering
+    // to fix the outline used to delete them on the way in.
     const drawAction = drawn
-      ? { label: 'Redraw', onClick: () => handleDrawMode({ keepStrokes: true }) }
-      : { label: 'Draw mode', onClick: () => handleDrawMode() };
+      ? { label: 'Paint again', onClick: () => handleDrawMode({ keepStrokes: true }) }
+      : { label: 'Paint it instead', onClick: () => handleDrawMode({ keepStrokes: true }) };
 
     if (!floorCount) {
       notify(quality.reason
-        ? `No usable outline — ${quality.reason}.`
-        : 'No usable outline found.',
-      { type: 'error', id: 'trace-result', action: drawAction });
+        ? `No usable outline — ${quality.reason}. Paint over the exterior walls instead.`
+        : 'No usable outline found. Paint over the exterior walls instead.',
+      { type: 'error', id: 'trace-result', duration: DURATION.LONG, action: drawAction });
       return;
     }
 
     const noun = drawn ? 'Outline traced from your painting' : 'Outline found';
+    // The wall-face parenthetical is gone from the *warning* branch below: it
+    // is a setting the Area card already shows a toggle for, and stacking it in
+    // front of the reason left the most common failure message reading
+    // "Outline found (outer wall face) (71% confidence): check it" — two
+    // parentheticals and an imperative with no object.
     const what = floorCount > 1
       ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels (${mode} wall face)`
       : `${noun} (${mode} wall face)`;
+    const plain = floorCount > 1
+      ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels`
+      : noun;
     // The outline on screen is not the one the first search produced, and the
     // area moved with it. By the routing rule that is a toast and not a flash
     // even when the result is clean: the user must know it, and cannot see it —
@@ -673,10 +787,42 @@ function App() {
       }
       return;
     }
-    const confidenceNote = quality.percent === null ? '' : ` (${quality.percent}% confidence)`;
+    // "wall match", not "confidence". The number is the share of this outline
+    // that sits on wall the plan actually draws — it is evidence about the
+    // tracing, and it is blind to whether the enclosed area is the right area.
+    // Read as "71% accurate" it is worse than no number: measured across the
+    // results the app presents, its correlation with area error is +0.117, and
+    // the single worst over-count in the fixture set carries the joint-highest
+    // value.
+    const matchNote = quality.percent === null ? '' : ` (${quality.percent}% wall match)`;
     const reason = quality.reason ? ` — ${quality.reason}` : '';
-    notify(`${what}${confidenceNote}: check it${reason}.${retryNote}`, {
-      type: quality.level === 'fair' ? 'warning' : 'error',
+
+    // A result the detector rates poor is not handed over as an answer, but it
+    // is no longer taken away either. The outline stays on the canvas with its
+    // reasons intact, as the thing to paint over; the brush is the toast's
+    // primary action and is entered only when the user takes it. Deleting it
+    // here left the toast pointing at geometry that no longer existed, offering
+    // a mode the app had already entered, behind a button that wiped whatever
+    // had been painted since.
+    if (quality.level === 'poor' || quality.level === 'failed') {
+      notify(
+        `${plain}${matchNote}, and it is probably wrong${reason}.${retryNote} `
+        + 'It is on the plan so you can see what it got — paint over the exterior walls to replace it.',
+        {
+          type: 'error',
+          id: 'trace-result',
+          duration: DURATION.LONG,
+          action: {
+            label: drawn ? 'Paint again' : 'Paint it instead',
+            onClick: () => handleDrawMode({ keepStrokes: true, keepOutline: true }),
+          },
+        },
+      );
+      return;
+    }
+
+    notify(`${plain}${matchNote}: check it${reason}.${retryNote}`, {
+      type: 'warning',
       id: 'trace-result',
       duration: DURATION.LONG,
       action: drawAction,
@@ -748,26 +894,62 @@ function App() {
         // force is still the automatic one.
         applied = floors;
         if (floors) reviewAgainstFootprint(tracedAreaPx(traced));
+        // Written before the report, and on the no-floor branch too. This is
+        // the only durable record that a trace ran at all: without it a trace
+        // that produced nothing wrote no field, so once the toast expired the
+        // panel said "every outline came back clean" about zero outlines and
+        // the spine read exactly as it does on a plan nobody has tried.
+        const level = floors ? qualitySummary(traced?.quality).level : 'failed';
+        setLastTraceOutcome({
+          at: Date.now(),
+          level,
+          reason: qualitySummary(traced?.quality).reason ?? null,
+          floors,
+          source: brush ? 'drawn' : 'auto',
+        });
         reportTrace(traced, floors);
         reportTraceTypes(typeChanges);
       };
 
       const verdict = deliver(work, applyTrace);
+      // 'routed' is held and replayed on adopt, so it is not a failure and must
+      // not be recorded as one. 'stale' and 'dropped' are the user's own doing
+      // — they cropped the image or closed the plan — but the spinner simply
+      // stopping with no message is indistinguishable from a trace that hung.
+      if (verdict === 'stale' || verdict === 'dropped') {
+        flash(verdict === 'stale'
+          ? 'The plan changed while it was tracing — trace it again.'
+          : 'That trace finished after its plan was closed.');
+      }
       if (verdict !== 'applied') return null;
 
       perfMark(MARKS.areaReady);
       perfReportRun();
       return applied ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
+      // Logged outside the delivery: a crash on a plan the user has since
+      // cropped is still a crash, and inside the closure it was swallowed
+      // along with the toast.
+      console.error('Perimeter detection failed:', error);
       // The toast is a claim about the plan on screen — `id: 'trace-result'`
       // means it replaces whatever that plan's own trace had to say — so it is
       // raised only by work that still owns what it was tracing.
       deliver(work, () => {
-        console.error('Perimeter detection failed:', error);
-        notify('Could not trace this plan.', {
+        // One dead end used to cover a timeout, a killed worker and a bug in
+        // applying a *successful* trace. They need different things from the
+        // user, so they say different things.
+        const text = String(error?.message ?? '');
+        const message = /timed out|timeout/i.test(text)
+          ? 'Tracing took too long and was stopped. Crop the sheet to the building, or paint the outline instead.'
+          : /terminated|worker/i.test(text)
+            ? 'Tracing was interrupted before it finished. Try again, or paint the outline instead.'
+            : 'Could not trace this plan. Paint over the exterior walls instead.';
+        setLastTraceOutcome({ at: Date.now(), level: 'failed', reason: message, floors: 0 });
+        notify(message, {
           type: 'error',
           id: 'trace-result',
-          action: { label: 'Paint it instead', onClick: () => handleDrawMode() },
+          duration: DURATION.LONG,
+          action: { label: 'Paint it instead', onClick: () => handleDrawMode({ keepStrokes: true }) },
         });
       });
       return 'failed';
@@ -783,7 +965,8 @@ function App() {
       setIsProcessing(false);
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
-    reportTrace, reportTraceTypes, handleDrawMode, reviewAgainstFootprint]);
+    reportTrace, reportTraceTypes, handleDrawMode, reviewAgainstFootprint,
+    setLastTraceOutcome]);
 
   // Auto-detection, with draw mode as its fallback. A result the detector
   // itself rates poor or worse is not something to hand over as an answer, so
@@ -791,13 +974,8 @@ function App() {
   const handleTracePerimeter = useCallback(async () => {
     if (!image) return;
     undoManager.save();
-    const level = await runTrace('Tracing exterior walls…');
-    if (level === 'failed' || level === 'poor') {
-      handleDrawMode({
-        message: 'Auto-detection could not read this plan. Paint over the exterior walls instead — [ and ] resize the brush, Enter when done.',
-      });
-    }
-  }, [image, runTrace, handleDrawMode]);
+    await runTrace(FIND_OUTLINE_MESSAGE);
+  }, [image, runTrace]);
 
   // Draw mode's commit: hand the painted strokes to the tracer as a corridor.
   const handleFinishDrawMode = useCallback(async () => {
@@ -805,7 +983,7 @@ function App() {
     const strokes = state.drawStrokes;
     if (!strokes.length) {
       setDrawModeActive(false);
-      flash('Nothing painted');
+      flash('Nothing painted — drag over the exterior walls to outline them');
       return;
     }
     undoManager.save();
@@ -814,10 +992,11 @@ function App() {
       strokes,
       radius: state.drawBrushSize / 2,
     });
-    // The strokes are kept when the result is doubtful: re-entering draw mode
-    // to add one more pass is the natural correction, and discarding them
-    // would make the user paint the whole outline again.
-    if (level === 'good' || level === 'fair') setDrawStrokes([]);
+    // The strokes are kept unless the result is clean: re-entering draw mode to
+    // add one more pass is the natural correction, and discarding them would
+    // make the user paint the whole outline again. `fair` used to clear them,
+    // which is precisely the case whose own toast says to check it.
+    if (level === 'good') setDrawStrokes([]);
   }, [runTrace, setDrawModeActive, setDrawStrokes]);
 
   // One setting over every outline. Each traced outline carries the detector's
@@ -965,7 +1144,7 @@ function App() {
 
   // Auto-trace exterior boundary after a room overlay is placed.
   const autoTraceExterior = useCallback(
-    () => runTrace('Detecting exterior boundary…'),
+    () => runTrace(FIND_OUTLINE_MESSAGE),
     [runTrace],
   );
 
@@ -1331,11 +1510,13 @@ function App() {
       case 'area': return handleDrawAreaToggle();
       case 'crop': return handleCropToolToggle();
       case 'eraser': return handleEraserToolToggle();
+      case 'cornerEraser': return handleCornerEraserToggle();
       default: return undefined;
     }
   }, [handleCancelTool, handleDrawMode, handleDrawExterior, handleVoidToolToggle,
     handleScaleToolToggle, handleLineToolToggle, handleAngleToolToggle,
-    handleDrawAreaToggle, handleCropToolToggle, handleEraserToolToggle]);
+    handleDrawAreaToggle, handleCropToolToggle, handleEraserToolToggle,
+    handleCornerEraserToggle]);
 
   const handleZoom = useCallback((direction) => {
     canvasRef.current?.zoomByStep(direction);
@@ -1396,7 +1577,6 @@ function App() {
       perimeterTraces={perimeterTraces}
       activeTraceId={activeTraceId}
       traceInteractionMode={traceInteractionMode}
-      mode={mode}
       onRoomOverlayUpdate={updateRoomOverlay}
       onPerimeterUpdate={updatePerimeterVertices}
       isProcessing={isProcessing}
@@ -1427,6 +1607,7 @@ function App() {
       onSaveUndoPoint={handleSaveUndoPoint}
       onCancelUndoSave={handleCancelUndoSave}
       eraserToolActive={eraserToolActive}
+      cornerEraserActive={cornerEraserActive}
       eraserBrushSize={eraserBrushSize}
       cropToolActive={cropToolActive}
       onCropToolToggle={handleCropToolToggle}
@@ -1502,6 +1683,7 @@ function App() {
           canSwitchWallFace={canSwitchWallFace}
           onScaleTool={handleScaleToolToggle}
           onSelectRoom={handleSelectRoom}
+          onRestoreAutoScale={restoreAutoScale}
           showSideLengths={showSideLengths}
           onShowSideLengthsChange={handleShowSideLengthsChange}
           autoSnapEnabled={autoSnapEnabled}
@@ -1524,6 +1706,10 @@ function App() {
         calibrated={!!calibration?.calibrated}
         perimeterTraces={perimeterTraces}
         drawModeActive={drawModeActive}
+        ocrFailed={ocrFailed}
+        lastTraceOutcome={lastTraceOutcome}
+        alternativeCount={alternativeCount}
+        onUseAlternative={handleUseAlternative}
         planCount={documentOrder.length}
         canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
         onFileOpen={handleFileOpen}
@@ -1568,7 +1754,6 @@ function App() {
             roomDimensions={roomDimensions}
             onDimensionsChange={handleDimensionsChange}
             area={area}
-            mode={mode}
             unit={unit}
             onUnitChange={handleUnitChange}
             isProcessing={isProcessing}
@@ -1580,6 +1765,7 @@ function App() {
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
             onSelectRoom={handleSelectRoom}
+            onRestoreAutoScale={restoreAutoScale}
             onExport={openExport}
           />
         )}

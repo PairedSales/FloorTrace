@@ -208,6 +208,7 @@ const WARNING_TEXT = {
   'wall-left-outside': 'some drawn wall falls outside the traced outline',
   'thin-structure-excluded': 'an attached area bounded only by hairlines was left out of the living area',
   'incomplete-enclosure': 'a wider closing enclosed more of this outline',
+  'spanned-walls': 'part of this outline follows wall that was never drawn, painted across from the walls that were',
   'floors-rejected': 'some closed outlines were judged not to be buildings',
   'no-boundary': 'no wall outline could be traced',
   'floor-empty': 'a floor produced no usable polygon',
@@ -222,7 +223,9 @@ const WARNING_TEXT = {
   'label-outside': 'a labelled area falls outside the traced outline',
   'no-alternative': 'only one usable hypothesis was found',
   'brush-mismatch': 'the traced outline does not match the area you outlined',
-  'drawn-freehand': 'no wall was found under part of the outline, so your stroke was used instead',
+  // All-or-nothing: `freehandFloorNet` is reached only when no ink hypothesis
+  // produced a candidate at all, so "part of the outline" was never true.
+  'drawn-freehand': 'no wall could be read under this outline, so it follows your stroke exactly',
   remediated: 'the first outline left known rooms outside, so it was traced again',
 };
 
@@ -289,6 +292,22 @@ export const bboxRing = (b) => (b ? [
   { x: b.minX, y: b.maxY + 1 },
 ] : null);
 
+// Two numbers, and they are not the same question.
+//
+// `WEAK_SUPPORT` is where the outline is *said* to be weakly supported. With a
+// perfect seal confidence is `0.3 + 0.7 * support`, so the `good` band (0.75)
+// begins at exactly 0.643 — and warning any later than that leaves a band where
+// a trace is presented as "check it" with nothing attached to check. Two of the
+// nine real fixtures land in it.
+//
+// `WEAK_SUPPORT_PENALTY` is where it is additionally *discounted*, and it stays
+// where it was calibrated. Moving both together double-counted: the base
+// formula already falls with support, so a trace at 0.636 took a further ×0.75
+// and dropped from 0.745 to 0.56 — below `REMEDIATION_CONFIDENCE`, so a
+// correct trace then paid for a re-search that was always rejected.
+const WEAK_SUPPORT = 0.643;
+const WEAK_SUPPORT_PENALTY = 0.6;
+
 /**
  * Confidence for the winning candidate. Deliberately pessimistic: unsupported
  * outline, a bridged opening or a missing room each pull it down, because the
@@ -308,10 +327,10 @@ export const candidateConfidence = (scored, ctx) => {
   // In draw mode a stretch of outline supported only by the user's stroke is a
   // legitimate answer, not a defect — the ribbon already grades it below
   // structural ink, so the bar for calling it *weak* drops accordingly.
-  if (support.mean < (ctx.brush ? 0.4 : 0.6)) {
+  if (support.mean < (ctx.brush ? 0.4 : WEAK_SUPPORT)) {
     warnings.push(warning('weak-wall-support', { support: Number(support.mean.toFixed(3)) }, 'warn',
       unsupportedRuns(scored.shape?.polygon, ctx)));
-    confidence *= 0.75;
+    if (support.mean < (ctx.brush ? 0.4 : WEAK_SUPPORT_PENALTY)) confidence *= 0.75;
   }
   if (support.longestGap > Math.max(24, 0.08 * perimeter)) {
     const px = Math.round(support.longestGap / ctx.scale);
@@ -342,6 +361,17 @@ export const candidateConfidence = (scored, ctx) => {
     warnings.push(warning('incomplete-enclosure', { completeness: Number(scored.completeness.toFixed(2)) }));
     confidence *= 0.7;
   }
+  // `span` paints every wall line across its full extent before closing, so by
+  // that policy's own description the winning outline runs along wall the
+  // drawing never shows. It is a rescue reached only when nothing else
+  // enclosed the network, and it was the one hypothesis that said so nowhere.
+  if (scored.policy === 'span') {
+    // Original image px, the convention `bridged-opening` above already prints
+    // a length in. `bridgedSpan` is measured in the working raster.
+    warnings.push(warning('spanned-walls', {
+      span: Math.round((scored.bridgedSpan ?? 0) / ctx.scale),
+    }, 'warn'));
+  }
   if (scored.coverage < 0.9) {
     warnings.push(warning('wall-left-outside', { coverage: Number(scored.coverage.toFixed(2)) }));
     confidence *= 0.6 + 0.4 * scored.coverage;
@@ -365,11 +395,20 @@ export const candidateConfidence = (scored, ctx) => {
     // condemns geometry the user chose. (validate.js softens its own
     // late-stage copy of this check on the same grounds.)
     const severity = ctx.brush ? 'warn' : 'error';
-    for (const miss of constraintScore.roomMisses) {
+    // One warning for every missed room, not one per room. Emitted per room
+    // they were then collapsed downstream by code, so three rooms outside on
+    // three floors reported as one — and the count is the whole finding.
+    // `name`/`cover`/`rect` are the first miss, kept because they are the
+    // single-room shape every stored trace and every anchor resolver reads.
+    const misses = constraintScore.roomMisses;
+    if (misses.length) {
       warnings.push(warning('room-outside', {
-        name: miss.name,
-        cover: Number(miss.cover.toFixed(2)),
-        rect: miss.rect,
+        count: misses.length,
+        names: misses.map((m) => m.name ?? null),
+        rects: misses.map((m) => m.rect ?? null),
+        name: misses[0].name,
+        cover: Number(misses[0].cover.toFixed(2)),
+        rect: misses[0].rect,
       }, severity));
     }
     if (constraintScore.pointMisses.length) {

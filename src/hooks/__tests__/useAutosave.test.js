@@ -307,4 +307,33 @@ describe('useAutosave', () => {
     // id of the plan being closed — a stale index on every close.
     expect(index.activeId).toBe(docA);
   });
+  // `ErrorBoundary` replaces the whole tree when a render throws, and the crash
+  // screen it puts up promises the autosaved draft is intact. This effect's
+  // cleanup used to *cancel* the pending write, so that promise was false for
+  // exactly the edits a crash makes most expensive to lose.
+  it('flushes the pending write when the tree is torn down', async () => {
+    const rendered = await mountAutosave();
+    act(() => { app().setImage(IMAGE_A); });
+    drafts.writeDocDraft.mockClear();
+
+    // Unmounted inside the 2 s window, with the edit still unwritten.
+    act(() => { rendered.unmount(); });
+    mounted.pop();
+    await flush();
+
+    const write = drafts.writeDocDraft.mock.calls.find(([id]) => id === docA);
+    expect(write?.[1].image).toBe(IMAGE_A);
+  });
+
+  it('writes nothing on an unmount with nothing pending', async () => {
+    const rendered = await mountAutosave();
+    act(() => { app().setImage(IMAGE_A); });
+    await settle();
+    drafts.writeDocDraft.mockClear();
+
+    act(() => { rendered.unmount(); });
+    mounted.pop();
+    await flush();
+    expect(drafts.writeDocDraft).not.toHaveBeenCalled();
+  });
 });

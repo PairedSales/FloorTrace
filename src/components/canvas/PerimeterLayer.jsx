@@ -337,6 +337,34 @@ const PerimeterLayer = ({
 
   const isTouch = useIsTouch();
   const canvasRotation = useAppStore((s) => s.canvasRotation);
+
+  /* A vertex handle is the topmost thing on the canvas and it is draggable, so
+     while another drag tool is running it steals that tool's gesture: a crop
+     rectangle, an erase stroke or a void that happens to start on a corner
+     moves the outline instead. Read off the store rather than threaded down as
+     props — `canvasRotation` above sets that precedent, and the alternative is
+     five more props through CanvasStage for a fact none of the other layers
+     need. The corner eraser is in the list for the same reason as the rest: its
+     whole gesture is dragging *over* the handles.
+
+     The click-to-place modes below are the same bug through the other event:
+     each of them places geometry from `useToolRouter`'s stage `onClick`, and
+     this handle's own `onClick` sets `cancelBubble`, so a scale-line end, a
+     measurement end, a shape corner or a *replacement outline corner* dropped
+     on top of an existing one is swallowed and selects that corner instead.
+     Placing corners by hand is the documented rescue for a trace that came back
+     wrong, and it is precisely over the wrong outline that it gets used. */
+  const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const cornerEraserActive = useAppStore((s) => s.cornerEraserActive);
+  const drawModeActive = useAppStore((s) => s.drawModeActive);
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
+  const lineToolActive = useAppStore((s) => s.lineToolActive);
+  const drawAreaActive = useAppStore((s) => s.drawAreaActive);
+  const placingVertices = useAppStore((s) => s.traceInteractionMode === 'drawing');
+  const handlesLocked = cropToolActive || eraserToolActive || cornerEraserActive
+    || drawModeActive || voidToolActive
+    || scaleToolActive || lineToolActive || drawAreaActive || placingVertices;
   const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
   const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
 
@@ -646,7 +674,10 @@ const PerimeterLayer = ({
           fill={activeTrace.color || '#BD93F9'}
           stroke={selectedVertexIndex === i ? '#8BE9FD' : '#fff'}
           strokeWidth={(selectedVertexIndex === i ? 2.5 : 1.5) / scale}
-          draggable
+          draggable={!handlesLocked}
+          // Both, not just `draggable`: a non-draggable handle still swallows
+          // the press, so the crop or erase stroke would start nowhere at all.
+          listening={!handlesLocked}
           // The grabbable region, separate from the drawn one. `/scale` keeps
           // it a constant *screen* size, so a corner is no harder to hit when
           // the plan is zoomed out — which is exactly when it is smallest.

@@ -105,6 +105,10 @@ const DEBUG_WHITELIST = [
   'floorCount', 'workingSize', 'scale', 'wallThickness', 'exteriorThickness',
   'sealRadius', 'usedFallback', 'networks', 'elapsedMs', 'hasFootprint',
   'alternatives', 'sealSearches', 'sides', 'searchMemo',
+  // The winning candidate's connectivity policy, so the UI can say when an
+  // outline followed wall that was never drawn (`span`), and the regions the
+  // carve examined and declined — both were computed and reached nobody.
+  'candidate', 'rejectedRegions', 'wallBbox', 'wallBboxArea',
 ];
 
 const projectDebug = (debug) => {
@@ -119,12 +123,6 @@ const projectDebug = (debug) => {
 self.onmessage = async (event) => {
   const { id, type, payload } = event.data ?? {};
   if (!id || !type) return;
-
-  // Picked up. The main thread arms its timeout before `postMessage`, so
-  // without this the wait behind a long-running request is charged to whoever
-  // is queued behind it — a second plan's trace could time out having executed
-  // nothing at all.
-  self.postMessage({ id, started: true });
 
   try {
     if (!payload?.image) {
@@ -142,6 +140,15 @@ self.onmessage = async (event) => {
     const decodeStart = Date.now();
     const { imageData, cacheKey } = await imageBitmapToImageData(payload.image);
     const decodeMs = Date.now() - decodeStart;
+
+    // Started, and only now. The main thread arms its timeout before
+    // `postMessage` and rearms it on this, so what the clock measures has to be
+    // the work — posted on receipt it also cleared while the decode ran, and,
+    // worse, while a request queued ahead of this one still held the thread:
+    // `onmessage` is async, so a second plan's trace could report itself
+    // started, and then time out, having executed nothing at all.
+    self.postMessage({ id, started: true });
+
     const options = { ...payload.options, cacheKey };
     let data = null;
 

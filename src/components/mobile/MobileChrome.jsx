@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
+import { AlertTriangle, Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
-import { qualitySummary, scaleQualitySummary } from '../../utils/boundaryQuality';
+import { scaleQualitySummary } from '../../utils/boundaryQuality';
+import { summariseIssues } from '../../utils/traceIssues';
 import { planStage } from '../../utils/planStage';
 import MeasurementDock from '../MeasurementDock';
 import BottomSheet from './BottomSheet';
@@ -73,6 +74,7 @@ const MobileChrome = ({
   canSwitchWallFace,
   onScaleTool,
   onSelectRoom,
+  onRestoreAutoScale,
   // preferences
   showSideLengths,
   onShowSideLengthsChange,
@@ -88,9 +90,9 @@ const MobileChrome = ({
   const [sheet, setSheet] = useState(null); // 'menu' | 'tools' | 'panel' | 'plans'
 
   const image = useAppStore((s) => s.image);
-  const mode = useAppStore((s) => s.mode);
   const unit = useAppStore((s) => s.unit);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
+  const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
   const projectName = useAppStore((s) => s.projectName);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
@@ -110,10 +112,18 @@ const MobileChrome = ({
   // ask "is this plan outlined", and the first two answering it differently is
   // the reason that helper exists — the seven-outline ceiling it also owns was
   // missing here, so the menu offered an eighth that nothing else would.
-  const { canAddOutline, tracedCount } = planStage({
+  const issues = summariseIssues(
+    perimeterTraces,
+    scaleQualitySummary(scaleQuality),
+    areas.doubleCounted,
+    lastTraceOutcome,
+  );
+  const stage = planStage({
     image, calibrated, perimeterTraces, area: areas.total,
+    doubleCounted: areas.doubleCounted?.length ?? 0,
+    issues, lastTraceOutcome, ocrFailed,
   });
-  const hasOutline = tracedCount > 0;
+  const { canAddOutline } = stage;
   const noGla = areas.gla === 0 && areas.total > 0;
   // The same arithmetic the dock and the exhibit do, because the thumb bar and
   // the measurement sheet are on screen together: a total summed from the raw
@@ -124,37 +134,44 @@ const MobileChrome = ({
     ? formatAreaValue(totalDisplay, unit)
     : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
 
-  // The same three questions the desktop's outline chips and scale chip answer,
-  // reduced to the one bit the action bar has room for: is this number worth
-  // trusting as it stands.
-  const areaWarn = areas.total > 0 && (
-    areas.doubleCounted?.length > 0
-    || scaleQualitySummary(scaleQuality)?.level === 'check'
-    || (perimeterTraces || []).some((t) => t.quality
-      && qualitySummary(t.quality).level !== 'good')
-  );
+  // The same count the dock's chip and the exhibit's flags read, not a fourth
+  // hand-rolled derivation. The three-term boolean this replaces missed stale
+  // voids entirely — on the shell with the least room to qualify a number.
+  const areaWarn = issues.count > 0;
 
   // ── the one verb ─────────────────────────────────────────────────────────
-  // Derived from the pipeline the app already models, so the bar always offers
-  // the step the user is actually on rather than seven steps at equal weight.
-  const primary = useMemo(() => {
-    if (!image) {
-      return { label: 'Open a plan', icon: FolderOpen, onPress: onMenuFileOpen };
+  // `planStage` decides, so the bar always offers the step the user is actually
+  // on and cannot disagree with the desktop's primary or with the spine inside
+  // its own measurement sheet. Its `failed` states are what stop it offering
+  // the action that has just failed.
+  const primaryAction = useMemo(() => {
+    if (!image) return { label: 'Open a plan', icon: FolderOpen, onPress: onMenuFileOpen };
+    switch (stage.primary) {
+      case 'scale':
+        return { label: 'Read dimensions', icon: ScanText, onPress: onFindRoomSize };
+      // The scan came back empty and is memoised, so offering it again is a
+      // guaranteed no-op. The brush and the ruler are the routes that work.
+      case 'scale-manual':
+        return { label: 'Set the scale by hand', icon: ScanText, onPress: onScaleTool };
+      case 'outline':
+        return { label: 'Find outline', icon: ScanSearch, onPress: onTracePerimeter };
+      case 'outline-paint':
+        return { label: 'Paint the outline', icon: Brush, onPress: onDrawExterior };
+      default:
+        break;
     }
-    if (!calibrated) {
-      return { label: 'Read dimensions', icon: ScanText, onPress: onFindRoomSize };
-    }
-    if (!hasOutline) {
-      return { label: 'Find outline', icon: ScanSearch, onPress: onTracePerimeter };
+    // An outline exists. If the panel is counting something against it, the
+    // next thing to do is read that — not export it.
+    if (issues.count > 0) {
+      return {
+        label: `Check ${issues.count} ${issues.count === 1 ? 'thing' : 'things'}`,
+        icon: AlertTriangle,
+        onPress: () => setSheet('panel'),
+      };
     }
     return { label: 'Export for workfile', icon: Share, onPress: onExport };
-  }, [image, calibrated, hasOutline, onMenuFileOpen, onFindRoomSize, onTracePerimeter, onExport]);
-
-  // A plan the detector could not read leaves the user with nothing to press;
-  // the brush is the answer and it should be the offer, not a menu item.
-  const primaryAction = (image && calibrated && !hasOutline && ocrFailed)
-    ? { label: 'Paint the outline', icon: Brush, onPress: onDrawExterior }
-    : primary;
+  }, [image, stage.primary, issues.count, onMenuFileOpen, onFindRoomSize,
+    onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
 
@@ -186,7 +203,7 @@ const MobileChrome = ({
         planCount={documentOrder.length}
         onPlans={() => setSheet('plans')}
         isProcessing={isProcessing}
-        hasArea={areas.total > 0}
+        ready={areas.total > 0 && !areaWarn}
         onMenu={() => setSheet('menu')}
         onExport={onExport}
       />
@@ -283,7 +300,6 @@ const MobileChrome = ({
           roomDimensions={roomDimensions}
           onDimensionsChange={onDimensionsChange}
           area={areas.total}
-          mode={mode}
           unit={unit}
           onUnitChange={onUnitChange}
           isProcessing={isProcessing}
@@ -295,6 +311,7 @@ const MobileChrome = ({
           onDimensionBlur={onDimensionBlur}
           onScaleTool={() => { closeSheet(); onScaleTool(); }}
           onSelectRoom={() => { closeSheet(); onSelectRoom?.(); }}
+          onRestoreAutoScale={onRestoreAutoScale}
           onExport={() => { closeSheet(); onExport(); }}
         />
       </BottomSheet>

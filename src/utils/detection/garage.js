@@ -107,11 +107,27 @@ const interiorInkFraction = (labels, id, bbox, ink, width) => {
   return total ? inked / total : 0;
 };
 
+// A cavity with a garage door across one side and something other than walls
+// around the rest is reported rather than dropped: the door is real evidence
+// of non-GLA, and a porch or a deck refused here is area nobody was told
+// about. The floor is well above the 5% candidacy floor because this is a
+// guess, and a guess is worth stating only when what it would change is worth
+// the reader's attention.
+//
+// The other failure — no door found at all — deliberately raises nothing here.
+// Measured over the nine fixtures it fires on ten ordinary rooms and whole
+// small floors, because with the door test gone the remaining gates say only
+// "a large empty rectangular cavity", which is what half a floorplan looks
+// like. What that case really is, a space inside the outline nothing opens
+// onto, `enclosed-void` states from the footprint itself.
+const NEAR_MISS_MIN_AREA = 0.12;
+
 export const findGarageCavities = ({
   labels, components, footprint, wallMask, ink, width, height, exteriorThickness, minCavity,
 }) => {
   const ext = exteriorThickness;
   const found = [];
+  const nearMisses = [];
   for (const comp of components) {
     if (comp.size < Math.max(minCavity, 0.05 * footprint.area)) continue;
     if (comp.size > 0.45 * footprint.area) continue;
@@ -128,15 +144,26 @@ export const findGarageCavities = ({
       s.len >= 3 * ext
       && s.doorFrac >= 0.65
       && s.bestRun >= Math.max(2.5 * ext, 0.3 * s.len));
+
     if (doorIdx < 0) continue;
 
     // A garage is walled everywhere except the door; anything ringed by thin
     // strokes (porch, deck) or mostly open is not a garage.
     const others = sides.filter((_, i) => i !== doorIdx);
     const meanWalled = others.reduce((sum, s) => sum + s.walledFrac, 0) / others.length;
-    if (meanWalled < 0.55) continue;
-
-    found.push(comp.id);
+    if (meanWalled >= 0.55) {
+      found.push(comp.id);
+      continue;
+    }
+    if (comp.size < NEAR_MISS_MIN_AREA * footprint.area) continue;
+    nearMisses.push({
+      id: comp.id,
+      size: comp.size,
+      bbox: comp.bbox,
+      reason: 'not-walled',
+      walledFrac: Number(meanWalled.toFixed(2)),
+      doorFrac: Number(sides[doorIdx].doorFrac.toFixed(2)),
+    });
   }
-  return found;
+  return { found, nearMisses };
 };

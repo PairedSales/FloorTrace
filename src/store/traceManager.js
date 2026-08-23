@@ -11,8 +11,50 @@ import {
 import { classifyTraces } from '../utils/traceClassification';
 // From areaCalculator, not appStore: appStore already imports createTraceSlice
 // from here, so sourcing it there made a cycle that only worked by hoisting.
-import { mergeHoles } from '../utils/areaCalculator';
+import { calculateArea, mergeHoles } from '../utils/areaCalculator';
 import { markStaleHoles } from '../utils/geometryValidation';
+import { RESULT_SCOPED_CODES } from '../utils/boundaryQuality';
+import { pointInPolygon } from '../utils/detection/polygon';
+
+// Which existing trace each newly detected floor *is*, decided by where the
+// polygons sit rather than by their position in the array.
+//
+// Identity used to ride the index: `current.map((t, i) => ({...t, ...new[i]}))`
+// supplies only geometry, so `type`, `typeSource`, `name` and `nameSource`
+// stayed put while the shape under them changed. A user who traced their garage
+// as a second outline and typed it Garage, then re-traced a two-storey sheet,
+// got a whole storey typed `garage` with `typeSource: 'user'` — which
+// `classifyTraces` then explicitly refuses to correct, so the level stayed out
+// of GLA permanently.
+//
+// Position in the list stays the pairing, because it means something: the
+// detector emits floors in page reading order, so floor *i* of a re-trace is
+// very probably the same building as floor *i* of the last one. What is new is
+// that geometry gets a **veto** — an identity is only carried onto a shape that
+// is still in the same place.
+//
+// A veto rather than a replacement, and not an overlap ratio, because a
+// re-traced floor is routinely a slightly different polygon in the same spot:
+// `containmentRatio` counts vertices, so a floor one pixel smaller has all four
+// corners outside its predecessor and scores zero, and box IoU falls apart on
+// concentric outlines. "Is the old outline's middle still inside the new one"
+// survives both, and is exactly the question being asked.
+const centroid = (vertices) => {
+  if (!vertices?.length) return null;
+  let x = 0; let y = 0;
+  for (const p of vertices) { x += p.x; y += p.y; }
+  return { x: x / vertices.length, y: y / vertices.length };
+};
+
+const sameBuilding = (prev, floor) => {
+  const a = centroid(prev?.vertices);
+  const b = centroid(floor?.vertices);
+  if (!a || !b) return false;
+  const prevRing = prev.vertices ?? [];
+  const nextRing = floor.vertices ?? [];
+  if (prevRing.length < 3 || nextRing.length < 3) return false;
+  return pointInPolygon(a, nextRing, []) || pointInPolygon(b, prevRing, []);
+};
 
 /**
  * Perimeter Trace Manager Slice — refactored to manage multiple perimeter traces
@@ -34,12 +76,99 @@ export { newTraceId } from './ids';
 // arrays would let a later vertex drag edit the face it came from, and the
 // switch back would return geometry that had quietly moved.
 const clonePoints = (points) => (points ?? []).map((p) => ({ x: p.x, y: p.y }));
-const cloneFaceHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
+const cloneHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
   ? clonePoints(h)
   : { ...h, ring: clonePoints(h.ring) }));
 
 // Naming lives in traceTypes.js, which owns the taxonomy the names come from.
 const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
+
+/**
+ * How far back an outline can be walked. The list rides inside every undo
+ * snapshot, every draft and every `.floorplan`, so the cap has to bound it by
+ * the plan rather than by the length of the session.
+ */
+export const MAX_TRACE_ATTEMPTS = 5;
+
+/**
+ * What an outline was, at the moment something replaced it.
+ *
+ * `area` is px², not square feet, and deliberately: a scale corrected later
+ * must not falsify a row that was right when it was written — the caller
+ * multiplies by the live calibration, the same way every other stored geometry
+ * is read.
+ *
+ * `wallFaces` is absent. It is by far the heaviest thing on a trace (two full
+ * face polygons with their own holes), and the pair belongs to the result that
+ * produced it — which is why `revertTraceToAttempt` drops the pair rather than
+ * leaving a switch that would jump this outline to a different building.
+ *
+ * `quality` is shared rather than cloned: a trace's quality object is replaced
+ * wholesale by every setter that touches it and never mutated in place, so the
+ * outgoing one has no other owner. Its `warnings` can carry ring anchors, which
+ * is the one part of an attempt that is not trivially small — the cap is what
+ * bounds it.
+ */
+export const makeAttempt = (trace) => ({
+  at: Date.now(),
+  source: trace?.quality?.source ?? 'manual',
+  confidence: trace?.quality?.confidence ?? null,
+  area: calculateArea(trace?.vertices, 1, trace?.holes),
+  vertices: clonePoints(trace?.vertices),
+  holes: cloneHoles(trace?.holes),
+  quality: trace?.quality ?? null,
+  // Lifted out of `quality` so a row can read "this was the escalate pass"
+  // without reaching through; the same object, not a second copy.
+  remediation: trace?.quality?.remediation ?? null,
+});
+
+const samePoints = (a, b) => (a?.length ?? 0) === (b?.length ?? 0)
+  && (a ?? []).every((p, i) => p.x === b[i].x && p.y === b[i].y);
+
+// Only geometry worth returning to is recorded — an outline with no ring is
+// not a state anyone wants back, and recording it would spend the cap.
+export const recordAttempt = (trace) => {
+  if ((trace?.vertices?.length ?? 0) < 3) return trace;
+  const attempts = [...(trace.attempts ?? []), makeAttempt(trace)];
+  return { ...trace, attempts: attempts.slice(-MAX_TRACE_ATTEMPTS) };
+};
+
+// Rebuilt, never mutated: `quality.warnings` is the array `rankedWarnings`
+// indexes into, and every reader of a trace compares by reference.
+const withWarningAcknowledged = (trace, index, acknowledged) => ({
+  ...trace,
+  quality: {
+    ...trace.quality,
+    warnings: trace.quality.warnings.map((w, i) => (
+      i === index ? { ...w, acknowledged } : w
+    )),
+  },
+});
+
+// The same finding on a sibling outline. `pipeline.js` fans every whole-drawing
+// warning onto every floor, and the panel prints the group once — so a mark
+// left on one copy is a mark the other copies contradict. Keyed on code plus
+// payload, which is the key `boundary.js` itself dedupes on.
+const warningKey = (w) => `${w?.code}|${JSON.stringify(w?.detail ?? null)}`;
+
+const withGroupAcknowledged = (traces, target, index, acknowledged) => {
+  const source = target.quality.warnings[index];
+  if (!RESULT_SCOPED_CODES.has(source.code)) {
+    return traces.map((t) => (t === target ? withWarningAcknowledged(t, index, acknowledged) : t));
+  }
+  const key = warningKey(source);
+  return traces.map((t) => {
+    const warnings = t?.quality?.warnings;
+    if (!warnings?.some((w) => warningKey(w) === key)) return t;
+    return {
+      ...t,
+      quality: {
+        ...t.quality,
+        warnings: warnings.map((w) => (warningKey(w) === key ? { ...w, acknowledged } : w)),
+      },
+    };
+  });
+};
 
 export function createTraceSlice(set, get) {
   return {
@@ -247,39 +376,45 @@ export function createTraceSlice(set, get) {
           wallFaces: floor.wallFaces ?? null,
         }));
 
-      let traces;
-      if (current.length === normalized.length) {
-        // Identity is kept, and visibility and type are part of identity:
-        // re-tracing must not un-hide a trace the user hid, nor reset a garage
-        // the user typed back to GLA.
-        traces = current.map((t, i) => ({
-          ...t,
-          ...normalized[i],
-          // Spreading `normalized[i]` would replace the holes wholesale, and a
-          // void the user punched is not the detector's to discard.
-          // Re-checked against the outline that just moved: a user void kept
-          // across the re-trace can land outside it, and is marked not dropped.
-          holes: markStaleHoles(mergeHoles(t.holes, normalized[i].holes), normalized[i].vertices),
-          closed: true,
-        }));
-      } else {
-        traces = normalized.map((floor, i) => makeTrace({
-          id: newTraceId(),
-          name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
+      // Identity is kept, and visibility and type are part of identity:
+      // re-tracing must not un-hide a trace the user hid, nor reset a garage
+      // the user typed back to GLA. But it is only carried onto a shape still
+      // in the same place: a user who traced their garage as a second outline
+      // and typed it Garage, then re-traced a two-storey sheet, used to get a
+      // whole storey typed `garage` with `typeSource: 'user'` — which
+      // `classifyTraces` then refuses to correct, so the level stayed out of
+      // GLA permanently.
+      const traces = normalized.map((floor, i) => {
+        const candidate = current.length === normalized.length ? current[i] : null;
+        const prior = candidate && sameBuilding(candidate, floor) ? candidate : null;
+        if (!prior) {
+          return makeTrace({
+            id: newTraceId(),
+            name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
+            ...floor,
+            holes: markStaleHoles(mergeHoles(current[i]?.holes, floor.holes), floor.vertices),
+            closed: true,
+          });
+        }
+        return {
+          // The outline this re-trace is about to overwrite, kept so a worse
+          // second reading is recoverable without re-scanning the image.
+          ...recordAttempt(prior),
           ...floor,
-          // No identity to carry across a floor-count change, so the voids ride
-          // along by position — the common case is a floor gained or lost below
-          // the one that was punched.
-          holes: markStaleHoles(mergeHoles(current[i]?.holes, floor.holes), floor.vertices),
+          // Spreading `floor` would replace the holes wholesale, and a void the
+          // user punched is not the detector's to discard. Re-checked against
+          // the outline that just moved: a user void kept across the re-trace
+          // can land outside it, and is marked not dropped.
+          holes: markStaleHoles(mergeHoles(prior.holes, floor.holes), floor.vertices),
           closed: true,
-        }));
-      }
-      traces = assignTypeColors(traces);
+        };
+      });
 
-      const activeStillExists = traces.some((t) => t.id === state.activeTraceId);
+      const coloured = assignTypeColors(traces);
+      const activeStillExists = coloured.some((t) => t.id === state.activeTraceId);
       set({
-        perimeterTraces: traces,
-        activeTraceId: activeStillExists ? state.activeTraceId : traces[0].id,
+        perimeterTraces: coloured,
+        activeTraceId: activeStillExists ? state.activeTraceId : coloured[0].id,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
         isDirty: true,
@@ -297,6 +432,10 @@ export function createTraceSlice(set, get) {
      *
      * Returns how many outlines carry the requested face, so a caller can tell
      * "nothing to switch" from "switched". Callers own the undo snapshot.
+     *
+     * Deliberately records no attempt: both faces are already on the trace, so
+     * flipping back is the recovery, and recording one would spend the whole
+     * cap on a toggle.
      */
     setWallFaceMode: (interior) => {
       const key = interior ? 'inner' : 'outer';
@@ -314,7 +453,7 @@ export function createTraceSlice(set, get) {
           // The same merge a re-trace does: the detector's voids are replaced,
           // a void the user punched outlives the switch and is re-checked
           // against the outline that just moved under it.
-          holes: markStaleHoles(mergeHoles(t.holes, cloneFaceHoles(face.holes)), vertices),
+          holes: markStaleHoles(mergeHoles(t.holes, cloneHoles(face.holes)), vertices),
           closed: true,
         };
       });
@@ -342,6 +481,101 @@ export function createTraceSlice(set, get) {
       set({
         perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
       });
+    },
+
+    /**
+     * Put an outline back to what it was at `index` of its own attempt list.
+     *
+     * The state being left is itself recorded first — a feature that exists to
+     * end destructive recovery must not make its own move the destructive one.
+     * That does mean the indices shift once the cap is reached, so callers read
+     * `attempts` fresh rather than holding an index across a revert.
+     *
+     * `wallFaces` is dropped rather than kept: the pair describes the result
+     * that produced it, and this outline is no longer that result. A switch
+     * that reports "nothing to switch" is honest; one that jumps the outline to
+     * a different building is the wrong-answer-that-looks-green failure.
+     *
+     * User voids survive on the same rule a re-trace and the face switch use —
+     * kept, then re-checked against the outline that just moved under them.
+     */
+    revertTraceToAttempt: (traceId, index) => {
+      const state = get();
+      const traces = state.perimeterTraces || [];
+      const trace = traces.find((t) => t.id === traceId);
+      const attempt = trace?.attempts?.[index];
+      if (!attempt || (attempt.vertices?.length ?? 0) < 3) return false;
+      // Already there. Without this, a second click on the same row records a
+      // duplicate of the geometry it is standing on, and five of those push the
+      // detector's own result off the end of the cap — the one state this
+      // feature exists to keep reachable.
+      if (samePoints(trace.vertices, attempt.vertices)) return false;
+      undoManager.save();
+
+      const vertices = clonePoints(attempt.vertices);
+      set({
+        perimeterTraces: traces.map((t) => (t.id === traceId ? {
+          ...recordAttempt(t),
+          vertices,
+          holes: markStaleHoles(mergeHoles(t.holes, cloneHoles(attempt.holes)), vertices),
+          quality: attempt.quality ?? null,
+          wallFaces: null,
+          closed: true,
+        } : t)),
+        traceInteractionMode: 'idle',
+        perimeterVertices: null,
+        isDirty: true,
+      });
+      return true;
+    },
+
+    /**
+     * Mark one detection warning as checked against the plan and accepted.
+     *
+     * `warningIndex` is the position in *this trace's* `quality.warnings`,
+     * which is exactly what `rankedWarnings` carries through as `.index` —
+     * the ranked list is a presentation of that array, so an index into the
+     * ranking would acknowledge a different warning than the one clicked as
+     * soon as anything re-ranked.
+     *
+     * A whole-drawing warning is marked on every outline it was fanned onto,
+     * because it is one finding and the panel prints it once. Marking only the
+     * copy behind the row left the siblings contradicting it, and the row came
+     * straight back.
+     *
+     * Document content: it takes one off the issue count and prints on the
+     * exhibit as reviewed, so it saves its own undo point.
+     */
+    acknowledgeWarning: (traceId, warningIndex, note = null) => {
+      const traces = get().perimeterTraces || [];
+      const trace = traces.find((t) => t.id === traceId);
+      if (!trace?.quality?.warnings?.[warningIndex]) return false;
+      undoManager.save();
+
+      const acknowledged = { at: Date.now(), ...(note ? { note } : {}) };
+      set({
+        perimeterTraces: withGroupAcknowledged(traces, trace, warningIndex, acknowledged),
+        isDirty: true,
+      });
+      return true;
+    },
+
+    /**
+     * Put a warning back in the count, across the same group `acknowledgeWarning`
+     * marked. No-ops on one that was never acknowledged, so it cannot spend an
+     * undo point saying nothing.
+     */
+    unacknowledgeWarning: (traceId, warningIndex) => {
+      const traces = get().perimeterTraces || [];
+      const trace = traces.find((t) => t.id === traceId);
+      if (!trace?.quality?.warnings?.[warningIndex]?.acknowledged) return false;
+      undoManager.save();
+
+      set({
+        perimeterTraces: withGroupAcknowledged(traces, trace, warningIndex, null),
+        isDirty: true,
+      });
+      return true;
     },
 
     /**

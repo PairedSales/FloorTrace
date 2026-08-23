@@ -311,11 +311,17 @@ export const analyzeFloorplan = (imageData, options = {}) => {
 
   const band = Math.max(2, Math.round(wallThickness / 2));
 
+  // `wallThickness` is the answer to "is this image too small to trace": it is
+  // the dominant stroke width *at working scale*, and below ~3px the speck
+  // filter and the run filter take the walls with the noise. `downscaled` says
+  // which remedy applies — a thin stroke on a raster we shrank can be recovered
+  // by raising `maxDimension`, one at scale 1:1 cannot be recovered at all.
   return {
     width,
     height,
     scaleX: scaled.scaleX,
     scaleY: scaled.scaleY,
+    downscaled: scaled.scaleX < 1 || scaled.scaleY < 1,
     ink,
     gray: scaled.gray,
     cleaned,

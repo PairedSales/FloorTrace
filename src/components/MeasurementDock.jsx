@@ -21,7 +21,6 @@ const MeasurementDock = ({
   roomDimensions,
   onDimensionsChange,
   area,
-  mode,
   unit,
   onUnitChange,
   isProcessing,
@@ -33,6 +32,7 @@ const MeasurementDock = ({
   onDimensionBlur,
   onScaleTool,
   onSelectRoom,
+  onRestoreAutoScale,
   onExport,
   // Rendered inside the mobile bottom sheet rather than docked beside the
   // canvas. Everything below this line — the area maths, the breakdown, the
@@ -54,6 +54,7 @@ const MeasurementDock = ({
   const image = useAppStore((s) => s.image);
   const feetPerPixel = useAppStore((s) => s.calibration?.feetPerPixel);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
+  const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
   const detectedDimensions = useAppStore((s) => s.detectedDimensions) || [];
   const calibrationSource = useAppStore((s) => s.calibration?.source);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
@@ -213,6 +214,13 @@ const MeasurementDock = ({
   // `perimeterOverlay`, the detector's most recent overlay; this asked
   // `perimeterTraces`, which is what the area is computed from. The area is the
   // number on the report, so it is the one that decides.
+  // How much there is to check, counted once for the chip on the Stats &
+  // warnings card, the line the Area card points at it with, the mobile bar's
+  // triangle and the exhibit's flags. Computed before the spine because the
+  // spine consumes it: banding on confidence alone left a stale void making
+  // the area too large while Outline and Report both stayed green.
+  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome);
+
   const { stages } = planStage({
     image,
     calibrated,
@@ -220,11 +228,10 @@ const MeasurementDock = ({
     perimeterTraces,
     area,
     doubleCounted: areas.doubleCounted?.length ?? 0,
+    issues,
+    lastTraceOutcome,
+    ocrFailed,
   });
-
-  // How much there is to check, counted once for both the chip on the Checks
-  // card and the line the Area card points at it with.
-  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted);
 
   // A stage in trouble jumps to where the trouble is explained, not to the card
   // that would have shown a green tick. PLAN is the one stage with no card of
@@ -321,10 +328,17 @@ const MeasurementDock = ({
               ))}
             </div>
 
-            {mode === 'manual' && ocrFailed && !isProcessing && (
+            {/* Gated on the scale still being unset, not on `mode`. The scan's
+                own failure path calls `setMode('normal')`, which switched this
+                banner off on the one path it was written for — so the guidance
+                for a failed scan appeared only in a toast that had already
+                gone. It also names the box the failure drops on the plan,
+                which was otherwise an unexplained rectangle. */}
+            {ocrFailed && !calibrated && !isProcessing && (
               <p className="mt-2.5 px-2.5 py-2 bg-warn/10 border border-warn/30 rounded-md
                             text-[12px] text-warn font-medium">
-                Could not read any dimensions — type a room size here instead.
+                No dimensions could be read from this plan. Drag the box on the plan onto a
+                room you can measure, then type its size here.
               </p>
             )}
           </Card>
@@ -467,6 +481,28 @@ const MeasurementDock = ({
                 Export first and copy second: a plain number pasted into a
                 report carries none of the evidence under it, and this panel is
                 the last place the two can still be told apart. */}
+            {/* The reasons this number might be wrong are read in one place at
+                the foot of the panel now, not as three separate marks around
+                the figure they qualify. What must not move is the *fact* that
+                there are some: an area offered clean while the detector doubts
+                it is the failure this app is most prone to, so the count sits
+                on the total, and clicking it goes to the reasons. */}
+            {issues.count > 0 && area > 0 && (
+              <button
+                type="button"
+                onClick={() => jumpTo('checks')}
+                className={`mt-2.5 flex w-full items-start gap-1.5 text-left text-[12px]
+                            leading-snug cursor-pointer hover:underline
+                            ${issues.level === 'error' ? 'text-crit' : 'text-warn'}`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
+                <span>
+                  {issues.count} {issues.count === 1 ? 'thing' : 'things'} to check — see stats
+                  &amp; warnings
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onExport}
@@ -493,26 +529,6 @@ const MeasurementDock = ({
               {showBreakdown ? 'Copy breakdown as text' : 'Copy area as text'}
             </button>
 
-            {/* The reasons this number might be wrong are read in one place at
-                the foot of the panel now, not as three separate marks around
-                the figure they qualify. What must not move is the *fact* that
-                there are some: an area offered clean while the detector doubts
-                it is the failure this app is most prone to, so the count sits
-                on the total, and clicking it goes to the reasons. */}
-            {issues.count > 0 && area > 0 && (
-              <button
-                type="button"
-                onClick={() => jumpTo('checks')}
-                className={`mt-2.5 flex w-full items-start gap-1.5 text-left text-[12px]
-                            leading-snug cursor-pointer hover:underline
-                            ${issues.level === 'error' ? 'text-crit' : 'text-warn'}`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
-                <span>
-                  {issues.count} {issues.count === 1 ? 'thing' : 'things'} to check
-                </span>
-              </button>
-            )}
 
             {showBreakdown && (
               <p className="mt-2.5 pt-2.5 border-t border-line-soft text-[11.5px] leading-snug text-fg-dim">
@@ -705,6 +721,24 @@ const MeasurementDock = ({
             >
               Set from a length you know
             </button>
+
+            {/* The way back, which two of the scale messages promise by name
+                and no route provided: `applyDecision` refuses to write over a
+                user-asserted scale forever, and clearing a line calibration
+                reset to *uncalibrated* rather than re-resolving from the rooms
+                still in the store. */}
+            {onRestoreAutoScale && calibrationSource && calibrationSource !== 'room-calibration'
+              && rooms?.length > 0 && (
+              <button
+                type="button"
+                onClick={onRestoreAutoScale}
+                className="mt-2 w-full h-8 rounded-md border border-line bg-panel-2
+                           text-[12.5px] text-fg-2 font-medium hover:text-fg hover:border-accent/50
+                           transition-colors cursor-pointer"
+              >
+                Back to the measured scale
+              </button>
+            )}
 
             <ScaleSection unit={unit} />
           </Card>

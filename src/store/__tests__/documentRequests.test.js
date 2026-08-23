@@ -3,6 +3,7 @@ import useAppStore from '../appStore';
 import {
   beginWork, settleWork, deliver, isCurrent, signalOf,
   detachDocument, detachActiveDocument, workCount, resetRequests, ownerVerdict,
+  cancelActiveWork, hasStoppableWork,
 } from '../documentRequests';
 import { clearParked, parkedInboxSize } from '../documentManager';
 
@@ -185,7 +186,7 @@ describe('documentRequests', () => {
       expect(signalOf(a).aborted).toBe(true);
     });
 
-    it('leaves another plan’s work alone', () => {
+    it('leaves another plan’s ownership alone', () => {
       const mine = beginWork('trace');
       expect(detachDocument('doc-not-mine')).toBe(0);
       expect(deliver(mine, () => {})).toBe('applied');
@@ -203,5 +204,71 @@ describe('documentRequests', () => {
     expect(deliver(null, () => {})).toBe('dropped');
     expect(isCurrent(undefined)).toBe(false);
     expect(() => settleWork(null)).not.toThrow();
+  });
+});
+
+/**
+ * A trace can hold the app for thirty seconds and `signalOf` had no consumer,
+ * so there was nothing a Cancel could do. Aborting the tokens is only half of
+ * it — the detection cores are straight-line pure JS with nothing to poll a
+ * signal — but it is the half this layer owns: whatever arrives afterwards is
+ * dropped rather than written onto a plan the user has moved on from.
+ */
+describe('cancelActiveWork', () => {
+  beforeEach(() => {
+    resetRequests();
+    clearParked();
+    app().restart();
+    useAppStore.setState({ image: IMAGE_A });
+  });
+
+  it('drops what the active plan is waiting on, and says what it stopped', () => {
+    const trace = beginWork('trace');
+    const scan = beginWork('scan');
+
+    const stopped = cancelActiveWork();
+    expect(stopped.count).toBe(2);
+    expect(stopped.kinds.sort()).toEqual(['scan', 'trace']);
+
+    let ran = false;
+    expect(deliver(trace, () => { ran = true; })).toBe('dropped');
+    expect(ran).toBe(false);
+    expect(ownerVerdict(scan)).toBe('dropped');
+    expect(signalOf(trace).aborted).toBe(true);
+    expect(workCount()).toBe(0);
+  });
+
+  it('is a no-op when nothing is running', () => {
+    expect(cancelActiveWork()).toEqual({ count: 0, kinds: [] });
+  });
+
+  // The OCR pool has no interrupt: a Stop there would drop the result and leave
+  // the spinner turning, which is a worse answer than offering no Stop.
+  it('only claims to stop what the detection worker is doing', () => {
+    const scan = beginWork('scan');
+    expect(hasStoppableWork()).toBe(false);
+    const trace = beginWork('trace');
+    expect(hasStoppableWork()).toBe(true);
+    settleWork(scan);
+    settleWork(trace);
+    expect(hasStoppableWork()).toBe(false);
+  });
+
+  // A parked plan's trace is held and replayed on adopt, so stopping the plan
+  // in front of you must not take its *ownership* away. What this cannot cover
+  // is the worker: terminating it ends every open plan's detection request, and
+  // that plan's trace then comes back through the App layer's "interrupted
+  // before it finished" branch rather than as a result. Per-request
+  // cancellation (`signalOf`) is what would close that, and nothing consumes it.
+  it('leaves another plan\u2019s work alone', () => {
+    const mine = beginWork('trace');
+    const otherDoc = 'doc-elsewhere';
+    useAppStore.setState({ activeDocumentId: otherDoc });
+    const theirs = beginWork('trace');
+    useAppStore.setState({ activeDocumentId: mine.docId });
+
+    expect(cancelActiveWork().count).toBe(1);
+    expect(signalOf(theirs).aborted).toBe(false);
+    expect(workCount(otherDoc)).toBe(1);
   });
 });

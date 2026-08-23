@@ -116,15 +116,49 @@ describe('setPerimeterOverlay', () => {
 
   // The deliberate asymmetry: a hand edit invalidates the detector's confidence
   // but not the rings it did not touch. Guards against collapsing the branches.
-  it('nulls quality on a hand edit while keeping holes', () => {
+  // A hand edit demotes the detector's verdict; it does not delete it. Nulling
+  // the whole record made one corner nudge clear the issue count, the quality
+  // section, the stage spine and the exhibit's flags at once — which made
+  // destroying the evidence the fastest route to a clean exhibit.
+  it('demotes quality on a hand edit while keeping holes', () => {
     seedTracedFloor();
     expect(activeTrace().quality).not.toBeNull();
 
     useAppStore.getState().setPerimeterOverlay({ vertices: moved });
 
     const t = activeTrace();
-    expect(t.quality).toBeNull();
+    expect(t.quality).not.toBeNull();
+    expect(t.quality.confidence).toBeNull();
+    expect(t.quality.edited).toBe(true);
+    expect(t.quality.source).toBe('auto');
     expect(t.holes).toHaveLength(1);
+  });
+
+  it('keeps the warnings an edit cannot answer and retires the ones it can', () => {
+    useAppStore.getState().setPerimeterOverlay({
+      vertices: outer,
+      quality: {
+        source: 'auto',
+        confidence: 0.4,
+        warnings: [
+          // A fact about the drawing, and about a place the edit never visited.
+          { code: 'label-outside', severity: 'error', detail: { count: 1, of: 3 } },
+          // A property of the ring the user just moved, so it is re-derived.
+          { code: 'self-intersecting', severity: 'error', detail: { floor: 0 } },
+        ],
+      },
+    });
+
+    useAppStore.getState().setPerimeterOverlay({ vertices: moved });
+
+    const codes = activeTrace().quality.warnings.map((w) => w.code);
+    expect(codes).toEqual(['label-outside']);
+  });
+
+  it('leaves a trace that never had a quality record alone', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer });
+    useAppStore.getState().setPerimeterOverlay({ vertices: moved });
+    expect(activeTrace().quality).toBeNull();
   });
 });
 
@@ -506,6 +540,16 @@ describe('double-count detection', () => {
     ]);
 
     expect(selectActiveAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
+  });
+
+  it('says why, in words the panel can print', () => {
+    seed([
+      trace('house', 'gla', box(0, 0, 100, 100)),
+      trace('garage', 'garage', box(10, 10, 40, 40)),
+    ]);
+
+    const { doubleCounted } = selectActiveAreaByType(useAppStore.getState());
+    expect(doubleCounted[0].detail).toBe('garage sits inside house, so its area is counted twice');
   });
 
   // Two storeys of a house are nested by construction and are not double counted.

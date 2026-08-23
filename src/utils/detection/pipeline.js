@@ -203,6 +203,15 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       innerHoles: mapRings(floor.innerHoles, scaleX, scaleY),
       confidence: floor.confidence,
       warnings: mapWarningAnchors(floor.warnings, scaleX, scaleY),
+      // Mapped here with everything else it will be drawn beside. These are
+      // whole footprints in working px; left unmapped they would be offered to
+      // the user at 1/scale of where the building is.
+      alternatives: (floor.alternatives ?? [])
+        .map((alt) => ({
+          ...alt,
+          polygon: mapPolygonToOriginal(alt.polygon ?? [], scaleX, scaleY),
+        }))
+        .filter((alt) => alt.polygon.length >= 3),
       excluded: floor.excluded,
       excludedGarages: floor.excludedGarages,
       candidate: floor.candidate,
@@ -214,6 +223,24 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     {
       imageWidth: imageData.width,
       imageHeight: imageData.height,
+      // The extent of the drawing, in the same original px as the polygons, so
+      // `covers-page` can ask whether the outline outgrew the *building* rather
+      // than whether the building fills its own sheet. A plan cropped tight to
+      // its page is the common CAD export, not a runaway flood.
+      inkArea: boundary.debug?.wallBboxArea
+        ? boundary.debug.wallBboxArea / (scaleX * scaleY)
+        : null,
+      // Two facts about the sheet rather than about any one outline, so they
+      // are raised here where the result-scoped checks live. Wall thickness is
+      // the answer to "is this image too small to trace" — below ~3px at
+      // working scale the strokes do not survive, and measured on the fixtures
+      // confidence *rises* as the input degrades. Skew is measured by the
+      // polygon fit and was discarded; past its ceiling the fit squashes the
+      // outline onto the page's axes, which silently shrinks the footprint.
+      wallThickness: analysis.wallThickness,
+      skew: (boundary.floors ?? []).reduce((worst, f) => (
+        f.deskewed === false && f.skewDeg > worst ? f.skewDeg : worst
+      ), 0),
       labels: options.constraints?.interiorPoints ?? [],
       // A label inside a deliberately excluded region (a garage, a porch) is
       // outside the outline on purpose, not evidence of a bad trace.
@@ -240,10 +267,22 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const warnings = [...boundaryWarnings, ...validation.warnings].map(tagWarning);
   const confidence = Math.max(0, Math.min(0.98, boundary.confidence * validation.factor));
 
+  // The validation discount reaches the floors, not only the aggregate. Every
+  // durable surface — the dock chip, `planStage`, the exhibit's flag list —
+  // reads a floor's own confidence, and only the transient toast read the
+  // aggregate. A floor cut to 0.35 by `label-outside` chipped green at 0.98
+  // while the toast beside it said 65%, about the same outline.
+  const discounted = fanOutWarnings(floors, boundaryWarnings, validation.warnings)
+    .map((floor, i) => ({
+      ...floor,
+      confidence: Math.max(0, Math.min(0.98,
+        floor.confidence * (validation.floorFactors?.[i] ?? validation.factor))),
+    }));
+
   return {
     outer,
     inner,
-    floors: fanOutWarnings(floors, boundaryWarnings, validation.warnings),
+    floors: discounted,
     holes: mapRings(boundary.holes, scaleX, scaleY),
     innerHoles: mapRings(boundary.innerHoles, scaleX, scaleY),
     // Top-level (not debug): the worker only forwards a whitelist of fields.

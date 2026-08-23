@@ -10,7 +10,16 @@ import {
   polygonSignedArea,
 } from './polygon.js';
 import { traceFramedBoundary } from './labelFrame.js';
-import { collectNonGlaRegions, arbitrateRegions, applyRegions, componentMask } from './nonGla.js';
+import {
+  collectNonGlaRegions,
+  arbitrateRegions,
+  applyRegions,
+  componentMask,
+  enclosedVoids,
+  sealedCavities,
+  refusedRegion,
+} from './nonGla.js';
+import { warning, bboxRing } from './scoring.js';
 
 const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);
@@ -20,6 +29,41 @@ const largestComponent = (mask, width, height) => {
     if (comp.size > best.size) best = comp;
   }
   return { labels, component: best };
+};
+
+// How much of a footprint a space nothing opens onto has to be before saying
+// so is worth the reader's attention. The shape gate in `sealedCavities` rules
+// out a wing of rooms; this rules out the small ones the shape gate cannot,
+// because a door swing seals a bathroom in the structural mask as surely as a
+// wall does and a sealed bathroom is exactly square against its box. Measured
+// across the nine fixtures: at the 0.4% a carved void is kept at, one
+// fine-lined plan raises fourteen of these; at 5% all nine raise none, and the
+// synthetic courtyard (13.8%) and the garage bay whose door was drawn too
+// thick to read as a door (25%) both still land.
+const MIN_SEALED_CAVITY = 0.05;
+
+// Whether the carve is what opened this void — a courtyard the exclusion
+// removed — or whether it was already there, which the carve cannot explain
+// and the user has to be told about.
+const voidWasCarved = (cavity, removed, width) => {
+  const { labels, componentId, bbox } = cavity;
+  let inside = 0;
+  for (let y = bbox.minY; y <= bbox.maxY; y += 1) {
+    const row = y * width;
+    for (let x = bbox.minX; x <= bbox.maxX; x += 1) {
+      if (labels[row + x] === componentId && removed[row + x]) inside += 1;
+    }
+  }
+  return inside >= 0.5 * cavity.size;
+};
+
+// Does `outer` account for most of `inner`? Bboxes, because the more specific
+// warning already carries the shape — this only decides which one speaks.
+const bboxCovers = (outer, inner) => {
+  const w = Math.min(outer.maxX, inner.maxX) - Math.max(outer.minX, inner.minX) + 1;
+  const h = Math.min(outer.maxY, inner.maxY) - Math.max(outer.minY, inner.minY) + 1;
+  if (w <= 0 || h <= 0) return false;
+  return w * h >= 0.5 * bboxAreaOf(inner);
 };
 
 // `carrier` is anything holding `{labels, frame, componentId}` — the footprint
@@ -32,7 +76,17 @@ const polygonize = (carrier, width, height, epsilon, fitOptions) => {
   if (simplified.length < 3) return null;
   const fitted = fitRing(simplified, fitOptions);
   if (!fitted.polygon || fitted.polygon.length < 3) return null;
-  return { polygon: fitted.polygon, ring, skew: fitted.skew };
+  // `skewDeg` is what was measured; `deskewed` says whether the fit acted on
+  // it. A ring past the de-skew ceiling is squashed onto the page's own axes,
+  // which silently shrinks a rotated plan's footprint — so the pair travels up
+  // to `quality` where the user can be told the plan is not square.
+  return {
+    polygon: fitted.polygon,
+    ring,
+    skew: fitted.skew,
+    skewDeg: fitted.skewDeg,
+    deskewed: fitted.deskewed,
+  };
 };
 
 // March inward from footprint boundary pixels and measure the depth of the
@@ -230,36 +284,114 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
   // only. Every detector contributes candidates; one arbitration step decides.
   let excludedRegions = [];
   let rejectedRegions = [];
-  let holeSources = [];
+  let nearMissRegions = [];
+  let removed = null;
+  // The building as it stood before the carve, so "0.4% of the footprint" and
+  // "5% of the footprint" mean the same fraction of the same thing whether or
+  // not a garage came off it first.
+  const preCarveArea = footprint.area;
   if (options.excludeRegions?.length || options.autoGarage !== false
       || options.autoShaded !== false) {
-    const candidates = collectNonGlaRegions(footprint, analysis, {
+    const collected = collectNonGlaRegions(footprint, analysis, {
       ...options,
       exteriorThickness,
       wallMask,
     });
-    const arbitrated = arbitrateRegions(candidates);
+    nearMissRegions = collected.nearMisses;
+    const arbitrated = arbitrateRegions(collected.regions);
     if (arbitrated.length) {
       const applied = applyRegions(footprint, arbitrated, analysis, {
         ...options,
         exteriorThickness,
       });
-      if (applied.accepted.length) {
-        const carvedOuter = polygonize(applied.footprint, width, height, epsilon, options.fit);
-        if (carvedOuter) {
-          footprint = applied.footprint;
-          outerResult = carvedOuter;
-          excludedRegions = applied.accepted;
-          rejectedRegions = applied.rejected;
-          holeSources = applied.holes;
-          exteriorThickness = sampleExteriorThickness(
-            outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
-          );
-        }
-      } else {
-        rejectedRegions = applied.rejected;
+      rejectedRegions = applied.rejected;
+      const carvedOuter = applied.accepted.length
+        ? polygonize(applied.footprint, width, height, epsilon, options.fit)
+        : null;
+      if (carvedOuter) {
+        footprint = applied.footprint;
+        outerResult = carvedOuter;
+        excludedRegions = applied.accepted;
+        removed = applied.removed;
+        exteriorThickness = sampleExteriorThickness(
+          outerResult.ring, wallMask, footprint.mask, width, height, wallThickness,
+        );
+      } else if (applied.accepted.length) {
+        // The carve left a footprint with no traceable ring, so it was
+        // abandoned — which keeps the area rather than removing it, and is
+        // therefore a refusal like any other.
+        rejectedRegions = [
+          ...rejectedRegions,
+          ...applied.accepted.map((r) => refusedRegion(r, 'untraceable')),
+        ];
       }
     }
+  }
+
+  const carveWarnings = [];
+  const anchorOf = (bbox) => ({ kind: 'ring', rings: [bboxRing(bbox)] });
+  // Stated, never counted: `area-excluded` is the detector working, and its
+  // severity keeps it out of the "things to check" count. The number is here
+  // rather than only in a toast because it is the largest discretionary
+  // subtraction the app makes.
+  for (const region of excludedRegions) {
+    carveWarnings.push(warning('area-excluded', {
+      keyword: region.keyword ?? null,
+      sources: region.sources ?? [region.source],
+      areaPx: region.size,
+      // Scale-free, and the number that actually answers "how much of my
+      // building did it take out". Nothing under `detection/` knows px per
+      // foot, so a square-footage figure here could only ever have been wrong.
+      shareOfFootprint: preCarveArea > 0 ? region.size / preCarveArea : 0,
+      bbox: region.bbox,
+    }, 'info', anchorOf(region.bbox)));
+  }
+  // A near-miss the carve already settled says nothing: the garage detector
+  // doubts a cavity another source carved, and "not removed" printed beside
+  // the `area-excluded` that removed it is a contradiction, in the count of
+  // things to check.
+  const settled = [...excludedRegions, ...rejectedRegions].map((r) => r.bbox);
+  nearMissRegions = nearMissRegions.filter(
+    (miss) => !settled.some((bbox) => bboxCovers(bbox, miss.bbox)),
+  );
+  for (const region of [...rejectedRegions, ...nearMissRegions]) {
+    carveWarnings.push(warning('non-gla-not-removed', {
+      keyword: region.keyword ?? null,
+      sources: region.sources ?? [region.source],
+      reason: region.reason,
+      areaPx: region.size,
+      bbox: region.bbox,
+    }, 'warn', anchorOf(region.bbox)));
+  }
+
+  // Voids and sealed cavities are enumerated whether or not anything was
+  // carved. A void only ever became a hole as a by-product of an accepted
+  // carve, so a courtyard on a plan with no garage was counted as living area
+  // in full — 16.5% over on the synthetic courtyard, at 0.98 confidence.
+  const minVoid = 0.004 * preCarveArea;
+  const holeSources = [];
+  const stated = [...excludedRegions, ...rejectedRegions, ...nearMissRegions].map((r) => r.bbox);
+  for (const cavity of enclosedVoids(footprint.mask, width, height, minVoid)) {
+    if (removed && voidWasCarved(cavity, removed, width)) {
+      holeSources.push(cavity);
+      continue;
+    }
+    stated.push(cavity.bbox);
+    carveWarnings.push(warning('enclosed-void', {
+      areaPx: cavity.size, bbox: cavity.bbox,
+    }, 'warn', anchorOf(cavity.bbox)));
+  }
+  // Not subtracted, only shown: geometry cannot tell a courtyard from a room
+  // nothing opens onto, and removing the second deletes floor the plan has.
+  // The user has a void tool; what they lacked was any sign there was
+  // something to point it at.
+  const wallish = analysis.thickMask ?? wallMask;
+  const minSealed = MIN_SEALED_CAVITY * preCarveArea;
+  for (const cavity of sealedCavities(footprint.mask, wallish, width, height, minSealed)) {
+    if (stated.some((bbox) => bboxCovers(bbox, cavity.bbox))) continue;
+    carveWarnings.push(warning('enclosed-void', {
+      areaPx: cavity.size, bbox: cavity.bbox,
+    }, 'warn', anchorOf(cavity.bbox)));
   }
 
   const holes = [];
@@ -312,13 +444,20 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     holes,
     innerHoles,
     skew: outerResult.skew,
+    skewDeg: outerResult.skewDeg,
+    deskewed: outerResult.deskewed,
     footprintMask: footprint.mask,
     footprintArea: footprint.area,
     footprintBbox: footprint.bbox,
     exteriorThickness,
     filamentShaved,
     excludedRegions,
-    rejectedRegions,
+    // Every region the carve examined and declined, near-misses included, and
+    // the warnings that say so. `carveWarnings` and not `warnings` because
+    // assembleFloors assigns the search's own list over that field after this
+    // returns; it merges these in.
+    rejectedRegions: [...rejectedRegions, ...nearMissRegions],
+    carveWarnings,
     excluded: excludedRegions.length,
     excludedGarages: excludedRegions.filter((r) => r.keyword && /garage/i.test(r.keyword)).length,
   };

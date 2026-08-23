@@ -77,11 +77,16 @@ export function useAutosave() {
   // `restart` keeps the plan's id, so that write lands under a live key and
   // survives the reload as a plan the user had closed.
   const autosaveTimerRef = useRef(null);
+  // Which plan armed it. The timer reads *state* when it fires, so anything
+  // that runs it early has to check that the plan which armed it is still the
+  // live one — the same rule the timer's own body states below.
+  const pendingWriteDocRef = useRef(null);
   const cancelPendingWrite = useCallback(() => {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
+    pendingWriteDocRef.current = null;
   }, []);
 
   // Every plan the workspace holds, not just the one on screen: switching the
@@ -197,6 +202,28 @@ export function useAutosave() {
       );
     }
   }, [buildIndex]);
+
+  /**
+   * Run the debounced write now instead of waiting out its two seconds.
+   *
+   * For the unmount that matters: `ErrorBoundary` replaces the whole tree when
+   * a render throws, and its crash screen promises the autosaved draft is
+   * intact and that reloading restores it. This effect's cleanup used to
+   * *cancel* the pending write, so the promise was false for exactly the edits
+   * the user had just made — the ones a crash makes most expensive to lose.
+   *
+   * No-ops when nothing is armed, so a dependency change costs nothing; the
+   * write is only for the plan that armed it.
+   */
+  const flushPendingWrite = useCallback(() => {
+    const docId = pendingWriteDocRef.current;
+    if (!autosaveTimerRef.current || !docId) return false;
+    cancelPendingWrite();
+    const live = useAppStore.getState();
+    if (live.activeDocumentId !== docId || !live._hasRestoredState || !live.image) return false;
+    saveAutosavedDraft(docId, live.getParkedState());
+    return true;
+  }, [cancelPendingWrite, saveAutosavedDraft]);
 
   const handleSaveOnExitChange = useCallback((enabled) => {
     setSaveOnExit(enabled);
@@ -583,8 +610,10 @@ export function useAutosave() {
         // timer fires would write the *incoming* plan's state under whichever
         // key happened to be active two seconds later.
         const docId = state.activeDocumentId;
+        pendingWriteDocRef.current = docId;
         autosaveTimerRef.current = setTimeout(() => {
           autosaveTimerRef.current = null;
+          pendingWriteDocRef.current = null;
           const live = useAppStore.getState();
           // Capturing the id was only half of it: the *state* is still read
           // here, so a switch inside the debounce window wrote the incoming
@@ -610,9 +639,13 @@ export function useAutosave() {
 
     return () => {
       unsub();
-      cancelPendingWrite();
+      // Flushed, not cancelled. This cleanup is what runs when `ErrorBoundary`
+      // tears the tree down, and the crash screen it puts up says the draft is
+      // intact — which cancelling here is precisely what made untrue.
+      flushPendingWrite();
     };
-  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite, queueIndexWrite]);
+  }, [saveOnExit, clearAutosavedDraft, saveAutosavedDraft, cancelPendingWrite,
+    flushPendingWrite, queueIndexWrite]);
 
   // Best-effort flush when the tab is hidden or unloaded, and the only write
   // that carries the undo history. It is not a guarantee: setDraft opens an

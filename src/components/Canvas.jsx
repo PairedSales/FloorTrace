@@ -88,6 +88,17 @@ const Canvas = React.memo(forwardRef((props, ref) => {
                 </p>
               </>
             )}
+            {/* What the app is about to attempt, and the honest caveat. Three
+                spinners used to run in sequence with nothing having said what
+                they were for or that the last of them can be wrong — so a bad
+                trace arrived as a surprise rather than as the expected case it
+                is. Both shells, because the surprise is the same on a phone. */}
+            <p className="mt-5 pt-4 border-t border-line text-[12.5px] text-fg-3 leading-relaxed">
+              FloorTrace reads the printed room sizes, works out the scale from them, and
+              traces the exterior walls to get the area. Automatic tracing works best on a
+              clean plan with space around the drawing — when it struggles, you paint
+              roughly over the walls instead and it snaps to them.
+            </p>
           </div>
         </div>
       )}

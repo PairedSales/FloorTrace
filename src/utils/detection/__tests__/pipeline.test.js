@@ -665,6 +665,30 @@ describe('traceFloorplanBoundaryCore validation routing', () => {
   };
 
   it('lands a floor-scoped finding on the floor its detail names', () => {
+    // Walls thick enough that the interior envelope is inset most of the way
+    // in, which is what `inner-over-inset` is for. It stands in for
+    // `covers-page` here because that check no longer fires on a drawing that
+    // merely fills its sheet — see the test below.
+    const img = createImage(400, 400);
+    wall(img, 20, 20, 90, 20, 26);
+    wall(img, 20, 90, 90, 90, 26);
+    wall(img, 20, 20, 20, 90, 26);
+    wall(img, 90, 20, 90, 90, 26);
+
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced.floors.length).toBe(1);
+    const found = traced.floors[0].warnings.find((w) => w.code === 'inner-over-inset');
+    expect(found).toBeTruthy();
+    expect(found.scope).toBe('floor');
+    // Still reported at the top level exactly once, as it always was.
+    expect(traced.quality.warnings.filter((w) => w.code === 'inner-over-inset')).toHaveLength(1);
+  });
+
+  // Filling the page is not the defect; outgrowing the drawing is. A plan
+  // cropped tight to its own sheet is the common CAD export, and flagging it
+  // cut a 94.7%-IoU trace of ExampleFloorplan6 to 0.392 — which then dropped
+  // the user into draw mode under "Auto-detection could not read this plan".
+  it('does not flag a building that simply fills its own sheet', () => {
     const img = createImage(400, 300);
     wall(img, 6, 6, 394, 6, 6);
     wall(img, 6, 294, 394, 294, 6);
@@ -672,13 +696,8 @@ describe('traceFloorplanBoundaryCore validation routing', () => {
     wall(img, 394, 6, 394, 294, 6);
 
     const traced = traceFloorplanBoundaryCore(img);
-    expect(traced.floors.length).toBe(1);
-    const found = traced.floors[0].warnings.find((w) => w.code === 'covers-page');
-    expect(found).toBeTruthy();
-    expect(found.scope).toBe('floor');
-    expect(found.anchor).toBeNull();
-    // Still reported at the top level exactly once, as it always was.
-    expect(traced.quality.warnings.filter((w) => w.code === 'covers-page')).toHaveLength(1);
+    expect(traced.quality.warnings.some((w) => w.code === 'covers-page')).toBe(false);
+    expect(traced.quality.confidence).toBeGreaterThan(0.75);
   });
 
   it('reaches every floor with a finding about the whole drawing', () => {

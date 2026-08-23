@@ -4,6 +4,7 @@ import { render, fireEvent, cleanup } from '@testing-library/react';
 import ChecksCard from '../ChecksCard';
 import useAppStore from '../../store/appStore';
 import { warning } from '../../utils/detection/scoring.js';
+import { WARNING_CODES, warningLabel, detailText } from '../../utils/boundaryQuality';
 
 /**
  * The one card that says how much of the panel above it to believe. What is
@@ -58,7 +59,7 @@ describe('ChecksCard with nothing to say', () => {
     const view = render(<ChecksCard />);
     expect(view.getByText('All clear')).toBeTruthy();
     expect(view.getByText(/Nothing to check/)).toBeTruthy();
-    expect(view.getByText('92% confidence')).toBeTruthy();
+    expect(view.getByText('92% wall match')).toBeTruthy();
   });
 });
 
@@ -136,10 +137,10 @@ describe('ChecksCard on the outlines', () => {
   it('keeps its reasons folded until asked, then names each one', () => {
     useAppStore.setState({ perimeterTraces: [outline({ quality: doubtful })] });
     const view = render(<ChecksCard />);
-    expect(view.queryByText('Opening bridged')).toBeNull();
+    expect(view.queryByText('A gap was closed for you')).toBeNull();
     fireEvent.click(view.getByText(/2 to check · /));
-    expect(view.getByText('Opening bridged')).toBeTruthy();
-    expect(view.getByText('No interior envelope')).toBeTruthy();
+    expect(view.getByText('A gap was closed for you')).toBeTruthy();
+    expect(view.getByText('No interior outline')).toBeTruthy();
   });
 
   // The card exists to be turned to when something is wrong; an outline the
@@ -157,7 +158,7 @@ describe('ChecksCard on the outlines', () => {
     });
     const view = render(<ChecksCard />);
     expect(view.getByText('Outline never closed')).toBeTruthy();
-    expect(view.queryByText('No interior envelope')).toBeNull();
+    expect(view.queryByText('No interior outline')).toBeNull();
   });
 
   it('says when a void is no longer subtracted, which no detector warning does', () => {
@@ -186,4 +187,61 @@ describe('ChecksCard on the outlines', () => {
     fireEvent.click(view.getByText('Show'));
     expect(useAppStore.getState().focusedWarning).toBeNull();
   });
+});
+
+
+/**
+ * Every code the detector can emit, rendered once.
+ *
+ * Most of them fire on no fixture, so their copy, severity dot and Show button
+ * had never been drawn by anything — and that is not hypothetical: the
+ * `enclosed-void` detector shipped a ring over a third of ExampleFloorplan3's
+ * bedroom wing, under copy instructing the user to cut it out of the living
+ * area, and it was caught by somebody rendering anchors by hand rather than by
+ * any test. This asserts the weakest useful property — that the row renders,
+ * says something, and does not throw.
+ */
+describe('every warning code the detector can emit', () => {
+  const detailFor = (code) => {
+    if (code === 'room-outside') return { count: 1, names: ['BEDROOM'], name: 'BEDROOM' };
+    if (code === 'label-outside') return { count: 2, of: 5, names: [], points: [] };
+    if (code === 'floors-rejected' || code === 'outlines-dropped') return { count: 2 };
+    if (code === 'bridged-opening') return { px: 34 };
+    if (code === 'low-resolution') return { px: 2.1 };
+    if (code === 'plan-skewed') return { degrees: 7 };
+    if (code === 'area-excluded') return { keyword: 'GARAGE', shareOfFootprint: 0.2 };
+    if (code === 'non-gla-not-removed') return { keyword: 'PORCH' };
+    if (code === 'remediated') return { of: 6, heldBefore: 4, heldAfter: 6 };
+    return { floor: 0 };
+  };
+
+  for (const code of WARNING_CODES) {
+    it(`renders a row for ${code}`, () => {
+      const emitted = warning(code, detailFor(code), code === 'no-alternative' ? 'info' : 'warn');
+      useAppStore.setState({
+        calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
+        perimeterTraces: [outline({ quality: { confidence: 0.6, warnings: [emitted] } })],
+      });
+      const view = render(<ChecksCard />);
+      // The collapsed headline is the toggle. An `info` code produces the
+      // "N notes" line instead of "N to check", so accept either.
+      const toggle = view.queryByText(/\d+ to check · /) ?? view.queryByText(/^\d+ notes?$/);
+      if (toggle) fireEvent.click(toggle);
+      // `info` codes describe how the outline was reached rather than a reason
+      // to doubt it, so they sit behind a second toggle. Still rendered, and
+      // still required to say something.
+      const notes = view.queryByText(/· \d+ notes?$/);
+      if (notes) fireEvent.click(notes);
+
+      // The headline is never the raw code, and the detail is never empty —
+      // both are how a missing entry shows itself.
+      const label = warningLabel(code);
+      expect(label).not.toBe(code);
+      expect(view.getAllByText(label).length).toBeGreaterThan(0);
+      // Built by the real emitter, so a code with no `WARNING_TEXT` entry and
+      // no `detailText` branch shows up here as the blank row it would be.
+      const detail = detailText(emitted);
+      expect(String(detail ?? '').length, `${code} renders an empty detail`).toBeGreaterThan(0);
+    });
+  }
 });

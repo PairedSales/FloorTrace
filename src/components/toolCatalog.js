@@ -1,6 +1,6 @@
 import {
   MousePointer2, Ruler, Pentagon, Compass, Waypoints, SquareDashedBottom,
-  Crop, Eraser, Scaling, RotateCw, Brush,
+  Crop, Eraser, CircleMinus, Scaling, RotateCw, Brush,
 } from 'lucide-react';
 
 /**
@@ -18,6 +18,13 @@ import {
  * around them. Nothing derives a digit from an index — a mapping that moves
  * with app state is the thing being avoided, not a mapping written down twice
  * — so renumbering means editing both lists together.
+ *
+ * There are ten tools and nine digits, so two of them carry none. Both sit
+ * **last in their own group**, which is what keeps the run reading straight
+ * down the list rather than skipping a number in the middle of one. `rotate`
+ * has always been one; `cornerEraser` is the other, and it is the right one to
+ * go without: it is a correction reached from the outline you are correcting,
+ * not a mode anyone reaches for blind.
  *
  * Group order is the core job first and the utilities last: Select is the rest
  * state, Outline is what the app is for, Measure needs an outline to act on,
@@ -65,6 +72,14 @@ export const TOOL_GROUPS = [
       { id: 'void',    digit: '3',  icon: SquareDashedBottom, short: 'Cut out', label: 'Cut out a void',
         hint: 'Punch a courtyard or light well out of an outline',
         needsArea: 'Cutting a void needs a traced outline first.' },
+      // This is the tool that used to be called "Erase clutter" and sit in the
+      // Plan image group. It never touched the image: it deletes the outline's
+      // own corners, and with no outline on the canvas it did nothing at all
+      // and said nothing about why. Named and grouped for what it does, and
+      // gated so the reason shows.
+      { id: 'cornerEraser', digit: null, icon: CircleMinus, short: 'Remove corners', label: 'Remove outline corners',
+        hint: 'Drag over corners of the outline to delete them',
+        needsArea: 'Removing corners needs a traced outline first.' },
     ],
   },
   {
@@ -92,6 +107,10 @@ export const TOOL_GROUPS = [
     tools: [
       { id: 'crop',    digit: '8',  icon: Crop,               short: 'Crop', label: 'Crop the plan',
         hint: 'Keep only the part of the image you drag over' },
+      // Keeps the id, the digit and the name the old one advertised, and is
+      // the first thing under either of them that actually paints over the
+      // plan. A legend inside the footprint is a documented way to lose a
+      // trace, and until now nothing in the app could take one off the page.
       { id: 'eraser',  digit: '9',  icon: Eraser,             short: 'Erase', label: 'Erase clutter',
         hint: 'Remove legends or notes that confuse detection' },
       // The desktop rail rotates the other way on right-click; the mobile sheet

@@ -97,6 +97,19 @@ const scenarios = {
     const { img: legendImg, truth: legendTruth } = legendPlan();
     cases.push(['legend in notch', legendImg, legendTruth]);
 
+    // The cases draw mode is actually *reached* on. The three above are all
+    // ones auto-detection already traces at 0.66-0.98, so the app's only escape
+    // from total tracing failure was measured exclusively on plans it never has
+    // to rescue — a change to brush.js could have removed it with every harness
+    // green. windowedHouse(100)/(180) return 1.7% IoU or no boundary bare, and
+    // garageHouse(8) returns a +41% area at the confidence ceiling.
+    for (const gap of [100, 180]) {
+      const { img: wImg, truth: wTruth } = windowedHouse(gap);
+      cases.push([`windows ${gap}px (auto fails)`, wImg, wTruth]);
+    }
+    const { img: gImg, truth: gTruth } = garageHouse(8);
+    cases.push(['garage door 8px (auto over-counts)', gImg, gTruth]);
+
     for (const [name, img, truth] of cases) {
       for (const jitter of [0, 6, 12]) {
         report(

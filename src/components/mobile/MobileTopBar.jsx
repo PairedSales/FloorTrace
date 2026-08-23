@@ -15,7 +15,7 @@ import FloorTraceMark from '../FloorTraceMark';
  * Export is here because it is the end of the job and the only reason the app
  * was opened. Everything else lives behind the menu button.
  */
-const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, hasArea, onMenu, onExport, onPlans }) => {
+const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, ready, onMenu, onExport, onPlans }) => {
   const { canUndo, canRedo } = useUndoHistory();
 
   return (
@@ -88,10 +88,15 @@ const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, hasArea, on
           onClick={onExport}
           disabled={!image || isProcessing}
           aria-label="Export for your workfile"
+          /* Outlined when there is an area, never filled — the same rule the
+             desktop honours. A filled Export over a doubtful trace is a wrong
+             answer that looks green, in the part of the shell read first, and
+             `hasArea` says only that a number exists. `ready` additionally
+             requires that nothing is outstanding against it. */
           className={`tap-target px-3 gap-1.5 rounded-lg text-[13px] font-semibold
                       disabled:opacity-30
-                      ${hasArea
-                        ? 'bg-accent text-accent-ink active:brightness-110'
+                      ${ready
+                        ? 'border border-accent text-accent active:bg-accent/10'
                         : 'text-fg-2 active:bg-sunken active:text-fg'}`}
         >
           <Share className="w-[18px] h-[18px]" aria-hidden="true" />

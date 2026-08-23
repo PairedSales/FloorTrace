@@ -55,6 +55,28 @@ const gestures = [
 // Names here must match the command bar and the tool rail. They drifted once
 // already: the shell renamed every command and this list kept describing the
 // old one.
+// What to do when automatic tracing disappoints you, in the order worth
+// trying. Written against the causes the detector actually reports — a legend
+// or dimension string it read as wall, a plan too small for its strokes to
+// survive, an opening it had to bridge — rather than as general advice.
+const recovery = [
+  'Automatic tracing works best on a clean plan with white space around the drawing. '
+    + 'It struggles with legends and notes inside the building, low-resolution scans, '
+    + 'and plans photographed at an angle.',
+  '"Paint outline" is the answer to most failures: drag roughly over the exterior walls '
+    + 'and FloorTrace snaps to them. It only needs to be close.',
+  'Painted the outline and it still came back wrong? Paint again — your strokes are kept, '
+    + 'so you can add one more pass rather than starting over.',
+  'A legend, title block or note inside the building confuses the tracer. Erase it from the '
+    + 'plan image, or crop to the building, then trace again.',
+  'Read the dimensions before tracing. The rooms it finds are evidence the tracer uses, and '
+    + 'on some plans they are the difference between an outline and nothing.',
+  'The area looks wrong but the outline looks right? Check the scale — it is a separate step, '
+    + 'and area changes with the square of it.',
+  'Stats & warnings at the foot of the measurement panel lists everything the app doubts, '
+    + 'with a "Show" button that points at the spot on the plan.',
+];
+
 const tips = [
   'Click on a room to auto-detect its boundary.',
   'Use "Find outline" to detect the exterior walls automatically.',
@@ -133,6 +155,30 @@ const HelpModal = ({ onClose }) => {
             <X className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} />
           </button>
         </div>
+
+        {/* First, deliberately. This panel used to open with 24 keyboard
+            shortcuts and bury the one thing a stuck user is looking for as the
+            third of eleven tips — and automatic tracing failing is the single
+            most likely reason anybody opens it. */}
+        <section className="px-4 py-3">
+          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
+            When tracing goes wrong
+          </h3>
+          <ul className="space-y-1.5">
+            {recovery.map((item) => (
+              <li
+                key={item}
+                className={`text-fg-3 leading-relaxed flex gap-1.5
+                            ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}
+              >
+                <span className="text-accent shrink-0">•</span>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <div className="panel-divider mx-4" />
 
         <section className="px-4 py-3">
           <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">

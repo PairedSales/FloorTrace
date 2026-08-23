@@ -1,15 +1,69 @@
 import { boundaryByMode } from './pipeline';
 import { perfRecordWorker } from '../perfMarks';
+import { isStaleChunkError, recoverFromStaleBuild } from '../staleBuild';
 
 let detectionWorker = null;
 let nextRequestId = 1;
 const pending = new Map();
 
+const failPending = (error) => {
+  const requests = [...pending.values()];
+  pending.clear();
+  requests.forEach((request) => request.reject(error));
+};
+
+/**
+ * The worker died. Nothing arrives on the message channel when that happens —
+ * an OOM kill, a chunk that 404s after a deploy, a syntax error in the module —
+ * so before this every pending request simply sat there until its own timeout,
+ * and a dead worker was indistinguishable from a slow one for thirty seconds.
+ *
+ * The word "worker" in the message is load-bearing: the App layer tells a kill
+ * from a timeout by matching it, and says different things to the user.
+ */
+const handleWorkerCrash = (detail) => {
+  if (detectionWorker) {
+    detectionWorker.terminate();
+    detectionWorker = null;
+  }
+  // After a deploy this is a hashed filename that no longer exists: the page is
+  // stale, not the plan. Reloading is the fix and there is nothing to report.
+  if (isStaleChunkError(detail) && recoverFromStaleBuild()) return;
+  failPending(new Error(`Detection worker stopped: ${detail || 'it crashed or was killed'}`));
+};
+
 const ensureWorker = () => {
   if (detectionWorker) return detectionWorker;
 
-  detectionWorker = new Worker(new URL('../../workers/detectionWorker.js', import.meta.url), { type: 'module' });
-  detectionWorker.onmessage = (event) => {
+  let worker;
+  try {
+    worker = new Worker(new URL('../../workers/detectionWorker.js', import.meta.url), { type: 'module' });
+  } catch (error) {
+    detectionWorker = null;
+    // Same fact one step earlier, and the only place it can be caught
+    // synchronously: a stale index naming a chunk nobody serves any more.
+    if (isStaleChunkError(error)) recoverFromStaleBuild();
+    throw new Error(`Detection worker could not start: ${error?.message ?? 'unknown error'}`);
+  }
+  detectionWorker = worker;
+
+  // Both handlers fail *every* pending request, so both check that the worker
+  // they belong to is still the one in use: a timeout, a cancel and a crash all
+  // replace it, and an event dispatched against the worker they replaced would
+  // otherwise kill its healthy successor and everything queued on it.
+  worker.onerror = (event) => {
+    if (detectionWorker !== worker) return;
+    // Otherwise the same failure also surfaces as an unhandled window error.
+    event.preventDefault?.();
+    handleWorkerCrash(event?.message || event?.error?.message || '');
+  };
+  // A reply that could not be structured-cloned. The worker is alive, but the
+  // envelope carried the id, so there is no way to say whose result was lost.
+  worker.onmessageerror = () => {
+    if (detectionWorker !== worker) return;
+    failPending(new Error('Detection worker sent a result that could not be read'));
+  };
+  worker.onmessage = (event) => {
     const { id, ok, data, error, started } = event.data ?? {};
     perfRecordWorker(event.data);
     const request = pending.get(id);
@@ -29,7 +83,7 @@ const ensureWorker = () => {
     request.reject(new Error(error || 'Detection request failed'));
   };
 
-  return detectionWorker;
+  return worker;
 };
 
 // A flat budget gets tighter the more there is to measure, and
@@ -69,11 +123,17 @@ const runWorkerRequest = (
       terminateDetectionWorker();
       reject(new Error('Detection timed out'));
 
-      const fresh = ensureWorker();
-      for (const [otherId, r] of unstarted) {
-        pending.set(otherId, r);
-        r.rearm();
-        fresh.postMessage({ id: otherId, type: r.type, payload: r.payload });
+      try {
+        const fresh = ensureWorker();
+        for (const [otherId, r] of unstarted) {
+          pending.set(otherId, r);
+          r.rearm();
+          fresh.postMessage({ id: otherId, type: r.type, payload: r.payload });
+        }
+      } catch (error) {
+        // Nothing to re-post them to. They are already out of `pending`, so
+        // without this their callers wait for a worker that will never exist.
+        for (const [, r] of unstarted) r.reject(error);
       }
     },
     resolve: (data) => {
@@ -210,4 +270,36 @@ export const terminateDetectionWorker = () => {
   detectionWorker = null;
   pending.forEach((request) => request.reject(new Error('Detection worker terminated')));
   pending.clear();
+};
+
+/**
+ * Abandon everything the detection worker is doing, because the user said stop.
+ *
+ * The cores are straight-line pure JS — nothing inside a trace polls a signal —
+ * so terminating is the only thing that gives the CPU back, and rejecting is
+ * the only thing that unblocks a caller still awaiting it. Without both, a
+ * cancelled trace runs its full thirty seconds with the spinner still up.
+ *
+ * Unlike the timeout path this does not re-post what never ran: there the queue
+ * behind a runaway job is innocent, here the whole queue is what was cancelled.
+ *
+ * The message names the worker on purpose, because of *who* reads it. The plan
+ * that pressed Stop never does — its token was aborted first, so its delivery
+ * resolves to 'dropped' and the closure holding the toast never runs. The only
+ * caller left to see this is another open plan whose trace this terminate took
+ * with it, and for that plan "interrupted before it finished" — the App layer's
+ * `/terminated|worker/i` branch — is exactly what happened. Worded to match
+ * neither pattern it fell through to "Could not trace this plan", which blames
+ * a drawing for a button pressed on somebody else's tab.
+ *
+ * @returns {number} how many requests were abandoned
+ */
+export const abandonDetectionWork = () => {
+  const count = pending.size;
+  if (detectionWorker) {
+    detectionWorker.terminate();
+    detectionWorker = null;
+  }
+  failPending(new Error('Detection worker terminated — cancelled'));
+  return count;
 };

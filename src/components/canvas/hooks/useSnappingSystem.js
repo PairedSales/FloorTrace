@@ -27,6 +27,25 @@ const buildWallSnapEngine = (image) => cachedWallSnapEngine(image) ?? rememberWa
     .catch(() => createWallSnapEngine(image)),
 );
 
+// One axis of a vertex, snapped onto a wall *face* rather than a centreline:
+// `findSegmentSnap` lands on `faceLo`/`faceHi`, the pixel where white turns
+// black. Which face is nearer decides, because a perimeter corner has no
+// interior side the way a room rectangle's edges do.
+//
+// It wants an extent, not a point, so the axis is probed with a short span
+// across the vertex. Its overlap rule is `min(edgeLen * 0.35, segLen * 0.8)`,
+// so a wall that ends *at* the corner — covering only half the probe — still
+// qualifies, which is exactly the case this is for.
+const snapAxisToWallFace = (snapEdge, pos, spanCentre, span, tolerance) => {
+  const a = spanCentre - span;
+  const b = spanCentre + span;
+  const lo = snapEdge(pos, a, b, tolerance, 'lo');
+  const hi = snapEdge(pos, a, b, tolerance, 'hi');
+  if (lo === null) return hi;
+  if (hi === null) return lo;
+  return Math.abs(lo - pos) <= Math.abs(hi - pos) ? lo : hi;
+};
+
 export function useSnappingSystem({ autoSnapEnabled, image }) {
   const imageSnapAnalyzerRef = useRef(null);
   const imageSnapAnalyzerSourceRef = useRef(null);
@@ -156,19 +175,41 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
       });
   }, [autoSnapEnabled, image]);
 
-  const findVertexSnapPoint = useCallback((point) => {
+  // Wall faces first, the generic dark-corner detector as the fallback. The
+  // corner detector was the only thing here, and it answers a different
+  // question — "is there a dark corner near this point" — so a hand-corrected
+  // vertex landed on whatever ink was closest, routinely a wall centreline or a
+  // dimension tick, on an outline whose whole job is to follow the wall face.
+  //
+  // Per axis, not all-or-nothing: an outline corner often has a wall on one
+  // side of it only, and taking the raw cursor x because the y found nothing
+  // would throw away the half that was right.
+  const findVertexSnapPoint = useCallback((point, tolerance = 12) => {
     if (!autoSnapEnabled || !point) {
       return null;
     }
 
     ensureImageSnapAnalyzer();
-    const analyzer = imageSnapAnalyzerRef.current;
-    if (!analyzer) {
-      return null;
+    const corner = imageSnapAnalyzerRef.current?.findCornerSnap(point) ?? null;
+
+    ensureWallSnapEngine();
+    const engine = wallSnapEngineRef.current;
+    if (!engine) {
+      return corner;
     }
 
-    return analyzer.findCornerSnap(point);
-  }, [autoSnapEnabled, ensureImageSnapAnalyzer]);
+    const span = Math.max(6, tolerance);
+    const x = snapAxisToWallFace(engine.snapVerticalEdge, point.x, point.y, span, tolerance);
+    const y = snapAxisToWallFace(engine.snapHorizontalEdge, point.y, point.x, span, tolerance);
+
+    if (x === null && y === null) {
+      return corner;
+    }
+    return {
+      x: x ?? corner?.x ?? point.x,
+      y: y ?? corner?.y ?? point.y,
+    };
+  }, [autoSnapEnabled, ensureImageSnapAnalyzer, ensureWallSnapEngine]);
 
   // Translate the whole overlay by the smallest delta that lands one vertical
   // and/or one horizontal edge on a wall face. Each edge targets the face on

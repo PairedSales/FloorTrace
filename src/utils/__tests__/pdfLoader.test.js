@@ -34,7 +34,7 @@ vi.mock('pdfjs-dist', () => ({
   }),
 }));
 
-const { pdfToPageImages } = await import('../pdfLoader');
+const { pdfToPageImages, MAX_PDF_PAGES } = await import('../pdfLoader');
 
 /** happy-dom has no 2D context, and the renderer needs one that records. */
 const installCanvas = () => {
@@ -133,12 +133,22 @@ describe('pdfToPageImages', () => {
     expect(pages.map((p) => p.name)).toEqual(['Maple Ave plan.png']);
   });
 
-  it('stops at the plan cap and says how many it left', async () => {
+  // Its own cap, not the caller's: the render budget is about six 4000 px
+  // canvases, and how many of those become plans is the caller's business.
+  it('stops at its own page cap and reports what the document holds', async () => {
     rendered.numPages = 9;
     installCanvas();
-    const { pages, skipped } = await pdfToPageImages(pdfFile(), { maxDimension: 4000, maxPages: 6 });
-    expect(pages).toHaveLength(6);
-    expect(skipped).toBe(3);
+    const { pages, skipped, totalPages } = await pdfToPageImages(pdfFile(), { maxDimension: 4000 });
+    expect(pages).toHaveLength(MAX_PDF_PAGES);
+    expect(skipped).toBe(9 - MAX_PDF_PAGES);
+    expect(totalPages).toBe(9);
+  });
+
+  it('never renders more than its cap, whatever the caller asks for', async () => {
+    rendered.numPages = 9;
+    installCanvas();
+    const { pages } = await pdfToPageImages(pdfFile(), { maxDimension: 4000, maxPages: 99 });
+    expect(pages).toHaveLength(MAX_PDF_PAGES);
   });
 
   it('reports progress so a slow render is not a frozen app', async () => {

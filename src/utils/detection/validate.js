@@ -71,49 +71,97 @@ export const constraintFactor = (missed, total, drawn = false) => {
  * @returns {{ warnings: Array, confidence: number }} confidence is a multiplier
  *   applied to the detector's own confidence.
  */
+// How much bigger than its own wall network an outline may be before covering
+// the page reads as a flood rather than as a tightly-cropped drawing. A plan
+// that fills its sheet sits at ~1.0; a flood into the margins is well above it.
+const COVERS_INK_RATIO = 1.25;
+
+// Below this the wall strokes do not survive the working raster, and every
+// score the detector computes is measuring noise.
+const MIN_TRACEABLE_WALL_PX = 3;
+
+// Worth telling the user the plan is not square only once it is enough to move
+// the footprint. Below this the rectilinear fit is doing its job.
+const MIN_REPORTABLE_SKEW_DEG = 2;
+
 export const validateBoundaryResult = (result, context = {}) => {
   const warnings = [];
   let factor = 1;
   if (!result?.floors?.length) {
-    return { warnings: [warning('no-boundary', null, 'error')], factor: 0 };
+    return { warnings: [warning('no-boundary', null, 'error')], factor: 0, floorFactors: [] };
   }
 
   const imageArea = (context.imageWidth ?? 0) * (context.imageHeight ?? 0);
+
+  // The same penalties, kept per floor as well as in aggregate. Every durable
+  // surface reads a floor's own confidence, and the toast read the aggregate —
+  // so a floor discounted to 0.35 by `label-outside` chipped green at 0.98
+  // while the toast beside it said 65%, about the same outline. `penalise`
+  // exists so a branch cannot update one and forget the other.
+  const floorFactors = new Array(result.floors.length).fill(1);
+  const penalise = (i, mult) => {
+    factor *= mult;
+    floorFactors[i] *= mult;
+  };
+  // Whole-drawing findings discount every floor: there is no one floor they
+  // are about, and a floor left undiscounted is a floor that reads clean while
+  // the result it belongs to does not.
+  const penaliseAll = (mult) => {
+    factor *= mult;
+    for (let i = 0; i < floorFactors.length; i += 1) floorFactors[i] *= mult;
+  };
 
   for (let i = 0; i < result.floors.length; i += 1) {
     const floor = result.floors[i];
     const outer = floor.outer?.polygon;
     if (!outer || outer.length < 3) {
       warnings.push(warning('floor-empty', { floor: i }, 'error'));
-      factor *= 0.5;
+      penalise(i, 0.5);
       continue;
     }
     if (hasSelfIntersection(outer, true)) {
       warnings.push(warning('self-intersecting', { floor: i }, 'error'));
-      factor *= 0.5;
+      penalise(i, 0.5);
     }
     const area = ringSetArea(outer, floor.holes ?? []);
-    if (imageArea && area > 0.92 * imageArea) {
+    // Filling the page is not the defect; **outgrowing the drawing** is.
+    //
+    // A plan cropped tight to its sheet is what most CAD exports look like, and
+    // it covered >92% of the page — so this fired on a correct trace and cut it
+    // to 0.392, which then dropped the user into draw mode with "Auto-detection
+    // could not read this plan" over a 94.7%-IoU outline. The flood this check
+    // is really aimed at also covers the page, but its wall network does not:
+    // the ink stays where the building is, so the outline is much larger than
+    // the drawing it grew from. That ratio is the discriminator, and a
+    // page-filling plan sits at ~1.0 on it.
+    const inkArea = context.inkArea ?? 0;
+    const outgrewInk = !inkArea || area > COVERS_INK_RATIO * inkArea;
+    if (imageArea && area > 0.92 * imageArea && outgrewInk) {
       warnings.push(warning('covers-page', { floor: i }, 'error'));
-      factor *= 0.4;
+      penalise(i, 0.4);
     }
     if (imageArea && area < 0.005 * imageArea) {
       warnings.push(warning('tiny-floor', { floor: i }));
-      factor *= 0.7;
+      penalise(i, 0.7);
     }
     const inner = floor.inner?.polygon;
     if (inner && inner.length >= 3) {
       const innerArea = ringSetArea(inner, floor.innerHoles ?? []);
       if (innerArea >= area) {
         warnings.push(warning('inner-not-nested', { floor: i }, 'error'));
-        factor *= 0.6;
+        penalise(i, 0.6);
       } else if (innerArea < 0.45 * area) {
         warnings.push(warning('inner-over-inset', { floor: i, ratio: Number((innerArea / area).toFixed(2)) }));
-        factor *= 0.85;
+        penalise(i, 0.85);
       }
     } else {
+      // Ranked and worded as a real defect rather than a note about how the
+      // outline was reached: in interior mode this floor shows and measures
+      // its *exterior* polygon under an interior caption. The mode is an app
+      // setting applied after detection, so this core cannot see it — the
+      // dock's wall-face pill is what says so, from the same missing `inner`.
       warnings.push(warning('no-inner', { floor: i }));
-      factor *= 0.9;
+      penalise(i, 0.9);
     }
   }
 
@@ -131,7 +179,10 @@ export const validateBoundaryResult = (result, context = {}) => {
       if (!boxesOverlap(boundsOf(a), boundsOf(b))) continue;
       if (sampledOverlap(a, b) > 0.4 * smaller) {
         warnings.push(warning('floors-overlap', { floors: [i, j] }, 'error'));
-        factor *= 0.6;
+        // Both floors named, both discounted: neither is the innocent one.
+        // The aggregate takes the penalty once — it is one finding.
+        penalise(i, 0.6);
+        floorFactors[j] *= 0.6;
       }
     }
   }
@@ -177,11 +228,45 @@ export const validateBoundaryResult = (result, context = {}) => {
         // are indistinguishable by name, and these are already original px.
         points: outside.slice(0, 8).map(({ x, y }) => ({ x, y })),
       }, drawn ? 'warn' : 'error'));
-      factor *= constraintFactor(outside.length, labels.length, drawn);
+      penaliseAll(constraintFactor(outside.length, labels.length, drawn));
     }
   }
 
-  return { warnings, factor: Math.max(0, Math.min(1, factor)) };
+  // Facts about the sheet itself, raised once for the whole result.
+  //
+  // Resolution is ranked with the first group and clamps the result below
+  // QUALITY_POOR deliberately: measured on the fixtures, a plan shrunk until
+  // its walls are hairlines reports *higher* confidence than the same plan at
+  // full size while losing half the building, because every term the score is
+  // made of asks how cleanly the outline followed ink and there is less ink to
+  // disagree with. An answer that cannot be trusted must not be handed over as
+  // a number, so this pushes it into the offer-the-brush branch.
+  // Not in draw mode, following the same rule as `label-outside` and the OCR
+  // constraints: there the stroke is the intent, and an outline the user
+  // painted over faint or absent wall is the answer they asked for rather than
+  // a resolution problem. It fired on blank paper, where there is no wall to
+  // measure and the message would have described one.
+  if (!context.userDrawn
+    && context.wallThickness > 0 && context.wallThickness < MIN_TRACEABLE_WALL_PX) {
+    warnings.push(warning('low-resolution', {
+      px: Number(context.wallThickness.toFixed(1)),
+    }, 'error'));
+    penaliseAll(0.35);
+  }
+
+  if (context.skew > MIN_REPORTABLE_SKEW_DEG) {
+    warnings.push(warning('plan-skewed', {
+      degrees: Math.round(context.skew),
+    }, 'warn'));
+    penaliseAll(0.85);
+  }
+
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  return {
+    warnings,
+    factor: clamp(factor),
+    floorFactors: floorFactors.map(clamp),
+  };
 };
 
 // How far apart one room's two scales may be before the room, not the drawing,

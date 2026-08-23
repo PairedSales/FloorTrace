@@ -14,7 +14,8 @@ import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-ko
 import useAppStore, { roomScaleSamples } from '../store/appStore';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
 import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
-import { useEraserTool } from '../hooks/useEraserTool';
+import { useCornerEraser } from '../hooks/useEraserTool';
+import { useImageEraser } from '../hooks/useImageEraser';
 import { useCropTool } from '../hooks/useCropTool';
 import { useDrawTool } from '../hooks/useDrawTool';
 import { useVoidTool } from '../hooks/useVoidTool';
@@ -67,6 +68,7 @@ const CanvasStage = React.memo(({
   onSaveUndoPoint,
   onCancelUndoSave,
   eraserToolActive,
+  cornerEraserActive,
   eraserBrushSize,
   cropToolActive,
   onCropToolToggle,
@@ -158,9 +160,9 @@ const CanvasStage = React.memo(({
       : perimeterOverlay;
   }, [perimeterOverlay]);
 
-  const eraser = useEraserTool({
+  const cornerEraser = useCornerEraser({
     perimeterOverlay: activePerimeterOverlay,
-    eraserToolActive,
+    cornerEraserActive,
     eraserBrushSize,
     onPerimeterUpdate: useCallback((nextVertices, isFinal) => {
       if (isFinal) {
@@ -170,6 +172,16 @@ const CanvasStage = React.memo(({
         perimeterRef.current?.setLocalPerimeterVertices(nextVertices);
       }
     }, [onPerimeterUpdate]),
+    getCanvasCoords,
+  });
+
+  // The other eraser: a white brush over the plan itself, for the legend or
+  // dimension string that made the trace go wrong in the first place.
+  const imageEraser = useImageEraser({
+    imageObj: camera.imageObj,
+    imageEraserActive: eraserToolActive,
+    eraserBrushSize,
+    onImageUpdate,
     getCanvasCoords,
   });
 
@@ -273,8 +285,10 @@ const CanvasStage = React.memo(({
     // Scale line
     currentScaleLine,
 
-    // Eraser, Crop & Draw
-    eraser,
+    // Erasers, Crop & Draw
+    imageEraser,
+    cornerEraser,
+    cornerEraserActive,
     crop,
     drawTool,
     onDrawModeToggle,
@@ -543,7 +557,7 @@ const CanvasStage = React.memo(({
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          style={{ cursor: (eraserToolActive || drawModeActive) ? 'none' : (cropToolActive || voidToolActive) ? 'crosshair' : 'default' }}
+          style={{ cursor: (eraserToolActive || cornerEraserActive || drawModeActive) ? 'none' : (cropToolActive || voidToolActive) ? 'crosshair' : 'default' }}
         >
           {camera.isImageReady && (
             <Layer ref={backgroundImageLayerRef} {...contentTransform} listening={false}>
@@ -673,7 +687,7 @@ const CanvasStage = React.memo(({
             </Group>
 
             <Group listening={false}>
-              {eraserToolActive && router.currentMousePos && (
+              {(eraserToolActive || cornerEraserActive) && router.currentMousePos && (
                 <Circle
                   x={router.currentMousePos.x}
                   y={router.currentMousePos.y}

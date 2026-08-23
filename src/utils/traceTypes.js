@@ -110,6 +110,9 @@ export function normalizeTraces(traces) {
   if (!Array.isArray(traces)) return traces;
   return assignTypeColors(traces.map((t) => (t && typeof t === 'object' ? {
     ...t,
+    // A trace saved before attempt history existed has none, not an unknown
+    // one: every reader indexes into this array, so it has to exist.
+    attempts: Array.isArray(t.attempts) ? t.attempts : [],
     type: normalizeTraceType(t.type),
     typeSource: t.typeSource
       ?? (normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE ? 'auto' : 'user'),
@@ -133,10 +136,16 @@ export function normalizeTraces(traces) {
  * whatever type ends up applying rather than passed alongside it. Anything else
  * — `id`, `name`, `vertices`, `closed`, `quality`, `wallFaces`, `holes` — is a
  * plain override.
+ *
+ * `attempts` is what this outline was before something replaced it, oldest
+ * first. Born empty and written by `recordAttempt` (traceManager), because an
+ * outline that is one mutable cell makes every recovery destructive — and the
+ * only move that lowers the issue count is then destroying the evidence.
  */
 export const makeTrace = ({ type = DEFAULT_TRACE_TYPE, ...rest } = {}) => ({
   name: '1st Floor',
   vertices: [],
+  attempts: [],
   closed: false,
   visible: true,
   locked: false,

@@ -1,8 +1,9 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
-import { loadImageFromClipboard, loadPagesFromFile, isPdfFile } from '../utils/imageLoader';
-import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
+import {
+  loadImageFromClipboard, loadPagesFromFile, isPdfFile, pageShortfall, lowResolutionNote,
+} from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
@@ -20,7 +21,7 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
       perfResetRun();
       perfMark(MARKS.imageSet);
       // Load and validate first — a failed paste must leave the current project intact
-      const { dataUrl, mimeType } = await loadImageFromClipboard();
+      const { dataUrl, mimeType, lowResolution } = await loadImageFromClipboard();
       if (dataUrl) {
         resetOverlays();
         undoManager.clear();
@@ -32,10 +33,21 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
         useAppStore.getState().setActiveDocumentMeta({ sourceFileName: null });
         prewarmDetection(dataUrl);
         await handleManualMode(dataUrl, true); // Automatically enter manual mode
+        // The same note the dropped-file path gives, and this is the path that
+        // needs it most: a paste is a screenshot, which is the one input that
+        // routinely arrives at screen resolution.
+        const tooSmall = lowResolutionNote(lowResolution ? 1 : 0);
+        if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
       }
     } catch (error) {
       console.error('Error pasting image:', error);
-      notify('Nothing to paste — copy an image first.', { type: 'error', id: 'paste' });
+      // The loader's own words. One message covered a refused clipboard, an
+      // empty one and an image over the 20 MB cap — and told all three to copy
+      // an image first, which for the last two is advice for a problem the user
+      // does not have.
+      notify(error?.message || 'Nothing to paste — copy an image first.', {
+        type: 'error', id: 'paste',
+      });
     }
   }, [resetOverlays, handleManualMode, makeRoomForIncoming, setImage, setImageMimeType]);
 
@@ -46,7 +58,10 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
   const openOne = useCallback(async (file) => {
     if (!file) return;
 
-    const isFloorplan = file.name.endsWith('.floorplan');
+    // Case-insensitively, the way `isPdfFile` one operand along has always
+    // tested: a `.FLOORPLAN` off a Windows share was refused as "not a plan
+    // image" by the same expression that accepts `.PDF`.
+    const isFloorplan = /\.floorplan$/i.test(file.name ?? '');
     const openable = isFloorplan || file.type.startsWith('image/') || isPdfFile(file);
     // Said, not silently ignored. A dropped file that vanishes without a word
     // is indistinguishable from an app that has stopped responding — which is
@@ -86,13 +101,17 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
         // the current project intact. A PDF arrives as one entry per page,
         // which is where a two-page plan set becomes two plans.
         setIsProcessing(true, 'Reading the plan…');
-        const { pages, skipped } = await loadPagesFromFile(file, {
-          maxPages: MAX_OPEN_DOCUMENTS,
+        const { pages, totalPages } = await loadPagesFromFile(file, {
           onProgress: (n, total) => {
             if (total > 1) setIsProcessing(true, `Rendering page ${n} of ${total}…`);
           },
         });
 
+        // Counted as they open, never assumed from `pages.length`: the plan cap
+        // can stop this loop halfway, and the old message reported the pages
+        // *rendered* as the pages opened.
+        let opened = 0;
+        let small = 0;
         for (const page of pages) {
           if (!makeRoomForIncoming()) break;
           perfResetRun();
@@ -105,15 +124,15 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
           // Not awaited: it runs in the detection worker while the scan below
           // holds the main thread and the Tesseract pool.
           prewarmDetection(page.dataUrl);
+          opened += 1;
+          if (page.lowResolution) small += 1;
           await handleManualMode(page.dataUrl, true);
         }
 
-        if (skipped > 0) {
-          notify(
-            `Opened the first ${pages.length} pages — ${skipped} more are in that PDF.`,
-            { type: 'warning', id: 'file-open' },
-          );
-        }
+        const shortfall = pageShortfall({ opened, rendered: pages.length, totalPages });
+        if (shortfall) notify(shortfall, { type: 'warning', id: 'file-open' });
+        const tooSmall = lowResolutionNote(small);
+        if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);

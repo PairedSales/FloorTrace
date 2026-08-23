@@ -356,8 +356,15 @@ export function composeExhibit(ctx, model, {
         ry += Math.round(17 * ui);
         const notes = [
           outline.typeLabel,
+          // How it was reached, before how much of it sat on drawn wall. A
+          // reviewer opening this in a workfile could not tell an outline the
+          // appraiser painted from one the app traced, and the two deserve
+          // different amounts of trust.
+          outline.provenance,
           outline.quality
-            ? (outline.quality.percent === null ? 'unverified' : `${outline.quality.percent}% confidence`)
+            ? (outline.quality.edited ? null
+              : outline.quality.percent === null ? 'unverified'
+                : `${outline.quality.percent}% wall match`)
             : null,
           outline.voids,
         ].filter(Boolean).join(' · ');
@@ -390,7 +397,11 @@ export function composeExhibit(ctx, model, {
     const flagOps = [];
     let fy = y + Math.round(13 * ui);
     for (const flag of model.flags) {
-      const color = flag.severity === 'error' ? PAPER.crit : PAPER.warn;
+      // A finding somebody checked against the plan and accepted still prints,
+      // in the resting tone rather than a warning one — the record is the
+      // point, and colouring it amber would have it read as outstanding.
+      const color = flag.severity === 'reviewed' ? PAPER.ink2
+        : flag.severity === 'error' ? PAPER.crit : PAPER.warn;
       flagOps.push({ op: 'dot', x: left + 14 * ui, y: fy + 7 * ui, r: 3.5 * ui, fill: color });
       wrapLines((t) => measure(t, flagFont), flag.text, inner).forEach((l, i) => {
         flagOps.push(text(l, left + 26 * ui, fy, flagFont, i === 0 ? color : PAPER.ink2));

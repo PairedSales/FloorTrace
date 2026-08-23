@@ -12,7 +12,11 @@ export function useToolRouter({
   scaleRef,
 
   // States & Tool Flags
+  // Two erasers now, and they are unrelated jobs: `eraserToolActive` is the
+  // white brush over the plan image, `cornerEraserActive` deletes the outline's
+  // own corners. One flag used to carry the second under the first one's name.
   eraserToolActive,
+  cornerEraserActive,
   cropToolActive,
   lineToolActive,
   drawAreaActive,
@@ -62,7 +66,8 @@ export function useToolRouter({
   currentScaleLine,
 
   // Sub-system: Eraser, Crop & Draw Hooks (directly instantiated in Canvas)
-  eraser,
+  imageEraser,
+  cornerEraser,
   crop,
   drawTool,
   onFinishDrawMode,
@@ -166,7 +171,14 @@ export function useToolRouter({
     if (eraserToolActive) {
       e.cancelBubble = true;
       e.evt.preventDefault();
-      eraser.handleEraserMouseDown(stage);
+      imageEraser.handleEraserMouseDown(stage);
+      return;
+    }
+
+    if (cornerEraserActive) {
+      e.cancelBubble = true;
+      e.evt.preventDefault();
+      cornerEraser.handleEraserMouseDown(stage);
       return;
     }
 
@@ -184,8 +196,8 @@ export function useToolRouter({
       return;
     }
     // ── end void tool ────────────────────────────────────────────────────────
-  }, [drawModeActive, drawTool, eraserToolActive, cropToolActive, eraser, crop,
-    voidToolActive, voidTool]);
+  }, [drawModeActive, drawTool, eraserToolActive, cornerEraserActive, cropToolActive,
+    imageEraser, cornerEraser, crop, voidToolActive, voidTool]);
 
   // Stage Mouse Down
   const handleStageMouseDown = useCallback((e) => {
@@ -237,7 +249,7 @@ export function useToolRouter({
     const mousePoint = getCanvasCoords(stage);
     if (!mousePoint) return;
 
-    const needsMousePos = eraserToolActive || drawModeActive ||
+    const needsMousePos = eraserToolActive || cornerEraserActive || drawModeActive ||
       (drawAreaActive && currentCustomShape && currentCustomShape.vertices.length > 0) ||
       (traceInteractionMode === 'drawing' && perimeterVertices && perimeterVertices.length > 0);
 
@@ -251,9 +263,14 @@ export function useToolRouter({
       return;
     }
 
-    // Eraser brush dragging
-    if (eraserToolActive && eraser.isErasingRef.current) {
-      eraser.handleEraserMouseMove(stage, e.evt.shiftKey);
+    // Eraser brush dragging — the image brush and the corner brush in turn.
+    if (eraserToolActive && imageEraser.isErasingRef.current) {
+      imageEraser.handleEraserMouseMove(stage, e.evt.shiftKey);
+      return;
+    }
+
+    if (cornerEraserActive && cornerEraser.isErasingRef.current) {
+      cornerEraser.handleEraserMouseMove(stage, e.evt.shiftKey);
       return;
     }
 
@@ -363,10 +380,12 @@ export function useToolRouter({
     }
   }, [
     eraserToolActive,
+    cornerEraserActive,
     cropToolActive,
     drawModeActive,
     drawTool,
-    eraser,
+    imageEraser,
+    cornerEraser,
     crop,
     draggingRoom,
     roomStart,
@@ -435,8 +454,13 @@ export function useToolRouter({
     }
 
     // Eraser mouse up
-    if (eraser.isErasingRef.current) {
-      eraser.handleEraserMouseUp();
+    if (imageEraser.isErasingRef.current) {
+      imageEraser.handleEraserMouseUp();
+      return;
+    }
+
+    if (cornerEraser.isErasingRef.current) {
+      cornerEraser.handleEraserMouseUp();
       return;
     }
 
@@ -480,7 +504,7 @@ export function useToolRouter({
     } else {
       dragStartPosRef.current = null;
     }
-  }, [drawTool, eraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, commitRoomDrag, scaleRef, stageRef, viewportSyncTokenRef]);
+  }, [drawTool, imageEraser, cornerEraser, crop, voidTool, draggingRoom, localRoomOverlay, draggingRoomCorner, commitRoomDrag, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // ── touch ─────────────────────────────────────────────────────────────────
   // One finger is a pointer; two are the camera. The split is here rather than
@@ -544,8 +568,11 @@ export function useToolRouter({
       if (drawTool.isDrawingRef.current) {
         drawTool.handleDrawMouseUp();
       }
-      if (eraser.isErasingRef.current) {
-        eraser.handleEraserMouseUp();
+      if (imageEraser.isErasingRef.current) {
+        imageEraser.handleEraserMouseUp();
+      }
+      if (cornerEraser.isErasingRef.current) {
+        cornerEraser.handleEraserMouseUp();
       }
       if (crop.isCroppingRef.current) {
         crop.handleCropMouseUp();
@@ -573,7 +600,7 @@ export function useToolRouter({
       window.removeEventListener('touchend', handleWindowTouchEnd);
       window.removeEventListener('touchcancel', handleWindowTouchEnd);
     };
-  }, [drawTool, eraser, crop, voidTool, scaleRef, stageRef, viewportSyncTokenRef]);
+  }, [drawTool, imageEraser, cornerEraser, crop, voidTool, scaleRef, stageRef, viewportSyncTokenRef]);
 
   // Stage Clicks
   const handleStageClick = useCallback((e) => {
@@ -581,7 +608,8 @@ export function useToolRouter({
       return;
     }
 
-    if (isDraggingRef.current || eraserToolActive || cropToolActive || drawModeActive) {
+    if (isDraggingRef.current || eraserToolActive || cornerEraserActive
+      || cropToolActive || drawModeActive) {
       return;
     }
 
@@ -644,7 +672,7 @@ export function useToolRouter({
       // nothing, so a printed scale bar degrades to a raw click.
       if (scaleToolActive) {
         const snapped = (autoSnapEnabled && !e.evt?.shiftKey)
-          ? findVertexSnapPoint(clickPoint) : null;
+          ? findVertexSnapPoint(clickPoint, getSnapTolerance()) : null;
         const finalPoint = snapped || clickPoint;
         const store = useAppStore.getState();
         if (!store.currentScaleLine) {
@@ -669,7 +697,8 @@ export function useToolRouter({
           return;
         }
         
-        const snappedPoint = autoSnapEnabled ? findVertexSnapPoint(clickPoint) : null;
+        const snappedPoint = autoSnapEnabled
+          ? findVertexSnapPoint(clickPoint, getSnapTolerance()) : null;
         const finalPoint = snappedPoint || clickPoint;
         
         if (perimeterVertices.length > 2) {
@@ -746,6 +775,7 @@ export function useToolRouter({
     perimeterVertices,
     autoSnapEnabled,
     findVertexSnapPoint,
+    getSnapTolerance,
     handleAddPerimeterVertex,
     handleClosePerimeter,
     onMeasurementLineUpdate,
@@ -758,6 +788,7 @@ export function useToolRouter({
     scaleRef,
     getCanvasCoords,
     eraserToolActive,
+    cornerEraserActive,
     cropToolActive,
     drawModeActive,
     scaleToolActive,
@@ -908,7 +939,9 @@ export function useToolRouter({
       }
       // ── end void tool ──────────────────────────────────────────────────────
       if (eraserToolActive) {
-        eraser.cancelErase();
+        imageEraser.cancelErase();
+      } else if (cornerEraserActive) {
+        cornerEraser.cancelErase();
       } else if (cropToolActive) {
         crop.resetCropState();
       } else if (lineToolActive && onLineToolToggle) {
@@ -964,8 +997,10 @@ export function useToolRouter({
     }
   }, [
     eraserToolActive,
+    cornerEraserActive,
     cropToolActive,
-    eraser,
+    imageEraser,
+    cornerEraser,
     crop,
     lineToolActive,
     onLineToolToggle,

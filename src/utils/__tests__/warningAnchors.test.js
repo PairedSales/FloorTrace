@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAnchor, anchorBounds, UNANCHORED } from '../warningAnchors.js';
+import {
+  resolveAnchor, anchorBounds, UNANCHORED, DETECTOR_ANCHORED,
+} from '../warningAnchors.js';
 import { WARNING_CODES } from '../boundaryQuality.js';
 
 const ring = (x0, y0, x1, y1) => [
@@ -38,7 +40,7 @@ describe('resolveAnchor', () => {
   it('resolves every ranked code or declares it unanchorable', () => {
     for (const code of WARNING_CODES) {
       const anchor = resolveAnchor({ code, detail: detailFor(code) }, ctx());
-      if (UNANCHORED.has(code)) {
+      if (UNANCHORED.has(code) || DETECTOR_ANCHORED.has(code)) {
         expect(anchor, `${code} is declared unanchorable`).toBeNull();
       } else {
         expect(anchor, `${code} resolves an anchor`).not.toBeNull();
@@ -46,8 +48,19 @@ describe('resolveAnchor', () => {
     }
   });
 
+  // The other half of the three-way split: a detector-anchored code must
+  // actually use the anchor it is shipped. Declaring one and then dropping it
+  // is the same silent unclickability the guard above exists to prevent.
+  it('uses the anchor a detector-anchored warning arrives with', () => {
+    const supplied = { kind: 'ring', rings: [ring(300, 300, 360, 340)] };
+    for (const code of DETECTOR_ANCHORED) {
+      const anchor = resolveAnchor({ code, detail: detailFor(code), anchor: supplied }, ctx());
+      expect(anchor, `${code} keeps its detector anchor`).toEqual(supplied);
+    }
+  });
+
   it('declares nothing unanchorable that the detector never emits', () => {
-    for (const code of UNANCHORED) {
+    for (const code of [...UNANCHORED, ...DETECTOR_ANCHORED]) {
       expect(WARNING_CODES, code).toContain(code);
     }
   });

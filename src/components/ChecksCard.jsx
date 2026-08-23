@@ -26,12 +26,19 @@ const CHIP_TONE = {
    Full-size prose, not 9px grey, and the detail is on the page rather than in
    a `title`: the scale note used to keep its whole explanation in a tooltip,
    which on a phone is nowhere at all. */
-const WarningRow = ({ label, detail, severity = 'warn', anchor, active, onFocus }) => (
+const WarningRow = ({ label, detail, remedy, severity = 'warn', anchor, active, onFocus }) => (
   <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 py-2 border-t border-line-soft first:border-t-0">
     <span className={`mt-[6px] w-[7px] h-[7px] rounded-full shrink-0 ${SEVERITY_DOT[severity] ?? SEVERITY_DOT.warn}`} />
     <div className="min-w-0">
       <p className="text-[12.5px] font-semibold leading-snug text-fg">{label}</p>
       <p className="text-[12px] leading-snug text-fg-3 mt-0.5">{detail}</p>
+      {/* What to do about it. Every scale message already ended with an
+          instruction and no trace warning did, so the panel described problems
+          it offered no way to act on. A code with no remedy renders no line
+          rather than a filler one. */}
+      {remedy && (
+        <p className="text-[12px] leading-snug text-fg-2 mt-1">{remedy}</p>
+      )}
     </div>
     {anchor && (
       <button
@@ -85,12 +92,20 @@ const TraceBlock = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarn
   const stale = staleVoidCount(trace);
   const expandable = ranked.length > 0;
 
-  const chipTone = quality.level === 'good' ? CHIP_TONE.ok
-    : quality.level === 'fair' ? CHIP_TONE.warn : CHIP_TONE.error;
-  const tone = reasons.length === 0 || quality.level === 'good' ? 'text-fg-3'
-    : quality.level === 'fair' ? 'text-warn' : 'text-crit';
+  // Tone from the worst warning actually present, not from the confidence
+  // band. An error-severity finding on an outline that happened to score above
+  // the good threshold used to render in resting grey under a green chip.
+  const worst = reasons.some((w) => w.severity === 'error') ? 'error'
+    : reasons.length ? 'warn' : 'ok';
+  const chipTone = quality.edited ? CHIP_TONE.ok
+    : worst === 'error' ? CHIP_TONE.error
+      : worst === 'warn' ? CHIP_TONE.warn
+        : quality.level === 'good' ? CHIP_TONE.ok
+          : quality.level === 'fair' ? CHIP_TONE.warn : CHIP_TONE.error;
+  const tone = worst === 'error' ? 'text-crit' : worst === 'warn' ? 'text-warn' : 'text-fg-3';
   const headline = reasons.length === 0
-    ? (notes.length ? `${notes.length} note${notes.length === 1 ? '' : 's'}` : 'No warnings')
+    ? (quality.edited ? 'Edited by hand'
+      : notes.length ? `${notes.length} note${notes.length === 1 ? '' : 's'}` : 'No warnings')
     : `${reasons.length} to check · ${reasons[0].detail}`;
 
   const row = (warning) => (
@@ -98,6 +113,7 @@ const TraceBlock = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarn
       key={warning.index}
       label={warning.label}
       detail={warning.detail}
+      remedy={warning.remedy}
       severity={warning.severity}
       anchor={resolveAnchor(quality.warnings[warning.index], anchorCtx)}
       active={focusedWarning?.traceId === trace.id && focusedWarning?.index === warning.index}
@@ -112,9 +128,22 @@ const TraceBlock = ({ trace, quality, expanded, onToggle, anchorCtx, focusedWarn
         <span className="flex-1 min-w-0 truncate text-[12.5px] font-medium text-fg-2">
           {trace.name}
         </span>
-        <span className={`chip ${chipTone}`}>
+        {/* "wall match", not "confidence". The number is the share of this
+            outline that sits on wall the plan actually draws — evidence about
+            the tracing, blind to whether the enclosed area is the right area.
+            Read as "92% accurate" it is worse than no number: across the
+            results the app presents, its correlation with area error is
+            +0.117, and the worst over-count in the fixture set carries the
+            joint-highest value. */}
+        <span
+          className={`chip ${chipTone}`}
+          title={quality.edited
+            ? 'You edited this outline, so the detector’s score no longer describes it.'
+            : 'How much of this outline sits on wall the plan actually draws. It does not check whether a wing or a garage was left out.'}
+        >
           <span className="chip-dot" />
-          {quality.percent !== null ? `${quality.percent}% confidence` : 'unverified'}
+          {quality.edited ? 'edited by hand'
+            : quality.percent !== null ? `${quality.percent}% wall match` : 'unverified'}
         </span>
       </div>
 
@@ -185,9 +214,16 @@ const ChecksCard = () => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const rooms = useAppStore((s) => s.rooms);
   const detectedDimensions = useAppStore((s) => s.detectedDimensions);
-  const calibrated = useAppStore((s) => s.calibration?.calibrated);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
   const areas = useAppStore(selectActiveAreaByType);
+  const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
+  const areaRatio = useAppStore((s) => s.calibration?.quality?.areaRatio);
+  // The app's only signal that a calibration was deliberately refused. It was
+  // a 12px `aria-hidden` triangle on the tab strip — which does not render at
+  // one plan, and does not exist at all on the mobile shell. Here it is a
+  // counted row on the one surface both shells share.
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  const needsRescale = useAppStore((s) => s.documents?.[activeDocumentId]?.needsRescale);
   const focusedWarning = useAppStore((s) => s.focusedWarning);
   const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
 
@@ -200,7 +236,7 @@ const ChecksCard = () => {
   if (!image) return null;
 
   const scaleNote = scaleQualitySummary(scaleQuality);
-  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted);
+  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome);
 
   const traced = perimeterTraces.filter((t) => t.vertices?.length >= 3);
   const corners = traced.reduce((n, t) => n + t.vertices.length, 0);
@@ -218,7 +254,11 @@ const ChecksCard = () => {
   )?.trace.id ?? null;
   const openId = openTraceId === undefined ? autoOpen : openTraceId;
 
-  const nothingMeasured = !calibrated && traced.length === 0;
+  // With no outline there is nothing to call clean, whatever the scale says.
+  // Gated on `!calibrated` as well, this printed "the scale and every outline
+  // came back clean" on a plan whose scan had succeeded and whose trace had
+  // then produced nothing at all.
+  const nothingMeasured = traced.length === 0;
   const chipLabel = issues.count === 0
     ? (nothingMeasured ? 'Nothing yet' : 'All clear')
     : `${issues.count} to check`;
@@ -238,9 +278,26 @@ const ChecksCard = () => {
           {issues.count === 0 && (
             <p className="text-[12px] leading-snug text-fg-3 pb-0.5">
               {nothingMeasured
-                ? 'Nothing measured yet — read the dimensions, or set the scale from a length you know.'
+                ? (lastTraceOutcome
+                  ? 'No outline on this plan. The last attempt did not produce one.'
+                  : 'Nothing measured yet — read the dimensions, or set the scale from a length you know.')
                 : 'Nothing to check. The scale and every outline came back clean.'}
             </p>
+          )}
+
+          {/* A trace that ran and produced nothing has no trace object to hang
+              a warning on, so without this the card falls silent about the one
+              thing that just happened. */}
+          {lastTraceOutcome && traced.length === 0 && (
+            <WarningRow
+              severity="error"
+              label={lastTraceOutcome.level === 'failed'
+                ? 'The last trace found no outline'
+                : 'The last trace was rejected'}
+              detail={lastTraceOutcome.reason
+                ?? 'Nothing on this plan read as a closed exterior wall.'}
+              remedy="Paint over the exterior walls and FloorTrace will read them."
+            />
           )}
 
           {/* The scale, whatever it has to say. A scale that agrees is worth
@@ -251,6 +308,20 @@ const ChecksCard = () => {
               label={scaleNote.short}
               detail={scaleNote.detail}
               severity={scaleNote.level === 'check' ? 'warn' : 'info'}
+            />
+          )}
+
+          {/* A scale this plan measured while it was parked was refused rather
+              than applied, because area goes as scale squared and a late one
+              is a wrong number that looks right. Its only mark was an
+              unlabelled 12px triangle on the tab strip — which does not render
+              at one plan, and has no mobile surface at all. */}
+          {needsRescale && (
+            <WarningRow
+              severity="warn"
+              label="This plan's scale was not applied"
+              detail="Dimensions were read while you were on another plan, so the scale they imply was held back rather than applied late to a measurement you had moved on from."
+              remedy="Read dimensions again to measure this plan now."
             />
           )}
 
@@ -268,6 +339,19 @@ const ChecksCard = () => {
         <Section title="Measurements">
           <StatRow label="Dimension labels read" value={labelCount} />
           <StatRow label="Rooms measured" value={measuredRooms} />
+          {/* The one number the app holds that can see an *area* error rather
+              than a tracing error: the traced building against what its own
+              labels add up to. It was computed, gated on in one direction and
+              shown nowhere. Stated rather than only flagged, because a
+              reviewer who knows the plan can judge it far better than a
+              threshold can. */}
+          {areaRatio > 0 && (
+            <StatRow
+              label="Traced building vs. its labels"
+              value={`${areaRatio.toFixed(1)}×`}
+              tone={areaRatio > 2.5 || areaRatio < 0.7 ? 'text-warn' : undefined}
+            />
+          )}
           <StatRow
             label="Outlines traced"
             value={perimeterTraces.length > traced.length

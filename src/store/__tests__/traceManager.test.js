@@ -122,6 +122,28 @@ describe('trace types', () => {
     expect(after[1].vertices).toEqual(square(40));
   });
 
+  // Identity rode the array index, so a re-trace whose floors landed somewhere
+  // else on the sheet carried `type`/`typeSource: 'user'` onto foreign
+  // geometry — and `classifyTraces` then refuses to correct a user-set type,
+  // so a whole storey stayed out of GLA permanently.
+  it('does not carry a hand-assigned type onto a different building', () => {
+    const at = (x, n) => [
+      { x, y: 0 }, { x: x + n, y: 0 }, { x: x + n, y: n }, { x, y: n },
+    ];
+    useAppStore.getState().setImage('data:image/png;base64,AAAA');
+    useAppStore.getState().applyDetectedTraces([at(0, 100), at(500, 60)]);
+    const garageId = traces()[1].id;
+    useAppStore.getState().setPerimeterTraceType(garageId, 'garage');
+
+    // A re-trace that finds the two storeys of the house instead, nowhere near
+    // where the garage was.
+    useAppStore.getState().applyDetectedTraces([at(0, 100), at(0, 90)]);
+
+    const after = traces();
+    expect(after[1].id).not.toBe(garageId);
+    expect(after[1].type).toBe(DEFAULT_TRACE_TYPE);
+  });
+
   it('leaves a colour alone when it was not derived from the type', () => {
     useAppStore.setState({
       perimeterTraces: [{
