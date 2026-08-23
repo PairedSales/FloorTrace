@@ -313,7 +313,13 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
     // it holds. Painting it to the far edge left several hundred px of empty
     // panel between the last tab and a new-plan button pinned to the corner,
     // and that button belongs beside the tabs it adds to.
-    <div ref={stripRef} className="flex items-stretch h-[30px] shrink-0">
+    //
+    // Past the button the row is the canvas's own paper, so the strip ends at
+    // the `+` and the plan starts there. `bg-surface`, never `canvas-grid-bg`:
+    // that class is also the selector the dark theme re-applies the *light*
+    // palette through (`:root[data-theme='dark'] .canvas-grid-bg`), so wearing
+    // it here would hand every tab inside the light theme's tokens.
+    <div ref={stripRef} className="flex items-stretch h-[30px] shrink-0 bg-surface">
       <div className="flex items-stretch min-w-0 bg-panel border-b border-r border-line-soft">
         <div
           role="tablist"
