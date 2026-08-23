@@ -34,6 +34,38 @@ const overlaps = (a, b, margin) =>
   a.minX <= b.maxX + margin && b.minX <= a.maxX + margin
   && a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
 
+// Why a piece of the drawing never reached the answer. Seven branches between
+// the wall mask and the floors discarded one with a bare `continue`, and a
+// skipped network is a missing wing until somebody has looked at it — so each
+// one names itself and the count is reported as `outlines-dropped`.
+const DROP = {
+  thinInk: 'too little wall ink to be a building',
+  limit: 'more outlines on the page than the floor limit',
+  nested: 'inside an outline already traced',
+  noCandidate: 'no closed outline could be found for it',
+  noPolygon: 'no usable polygon came back',
+};
+
+// Six regions is what a highlight can point at; these are the six worth
+// spending. A network that produced no outline is a wing that is missing, and
+// the size filter's are usually a title block.
+const DROP_PRIORITY = [DROP.noCandidate, DROP.noPolygon, DROP.nested, DROP.limit, DROP.thinInk];
+
+const dropNet = (dropped, reason, bbox) => {
+  dropped.reasons.add(reason);
+  dropped.regions.push({ reason, bbox: bbox ?? null });
+};
+
+// A network whose centre lands inside a floor already traced: interior detail
+// (stair block, island, courtyard ring), not another outline. Tested against
+// the outline rather than the carved footprint mask, or a courtyard that has
+// just been carved into a hole reads as "not inside" and comes back as a
+// phantom floor.
+const nestedIn = (bbox, floors) => {
+  const p = { x: (bbox.minX + bbox.maxX) >> 1, y: (bbox.minY + bbox.maxY) >> 1 };
+  return floors.some((f) => pointInPolygon(p, f.outerPolygon));
+};
+
 // Partition the wall mask into disconnected wall networks (one per floor
 // outline drawn on the page): dilate to associate nearby strokes, label, and
 // project the original wall pixels onto the groups.
@@ -129,10 +161,24 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
 
   nets.sort((a, b) => b.size - a.size);
   const minSize = Math.max(200, 0.1 * nets[0].size);
-  return nets
-    .filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= 0.008 * width * height)
+  const minBbox = 0.008 * width * height;
+  const passed = nets.filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= minBbox);
+  const kept = passed
     .slice(0, maxNetworks)
     .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }));
+
+  // What this filter threw away, so assembleFloors can report it instead of
+  // losing it. Only networks whose extent already cleared the "could be a
+  // building" bar: below it every plan has dozens — dimension strings, a north
+  // arrow, a title block — and a count including those says nothing. Carried on
+  // the array rather than in a new return shape, because scripts/traceDebug.mjs
+  // and the memo both take these nets as a plain list.
+  kept.dropped = [
+    ...nets.filter((n) => n.size < minSize && bboxAreaOf(n.bbox) >= minBbox)
+      .map((n) => ({ reason: DROP.thinInk, bbox: n.bbox })),
+    ...passed.slice(maxNetworks).map((n) => ({ reason: DROP.limit, bbox: n.bbox })),
+  ];
+  return kept;
 };
 
 // Partitioning the page into wall networks and climbing each one's closing
@@ -316,6 +362,11 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     evidence,
     structuralInk: generated.structuralKept,
     alternatives: ranked.slice(1, 4).map((c) => ({
+      // The geometry, not only its scores. The search already computed these
+      // and threw them away at the main-thread boundary — so when a tie-break
+      // inside SCORE_EPSILON picked wrong, the right footprint existed and the
+      // user's only offer was to paint the whole outline again.
+      polygon: c.shape.polygon,
       variant: c.variant,
       policy: c.policy,
       radius: c.radius,
@@ -418,6 +469,10 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
   const searches = [];
   const alternatives = [];
   let worstConfidence = 1;
+  // Seeded with whatever the partition already discarded before this attempt
+  // saw a network, so one count covers the whole route from ink to floors.
+  const dropped = { reasons: new Set(), regions: [] };
+  for (const region of nets.dropped ?? []) dropNet(dropped, region.reason, region.bbox);
 
   // The geometric non-GLA detectors guess at intent from shape. In draw mode
   // the user already expressed intent by where they painted, so only the
@@ -428,15 +483,20 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
 
   for (let netIndex = 0; netIndex < nets.length; netIndex += 1) {
     const net = nets[netIndex];
-    if (floors.length >= maxFloors) break;
-    // A network sitting inside an already-traced outline is interior detail
-    // (stair block, island, courtyard ring), not another floor. Tested against
-    // the outline rather than the carved footprint mask, or a courtyard that
-    // has just been carved into a hole reads as "not inside" and comes back as
-    // a phantom floor.
-    const cx = (net.bbox.minX + net.bbox.maxX) >> 1;
-    const cy = (net.bbox.minY + net.bbox.maxY) >> 1;
-    if (floors.some((f) => pointInPolygon({ x: cx, y: cy }, f.outerPolygon))) continue;
+    if (floors.length >= maxFloors) {
+      // The break skips every remaining network, not only this one — and the
+      // cap is not why a nested one would have gone, so each still names
+      // itself.
+      for (let k = netIndex; k < nets.length; k += 1) {
+        const bbox = nets[k].bbox;
+        dropNet(dropped, nestedIn(bbox, floors) ? DROP.nested : DROP.limit, bbox);
+      }
+      break;
+    }
+    if (nestedIn(net.bbox, floors)) {
+      dropNet(dropped, DROP.nested, net.bbox);
+      continue;
+    }
 
     // The net key carries the search scope and the pass, so `gen|` and `ev|`
     // inherit both.
@@ -444,19 +504,41 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
       net, analysis, options, constraints, cache, `${searchScope}|${passKey}|${netIndex}`,
     )
       ?? (brush ? freehandFloorNet(net, analysis, options) : null);
-    if (!detected) continue;
+    if (!detected) {
+      dropNet(dropped, DROP.noCandidate, net.bbox);
+      continue;
+    }
     searches.push(detected.search);
     alternatives.push(detected.alternatives);
 
-    for (const footprint of detected.floorComps) {
-      if (floors.length >= maxFloors) break;
+    const comps = detected.floorComps;
+    for (let compIndex = 0; compIndex < comps.length; compIndex += 1) {
+      const footprint = comps[compIndex];
+      if (floors.length >= maxFloors) {
+        for (let k = compIndex; k < comps.length; k += 1) {
+          dropNet(dropped, DROP.limit, comps[k].bbox ?? net.bbox);
+        }
+        break;
+      }
       const floor = buildFloor(
         footprint, { ...analysis, wallMask: net.mask }, detected.epsilon, floorOptions,
       );
-      if (!floor) continue;
+      if (!floor) {
+        dropNet(dropped, DROP.noPolygon, footprint.bbox ?? net.bbox);
+        continue;
+      }
       floor.sealRadius = footprint.radius;
       floor.confidence = detected.confidence;
-      floor.warnings = detected.warnings;
+      // Only for a network that produced one floor: with several, a runner-up
+      // footprint for the network as a whole does not correspond to any one of
+      // them, and offering it as "the next-best version of this outline" would
+      // be a different building.
+      floor.alternatives = comps.length === 1 ? detected.alternatives : [];
+      // The carve's own record rides along with the scorer's. `buildFloor`
+      // returns them separately because this assignment used to replace the
+      // whole array, which would have dropped every statement about what area
+      // was removed, refused or left unsubtracted.
+      floor.warnings = [...detected.warnings, ...(floor.carveWarnings ?? [])];
       floor.candidate = {
         variant: detected.best.variant,
         policy: detected.best.policy,
@@ -500,7 +582,7 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
   const biggestBboxArea = floors.reduce((best, f) => Math.max(best, bboxAreaOf(f.footprintBbox)), 0);
   const biggestArea = floors.reduce((best, f) => Math.max(best, f.footprintArea), 0);
   const kept = [];
-  let rejectedFloors = 0;
+  const rejectedRings = [];
   for (const floor of floors) {
     const relBbox = bboxAreaOf(floor.footprintBbox) / biggestBboxArea;
     const relArea = floor.footprintArea / biggestArea;
@@ -511,15 +593,46 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
       && relBbox < 0.55
       && structural < 0.35
       && holdsConstraint !== true;
-    if ((!brush && relBbox < 0.12) || suspicious) {
-      rejectedFloors += 1;
+    // The size test takes the escape the plausibility test already had, but
+    // not on its own. `holdsConstraint` is a parsed dimension label sitting
+    // inside, not a room the user confirmed, and a room schedule printed in a
+    // title block has several — so it is paired with the structural test that
+    // is already what separates a legend from a building. A small outline the
+    // labels place inside survives if it is drawn as wall; a hairline box with
+    // a schedule in it does not.
+    const tooSmall = !brush && relBbox < 0.12
+      && !(holdsConstraint === true && structural >= 0.35);
+    if (tooSmall || suspicious) {
+      rejectedRings.push(bboxRing(floor.footprintBbox));
       continue;
     }
     kept.push(floor);
   }
-  if (!kept.length) kept.push(floors[0]);
-  if (rejectedFloors) {
-    warnings.push(warning('floors-rejected', { count: rejectedFloors }, 'info'));
+  // Reinstating the largest is a floor that was *not* rejected after all, and
+  // it is the first one this loop turned away.
+  if (!kept.length) {
+    kept.push(floors[0]);
+    rejectedRings.shift();
+  }
+  if (rejectedRings.length) {
+    // 'warn', not the 'info' this carried: it removes area from the total,
+    // which is the definition of something to check, and at 'info' it was
+    // neither counted nor shown.
+    warnings.push(warning('floors-rejected', { count: rejectedRings.length }, 'warn',
+      { kind: 'ring', rings: rejectedRings.slice(0, 6) }));
+  }
+  if (dropped.regions.length) {
+    // A highlight of forty boxes points at nothing; the count carries the rest.
+    // Worst first, because the partition's own drops are seeded ahead of the
+    // search's and would otherwise take all six.
+    const droppedRings = dropped.regions
+      .filter((r) => r.bbox)
+      .sort((a, b) => DROP_PRIORITY.indexOf(a.reason) - DROP_PRIORITY.indexOf(b.reason))
+      .slice(0, 6).map((r) => bboxRing(r.bbox));
+    warnings.push(warning('outlines-dropped', {
+      count: dropped.regions.length,
+      reasons: [...dropped.reasons],
+    }, 'warn', droppedRings.length ? { kind: 'ring', rings: droppedRings } : null));
   }
 
   // Reading order (rows top-to-bottom, left-to-right within a row). Row
@@ -549,12 +662,17 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
   const primary = ordered.reduce(
     (best, f) => (bboxAreaOf(f.footprintBbox) > bboxAreaOf(best.footprintBbox) ? f : best),
   );
+  // Keyed on the whole detail, not on `code` plus `detail.px` — only
+  // `bridged-opening` carries a `px`, so every other code collapsed to its
+  // first instance and three findings on three floors read as one.
+  const seen = new Set(warnings.map((w) => `${w.code}|${JSON.stringify(w.detail ?? null)}`));
   for (const floor of ordered) {
     worstConfidence = Math.min(worstConfidence, floor.confidence);
     for (const w of floor.warnings) {
-      if (!warnings.some((existing) => existing.code === w.code && existing.detail?.px === w.detail?.px)) {
-        warnings.push(w);
-      }
+      const key = `${w.code}|${JSON.stringify(w.detail ?? null)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      warnings.push(w);
     }
     delete floor.net;
   }
@@ -582,6 +700,14 @@ export const assembleFloors = (analysis, options, nets, cache, searchScope, pass
       wallBbox: nets[0].bbox,
       wallBboxArea: bboxAreaOf(nets[0].bbox),
       networks: nets.length,
+      // Working px. Every piece of the drawing this attempt did not measure,
+      // with why — the geometry behind `outlines-dropped` and `floors-rejected`
+      // for anything that wants more than their counts.
+      rejectedRegions: [
+        ...dropped.regions,
+        ...floors.filter((f) => !kept.includes(f))
+          .map((f) => ({ reason: 'judged not to be a building', bbox: f.footprintBbox })),
+      ],
     },
   };
 };

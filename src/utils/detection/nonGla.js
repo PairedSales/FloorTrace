@@ -218,6 +218,11 @@ const SOURCE_CONFIDENCE = {
 /**
  * Candidate non-GLA regions for one footprint, from every evidence source.
  * Returns first-class region objects; nothing is removed here.
+ *
+ * `nearMisses` are regions that looked non-GLA and were not offered as
+ * candidates. They carry no mask because nothing may carve from them — they
+ * exist so a refusal can be stated instead of being the one outcome the result
+ * has no words for.
  */
 export const collectNonGlaRegions = (footprint, analysis, options) => {
   const { width, height, wallThickness } = analysis;
@@ -253,6 +258,7 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   const resolved = [];
   const unresolved = [];
   const garageCavityIds = new Set();
+  const nearMisses = [];
 
   if (cavities.components.length) {
     for (const region of options.excludeRegions ?? []) {
@@ -287,7 +293,7 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
         exteriorThickness,
         minCavity,
       });
-      for (const id of garages) {
+      for (const id of garages.found) {
         const comp = cavities.components[id];
         regions.push({
           source: 'garage',
@@ -296,6 +302,20 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
           size: comp.size,
           bbox: comp.bbox,
           confidence: SOURCE_CONFIDENCE.garage,
+        });
+      }
+      for (const miss of garages.nearMisses) {
+        // A cavity a label already claimed is being carved on better evidence
+        // than the geometry that doubts it.
+        if (resolved.some((r) => r.id === miss.id)) continue;
+        nearMisses.push({
+          source: 'garage',
+          keyword: null,
+          size: miss.size,
+          bbox: miss.bbox,
+          reason: miss.reason,
+          walledFrac: miss.walledFrac,
+          doorFrac: miss.doorFrac,
         });
       }
     }
@@ -352,7 +372,7 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
     }
   }
 
-  return regions;
+  return { regions, nearMisses };
 };
 
 // Merge candidates covering the same physical area: two sources agreeing is
@@ -384,6 +404,18 @@ export const arbitrateRegions = (regions) => {
   return merged.sort((a, b) => b.confidence - a.confidence || b.size - a.size);
 };
 
+// What a refused region says about itself. No mask: this leaves the detector
+// for the debug channel and the worker structured-clones whatever it is
+// handed, and a page-sized array per refusal is megabytes of it.
+export const refusedRegion = (region, reason) => ({
+  sources: region.sources ?? [region.source],
+  keyword: region.keyword ?? null,
+  size: region.size,
+  bbox: region.bbox,
+  confidence: region.confidence,
+  reason,
+});
+
 /**
  * Remove accepted regions from the footprint in ONE pass, so the result cannot
  * depend on detector order, and stop at a cumulative bound so three
@@ -401,14 +433,14 @@ export const applyRegions = (footprint, regions, analysis, options) => {
   let removedArea = 0;
   for (const region of regions) {
     if (removedArea + region.size > maxCumulative * originalArea) {
-      rejected.push({ ...region, reason: 'cumulative-bound' });
+      rejected.push(refusedRegion(region, 'cumulative-bound'));
       continue;
     }
     for (let i = 0; i < remove.length; i += 1) if (region.mask[i]) remove[i] = 1;
     removedArea += region.size;
     accepted.push(region);
   }
-  if (!accepted.length) return { footprint, accepted: [], rejected, holes: [] };
+  if (!accepted.length) return { footprint, accepted: [], rejected, removed: null };
 
   const mask = footprint.mask.slice();
   for (let i = 0; i < mask.length; i += 1) if (remove[i]) mask[i] = 0;
@@ -426,28 +458,16 @@ export const applyRegions = (footprint, regions, analysis, options) => {
 
   const labeled = largestComponent(opened, width, height);
   if (!labeled || labeled.component.size < 0.35 * originalArea) {
-    return { footprint, accepted: [], rejected: regions.map((r) => ({ ...r, reason: 'guard' })), holes: [] };
+    return {
+      footprint,
+      accepted: [],
+      rejected: regions.map((r) => refusedRegion(r, 'guard')),
+      removed: null,
+    };
   }
 
   const { component, labels: newLabels } = labeled;
   const newMask = componentMask(newLabels, component, width);
-
-  // A carve that removed an entirely interior region (a courtyard, a light
-  // well) leaves a void the outer contour cannot express. Those become holes
-  // instead of being silently dropped with the rest of the non-largest
-  // components.
-  const holes = [];
-  // Plain loop, not `Uint8Array.from(mask, fn)`: the mapper form walks the
-  // iterator protocol and dispatches per element, ~92 ns/px against ~4 ns/px.
-  const voids = new Uint8Array(newMask.length);
-  for (let i = 0; i < voids.length; i += 1) voids[i] = newMask[i] ? 0 : 1;
-  const { labels: voidLabels, components: voidComps } = labelComponents(voids, width, height);
-  for (const comp of voidComps) {
-    if (comp.bbox.minX === 0 || comp.bbox.minY === 0
-      || comp.bbox.maxX === width - 1 || comp.bbox.maxY === height - 1) continue;
-    if (comp.size < 0.004 * originalArea) continue;
-    holes.push({ labels: voidLabels, componentId: comp.id, size: comp.size, bbox: comp.bbox });
-  }
 
   return {
     footprint: {
@@ -463,6 +483,73 @@ export const applyRegions = (footprint, regions, analysis, options) => {
     },
     accepted,
     rejected,
-    holes,
+    // What the carve took, so the caller can tell a void the carve opened —
+    // which is a hole — from one that was always there.
+    removed: remove,
   };
+};
+
+/**
+ * Enclosed voids of a footprint mask: components of its complement that touch
+ * no page edge and are worth naming. The carve is what usually opens one (a
+ * courtyard, a light well), but this is deliberately not conditional on a
+ * carve having happened — a void kept as floor area is a wrong number whatever
+ * produced it.
+ */
+export const enclosedVoids = (mask, width, height, minArea) => {
+  // Plain loop, not `Uint8Array.from(mask, fn)`: the mapper form walks the
+  // iterator protocol and dispatches per element, ~92 ns/px against ~4 ns/px.
+  const voids = new Uint8Array(mask.length);
+  for (let i = 0; i < voids.length; i += 1) voids[i] = mask[i] ? 0 : 1;
+  const { labels, components } = labelComponents(voids, width, height);
+  const found = [];
+  for (const comp of components) {
+    if (comp.bbox.minX === 0 || comp.bbox.minY === 0
+      || comp.bbox.maxX === width - 1 || comp.bbox.maxY === height - 1) continue;
+    if (comp.size < minArea) continue;
+    found.push({ labels, componentId: comp.id, size: comp.size, bbox: comp.bbox });
+  }
+  return found;
+};
+
+// A courtyard or a light well is one empty rectangle; a suite of rooms is not.
+// Without this the largest-component test below calls every part of the plan
+// the circulation cannot be walked to from a void, and on a real drawing that
+// is a wing, not a well: ExampleFloorplan3's four bedrooms and three baths
+// (37.7% of the plan, solidity 0.56) and ExampleFloorplan6's whole left
+// apartment (24.0%, 0.58) were each reported as an enclosed space to cut out.
+// The true cases are exactly square against their box — the synthetic
+// courtyard, both wide-door garage bays: 1.00 — so the gate has 0.27 of clear
+// air on either side and does not need to be tuned finer than that.
+const MIN_CAVITY_SOLIDITY = 0.85;
+
+/**
+ * Spaces inside the footprint with no way out: components of the un-walled
+ * interior other than the one the circulation is in, and shaped like a void
+ * rather than like rooms.
+ *
+ * `enclosedVoids` cannot see these. The seal floods the outside and keeps the
+ * complement, so a courtyard is filled solid before this file is reached and
+ * only ever becomes a void as a by-product of being carved — which is why a
+ * courtyard on a plan with no label was counted as living area. Doorways are
+ * gaps in the wall, so every room the plan can be walked through joins one
+ * component; what is left over is a space nothing opens onto. That is a
+ * courtyard or a fully-walled sealed room, and geometry cannot say which,
+ * which is exactly why the answer is a warning and not a carve.
+ */
+export const sealedCavities = (mask, wall, width, height, minArea) => {
+  const open = new Uint8Array(mask.length);
+  for (let i = 0; i < open.length; i += 1) open[i] = mask[i] && !wall[i] ? 1 : 0;
+  const { components } = labelComponents(open, width, height);
+  let circulation = null;
+  for (const comp of components) {
+    if (!circulation || comp.size > circulation.size) circulation = comp;
+  }
+  const found = [];
+  for (const comp of components) {
+    if (comp === circulation || comp.size < minArea) continue;
+    if (comp.size < MIN_CAVITY_SOLIDITY * bboxAreaOf(comp.bbox)) continue;
+    found.push({ size: comp.size, bbox: comp.bbox });
+  }
+  return found;
 };

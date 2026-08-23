@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, fireEvent, cleanup } from '@testing-library/react';
+import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import StatusBar from '../StatusBar';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
+import { beginWork, settleWork, ownerVerdict, resetRequests } from '../../store/documentRequests';
 
 /**
  * One band says both things now: what mode the app is in, and — while a tool is
@@ -134,5 +135,79 @@ describe('StatusBar while a tool is running', () => {
     const live = view.container.querySelector('[role="status"]');
     expect(live.textContent).toContain('Placing corners');
     expect(live.textContent).not.toContain('3 corners');
+  });
+});
+
+/**
+ * A trace can hold the app for thirty seconds, and until this the band said
+ * "Working…" for all of them: a slow trace and a wedged one were the same
+ * screen, with nothing to press either way.
+ */
+describe('StatusBar while work is running', () => {
+  beforeEach(() => {
+    resetRequests();
+    vi.useFakeTimers();
+    useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useAppStore.setState({ isProcessing: false, processingMessage: '' });
+  });
+
+  // A trace is usually well under a second, and a counter that flashes up and
+  // vanishes on every one of them is noise.
+  it('stays quiet about a job that finishes quickly', () => {
+    const work = beginWork('trace');
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(4000); });
+    expect(view.getByText('Finding the outline…')).toBeTruthy();
+    expect(view.queryByText('Stop')).toBeNull();
+    expect(view.queryByText(/^\d+s$/)).toBeNull();
+    settleWork(work);
+  });
+
+  it('says how long it has been going, and offers the way out', () => {
+    const work = beginWork('trace');
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(6000); });
+    expect(view.getByText('6s')).toBeTruthy();
+
+    fireEvent.click(view.getByText('Stop'));
+    // Aborted, so anything the trace still delivers is dropped rather than
+    // written over a plan the user has moved on from.
+    expect(ownerVerdict(work)).toBe('dropped');
+    settleWork(work);
+  });
+
+  // A project save or a PDF render holds `isProcessing` and owns no token, and
+  // a Stop that stops nothing is worse than no Stop at all.
+  it('offers no Stop for work nothing owns', () => {
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(6000); });
+    expect(view.getByText('6s')).toBeTruthy();
+    expect(view.queryByText('Stop')).toBeNull();
+  });
+
+  // The OCR pool has no interrupt, so a Stop could only drop the *result* while
+  // the spinner kept turning for another twenty seconds. Still says how long.
+  it('offers no Stop for a scan, which cannot be stopped', () => {
+    const work = beginWork('scan');
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(6000); });
+    expect(view.getByText('6s')).toBeTruthy();
+    expect(view.queryByText('Stop')).toBeNull();
+    settleWork(work);
+  });
+
+  // Same rule as the vertex count: the region is aria-atomic, so a number that
+  // changes every second would re-announce the whole band every second.
+  it('keeps the ticking clock out of the live region', () => {
+    const work = beginWork('trace');
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(6000); });
+    const live = view.container.querySelector('[role="status"]');
+    expect(live.textContent).toContain('Finding the outline…');
+    expect(live.textContent).not.toContain('6s');
+    settleWork(work);
   });
 });

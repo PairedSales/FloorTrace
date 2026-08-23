@@ -11,7 +11,29 @@
 export const UNANCHORED = new Set([
   'no-boundary', 'floor-empty',
   'bridged-opening', 'brush-mismatch', 'thin-structure-excluded',
-  'drawn-freehand', 'floors-rejected', 'no-alternative',
+  'drawn-freehand', 'no-alternative',
+  // Facts about the sheet, not about a place on it. There is nowhere to fly to
+  // that would tell the user anything they cannot already see.
+  'low-resolution', 'plan-skewed',
+  // The policy that won, not a stretch of the outline: the span is applied
+  // across the whole wall network, so there is no one run to point at.
+  'spanned-walls',
+]);
+
+/**
+ * Codes whose anchor can only come *with* the warning.
+ *
+ * A third category, and the distinction is real: `UNANCHORED` means there is
+ * nothing to point at, while these point at geometry the detector held and the
+ * store never receives — a footprint it rejected, a wall network it skipped, a
+ * cavity it declined to carve. None of it survives into `perimeterTraces`, so
+ * the live resolver cannot rebuild it and must not pretend to. They arrive with
+ * `warning.anchor` set, which wins above; without one they honestly show
+ * nothing, which is what a project saved before they existed does.
+ */
+export const DETECTOR_ANCHORED = new Set([
+  'floors-rejected', 'outlines-dropped', 'non-gla-not-removed',
+  'enclosed-void', 'void-superseded', 'area-excluded',
 ]);
 
 // Warnings about the outline as a whole. The honest highlight is "this
@@ -93,7 +115,7 @@ export const resolveAnchor = (warning, ctx) => {
   // *live* resolver can derive, so a code can sit in it and still arrive with
   // one — a pre-Phase-2 draft has no stored anchor and correctly shows nothing.
   if (warning.anchor) return warning.anchor;
-  if (UNANCHORED.has(code)) return null;
+  if (UNANCHORED.has(code) || DETECTOR_ANCHORED.has(code)) return null;
   if (WHOLE_OUTLINE.has(code)) return ownRing(ctx);
   if (code === 'floors-overlap') return overlapAnchor(warning, ctx);
   if (code === 'label-outside') return labelAnchor(warning, ctx);

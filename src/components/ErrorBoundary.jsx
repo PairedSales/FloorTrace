@@ -1,5 +1,24 @@
 import { Component } from 'react';
 import { recoverFromStaleBuild, isStaleChunkError } from '../utils/staleBuild';
+import useAppStore from '../store/appStore';
+
+// What this screen may honestly promise about the work. The draft is only a net
+// where the draft store is actually being written: with "Save work on exit" off
+// nothing was stored at all, and after a storage refusal the last write failed.
+// Telling someone their work is safe and being wrong about it is the worst
+// sentence this app can print, and it was printed unconditionally.
+const DRAFT_PROMISE = {
+  off: 'Nothing was saved — “Save work on exit” is off, so reloading starts a new session.',
+  error: 'This browser refused to store the draft, so the most recent work may not survive a reload.',
+};
+const DRAFT_PROMISE_DEFAULT =
+  'Your work is not lost — the autosaved draft is still in this browser, and reloading restores it.';
+// Before the restore effect has run, `draftState` is still its 'off' default and
+// says nothing about what is on disk. A render that throws on first paint is
+// exactly that moment, and printing "nothing was saved" there is the same lie
+// this table exists to stop, pointing the other way.
+const DRAFT_PROMISE_UNKNOWN =
+  'This failed before the app finished starting. Whatever was saved before is still in this browser, and reloading reads it back.';
 
 /**
  * The last thing between a thrown render and a blank page.
@@ -37,6 +56,12 @@ class ErrorBoundary extends Component {
     if (!error) return this.props.children;
     // A stale build is already reloading; saying so beats a bare spinner.
     const stale = isStaleChunkError(error);
+    // Read here rather than subscribed to: the tree that would re-render is the
+    // one that just threw, and this screen is shown once and then reloaded away.
+    const { draftState, _hasRestoredState } = useAppStore.getState();
+    const promise = _hasRestoredState
+      ? (DRAFT_PROMISE[draftState] ?? DRAFT_PROMISE_DEFAULT)
+      : DRAFT_PROMISE_UNKNOWN;
 
     return (
       <div role="alert" className="fixed inset-0 flex items-center justify-center p-6 bg-shell">
@@ -47,8 +72,7 @@ class ErrorBoundary extends Component {
           {!stale && (
             <>
               <p className="text-[13px] text-fg-2 leading-relaxed mb-4">
-                Your work is not lost — the autosaved draft is still in this
-                browser, and reloading restores it.
+                {promise}
               </p>
               <button
                 type="button"

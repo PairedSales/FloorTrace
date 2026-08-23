@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createTraceSlice } from './traceManager';
+import { createTraceSlice, recordAttempt } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
+import { retireOnEdit } from '../utils/boundaryQuality';
 import {
   DEFAULT_TRACE_TYPE,
   makeTrace,
@@ -77,13 +78,29 @@ const workingStateDefaults = () => {
   currentCustomShape: null,
   perimeterVertices: null,
   tracedBoundaries: null,
+  // What the last trace did, whatever it did — `{ at, level, reason, warnings,
+  // verdict }`. Document content, because "this plan was traced and produced
+  // nothing" is a fact about the plan that has to survive the ten seconds a
+  // toast lives. Without it, a trace that came back empty wrote no field at
+  // all, so the panel said "every outline came back clean" about zero
+  // outlines and the spine read identically to a plan nobody had tried.
+  lastTraceOutcome: null,
   eraserToolActive: false,
+  // The outline-corner eraser, which is a different tool from the image
+  // eraser above it: one deletes vertices from a trace, the other paints the
+  // plan white. They shared a name and a flag until the rail's "Erase
+  // clutter" was found to do neither of the things it advertised.
+  cornerEraserActive: false,
   eraserBrushSize: 60,
   cropToolActive: false,
   voidToolActive: false,
   // Draw mode: rough brush strokes over the exterior walls, which the tracer
-  // then reads as a corridor constraint. Scratch input, not document content —
-  // undoable and restored with a draft, but never written to a .floorplan.
+  // then reads as a corridor constraint. Document content, and the exception
+  // proves why: on a plan the detector cannot read, the stroke is the only
+  // statement of the user's intent that exists, it is the input to the
+  // keep-strokes re-trace, and it is a few hundred coordinates beside an
+  // embedded image. Excluding it made reopening a rescued plan strictly worse
+  // than restoring its draft, which inverts the rule the projections exist for.
   drawModeActive: false,
   drawBrushSize: 48,
   drawStrokes: [],
@@ -214,8 +231,12 @@ const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
 const EXCLUDED_PERSISTENT_FIELDS = [
   'isProcessing', 'processingMessage', 'traceInteractionMode',
   'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
+  'cornerEraserActive',
   'cropToolActive', 'eraserBrushSize', 'voidToolActive',
-  'drawModeActive', 'drawBrushSize', 'drawStrokes',
+  'drawModeActive', 'drawBrushSize',
+  // `drawStrokes` is deliberately absent, like `scaleLines` above and for the
+  // same reason: on a plan auto-detection cannot read, the stroke is the
+  // evidence the outline rests on.
   'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
   // `scaleLines` is deliberately absent: it is document content, the evidence
   // a hand-set scale rests on.
@@ -333,8 +354,21 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     const updatedTraces = currentTraces.map((t) => {
       if (t.id === activeId) {
         const vertices = v?.vertices || [];
+        // What this write is about to throw away, kept once.
+        //
+        // A result landing (`v` carries its own `quality` — a re-trace, a draw
+        // mode outline) always supersedes whatever was here. A hand edit does
+        // too, but only the *first* one: `edited` is set by the branch below
+        // and never cleared, so it is exactly the marker for "the pre-edit
+        // geometry of this attempt has already been kept". Without that test a
+        // single vertex drag would fill the cap on its own, and the geometry
+        // worth returning to — the detector's own result — would be the first
+        // thing pushed off the end of it.
+        const replacing = !!v && 'quality' in v;
+        const firstEdit = !replacing && !!t.quality && !t.quality.edited;
+        const base = replacing || firstEdit ? recordAttempt(t) : t;
         return {
-          ...t,
+          ...base,
           vertices,
           // Deliberately the opposite of `quality` below: holes are independent
           // rings a vertex edit did not touch, so an update that omits them
@@ -347,9 +381,27 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
             v ? ('holes' in v ? mergeHoles(t.holes, v.holes) : (t.holes ?? [])) : [],
             vertices,
           ),
-          // Editing a trace by hand makes it the user's geometry, so an
-          // auto-detection's confidence no longer describes it.
-          quality: v && 'quality' in v ? v.quality : null,
+          // Editing a trace by hand demotes its quality; it does not delete it.
+          //
+          // The confidence genuinely stops describing the polygon, so it goes.
+          // The *warnings* do not: `label-outside`, `room-outside`,
+          // `bridged-opening` and `annexation` are facts about the drawing and
+          // about places a corner nudge never visited, and the area after the
+          // nudge is usually barely changed and still wrong. Nulling the whole
+          // record made one nudge clear the issue count, the quality section,
+          // the stage spine, the mobile warn bit and the exhibit's flags at
+          // once — which made destroying the evidence the fastest route to a
+          // clean exhibit. `retireOnEdit` drops only what the new ring answers.
+          quality: v && 'quality' in v
+            ? v.quality
+            : (t.quality
+              ? {
+                ...t.quality,
+                confidence: null,
+                edited: true,
+                warnings: retireOnEdit(t.quality.warnings),
+              }
+              : null),
           // The opposite rule, and for the same reason as `holes`: the wall-face
           // pair describes the detection, not the vertices, so a corner nudge
           // keeps it and the exterior/interior switch still works afterwards.
@@ -483,7 +535,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     return patch;
   }),
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
+  setLastTraceOutcome: (v) => set({ lastTraceOutcome: v }),
   setEraserToolActive: (v) => set({ eraserToolActive: v }),
+  setCornerEraserActive: (v) => set({ cornerEraserActive: v }),
   setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
   setCropToolActive: (v) => set({ cropToolActive: v }),
   setVoidToolActive: (v) => set({ voidToolActive: v }),
@@ -774,6 +828,19 @@ let lastAreaByType = null;
 // which of the two is wrong is the user's call, not the app's.
 const NESTED_ENOUGH = 0.9;
 
+/**
+ * A non-GLA outline nested in a GLA one: the garage the carve failed to
+ * remove, traced by hand, and now in both subtotals.
+ *
+ * Deliberately still typed rather than purely geometric. Two storeys of a
+ * house are nested by construction and both belong in the total, so
+ * containment alone cannot mean duplication — and `containmentRatio` counts
+ * vertices, so two outlines over nearly the same ground are not mutually
+ * contained by it either. The stale-outline case this could not see is fixed
+ * where it is caused instead: every automatic result now goes through
+ * `applyDetectedTraces`, so a re-trace cannot leave a previous outline
+ * standing and summed.
+ */
 const findDoubleCounted = (traces) => {
   const live = traces.filter((t) => t.visible && t.vertices?.length >= 3);
   const found = [];
@@ -784,7 +851,12 @@ const findDoubleCounted = (traces) => {
       if (outer === inner) continue;
       if (normalizeTraceType(outer.type) !== DEFAULT_TRACE_TYPE) continue;
       if (containmentRatio(inner.vertices, outer.vertices) >= NESTED_ENOUGH) {
-        found.push({ innerId: inner.id, innerName: inner.name, outerName: outer.name });
+        found.push({
+          innerId: inner.id,
+          innerName: inner.name,
+          outerName: outer.name,
+          detail: `${inner.name} sits inside ${outer.name}, so its area is counted twice`,
+        });
         break;
       }
     }

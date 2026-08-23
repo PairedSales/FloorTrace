@@ -1,8 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Check, Loader2, Minus, Plus, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
+import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
 import { TOOL_MODES } from './toolModes';
+
+// How long a job may run before this band admits how long it has been running.
+// A trace is usually under a second and a scan is usually a few, and a counter
+// that flickers up and vanishes on every one of them is noise; past this it is
+// the only thing on screen that distinguishes "working" from "wedged".
+const ELAPSED_AFTER_MS = 5000;
 
 // What the draft store is actually doing, said in the user's terms. The cell
 // used to render a hardcoded "Saved" — the one claim in the shell that was
@@ -123,6 +130,39 @@ const StatusBar = ({
     return () => clearTimeout(t);
   }, [flash]);
 
+  // How long the running job has been running, and whether anything owns it.
+  //
+  // Both are polled on the same one-second tick rather than subscribed to:
+  // elapsed time is not state anyone stores, and the work registry lives outside
+  // the store. The tick only exists while `isProcessing` is true, so an idle app
+  // pays nothing.
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [cancellable, setCancellable] = useState(false);
+  useEffect(() => {
+    if (!isProcessing) {
+      setElapsedMs(0);
+      setCancellable(false);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const tick = () => {
+      setElapsedMs(Date.now() - startedAt);
+      // Only work that can really be stopped gets a Stop. A project save, a
+      // PDF render and an OCR scan cannot be, and a button that leaves the
+      // spinner turning is a worse answer than no button.
+      setCancellable(hasStoppableWork());
+    };
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [isProcessing]);
+
+  const handleStop = useCallback(() => {
+    const { count } = cancelActiveWork();
+    if (count) useWorkspaceStore.getState().flashStatus('Stopped — nothing was changed');
+  }, []);
+
+  const showElapsed = isProcessing && elapsedMs >= ELAPSED_AFTER_MS;
+
   const mode = TOOL_MODES[tool];
   const running = !!mode;
   const { Icon, name, hint } = running
@@ -167,6 +207,38 @@ const StatusBar = ({
 
         {shownFlash && <Cell className="text-ok font-semibold">{shownFlash}</Cell>}
       </div>
+
+      {/* How long this has been going, and the way out of it — deliberately
+          *outside* the live region above, for the reason the vertex count is:
+          that region is `aria-atomic`, so a number changing every second would
+          re-announce the whole band once a second for as long as the job runs.
+          `aria-live="off"` on the seconds says the same thing again for a
+          reader that reaches this cell some other way.
+
+          Both appear only after five seconds. A trace that returns in 300 ms
+          would otherwise flash a counter and a button through the band, and a
+          Stop the user cannot hit is a Stop that only makes the app look
+          twitchy. Past five seconds it is the opposite: with no elapsed time
+          and no control, a 30 s trace and a hung one are the same screen. */}
+      {showElapsed && (
+        <Cell className="text-fg-3">
+          <span className="font-mono tabular-nums" aria-live="off">
+            {Math.round(elapsedMs / 1000)}s
+          </span>
+          {cancellable && (
+            <button
+              type="button"
+              onClick={handleStop}
+              title="Stop this and leave the plan as it is"
+              className="inline-flex items-center h-[18px] px-1.5 rounded border border-line
+                         bg-panel-2 text-[11px] text-fg-2 hover:text-fg hover:border-accent/50
+                         transition-colors cursor-pointer"
+            >
+              Stop
+            </button>
+          )}
+        </Cell>
+      )}
 
       {/* One cell, three claimants, in this order: a flash the user just earned
           beats a tool they are only pointing at, and both beat the standing

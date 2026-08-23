@@ -9,7 +9,7 @@ import { traceFloorplanBoundaryCore } from '../pipeline.js';
 import { polygonArea } from '../polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
-  garageHouse, nestedFloorsPlan, mixedThicknessHouse,
+  garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, strokeAround,
   polygonIou, bboxIou, bboxOf,
 } from './synthetic.js';
 
@@ -162,5 +162,59 @@ describe('failure is visible', () => {
       expect(floor.confidence).toBeLessThanOrEqual(1);
       expect(Array.isArray(floor.warnings)).toBe(true);
     }
+  });
+});
+
+
+/**
+ * Draw mode is the app's only escape from total tracing failure, and until now
+ * it was measured exclusively on plans auto-detection already handles — the
+ * probe's three scenarios all trace at 0.66-0.98 bare. So the claim that it
+ * rescues the cases that reach it was prose, and a change to `brush.js` or
+ * `regionFit` could have removed the escape with every harness green.
+ *
+ * Each case here is asserted twice: that automatic tracing really does fail on
+ * it (otherwise the test would pass for the wrong reason forever), and that
+ * painting over it recovers. The stroke is offset outward and wobbled, so a
+ * high IoU means the outline snapped to wall rather than following the hand.
+ */
+describe('draw mode rescues what automatic tracing cannot read', () => {
+  const painted = (img, truth, jitter = 6) => traceFloorplanBoundaryCore(img, {
+    brush: { strokes: [strokeAround(truth, { offset: 10, jitter, step: 8 })], radius: 22 },
+  });
+
+  for (const gap of [100, 180]) {
+    it(`recovers a plan whose windows leave ${gap}px holes in the wall`, () => {
+      const { img, truth } = windowedHouse(gap);
+
+      const auto = traceFloorplanBoundaryCore(img);
+      const autoIou = auto?.outer ? polygonIou(auto.outer.polygon, truth) : 0;
+      expect(autoIou, 'automatic tracing should still be failing here').toBeLessThan(0.5);
+
+      const drawn = painted(img, truth);
+      expect(drawn?.outer).toBeTruthy();
+      expect(polygonIou(drawn.outer.polygon, truth)).toBeGreaterThan(0.95);
+    });
+  }
+
+  // The worst *presented* error in the whole synthetic set: a garage door drawn
+  // 8px instead of 5px defeats the carve, and the result is +41% area at the
+  // confidence ceiling with nothing said. Painting the outline is the recovery.
+  it('recovers the garage the carve declined to remove', () => {
+    const { img, truth } = garageHouse(8);
+
+    const auto = traceFloorplanBoundaryCore(img);
+    expect(areaError(auto.outer.polygon, truth), 'the auto over-count should still be there')
+      .toBeGreaterThan(0.2);
+
+    const drawn = painted(img, truth);
+    expect(polygonIou(drawn.outer.polygon, truth)).toBeGreaterThan(0.95);
+    expect(Math.abs(areaError(drawn.outer.polygon, truth))).toBeLessThan(0.05);
+  });
+
+  it('does not call a painted outline low-resolution', () => {
+    const { img, truth } = windowedHouse(180);
+    const drawn = painted(img, truth);
+    expect(drawn.quality.warnings.some((w) => w.code === 'low-resolution')).toBe(false);
   });
 });

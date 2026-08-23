@@ -199,8 +199,45 @@ describe('exhibit model', () => {
     expect(model.outlines[0].quality.percent).toBe(42);
     const flag = model.flags.find((f) => f.text.startsWith('1st Floor'));
     expect(flag.severity).toBe('error');
-    expect(flag.text).toContain('42% confidence');
+    expect(flag.text).toContain('42% wall match');
     expect(flag.text).toContain('never closed');
+  });
+
+  // The exhibit is read by somebody who was not here. An outline the appraiser
+  // painted and one the app traced deserve different amounts of trust, and the
+  // page could not tell them apart even though every trace records which it is.
+  describe('says how each outline was reached', () => {
+    const provenanceOf = (quality) => buildExhibitModel(setUp({
+      perimeterTraces: [trace(quality === undefined ? {} : { quality })],
+    })).outlines[0].provenance;
+
+    it('names an automatic trace', () => {
+      expect(provenanceOf({ source: 'auto', confidence: 0.9, warnings: [] }))
+        .toBe('traced automatically');
+    });
+
+    it('names a painted one', () => {
+      expect(provenanceOf({ source: 'drawn', confidence: 0.9, warnings: [] }))
+        .toBe('traced from your painted outline');
+    });
+
+    it('says an outline with no quality record was placed by hand', () => {
+      expect(provenanceOf(null)).toBe('placed by hand');
+    });
+
+    it('says when the user adjusted what the detector produced', () => {
+      expect(provenanceOf({ source: 'auto', confidence: null, edited: true, warnings: [] }))
+        .toBe('traced automatically, then adjusted by hand');
+    });
+
+    it('says the first attempt was rejected, and what it cost', () => {
+      expect(provenanceOf({
+        source: 'auto',
+        confidence: 0.89,
+        warnings: [],
+        remediation: { ran: true, accepted: 'join', before: { held: 0 }, after: { held: 2 } },
+      })).toBe('traced again after the first attempt left 2 known rooms outside');
+    });
   });
 
   it('flags a garage counted twice inside the living area', () => {

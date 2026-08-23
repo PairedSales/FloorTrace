@@ -15,7 +15,7 @@ import {
   areaDisplayValue, formatAreaValue,
 } from '../unitConverter';
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
-import { qualitySummary, scaleQualitySummary } from '../boundaryQuality';
+import { qualitySummary, rankedWarnings, scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
 
 export const EXHIBIT_DEFAULTS = {
@@ -99,7 +99,6 @@ const scaleLines = (state) => {
     ? { x: 1 / fpp.x, y: 1 / fpp.y }
     : null;
   const anisotropic = pxPerFoot && Math.abs(pxPerFoot.x - pxPerFoot.y) > 1e-6;
-  const measuredRooms = state.rooms?.length ?? 0;
 
   return {
     value: pxPerFoot
@@ -107,23 +106,86 @@ const scaleLines = (state) => {
         ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
         : `1 ft = ${pxPerFoot.x.toFixed(1)} px`)
       : 'Not set',
-    // Same wording as the Scale card, so the exhibit and the panel describe one
-    // provenance rather than two.
-    provenance: !pxPerFoot
-      ? 'No scale was set — areas are not to scale.'
-      : state.calibration?.source === 'line-calibration'
-        ? 'Set by hand from a line of known length.'
-        : measuredRooms > 0
-          ? `Measured from ${measuredRooms} room${measuredRooms === 1 ? '' : 's'} on this plan.`
-          : 'Measured from the room size entered by hand.',
+    // Derived from what the calibration actually says about itself, not from
+    // how many rooms happen to be in the store. `rooms.length` counts every
+    // room the detector ever confirmed, so a scale pinned to one hand-picked
+    // room printed "Measured from 6 rooms" — and the count went *up* at the
+    // moment the pool stopped being used, because picking a room pushes it
+    // onto `rooms` before calibrating from it alone.
+    provenance: scaleProvenance(state),
   };
+};
+
+// One derivation, shared with the Scale card, so the exhibit and the panel
+// cannot describe two different provenances for one number.
+export const scaleProvenance = (state) => {
+  const cal = state.calibration;
+  if (!cal?.calibrated) return 'No scale was set — areas are not to scale.';
+  const q = cal.quality;
+  if (cal.source === 'line-calibration' || q?.source === 'line') {
+    return q?.lineCount === 2
+      ? 'Set by hand from two lines of known length.'
+      : 'Set by hand from a line of known length.';
+  }
+  // A room the user picked, which replaces the pooled median with the app's
+  // weakest evidence class — worth saying on a document somebody else reads.
+  if (q?.source === 'auto' && q?.reason === 'room-vs-auto') {
+    return 'Taken from one room chosen by hand, overriding the measured average.';
+  }
+  const n = q?.roomCount ?? 0;
+  if (n > 0) return `Measured from ${n} room${n === 1 ? '' : 's'} on this plan.`;
+  return 'Measured from the room size entered by hand.';
+};
+
+/**
+ * How this outline came to be, in one phrase.
+ *
+ * `quality.source` and `quality.remediation` are written on every trace and
+ * survive a `.floorplan` round trip, and until now printed nowhere — so on the
+ * one document that leaves the app and is read by somebody who was not here, a
+ * hand-painted outline and an automatic one looked identical, and a re-searched
+ * one carried no sign that the first attempt had been rejected.
+ */
+export const outlineProvenance = (trace) => {
+  const q = trace?.quality;
+  // No record at all means nothing measured it: the user placed these corners.
+  if (!q) return 'placed by hand';
+  if (q.edited) {
+    return q.source === 'drawn'
+      ? 'traced from your painted outline, then adjusted by hand'
+      : 'traced automatically, then adjusted by hand';
+  }
+  const retry = q.remediation;
+  if (retry?.accepted && retry.before && retry.after) {
+    const recovered = (retry.after.held ?? 0) - (retry.before.held ?? 0);
+    if (recovered > 0) {
+      return `traced again after the first attempt left ${recovered} known `
+        + `room${recovered === 1 ? '' : 's'} outside`;
+    }
+    return 'traced again after the first attempt was rejected';
+  }
+  return q.source === 'drawn' ? 'traced from your painted outline' : 'traced automatically';
 };
 
 // The doubts, ranked by how much of the reported area they put in question.
 // Report-scoped problems first: a double-counted floor is wrong by a whole
 // storey, which no per-outline confidence figure conveys.
-const buildFlags = (state, areas, outlines) => {
+const buildFlags = (state, areas, outlines, measured = true) => {
   const flags = [];
+
+  // First, because it invalidates everything under it.
+  if (!measured) {
+    flags.push({
+      severity: 'error',
+      text: 'No outline has been traced on this plan, so no area has been measured.',
+    });
+  }
+  if (!state.calibration?.calibrated) {
+    flags.push({
+      severity: 'error',
+      text: 'No scale was set, so nothing on this page is to scale.',
+    });
+  }
 
   for (const d of areas.doubleCounted ?? []) {
     flags.push({
@@ -137,14 +199,42 @@ const buildFlags = (state, areas, outlines) => {
     flags.push({ severity: 'warn', text: `Scale: ${scaleNote.detail}` });
   }
 
+  // Every warning on every outline, not only those whose score fell below the
+  // good threshold. The `level === 'good'` skip dropped **error-severity**
+  // findings from the exported workfile whenever the score happened to sit
+  // above 0.75 — which is exactly the wrong-answer-that-looks-green case, on
+  // the one surface a third party reads without the app in front of them.
   for (const outline of outlines) {
-    if (!outline.quality || outline.quality.level === 'good') continue;
-    const pct = outline.quality.percent === null ? 'unverified' : `${outline.quality.percent}% confidence`;
-    flags.push({
-      severity: outline.quality.level === 'fair' ? 'warn' : 'error',
-      text: `${outline.name}: ${pct}`
-        + `${outline.quality.reason ? ` — ${outline.quality.reason}` : ''}.`,
-    });
+    const q = outline.quality;
+    if (!q) continue;
+    const reasons = rankedWarnings(q.warnings).filter((w) => w.severity !== 'info');
+
+    // The score rides on the first row for this outline rather than in a row
+    // of its own: a reviewer needs the reason and the number together, and
+    // repeating "42% wall match" above every one of four findings is noise.
+    const score = q.edited ? 'edited by hand'
+      : q.percent === null ? 'unverified'
+        : `${q.percent}% wall match`;
+
+    for (const w of reasons) {
+      // An acknowledged flag is not dropped, it is re-filed. A workfile that
+      // records a finding was considered is stronger than one that never had
+      // it, and dropping it would make the acknowledge control a way of
+      // quietly cleaning the page.
+      flags.push({
+        severity: w.acknowledged ? 'reviewed' : (w.severity === 'error' ? 'error' : 'warn'),
+        text: `${outline.name} (${score}): ${w.label} — ${w.detail}.`,
+      });
+    }
+
+    // Nothing explained why, so the score has to speak for itself.
+    if (!reasons.length && q.level !== 'good' && !q.edited) {
+      flags.push({
+        severity: q.level === 'fair' ? 'warn' : 'error',
+        text: `${outline.name}: ${score}`
+          + `${q.reason ? ` — ${q.reason}` : ''}.`,
+      });
+    }
   }
 
   const staleVoids = (state.perimeterTraces ?? [])
@@ -184,6 +274,9 @@ export function buildExhibitModel(state, {
   const drawn = (state.perimeterTraces ?? []).filter(
     (t) => t.visible && t.vertices?.length >= 3
   );
+  // Whether anything was actually measured. A page with no outline on it is
+  // not a measurement of zero, and this exhibit goes into a workfile.
+  const measured = drawn.length > 0;
 
   const outlines = drawn.map((trace) => {
     const area = calculateArea(trace.vertices, feetPerPixel, trace.holes);
@@ -198,6 +291,7 @@ export function buildExhibitModel(state, {
       typeLabel: typeLabel === trace.name ? null : typeLabel,
       areaText: calibrated ? `${value} ${suffix}` : '—',
       quality: trace.quality ? qualitySummary(trace.quality) : null,
+      provenance: outlineProvenance(trace),
       voids: voidNote(trace.holes, feetPerPixel, unit),
     };
   });
@@ -298,10 +392,15 @@ export function buildExhibitModel(state, {
     calibrated,
     headline: {
       label: noGla ? 'Total area' : 'Gross Living Area',
-      value: calibrated ? headline.value : '—',
-      suffix: calibrated ? headline.suffix : '',
-      caption: noGla
-        ? 'No outline is marked as living area'
+      // A page with no outline on it used to positively assert "Gross Living
+      // Area / 0 ft²", one keystroke after opening a plan, with no flag. A
+      // measurement that was never made is not a measurement of zero.
+      value: (calibrated && measured) ? headline.value : '—',
+      suffix: (calibrated && measured) ? headline.suffix : '',
+      caption: !measured
+        ? 'No outline has been traced on this plan'
+        : noGla
+          ? 'No outline is marked as living area'
         : `${glaCount} level${glaCount === 1 ? '' : 's'} · measured to the `
           + `${state.useInteriorWalls ? 'interior' : 'exterior'} wall face`
           // A page that reports one plan's figure while the property has more
@@ -317,7 +416,7 @@ export function buildExhibitModel(state, {
     showBreakdown: rows.length > 1,
     scale: scaleLines(state),
     outlines,
-    flags: buildFlags(state, areas, outlines),
+    flags: buildFlags(state, areas, outlines, measured),
     plan,
     disclaimer: 'Areas are grouped in the ANSI Z765 style and are derived from a traced '
       + 'sketch — this is a working measurement, not a certified survey.',

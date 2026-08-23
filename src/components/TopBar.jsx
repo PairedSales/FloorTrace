@@ -222,6 +222,10 @@ const TopBar = ({
   calibrated,
   perimeterTraces,
   drawModeActive,
+  ocrFailed,
+  lastTraceOutcome,
+  alternativeCount = 0,
+  onUseAlternative,
   planCount = 1,
   canOpenPlan = true,
   // file
@@ -268,14 +272,20 @@ const TopBar = ({
   const { canUndo, canRedo } = useUndoHistory();
 
   // Only the two fields that decide weight; the dock's StageSpine feeds the
-  // same function the rest and prints all four stages from it.
-  const { primary, canAddOutline } = planStage({ image, calibrated, perimeterTraces });
+  // same function the rest and prints all four stages from it. `ocrFailed` and
+  // `lastTraceOutcome` are what let the primary stop pointing at the action
+  // that has just failed — re-pressing "Read dimensions" after an empty scan
+  // hits the memoised result and fails identically.
+  const { primary, canAddOutline } = planStage({
+    image, calibrated, perimeterTraces, ocrFailed, lastTraceOutcome,
+  });
 
   const busy = !image || isProcessing;
   // The primary is an instruction, and an instruction you cannot follow is
   // worse than none — so it never lands on a control that is disabled.
-  const scalePrimary = primary === 'scale' && !busy;
-  const outlinePrimary = primary === 'outline' && !busy && !drawModeActive;
+  const scalePrimary = (primary === 'scale' || primary === 'scale-manual') && !busy;
+  const outlinePrimary = (primary === 'outline' || primary === 'outline-paint')
+    && !busy && !drawModeActive;
   const DockIcon = dockOpen ? PanelLeftClose : PanelLeftOpen;
 
   return (
@@ -306,8 +316,8 @@ const TopBar = ({
           <MenuItem label="Open plan or project…" keys={`${MOD}+O`} onSelect={onFileOpen} close={close} />
           <MenuItem label="Paste plan from clipboard" keys={`${MOD}+V`} onSelect={onPasteImage} close={close} />
           <Sep />
-          <MenuItem label="Export for workfile…" keys={`${MOD}+E`} disabled={!image} onSelect={onExport} close={close} />
-          <MenuItem label="Copy measurement image" keys={`${MOD}+${ALT}+C`} disabled={!image} onSelect={onCopyExhibit} close={close} />
+          <MenuItem label="Export for workfile…" keys={`${MOD}+E`} disabled={busy} onSelect={onExport} close={close} />
+          <MenuItem label="Copy measurement image" keys={`${MOD}+${ALT}+C`} disabled={busy} onSelect={onCopyExhibit} close={close} />
           <Sep />
           <MenuItem label="Save editable project" keys={`${MOD}+S`} disabled={!image} onSelect={() => onSaveProject(false)} close={close} />
           <MenuItem label="Save editable project as…" keys={`${MOD}+Shift+S`} disabled={!image} onSelect={onSaveProjectAs} close={close} />
@@ -437,6 +447,22 @@ const TopBar = ({
             menuLabel="More ways to make an outline"
           >
             <MenuItem label="Find outline" disabled={busy || drawModeActive} onSelect={onTracePerimeter} close={close} />
+            {/* The search's own runner-up, which it scored and until now threw
+                away. When two candidates sit within SCORE_EPSILON of each other
+                and the wrong one won, this is the whole correction — so it sits
+                directly under the verb that got it wrong. Hidden rather than
+                disabled when there is none: an option that is never available
+                on a clean trace is noise on every clean trace. */}
+            {alternativeCount > 0 && (
+              <MenuItem
+                label={alternativeCount > 1
+                  ? `Try the next-best outline (${alternativeCount} left)`
+                  : 'Try the next-best outline'}
+                disabled={busy || drawModeActive}
+                onSelect={onUseAlternative}
+                close={close}
+              />
+            )}
             <MenuItem label="Paint outline" keys="1" disabled={busy} onSelect={onPaintOutline} close={close} />
             <MenuItem label="Place corners" keys="2" disabled={busy} onSelect={onPlaceCorners} close={close} />
             <Sep />

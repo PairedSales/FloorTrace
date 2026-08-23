@@ -15,6 +15,19 @@
 // one at a time and the buffer is released with the document.
 const MAX_PDF_BYTES = 60 * 1024 * 1024;
 
+/**
+ * How many pages this app is willing to render from one PDF.
+ *
+ * Its own number, deliberately not the tab cap. The callers used to hand
+ * `MAX_OPEN_DOCUMENTS` in, which made two unrelated limits one: with plans
+ * already open, six pages were rendered — six 4000 px canvases, a few hundred
+ * megabytes of work — for however few slots were actually left, and the message
+ * afterwards counted the pages *rendered* rather than the plans opened. This
+ * bounds the rendering; how many of those pages become plans is the caller's
+ * business, and the caller is the only one that can say.
+ */
+export const MAX_PDF_PAGES = 6;
+
 let pdfjsPromise = null;
 
 /**
@@ -82,9 +95,10 @@ async function renderPage(page, maxDimension) {
  *
  * @param {File|Blob} file
  * @param {{maxDimension: number, maxPages?: number, onProgress?: (page: number, total: number) => void}} options
- * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string}>, skipped: number}>}
+ * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string,
+ *   lowResolution: boolean}>, skipped: number, totalPages: number}>}
  */
-export async function pdfToPageImages(file, { maxDimension, maxPages = Infinity, onProgress } = {}) {
+export async function pdfToPageImages(file, { maxDimension, maxPages = MAX_PDF_PAGES, onProgress } = {}) {
   if (file.size > MAX_PDF_BYTES) {
     throw new Error(`PDF too large. Maximum size is ${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB.`);
   }
@@ -110,7 +124,7 @@ export async function pdfToPageImages(file, { maxDimension, maxPages = Infinity,
   }
 
   try {
-    const total = Math.min(doc.numPages, maxPages);
+    const total = Math.min(doc.numPages, maxPages, MAX_PDF_PAGES);
     const baseName = (file.name ?? 'Plan').replace(/\.pdf$/i, '');
     const pages = [];
 
@@ -124,13 +138,21 @@ export async function pdfToPageImages(file, { maxDimension, maxPages = Infinity,
           mimeType: 'image/png',
           // One plan per page, so each needs a name a tab can show.
           name: doc.numPages > 1 ? `${baseName} p${n}.png` : `${baseName}.png`,
+          // A page is rendered onto `maxDimension`, so it is never the small
+          // input an exported screenshot can be. Carried anyway so a caller
+          // reads one shape whichever kind of file it handed in.
+          lowResolution: false,
         });
       } finally {
         page.cleanup();
       }
     }
 
-    return { pages, skipped: Math.max(0, doc.numPages - total) };
+    // `totalPages` as well as `skipped`, because "left behind" and "in the
+    // file" are different numbers once the caller has a cap of its own: it
+    // opens as many of these pages as it has room for, and only it can say how
+    // many of the whole document that turned out to be.
+    return { pages, skipped: Math.max(0, doc.numPages - total), totalPages: doc.numPages };
   } finally {
     await task.destroy();
   }

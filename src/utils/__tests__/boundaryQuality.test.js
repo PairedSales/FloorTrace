@@ -66,8 +66,11 @@ describe('rankedWarnings', () => {
       warning('no-inner', { floor: 0 }),
     ];
     const ranked = rankedWarnings(list);
+    // `no-inner` outranks `heavy-closing`: in interior mode it means the
+    // outline on screen is the exterior one under an interior caption, which
+    // is a wrong number rather than a note about how the trace was reached.
     expect(ranked.map((w) => w.code)).toEqual([
-      'self-intersecting', 'heavy-closing', 'no-inner', 'no-alternative',
+      'self-intersecting', 'no-inner', 'heavy-closing', 'no-alternative',
     ]);
     expect(primaryWarning(list)).toBe(ranked[0].detail);
   });

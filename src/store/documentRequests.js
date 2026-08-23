@@ -1,5 +1,6 @@
 import useAppStore from './appStore';
 import { parkedStateFor, queueForParked } from './documentManager';
+import { abandonDetectionWork } from '../utils/detection';
 
 /**
  * Ownership for asynchronous work.
@@ -167,7 +168,14 @@ export function deliver(token, apply) {
   return verdict;
 }
 
-/** The signal for work that can stop early rather than finish and be discarded. */
+/**
+ * The signal for work that can stop early rather than finish and be discarded.
+ *
+ * Nothing consumes it yet: the two long awaits are a detection request, which is
+ * stopped by terminating its worker (`cancelActiveWork` below), and an OCR scan,
+ * which cannot be stopped at all. It is the seam for the day a caller can poll
+ * one — until then, a token that is aborted is read through `resolveOwner`.
+ */
 export const signalOf = (token) => token?.controller?.signal;
 
 /**
@@ -190,6 +198,44 @@ export function detachDocument(docId) {
 
 /** Abandon the active plan's work. */
 export const detachActiveDocument = () => detachDocument(activeDocumentId());
+
+// Which kinds a Stop can honestly claim to stop: the ones that run in the
+// detection worker, which can be terminated. An OCR scan cannot — the Tesseract
+// pool has no interrupt — and a dialog is already waiting on the user. Offering
+// a Stop that only drops the *result*, while the spinner keeps turning for
+// another twenty seconds, is a worse answer than offering none.
+const STOPPABLE = new Set(['trace', 'room', 'measure']);
+
+/** Whether the plan is waiting on something a Stop would really stop. */
+export const hasStoppableWork = (docId = activeDocumentId()) =>
+  [...(inFlight.get(docId) ?? [])].some((token) => STOPPABLE.has(token.kind));
+
+/**
+ * Stop what the active plan is waiting on, because the user asked.
+ *
+ * Two halves, and neither is enough on its own. Aborting the tokens settles
+ * *ownership*: anything that arrives late is dropped rather than written. But a
+ * token only decides what may be written — it cannot make the answer arrive,
+ * and the detection cores are straight-line pure JS with nothing to poll a
+ * signal. So the second half hands the CPU back and rejects the promise the
+ * caller is still awaiting, which is what actually clears the spinner. Without
+ * it, "Cancel" would leave a trace running for its full thirty seconds and
+ * change nothing the user can see.
+ *
+ * @returns {{count: number, kinds: string[]}} what was stopped
+ */
+export function cancelActiveWork() {
+  const docId = activeDocumentId();
+  const kinds = [...(inFlight.get(docId) ?? [])].map((token) => token.kind);
+  // Only when something the worker is doing is actually being stopped. A plan
+  // whose only outstanding work is a scan or an open dialog must not cost
+  // another plan its warm decode — terminating is all-or-nothing, so it ends
+  // every open plan's detection work and discards the decode they share.
+  const stoppable = hasStoppableWork(docId);
+  const count = detachDocument(docId);
+  if (stoppable) abandonDetectionWork();
+  return { count, kinds };
+}
 
 /** How many units of work a plan has in flight. For tests and diagnosis. */
 export const workCount = (docId = activeDocumentId()) => inFlight.get(docId)?.size ?? 0;

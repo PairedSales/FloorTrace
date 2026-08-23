@@ -59,6 +59,11 @@ export function useAutoScale() {
         adopted: true,
         roomCount: decision.roomCount,
         source: 'auto',
+        // The traced building against what its own labels add up to — the one
+        // quantity the app holds that can see an area error, as opposed to a
+        // tracing error. Carried so the panel can state it rather than only
+        // gate on it.
+        areaRatio: decision.areaRatio ?? null,
         rejected: decision.rejected.map((r) => ({
           name: r.name, reason: r.reason, pixelsPerFoot: r.pixelsPerFoot ?? null,
         })),
@@ -166,9 +171,18 @@ export function useAutoScale() {
    */
   const reviewAgainstFootprint = useCallback((footprintAreaPx) => {
     const state = useAppStore.getState();
-    // This plan's own measurements, never another's.
-    const run = lastRunByDocRef.current.get(state.activeDocumentId);
-    if (!run || !(footprintAreaPx > 0)) return;
+    // This plan's own measurements, never another's. Rebuilt from the store
+    // when the ref is empty, which is every reopened project and every plan the
+    // user did not scan in this session — the check was silently dead there.
+    const run = lastRunByDocRef.current.get(state.activeDocumentId) ?? (
+      state.rooms?.length
+        ? {
+          rooms: state.rooms,
+          nonGlaRegions: (state.exteriorLabels ?? []).map((l) => l.bbox),
+        }
+        : null
+    );
+    if (!run?.rooms?.length || !(footprintAreaPx > 0)) return;
     if (state.calibration.quality?.source !== 'auto') return;
     applyDecision(selectProjectScale(run.rooms, {
       nonGlaRegions: run.nonGlaRegions,
@@ -176,5 +190,47 @@ export function useAutoScale() {
     }));
   }, [applyDecision]);
 
-  return { measureAndCalibrate, reviewAgainstFootprint };
+  /**
+   * Back to the scale the rooms agreed on.
+   *
+   * Two messages in `boundaryQuality` tell the user how to get here — "Re-scan
+   * to go back to the measured average", "Clear it to go back to the measured
+   * average" — and neither route did that: `applyDecision` refuses to write
+   * over a user-asserted source forever, and clearing a line calibration reset
+   * to *uncalibrated* rather than re-resolving from the rooms still in the
+   * store. There was no `restoreAutoScale` anywhere in the tree.
+   *
+   * It bypasses `isUserAsserted` deliberately: the user is the one asking.
+   */
+  const restoreAutoScale = useCallback(() => {
+    const state = useAppStore.getState();
+    const rooms = state.rooms ?? [];
+    if (!rooms.length) return false;
+    const run = lastRunByDocRef.current.get(state.activeDocumentId);
+    const decision = selectProjectScale(rooms, {
+      nonGlaRegions: run?.nonGlaRegions
+        ?? (state.exteriorLabels ?? []).map((l) => l.bbox),
+    });
+    if (!(decision?.pixelsPerFoot > 0)) return false;
+    useAppStore.getState().applyRoomCalibration(
+      { x: decision.feetPerPixel, y: decision.feetPerPixel },
+      null,
+      'room-calibration',
+      {
+        level: decision.level,
+        reason: decision.reason,
+        disagreement: decision.spread,
+        adopted: true,
+        roomCount: decision.roomCount,
+        source: 'auto',
+        areaRatio: decision.areaRatio ?? null,
+        rejected: decision.rejected.map((r) => ({
+          name: r.name, reason: r.reason, pixelsPerFoot: r.pixelsPerFoot ?? null,
+        })),
+      },
+    );
+    return true;
+  }, []);
+
+  return { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale };
 }

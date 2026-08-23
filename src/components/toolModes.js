@@ -1,6 +1,6 @@
 import {
   Brush, Waypoints, SquareDashedBottom, Scaling, Ruler, Compass,
-  Pentagon, Crop, Eraser, MousePointerClick,
+  Pentagon, Crop, Eraser, CircleMinus, MousePointerClick,
 } from 'lucide-react';
 
 // What each tool mode is called, what it asks the user to do, and how it
@@ -43,6 +43,15 @@ export const TOOL_MODES = {
     doneLabel: 'Close void',
     doneKey: 'Enter',
   },
+  cornerEraser: {
+    icon: CircleMinus,
+    name: 'Removing corners',
+    hint: 'Drag over the outline corners you want gone. Three always remain.',
+    touchHint: 'Drag over the outline corners you want gone. Three always remain.',
+    // Shares `eraserBrushSize` with the image eraser: the slider means the same
+    // thing in both — how wide a swathe the drag takes.
+    brush: 'eraser',
+  },
   scale: {
     icon: Scaling,
     name: 'Setting the scale',
@@ -75,8 +84,9 @@ export const TOOL_MODES = {
   },
   eraser: {
     icon: Eraser,
-    name: 'Erasing',
-    hint: 'Drag over legends or notes that confuse detection.',
+    name: 'Erasing clutter',
+    hint: 'Drag over legends or notes to white them out of the plan.',
+    touchHint: 'Drag over legends or notes to white them out. Pinch to zoom while you work.',
     brush: 'eraser',
   },
   // Not a tool flag: this one is on whenever the read labels are on screen as

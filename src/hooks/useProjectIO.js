@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
-import { parkedStateFor, parkedHistoryFor, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
+import { parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 import { readDocDraft, readHistoryRecord } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
 import * as undoManager from '../store/undoManager';
-import { loadPagesFromFile } from '../utils/imageLoader';
+import { loadPagesFromFile, pageShortfall, lowResolutionNote } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
@@ -72,7 +72,9 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
     const files = [...(input.files ?? [])];
     for (const file of files) {
       try {
-        if (file.name.endsWith('.floorplan')) {
+        // Case-insensitively: a `.FLOORPLAN` used to be read as an image, fail,
+        // and be reported as a file that could not be opened.
+        if (/\.floorplan$/i.test(file.name ?? '')) {
           // At the cap: stop opening, keep what was opened, and let the plan
           // manager's own message explain why the rest did not appear.
           if (!makeRoomForIncoming()) break;
@@ -100,13 +102,16 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
           // the current project intact. A PDF arrives as one entry per page,
           // which is where a two-page plan set becomes two plans.
           setIsProcessing(true, 'Reading the plan…');
-          const { pages, skipped } = await loadPagesFromFile(file, {
-            maxPages: MAX_OPEN_DOCUMENTS,
+          const { pages, totalPages } = await loadPagesFromFile(file, {
             onProgress: (n, total) => {
               if (total > 1) setIsProcessing(true, `Rendering page ${n} of ${total}…`);
             },
           });
 
+          // Counted as they open. The plan cap can stop this loop halfway, and
+          // the old message reported the pages *rendered* as the pages opened.
+          let opened = 0;
+          let small = 0;
           for (const page of pages) {
             if (!makeRoomForIncoming()) break;
             // Before the writes, not after: the decode and the base64 round
@@ -123,15 +128,15 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
             // Not awaited: it runs in the detection worker while the scan below
             // holds the main thread and the Tesseract pool.
             prewarmDetection(page.dataUrl);
+            opened += 1;
+            if (page.lowResolution) small += 1;
             await handleManualMode(page.dataUrl, true);
           }
 
-          if (skipped > 0) {
-            notify(
-              `Opened the first ${pages.length} pages — ${skipped} more are in that PDF.`,
-              { type: 'warning', id: 'file-open' },
-            );
-          }
+          const shortfall = pageShortfall({ opened, rendered: pages.length, totalPages });
+          if (shortfall) notify(shortfall, { type: 'warning', id: 'file-open' });
+          const tooSmall = lowResolutionNote(small);
+          if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
         }
       } catch (error) {
         console.error('Error loading file:', error);

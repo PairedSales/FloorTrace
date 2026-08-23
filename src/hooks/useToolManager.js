@@ -23,6 +23,7 @@ export function useToolManager() {
   const lineToolActive   = useAppStore((s) => s.lineToolActive);
   const drawAreaActive   = useAppStore((s) => s.drawAreaActive);
   const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const cornerEraserActive = useAppStore((s) => s.cornerEraserActive);
   const cropToolActive   = useAppStore((s) => s.cropToolActive);
   const angleToolActive   = useAppStore((s) => s.angleToolActive);
   const drawModeActive   = useAppStore((s) => s.drawModeActive);
@@ -41,6 +42,7 @@ export function useToolManager() {
   const setMeasurementLines       = useAppStore((s) => s.setMeasurementLines);
   const setCustomShapes           = useAppStore((s) => s.setCustomShapes);
   const setScaleToolActive        = useAppStore((s) => s.setScaleToolActive);
+  const setCornerEraserActive     = useAppStore((s) => s.setCornerEraserActive);
   const setCurrentScaleLine       = useAppStore((s) => s.setCurrentScaleLine);
 
   /**
@@ -48,8 +50,8 @@ export function useToolManager() {
    * Saves an undo point first so tool activations are undoable.
    */
   const deactivateAll = useCallback(() => {
-    if (lineToolActive || drawAreaActive || eraserToolActive || cropToolActive
-        || scaleToolActive || voidToolActive) {
+    if (lineToolActive || drawAreaActive || eraserToolActive || cornerEraserActive
+        || cropToolActive || scaleToolActive || voidToolActive) {
       undoManager.save();
     }
     setLineToolActive(false);
@@ -57,6 +59,7 @@ export function useToolManager() {
     setDrawAreaActive(false);
     setCurrentCustomShape(null);
     setEraserToolActive(false);
+    setCornerEraserActive(false);
     setCropToolActive(false);
     setAngleToolActive(false);
     setDrawModeActive(false);
@@ -67,6 +70,7 @@ export function useToolManager() {
     lineToolActive,
     drawAreaActive,
     eraserToolActive,
+    cornerEraserActive,
     cropToolActive,
     scaleToolActive,
     voidToolActive,
@@ -78,6 +82,7 @@ export function useToolManager() {
     setDrawAreaActive,
     setDrawModeActive,
     setEraserToolActive,
+    setCornerEraserActive,
     setLineToolActive,
     setScaleToolActive,
     setVoidToolActive,
@@ -116,6 +121,18 @@ export function useToolManager() {
     deactivateAll();
     setEraserToolActive(true);
   }, [eraserToolActive, deactivateAll, setEraserToolActive]);
+
+  // The outline-corner eraser, which is what the tool named "Erase clutter"
+  // actually did until the image eraser above took that name back.
+  const handleCornerEraserToggle = useCallback(() => {
+    if (cornerEraserActive) {
+      undoManager.save();
+      setCornerEraserActive(false);
+      return;
+    }
+    deactivateAll();
+    setCornerEraserActive(true);
+  }, [cornerEraserActive, deactivateAll, setCornerEraserActive]);
 
   const handleCropToolToggle = useCallback(() => {
     if (cropToolActive) {
@@ -187,6 +204,7 @@ export function useToolManager() {
     handleLineToolToggle,
     handleDrawAreaToggle,
     handleEraserToolToggle,
+    handleCornerEraserToggle,
     handleCropToolToggle,
     handleAngleToolToggle,
     handleDrawModeToggle,

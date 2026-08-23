@@ -103,7 +103,20 @@ const traceQualitySchema = z.object({
     scope: z.string().optional(),
     anchor: z.object({ kind: z.enum(['ring', 'rect', 'point', 'segment']) })
       .catchall(z.any()).nullable().optional(),
+    // That a person checked this against the plan and accepted it. Declared
+    // for exactly the reason the two above are, and it matters more here: an
+    // undeclared key would drop on reopen, so every flag an appraiser had
+    // already cleared would come back, and the count would be monotonic across
+    // sessions as well as within one.
+    acknowledged: z.object({
+      at: z.number().optional(),
+      note: z.string().optional(),
+    }).catchall(z.any()).nullable().optional(),
   })).optional(),
+  // A hand edit demotes the detector's score rather than deleting it, and this
+  // is the flag that says so. Without it a reopened project cannot tell an
+  // outline the user corrected from one the detector never scored.
+  edited: z.boolean().optional(),
   // Why this outline is not the one the first search produced: which passes
   // ran, which was kept, and how many known-inside rooms each attempt held.
   // Declared for the same reason `scope` and `anchor` above are — an undeclared
@@ -153,6 +166,23 @@ const perimeterTraceSchema = z.object({
   holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
+  // What this outline was before a re-trace, a draw-mode result or its first
+  // hand edit replaced it — oldest first, capped at MAX_TRACE_ATTEMPTS.
+  // Declared for the reason `scope` and `anchor` on a warning are: the
+  // `.catchall` below carries it today, and a later tightening that dropped it
+  // would turn every recovery back into a re-scan with nothing saying so.
+  // `wallFaces` is deliberately not part of an attempt — see `makeAttempt`.
+  attempts: z.array(z.object({
+    at: z.number().optional(),
+    source: z.string().optional(),
+    confidence: z.number().nullable().optional(),
+    // px², so a scale corrected after the fact cannot falsify a stored row.
+    area: z.number().optional(),
+    vertices: z.array(vertexSchema),
+    holes: z.array(holeSchema).optional(),
+    quality: traceQualitySchema,
+    remediation: z.object({}).catchall(z.any()).nullable().optional(),
+  }).catchall(z.any())).optional(),
   wallFaces: z.object({
     outer: wallFaceSchema,
     inner: wallFaceSchema,
@@ -262,6 +292,19 @@ const floorStateSchema = z.object({
   unit: z.string().optional(),
   measurementLines: z.array(measurementLineSchema).optional(),
   scaleLines: z.array(scaleLineSchema).optional(),
+  // The brush strokes a rescued outline was traced from. Document content for
+  // the same reason `scaleLines` is: on a plan the detector could not read,
+  // this is the evidence the measurement rests on.
+  drawStrokes: z.array(z.any()).optional(),
+  // What the last trace did, including when it did nothing. `.catchall` below
+  // would carry it either way; declared so it cannot be stripped by a future
+  // tightening, which is how `exteriorLabels` was lost once already.
+  lastTraceOutcome: z.object({
+    at: z.number().optional(),
+    level: z.string().optional(),
+    reason: z.string().nullable().optional(),
+    verdict: z.string().optional(),
+  }).catchall(z.any()).nullable().optional(),
   customShapes: z.array(customShapeSchema).optional(),
   tracedBoundaries: z.any().optional(),
   zoomScale: z.number().nullable().optional(),
