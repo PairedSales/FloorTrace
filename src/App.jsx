@@ -297,10 +297,14 @@ function App() {
                       : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
                         : 'select';
 
-  // "Close project" split in two once more than one plan can be open: closing
-  // the one you are looking at is a different act from closing everything, and
-  // the old single command silently meant the second.
-  // Both the last plan and any other now go through one path. The last-plan
+  // The old "Close project" split in two once more than one plan could be
+  // open: closing the one you are looking at is a different act from closing
+  // everything, and the single command silently meant the second. Both shells
+  // now print "Close plan" for this one and "Close all plans" for the other —
+  // the desktop said "Close this plan" and the phone still said "Close
+  // project", for the same handler.
+  //
+  // Both the last plan and any other go through one path. The last-plan
   // branch used to live here, where it duplicated `closePlan`'s confirm copy
   // and — because `restart()` keeps the plan's id and so looks like nothing
   // closed — never released the plan's decoded page, detection memo, bitmap or
@@ -1473,7 +1477,7 @@ function App() {
           onExport={openExport}
           onCopyExhibit={copyExhibitNow}
           onSaveProject={handleSaveProject}
-          onRestart={handleClosePlan}
+          onCloseActivePlan={handleClosePlan}
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
@@ -1532,7 +1536,7 @@ function App() {
         onNewPlan={openPlan}
         onNextPlan={() => stepPlan(1)}
         onPrevPlan={() => stepPlan(-1)}
-        onRestart={handleClosePlan}
+        onCloseActivePlan={handleClosePlan}
         onCloseAllPlans={handleCloseAllPlans}
         onHelpOpen={handleHelpOpen}
         onFindRoomSize={handleFindRoomSize}

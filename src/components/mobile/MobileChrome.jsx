@@ -40,7 +40,11 @@ const MobileChrome = ({
   onExport,
   onCopyExhibit,
   onSaveProject,
-  onRestart,
+  // Not `onClosePlan` above: that one closes a *named* plan from the plans
+  // sheet and takes its id. This is the menu command, which closes whichever
+  // plan you are looking at and takes nothing. Both print "Close plan"; only
+  // one of them needs to be told which.
+  onCloseActivePlan,
   onHelpOpen,
   // trace
   onFindRoomSize,
@@ -236,7 +240,7 @@ const MobileChrome = ({
         onExport={onExport}
         onCopyExhibit={onCopyExhibit}
         onSaveProject={onSaveProject}
-        onRestart={onRestart}
+        onCloseActivePlan={onCloseActivePlan}
         onFindRoomSize={onFindRoomSize}
         onTracePerimeter={onTracePerimeter}
         onDrawExterior={onDrawExterior}

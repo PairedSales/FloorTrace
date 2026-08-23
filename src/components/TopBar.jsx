@@ -235,7 +235,7 @@ const TopBar = ({
   onNewPlan,
   onNextPlan,
   onPrevPlan,
-  onRestart,
+  onCloseActivePlan,
   onCloseAllPlans,
   onHelpOpen,
   // scale stage
@@ -322,7 +322,7 @@ const TopBar = ({
               target, warned about only in a tooltip. Two commands, not one:
               closing the plan you are looking at is a different act from
               closing every plan. */}
-          <MenuItem label="Close this plan" danger disabled={!image} onSelect={onRestart} close={close} />
+          <MenuItem label="Close plan" danger disabled={!image} onSelect={onCloseActivePlan} close={close} />
           <MenuItem label="Close all plans" danger disabled={planCount < 2} onSelect={onCloseAllPlans} close={close} />
           <Sep />
           {/* Session-wide preferences rather than anything done to a file, so

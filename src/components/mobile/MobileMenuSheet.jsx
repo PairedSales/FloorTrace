@@ -55,7 +55,7 @@ const Toggle = ({ icon, label, detail, checked, onToggle }) => (
  */
 const MobileMenuSheet = ({
   open, onClose, image, hasArea,
-  onFileOpen, onTakePhoto, onExport, onCopyExhibit, onSaveProject, onRestart,
+  onFileOpen, onTakePhoto, onExport, onCopyExhibit, onSaveProject, onCloseActivePlan,
   onFindRoomSize, onTracePerimeter, onDrawExterior, onOutlineByVertex, onAddFloor, canAddOutline,
   onFitToWindow, showSideLengths, onShowSideLengthsChange,
   autoSnapEnabled, onAutoSnapChange,
@@ -188,10 +188,10 @@ const MobileMenuSheet = ({
         <div className="mt-4 pt-2 border-t border-line-soft">
           <Row
             icon={Trash2}
-            label="Close project"
+            label="Close plan"
             danger
             disabled={!image}
-            onSelect={onRestart}
+            onSelect={onCloseActivePlan}
             close={onClose}
           />
         </div>
