@@ -22,11 +22,10 @@ const FULL = 0.94;
 const DISMISS_RATIO = 0.55;
 const FLICK_VELOCITY = 0.5; // px per ms
 
-const BottomSheet = ({ open, onClose, title, subtitle, action, children, detent = 'half' }) => {
+const BottomSheet = ({ open, onClose, title, subtitle, children, detent = 'half' }) => {
   const [height, setHeight] = useState(null);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef(null);
-  const sheetRef = useRef(null);
 
   const detents = useCallback(() => {
     const vh = window.innerHeight || 800;
@@ -119,7 +118,6 @@ const BottomSheet = ({ open, onClose, title, subtitle, action, children, detent 
       />
 
       <div
-        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -145,7 +143,6 @@ const BottomSheet = ({ open, onClose, title, subtitle, action, children, detent 
               <p className="text-[12.5px] text-fg-3 leading-tight truncate mt-px">{subtitle}</p>
             )}
           </div>
-          {action}
           <button
             type="button"
             onClick={onClose}

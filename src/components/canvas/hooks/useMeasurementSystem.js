@@ -6,7 +6,6 @@ export function useMeasurementSystem({
   setSelectedCustomShapeIndex,
 }) {
   const [selectedMeasurementLineIndex, setSelectedMeasurementLineIndex] = useState(null);
-  const [localMeasurementLine, setLocalMeasurementLine] = useState(null);
 
   // Sync selected index when lines change
   useEffect(() => {
@@ -45,8 +44,6 @@ export function useMeasurementSystem({
   return {
     selectedMeasurementLineIndex,
     setSelectedMeasurementLineIndex,
-    localMeasurementLine,
-    setLocalMeasurementLine,
     handleMeasurementLineSelect,
     handleMeasurementLineDragEnd,
   };

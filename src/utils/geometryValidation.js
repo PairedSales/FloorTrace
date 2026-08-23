@@ -33,7 +33,7 @@ export function getOrientation(p, q, r) {
 /**
  * Checks if point q lies on line segment pr (assuming they are collinear).
  */
-export function onSegment(p, q, r) {
+function onSegment(p, q, r) {
   return (
     q.x <= Math.max(p.x, r.x) + 1e-9 &&
     q.x >= Math.min(p.x, r.x) - 1e-9 &&
@@ -377,37 +377,4 @@ export function markStaleHoles(holes, outer) {
     })();
   });
   return changed ? next : holes;
-}
-
-/**
- * Determines the winding order of the polygon.
- * Uses the signed Shoelace area.
- * Returns: 'CW' (visually clockwise in Y-down), 'CCW' (counterclockwise), or 'degenerate'.
- */
-export function getPolygonWinding(vertices) {
-  if (!vertices || vertices.length < 3) return 'degenerate';
-  let sum = 0;
-  const N = vertices.length;
-  for (let i = 0; i < N; i++) {
-    const v1 = vertices[i];
-    const v2 = vertices[(i + 1) % N];
-    sum += (v2.x - v1.x) * (v2.y + v1.y);
-  }
-  if (Math.abs(sum) < 1e-5) {
-    return 'degenerate';
-  }
-  return sum < 0 ? 'CW' : 'CCW'; // In Y-down: negative sum is Clockwise, positive is Counterclockwise
-}
-
-/**
- * Normalizes the winding order of a polygon to a target winding (defaults to 'CCW').
- * Reverses the vertices if the winding does not match the target.
- */
-export function normalizePolygonWinding(vertices, targetWinding = 'CCW') {
-  if (!vertices || vertices.length < 3) return [...vertices];
-  const currentWinding = getPolygonWinding(vertices);
-  if (currentWinding === 'degenerate' || currentWinding === targetWinding) {
-    return [...vertices];
-  }
-  return [...vertices].reverse();
 }

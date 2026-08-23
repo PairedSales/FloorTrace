@@ -84,10 +84,8 @@ export function useCropTool({
    * - Commits via onImageUpdate
    * Returns true if consumed.
    */
-  const handleCropMouseUp = useCallback((sel) => {
-    // Accept the selection as a parameter so callers can pass the latest value
-    // directly — avoids stale-closure issues with the cropSelection state.
-    const currentSel = sel ?? cropSelection;
+  const handleCropMouseUp = useCallback(() => {
+    const currentSel = cropSelection;
     const imageMimeType = useAppStore.getState().imageMimeType;
 
     if (!isCroppingRef.current || !cropStartRef.current || !imageObj || !onImageUpdate) {

@@ -345,13 +345,6 @@ const PerimeterLayer = ({
   const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
   const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
 
-  // Dev-only Render metrics
-  const renderCountRef = useRef(0);
-  if (import.meta.env?.DEV) {
-    renderCountRef.current += 1;
-    console.log(`[PerimeterLayer] Render count: ${renderCountRef.current}`);
-  }
-
   // Ref tracking drag coordinates, current drag index, and animation frame ID
   const draggingVertexIndexRef = useRef(null);
   const dragCoordsRef = useRef(null);

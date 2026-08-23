@@ -26,7 +26,6 @@ export function useEraserTool({
 }) {
   const isErasingRef = useRef(false);
   const eraserStartPosRef = useRef(null);
-  const eraserLastPosRef = useRef(null);
   const eraserAxisRef = useRef(null);
   const eraserPathRef = useRef([]);
 
@@ -41,7 +40,6 @@ export function useEraserTool({
 
     isErasingRef.current = true;
     eraserStartPosRef.current = pos;
-    eraserLastPosRef.current = pos;
     eraserAxisRef.current = null;
     eraserPathRef.current = [pos];
 
@@ -77,7 +75,6 @@ export function useEraserTool({
 
     const next = { x: drawX, y: drawY };
     eraserPathRef.current.push(next);
-    eraserLastPosRef.current = next;
 
     return true;
   }, [getCanvasCoords]);
@@ -87,7 +84,6 @@ export function useEraserTool({
 
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
-    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
 
     const vertices = initialVerticesRef.current;
@@ -143,7 +139,6 @@ export function useEraserTool({
 
     isErasingRef.current = false;
     eraserStartPosRef.current = null;
-    eraserLastPosRef.current = null;
     eraserAxisRef.current = null;
     eraserPathRef.current = [];
 

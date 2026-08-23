@@ -167,27 +167,6 @@ export function createDocumentSlice(set, get) {
       if (activeDocumentId) setDocumentMeta(activeDocumentId, patch);
     },
 
-    /** The active plan's metadata, never undefined. */
-    activeDocumentMeta: () => {
-      const state = get();
-      return state.documents[state.activeDocumentId] ?? newDocumentMeta();
-    },
-
-    /**
-     * What the active plan is called. Resolved through `documentLabel` so the
-     * window title and a tab cannot disagree.
-     */
-    activeDocumentLabel: () => {
-      const state = get();
-      const meta = state.documents[state.activeDocumentId] ?? newDocumentMeta();
-      const index = Math.max(0, state.documentOrder.indexOf(state.activeDocumentId));
-      return documentLabel({
-        projectName: state.projectName,
-        sourceFileName: meta.sourceFileName,
-        index,
-      });
-    },
-
     /**
      * Set the active plan aside, whole, and return its id.
      *

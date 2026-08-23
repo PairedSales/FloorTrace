@@ -48,12 +48,14 @@ describe('document identity', () => {
   });
 
   describe('metadata', () => {
+    const activeMeta = () => app().documents[app().activeDocumentId];
+
     it('records and clears the source file name', () => {
       app().setActiveDocumentMeta({ sourceFileName: 'Ranch on Elm.png' });
-      expect(app().activeDocumentMeta().sourceFileName).toBe('Ranch on Elm.png');
+      expect(activeMeta().sourceFileName).toBe('Ranch on Elm.png');
 
       app().setActiveDocumentMeta({ sourceFileName: null });
-      expect(app().activeDocumentMeta().sourceFileName).toBeNull();
+      expect(activeMeta().sourceFileName).toBeNull();
     });
 
     it('ignores a write to a document that does not exist', () => {
@@ -71,7 +73,7 @@ describe('document identity', () => {
       app().restart();
 
       expect(app().activeDocumentId).toBe(id);
-      expect(app().activeDocumentMeta().sourceFileName).toBeNull();
+      expect(activeMeta().sourceFileName).toBeNull();
     });
   });
 
@@ -97,13 +99,15 @@ describe('document identity', () => {
         .toBe('Untitled 3');
     });
 
-    it('resolves the active label through the same chain', () => {
-      app().setProjectName('42 Oak Ave');
-      expect(app().activeDocumentLabel()).toBe('42 Oak Ave');
-
-      app().setProjectName('');
-      app().setActiveDocumentMeta({ sourceFileName: 'oak.png' });
-      expect(app().activeDocumentLabel()).toBe('oak');
+    // Asserted on `documentLabel` itself rather than through a store action:
+    // the tabs, the plans sheet and the workspace index all call it directly,
+    // and the two thin store readers that used to wrap it had no caller left.
+    it('falls back typed name -> source filename -> Untitled N', () => {
+      expect(documentLabel({ projectName: '42 Oak Ave', sourceFileName: 'oak.png' }))
+        .toBe('42 Oak Ave');
+      expect(documentLabel({ projectName: '  ', sourceFileName: 'oak.png' })).toBe('oak');
+      expect(documentLabel({ projectName: '', sourceFileName: '', index: 2 }))
+        .toBe('Untitled 3');
     });
   });
 });

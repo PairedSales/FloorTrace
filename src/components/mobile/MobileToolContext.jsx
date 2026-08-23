@@ -17,14 +17,14 @@ import { TOOL_MODES } from '../toolModes';
  * between painting the exterior and painting the whole floor.
  */
 const MobileToolContext = ({
-  active, count, brushSize, onBrushSizeChange, onCancel, onDone, doneLabel,
+  active, count, brushSize, onBrushSizeChange, onCancel, onDone,
 }) => {
   const mode = TOOL_MODES[active];
   if (!mode) return null;
 
   const Icon = mode.icon;
   const isDraw = mode.brush === 'draw';
-  const label = doneLabel ?? mode.doneLabel;
+  const label = mode.doneLabel;
 
   return (
     <div

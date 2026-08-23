@@ -43,8 +43,7 @@ export const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
 
 /**
  * `top-[calc(100%+3px)]` drops the panel clear of a trigger that is 32 px tall
- * in a 40 px band, rather than 4 px up inside it. `align="right"` is for a
- * trigger near the right edge, where a left-aligned panel would run off.
+ * in a 40 px band, rather than 4 px up inside it.
  */
 export const Popover = ({ open, labelledBy, children }) => (
   open ? (

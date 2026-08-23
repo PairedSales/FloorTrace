@@ -4,8 +4,6 @@ import {
   segmentsIntersect,
   hasSelfIntersection,
   validateVertexMove,
-  getPolygonWinding,
-  normalizePolygonWinding,
 } from '../geometryValidation';
 
 describe('geometryValidation', () => {
@@ -161,49 +159,6 @@ describe('geometryValidation', () => {
       // Dragging V2 (20, 0) to (5, 0) backtracks on V0-V1-V2.
       const newPoint = { x: 5, y: 0 };
       expect(validateVertexMove(boxCollinear, 2, newPoint, true)).toBe(false);
-    });
-  });
-
-  describe('getPolygonWinding & normalizePolygonWinding', () => {
-    it('detects CW winding', () => {
-      const cw = [
-        { x: 0, y: 0 },
-        { x: 10, y: 0 },
-        { x: 10, y: 10 },
-        { x: 0, y: 10 },
-      ]; // visually CW in Y-down
-      expect(getPolygonWinding(cw)).toBe('CW');
-    });
-
-    it('detects CCW winding', () => {
-      const ccw = [
-        { x: 0, y: 0 },
-        { x: 0, y: 10 },
-        { x: 10, y: 10 },
-        { x: 10, y: 0 },
-      ]; // visually CCW in Y-down
-      expect(getPolygonWinding(ccw)).toBe('CCW');
-    });
-
-    it('detects degenerate winding', () => {
-      const degenerate = [
-        { x: 0, y: 0 },
-        { x: 5, y: 0 },
-        { x: 10, y: 0 },
-      ];
-      expect(getPolygonWinding(degenerate)).toBe('degenerate');
-    });
-
-    it('normalizes CW to CCW winding', () => {
-      const cw = [
-        { x: 0, y: 0 },
-        { x: 10, y: 0 },
-        { x: 10, y: 10 },
-        { x: 0, y: 10 },
-      ];
-      const normalized = normalizePolygonWinding(cw, 'CCW');
-      expect(getPolygonWinding(normalized)).toBe('CCW');
-      expect(normalized[0]).toEqual({ x: 0, y: 10 }); // reversed order
     });
   });
 });

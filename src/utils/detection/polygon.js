@@ -314,17 +314,6 @@ export const ringSetArea = (outer, holes = []) => {
   return Math.max(0, gross - voids);
 };
 
-export const polygonPerimeter = (polygon) => {
-  if (!polygon || polygon.length < 2) return 0;
-  let sum = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    sum += Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  return sum;
-};
-
 // Ray-cast containment (even-odd), holes subtracted.
 export const pointInPolygon = (point, polygon, holes = []) => {
   const inRing = (ring) => {
@@ -349,7 +338,7 @@ export const pointInPolygon = (point, polygon, holes = []) => {
 // phone photos routinely sit 1-8° off axis; fitting such a ring directly to
 // the image axes flattens the shape while leaving the area almost unchanged,
 // so no area- or bbox-based check can catch it.
-export const ringSkewAngle = (ring) => {
+const ringSkewAngle = (ring) => {
   if (!ring || ring.length < 8) return 0;
   const BINS = 180; // 0.5-degree resolution over 90 degrees
   const hist = new Float64Array(BINS);

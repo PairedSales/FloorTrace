@@ -442,7 +442,7 @@ export function useToolRouter({
 
     // Crop mouse up
     if (crop.isCroppingRef.current) {
-      crop.handleCropMouseUp(crop.cropSelection);
+      crop.handleCropMouseUp();
       return;
     }
 
@@ -548,7 +548,7 @@ export function useToolRouter({
         eraser.handleEraserMouseUp();
       }
       if (crop.isCroppingRef.current) {
-        crop.handleCropMouseUp(crop.cropSelection);
+        crop.handleCropMouseUp();
       }
       // ── void tool ──────────────────────────────────────────────────────────
       if (voidTool.isVoidingRef.current) {
@@ -1086,7 +1086,6 @@ export function useToolRouter({
     draggingAngle,
     setDraggingAngle,
     localRoomOverlay,
-    localMeasurementLine,
     activeRoomOverlay,
     activeMeasurementLine,
     activeScaleLine,

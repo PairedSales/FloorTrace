@@ -4,8 +4,8 @@ import {
   DEFAULT_TRACE_TYPE,
   assignTypeColors,
   autoTraceName,
+  makeTrace,
   normalizeTraceType,
-  traceTypeColor,
 } from '../utils/traceTypes';
 import { classifyTraces } from '../utils/traceClassification';
 // From areaCalculator, not appStore: appStore already imports createFloorSlice
@@ -55,19 +55,7 @@ export function createFloorSlice(set, get) {
       const newId = newTraceId();
       const newName = generateTraceName(state.perimeterTraces);
 
-      const newTrace = {
-        id: newId,
-        name: newName,
-        vertices: [],
-        closed: false,
-        visible: true,
-        locked: false,
-        type: DEFAULT_TRACE_TYPE,
-        typeSource: 'auto',
-        colorSource: 'type',
-        nameSource: 'auto',
-        color: traceTypeColor(DEFAULT_TRACE_TYPE),
-      };
+      const newTrace = makeTrace({ id: newId, name: newName });
 
       set({
         perimeterTraces: assignTypeColors([...state.perimeterTraces, newTrace]),
@@ -121,7 +109,7 @@ export function createFloorSlice(set, get) {
         // Re-shaded so the lightness steps close up behind the deleted trace.
         perimeterTraces: assignTypeColors(remainingTraces),
         activeTraceId: nextActiveId,
-        traceInteractionMode: nextActiveId ? 'idle' : 'idle',
+        traceInteractionMode: 'idle',
         perimeterVertices: null,
         isDirty: true,
       });
@@ -277,7 +265,7 @@ export function createFloorSlice(set, get) {
           closed: true,
         }));
       } else {
-        traces = normalized.map((floor, i) => ({
+        traces = normalized.map((floor, i) => makeTrace({
           id: newTraceId(),
           name: `${i + 1}${ordinalSuffix(i + 1)} Floor`,
           ...floor,
@@ -286,13 +274,6 @@ export function createFloorSlice(set, get) {
           // the one that was punched.
           holes: markStaleHoles(mergeHoles(current[i]?.holes, floor.holes), floor.vertices),
           closed: true,
-          visible: true,
-          locked: false,
-          type: DEFAULT_TRACE_TYPE,
-          typeSource: 'auto',
-          colorSource: 'type',
-          nameSource: 'auto',
-          color: traceTypeColor(DEFAULT_TRACE_TYPE),
         }));
       }
       traces = assignTypeColors(traces);
@@ -371,21 +352,7 @@ export function createFloorSlice(set, get) {
     resetPerimeterTraces: () => {
       const defaultTraceId = newTraceId();
       set({
-        perimeterTraces: [
-          {
-            id: defaultTraceId,
-            name: '1st Floor',
-            vertices: [],
-            closed: false,
-            visible: true,
-            locked: false,
-            type: DEFAULT_TRACE_TYPE,
-            typeSource: 'auto',
-            colorSource: 'type',
-            nameSource: 'auto',
-            color: traceTypeColor(DEFAULT_TRACE_TYPE),
-          }
-        ],
+        perimeterTraces: [makeTrace({ id: defaultTraceId })],
         activeTraceId: defaultTraceId,
         traceInteractionMode: 'idle',
         perimeterVertices: null,

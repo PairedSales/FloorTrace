@@ -165,7 +165,7 @@ export const implicatedNets = (point, nets, probeMask, width, height, pad) => {
 // small to be a network reads as -1, which is what lets `joinNets` pick it back
 // up: the fragment of exterior wall left between two window openings is exactly
 // the ink whose loss broke the outline in the first place.
-export const netMembership = (nets, length) => {
+const netMembership = (nets, length) => {
   const membership = new Int32Array(length).fill(-1);
   for (let i = 0; i < nets.length; i += 1) {
     const mask = nets[i].mask;
@@ -184,7 +184,7 @@ export const netMembership = (nets, length) => {
  * belonging to *another* kept network is deliberately not taken: that is the
  * case where the join would swallow a neighbouring plan.
  */
-export const joinNets = (ids, nets, boundaryMask, membership, width, height, pad) => {
+const joinNets = (ids, nets, boundaryMask, membership, width, height, pad) => {
   const box = { minX: width, minY: height, maxX: -1, maxY: -1 };
   for (const id of ids) {
     const b = nets[id].bbox;

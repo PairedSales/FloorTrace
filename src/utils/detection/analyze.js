@@ -316,7 +316,6 @@ export const analyzeFloorplan = (imageData, options = {}) => {
     height,
     scaleX: scaled.scaleX,
     scaleY: scaled.scaleY,
-    threshold: scaled.threshold,
     ink,
     gray: scaled.gray,
     cleaned,

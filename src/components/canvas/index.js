@@ -8,4 +8,4 @@ export { default as PerimeterPlacementLayer } from './PerimeterPlacementLayer';
 export { default as DrawModeLayer } from './DrawModeLayer';
 export { default as AngleOverlay } from './AngleOverlay';
 export { default as WarningHighlightLayer } from './WarningHighlightLayer';
-export { getCanvasCoordinates, pointToLineDistance, getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';
+export { getCanvasCoordinates } from './canvasUtils';

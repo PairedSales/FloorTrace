@@ -385,7 +385,7 @@ const parseTokenStripRight = (token) => {
 // ---------------------------------------------------------------------------
 
 /** Reconcile units across the pair (e.g. "3.5 x 2.8 m" — left side is meters too). */
-const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
+const buildPair = (lp, rp, textNorm, opts = {}) => {
   let left = { ...lp };
   let right = { ...rp };
 
@@ -519,7 +519,7 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
   const extremeAspect = ratio > 7 ? 10 : 0;
   const penalty =
     (3 - quality) * 7 + strippedCount * 4 + weakStripped * 8 + oversize * 8 +
-    extremeAspect + (separatorMissing ? 6 : 0);
+    extremeAspect;
 
   return {
     width: left.value,
@@ -530,7 +530,7 @@ const buildPair = (lp, rp, textNorm, separatorMissing, opts = {}) => {
     penalty,
     mixedPair: hyphenMixed,
     hyphenUpgraded,
-    score: left.quality + right.quality - strippedCount - (separatorMissing ? 1 : 0)
+    score: left.quality + right.quality - strippedCount
   };
 };
 
@@ -575,7 +575,7 @@ export const parseDimensionLine = (line, opts = {}) => {
       const rp = parseTokenStripRight(right);
       if (!rp) continue;
 
-      const pair = buildPair(lp, rp, norm, false, opts);
+      const pair = buildPair(lp, rp, norm, opts);
       if (pair && (!best || pair.score > best.score)) best = pair;
     }
     return best;

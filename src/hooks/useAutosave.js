@@ -33,7 +33,7 @@ const autosaveSelector = (state) =>
 //
 // `canvasRotation` is deliberately not here: rotating is an edit to the
 // document, not a camera move.
-const CAMERA_ONLY_FIELDS = ['zoomScale', 'stageX', 'stageY', 'viewportSyncToken'];
+const CAMERA_ONLY_FIELDS = ['zoomScale', 'stageX', 'stageY'];
 
 const onlyCameraMoved = (slice, prevSlice) => {
   if (!prevSlice) return false;

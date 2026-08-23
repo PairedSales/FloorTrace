@@ -322,7 +322,6 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
         size: flooded.size,
         bbox: flooded.bbox,
         confidence: SOURCE_CONFIDENCE['label-flood'],
-        mergesWith: 'label',
       });
     }
     for (const region of unresolved) {

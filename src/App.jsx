@@ -1438,7 +1438,6 @@ function App() {
       onCancelUndoSave={handleCancelUndoSave}
       eraserToolActive={eraserToolActive}
       eraserBrushSize={eraserBrushSize}
-      onEraserBrushSizeChange={setEraserBrushSize}
       cropToolActive={cropToolActive}
       onCropToolToggle={handleCropToolToggle}
       onImageUpdate={handleImageUpdate}

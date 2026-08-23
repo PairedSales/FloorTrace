@@ -34,7 +34,6 @@ const AngleOverlay = ({
   onDragStateChange, // Notify parent when dragging to disable stage pan
 }) => {
   const isTouch = useIsTouch();
-  const groupRef = useRef(null);
   const line1Ref = useRef(null);
   const line2Ref = useRef(null);
   const arcRef = useRef(null);
@@ -390,7 +389,7 @@ const AngleOverlay = ({
   const borderStrokeWidth = 1 / scale;
 
   return (
-    <Group ref={groupRef}>
+    <Group>
       {/* Visual protractor sweep arc */}
       <Arc
         ref={arcRef}

@@ -31,7 +31,7 @@ const roundRectPath = (ctx, x, y, w, h, r) => {
   ctx.closePath();
 };
 
-export function paintExhibit(ctx, ops, image) {
+function paintExhibit(ctx, ops, image) {
   for (const op of ops) {
     switch (op.op) {
       case 'image':
@@ -141,7 +141,7 @@ export async function renderExhibit(state, { now = Date.now(), options, maxPlanW
   return { canvas, model, layout };
 }
 
-export const exhibitBlob = (canvas) => new Promise((resolve, reject) => {
+const exhibitBlob = (canvas) => new Promise((resolve, reject) => {
   canvas.toBlob(
     (blob) => (blob ? resolve(blob) : reject(new Error('The image could not be encoded.'))),
     'image/png',

@@ -330,7 +330,6 @@ export function useCameraController({
     scale,
     scaleRef,
     dimensions,
-    setDimensions,
     fitToWindow,
     rotateCanvas,
     handleWheel,
@@ -346,6 +345,5 @@ export function useCameraController({
     handlePinchStart: pinch.handleTouchStart,
     handlePinchMove: pinch.handleTouchMove,
     handlePinchEnd: pinch.handleTouchEnd,
-    isPinchingRef: pinch.isPinchingRef,
   };
 }

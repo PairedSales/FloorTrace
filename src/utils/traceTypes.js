@@ -117,3 +117,33 @@ export function normalizeTraces(traces) {
     nameSource: t.nameSource ?? (isAutoTraceName(t.name) ? 'auto' : 'user'),
   } : t)));
 }
+
+/**
+ * One perimeter trace, with every field a new trace is born with.
+ *
+ * Written six times before this existed — twice in `appStore`, three times in
+ * `floorManager`, once in `projectSerializer` — and the copies had already
+ * begun to drift: the serializer's omitted `typeSource: 'auto'`, which is the
+ * provenance flag that decides whether re-reading a plan may overwrite the
+ * user's own classification. That is the field least able to afford a sixth
+ * hand-maintained copy.
+ *
+ * `type` and `color` are resolved together on purpose: a caller that overrides
+ * one and forgets the other is the next drift, so the colour is derived from
+ * whatever type ends up applying rather than passed alongside it. Anything else
+ * — `id`, `name`, `vertices`, `closed`, `quality`, `wallFaces`, `holes` — is a
+ * plain override.
+ */
+export const makeTrace = ({ type = DEFAULT_TRACE_TYPE, ...rest } = {}) => ({
+  name: '1st Floor',
+  vertices: [],
+  closed: false,
+  visible: true,
+  locked: false,
+  type: normalizeTraceType(type),
+  typeSource: 'auto',
+  colorSource: 'type',
+  nameSource: 'auto',
+  color: traceTypeColor(type),
+  ...rest,
+});

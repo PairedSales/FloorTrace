@@ -8,7 +8,6 @@ import {
   fitRing,
   polygonArea,
   polygonSignedArea,
-  ringSetArea,
 } from './polygon.js';
 import { traceFramedBoundary } from './labelFrame.js';
 import { collectNonGlaRegions, arbitrateRegions, applyRegions, componentMask } from './nonGla.js';
@@ -63,7 +62,7 @@ const measureBandDepth = (x0, y0, dir, wallMask, width, height, gapTol, maxDepth
   return sawWall && lastWall >= 0 ? lastWall + 1 : -1;
 };
 
-export const sampleExteriorThickness = (boundary, wallMask, footprint, width, height, strokeThickness) => {
+const sampleExteriorThickness = (boundary, wallMask, footprint, width, height, strokeThickness) => {
   const gapTol = Math.max(4, strokeThickness * 2);
   const maxDepth = Math.max(12, strokeThickness * 6) + gapTol;
   const samples = [];
@@ -241,12 +240,6 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
       exteriorThickness,
       wallMask,
     });
-    if (options.debugRegions) {
-      options.debugRegions.push(...candidates.map((r) => ({
-        sources: [r.source], keyword: r.keyword, size: r.size, bbox: r.bbox,
-        frac: r.size / footprint.area,
-      })));
-    }
     const arbitrated = arbitrateRegions(candidates);
     if (arbitrated.length) {
       const applied = applyRegions(footprint, arbitrated, analysis, {
@@ -320,17 +313,14 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     innerPolygon,
     holes,
     innerHoles,
-    outerRing: outerResult.ring,
     skew: outerResult.skew,
     footprintMask: footprint.mask,
     footprintArea: footprint.area,
     footprintBbox: footprint.bbox,
     exteriorThickness,
-    edgeInsets: insets.map((i) => i.inset),
     filamentShaved,
     excludedRegions,
     rejectedRegions,
-    netAreaPx: ringSetArea(outerResult.polygon, holes),
     excluded: excludedRegions.length,
     excludedGarages: excludedRegions.filter((r) => r.keyword && /garage/i.test(r.keyword)).length,
   };

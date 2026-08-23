@@ -133,7 +133,7 @@ export const footprintEntry = (measured, component, width, height) => {
 // How completely a footprint fills its wall network: the two quantities the
 // old boolean `isSealed` combined, kept separate and graded so a partially
 // sealed wing reads as "not sealed yet" instead of "close enough".
-export const sealMetrics = (entry, wallBboxArea) => {
+const sealMetrics = (entry, wallBboxArea) => {
   if (!entry) return { cover: 0, solidity: 0, seal: 0 };
   const cover = Math.min(1, entry.bboxArea / Math.max(1, wallBboxArea));
   const solidity = entry.area / Math.max(1, entry.bboxArea);
@@ -156,7 +156,7 @@ export const sealMetrics = (entry, wallBboxArea) => {
 // they must not answer differently: the partitioner applies it when deciding
 // what to keep apart, and remediate.js applies the same test when a known-
 // inside constraint says a partition was wrong. Two copies would have drifted.
-export const INDEPENDENT_SEAL = 0.75;
+const INDEPENDENT_SEAL = 0.75;
 
 export const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
   const compW = bbox.maxX - bbox.minX + 1;
@@ -505,6 +505,5 @@ export const generateCandidates = (net, analysis, options = {}) => {
     // `null` when no opening was run (thickRadius < 2), which is the case
     // floorPlausibility scores as fully structural.
     structuralKept,
-    netInk,
   };
 };

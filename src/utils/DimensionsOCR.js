@@ -297,6 +297,3 @@ export const detectAllDimensions = async (imageDataUrl) => {
     throw error;
   }
 };
-
-/** Forget every memoised scan. For tests, and for a plan being closed. */
-export const clearScanCache = () => scanQueue.clear();

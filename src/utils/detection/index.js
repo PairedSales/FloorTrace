@@ -200,15 +200,6 @@ export const getFloorBoundaryFaces = (tracedBoundary) => {
     .filter(Boolean);
 };
 
-export const getFloorBoundariesForMode = (tracedBoundary, useInteriorWalls) => {
-  const key = useInteriorWalls ? 'inner' : 'outer';
-  return getFloorBoundaryFaces(tracedBoundary)
-    .map((floor) => (floor[key]
-      ? { ...floor[key], confidence: floor.confidence, warnings: floor.warnings }
-      : null))
-    .filter(Boolean);
-};
-
 // The detection memo lives in the worker's module scope, so terminating the
 // worker is what frees it. Calling clearDetectionCache() here would clear the
 // main thread's own (permanently empty) copy of that module state and look

@@ -17,7 +17,7 @@ import { regionFit } from './brush.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-export const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
+const polygonizeFootprint = (entry, width, height, epsilon, fitOptions) => {
   const ring = traceFramedBoundary(entry, width, height);
   if (ring.length < 3) return null;
   const simplified = simplifyRing(ring, epsilon);
@@ -93,10 +93,8 @@ export const scoreConstraints = (entry, analysis, constraints) => {
   return {
     fit: total ? hits / total : 1,
     rooms: rooms.length,
-    roomHits,
     roomMisses,
     points: points.length,
-    pointHits,
     pointMisses,
   };
 };
@@ -193,7 +191,6 @@ export const scoreCandidate = (candidate, ctx) => {
     support,
     coverage,
     completeness,
-    economy,
     annex,
     constraintScore,
     brushFit,

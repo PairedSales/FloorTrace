@@ -22,16 +22,6 @@ export const decimalToFeetInches = (decimalFeet) => {
 };
 
 /**
- * Convert feet and inches to decimal feet
- * @param {number} feet - Feet value
- * @param {number} inches - Inches value
- * @returns {number} - Length in decimal feet
- */
-export const feetInchesToDecimal = (feet, inches) => {
-  return feet + inches / 12;
-};
-
-/**
  * Convert decimal feet to meters
  * @param {number} decimalFeet - Length in decimal feet
  * @returns {number} - Length in meters

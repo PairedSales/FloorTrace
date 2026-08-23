@@ -19,6 +19,6 @@ export const bboxIou = (a, b) => {
   return inter / (areaA + areaB - inter);
 };
 
-export { polygonIou, rasterize } from '../../src/utils/detection/__tests__/synthetic.js';
+export { polygonIou } from '../../src/utils/detection/__tests__/synthetic.js';
 
 export const pct = (x) => `${(x * 100).toFixed(1)}%`;
