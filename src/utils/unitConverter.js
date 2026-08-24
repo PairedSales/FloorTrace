@@ -110,6 +110,10 @@ export const formatLength = (decimalFeet, unit = 'decimal', style = null) => {
   if (unit === 'metric') {
     const meters = feetToMeters(decimalFeet);
     if (style === 'meters') return `${meters.toFixed(2)} meters`;
+    // A length standing in a multiply — `4.18 × 3.60 = 15.0 m²` — carries its
+    // unit once, on the product. Metric had no bare style, so the area working
+    // either repeated "m" on both factors or reached for its own converter.
+    if (style === 'bare') return meters.toFixed(2);
     return `${meters.toFixed(2)} m`;
   }
   
@@ -177,6 +181,22 @@ export const formatAreaValue = (value, unit = 'decimal') => ({
   value: Number.isInteger(value)
     ? value.toLocaleString()
     : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  suffix: unit === 'metric' ? 'm²' : 'ft²',
+});
+
+/**
+ * An area to the tenth, for a column of working that has to add up.
+ *
+ * The panel that shows how an area was reached prints every piece and every
+ * level at this precision — the same one a floorplan's own side labels carry,
+ * and the one the trade's calculation pages use. `formatAreaValue` cannot do
+ * it: it prints a non-integer to two places, so a level came out as "2,689.80"
+ * beside pieces of "161.70", and the pieces are apportioned to the tenth, not
+ * the hundredth. Always one place, so a piece that lands on a whole number
+ * still lines up under the ones that did not.
+ */
+export const formatAreaTenths = (value, unit = 'decimal') => ({
+  value: value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
   suffix: unit === 'metric' ? 'm²' : 'ft²',
 });
 

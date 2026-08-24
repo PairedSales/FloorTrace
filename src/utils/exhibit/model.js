@@ -17,6 +17,11 @@ import {
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
 import { qualitySummary, rankedWarnings, scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
+import { scaleProvenance } from '../scaleProvenance';
+
+// Re-exported: it moved to a leaf module so the dock can state the same
+// sentence without pulling this file's lazy graph into the entry chunk.
+export { scaleProvenance };
 
 export const EXHIBIT_DEFAULTS = {
   sideLengths: true,
@@ -114,27 +119,6 @@ const scaleLines = (state) => {
     // onto `rooms` before calibrating from it alone.
     provenance: scaleProvenance(state),
   };
-};
-
-// One derivation, shared with the Scale card, so the exhibit and the panel
-// cannot describe two different provenances for one number.
-export const scaleProvenance = (state) => {
-  const cal = state.calibration;
-  if (!cal?.calibrated) return 'No scale was set — areas are not to scale.';
-  const q = cal.quality;
-  if (cal.source === 'line-calibration' || q?.source === 'line') {
-    return q?.lineCount === 2
-      ? 'Set by hand from two lines of known length.'
-      : 'Set by hand from a line of known length.';
-  }
-  // A room the user picked, which replaces the pooled median with the app's
-  // weakest evidence class — worth saying on a document somebody else reads.
-  if (q?.source === 'auto' && q?.reason === 'room-vs-auto') {
-    return 'Taken from one room chosen by hand, overriding the measured average.';
-  }
-  const n = q?.roomCount ?? 0;
-  if (n > 0) return `Measured from ${n} room${n === 1 ? '' : 's'} on this plan.`;
-  return 'Measured from the room size entered by hand.';
 };
 
 /**

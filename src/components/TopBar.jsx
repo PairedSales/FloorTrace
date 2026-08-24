@@ -270,6 +270,10 @@ const TopBar = ({
 }) => {
   const { openId, open, close } = useOneOpenMenu();
   const { canUndo, canRedo } = useUndoHistory();
+  // Read here rather than threaded from App: it is window state, not a
+  // workflow decision, and the dock reads the same two fields directly.
+  const showWork = useWorkspaceStore((s) => s.showWork);
+  const setShowWork = useWorkspaceStore((s) => s.setShowWork);
 
   // Only the two fields that decide weight; the dock's StageSpine feeds the
   // same function the rest and prints all four stages from it. `ocrFailed` and
@@ -386,6 +390,12 @@ const TopBar = ({
             label="Snap to walls"
             checked={autoSnapEnabled}
             onSelect={() => onAutoSnapChange(!autoSnapEnabled)}
+            close={close}
+          />
+          <MenuItem
+            label="Show the area calculation"
+            checked={showWork}
+            onSelect={() => setShowWork(!showWork)}
             close={close}
           />
           <Sep />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Eye, EyeOff, Trash2, Copy, Share, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, EyeOff, Trash2, Copy, Share, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType, selectWorkspaceArea } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../utils/unitConverter';
 import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
 import { scaleQualitySummary } from '../utils/boundaryQuality';
+import { scaleProvenance } from '../utils/scaleProvenance';
 import { summariseIssues } from '../utils/traceIssues';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import Card from './DockCard';
@@ -16,6 +17,7 @@ import ScaleSection from './ScaleSection';
 import StageSpine from './StageSpine';
 import { planStage, MAX_TRACES } from '../utils/planStage';
 import ChecksCard from './ChecksCard';
+import WorkCard from './WorkCard';
 
 const MeasurementDock = ({
   roomDimensions,
@@ -58,9 +60,11 @@ const MeasurementDock = ({
   const detectedDimensions = useAppStore((s) => s.detectedDimensions) || [];
   const calibrationSource = useAppStore((s) => s.calibration?.source);
   const scaleQuality = useAppStore((s) => s.calibration?.quality);
-  // The rooms the detector confirmed — how many of them agreed is what the
-  // scale card states as its provenance.
+  // The rooms the detector confirmed — whether there are any is what decides
+  // if "go back to the measured average" has anything to go back to.
   const rooms = useAppStore((s) => s.rooms);
+  const showWork = useWorkspaceStore((s) => s.showWork);
+  const setShowWork = useWorkspaceStore((s) => s.setShowWork);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
 
   const scrollRef = useRef(null);
@@ -173,17 +177,19 @@ const MeasurementDock = ({
     ? { x: 1 / fpp.x, y: 1 / fpp.y }
     : null;
   const anisotropic = pxPerFoot && Math.abs(pxPerFoot.x - pxPerFoot.y) > 1e-6;
-  const measuredRooms = rooms?.length ?? 0;
-  const scaleProvenance = !pxPerFoot
-    ? 'Read the dimensions, or set it from a length you know.'
-    : calibrationSource === 'line-calibration'
-      ? 'From a line you drew.'
-      : measuredRooms > 0
-        ? `From ${measuredRooms} measured ${measuredRooms === 1 ? 'room' : 'rooms'}.`
-        // Not "below" any more — the room size is its own card above this
-        // one — and not "above" either, so moving a card cannot make it lie a
-        // second time.
-        : 'From the room size you typed.';
+  // Through the shared derivation, not a local one. This card counted
+  // `rooms.length` — every room the detector ever confirmed — so a scale
+  // pinned to one hand-picked room read "From 6 measured rooms" here while
+  // the exhibit built from the same state read "Taken from one room chosen by
+  // hand". `calibration.quality.roomCount` is what the scale says about
+  // itself, and it is the one that is right.
+  //
+  // The uncalibrated case is deliberately not shared: a workfile records that
+  // nothing was to scale, and this panel is where the user fixes it, so it
+  // says how.
+  const provenance = pxPerFoot
+    ? scaleProvenance({ calibration: { calibrated, source: calibrationSource, quality: scaleQuality } })
+    : 'Read the dimensions, or set it from a length you know.';
 
   const handleCopyArea = () => {
     if (!showBreakdown) {
@@ -529,6 +535,28 @@ const MeasurementDock = ({
               {showBreakdown ? 'Copy breakdown as text' : 'Copy area as text'}
             </button>
 
+            {/* An appraisal report has to show its working for the area
+                sketch, and the way into it belongs under the figure it
+                explains rather than in a menu two clicks away. Off until asked
+                for: it is a control on this card rather than a card of its
+                own, so nothing joins the dock's reading order while it is
+                off. */}
+            {area > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowWork(!showWork)}
+                aria-expanded={showWork}
+                aria-controls="dock-work"
+                className="mt-2 w-full inline-flex items-center justify-center gap-1 h-7
+                           text-[12px] text-fg-3 font-medium hover:text-fg
+                           transition-colors cursor-pointer"
+              >
+                {showWork ? <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                  : <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />}
+                {showWork ? 'Hide the calculation' : 'Show the calculation'}
+              </button>
+            )}
+
 
             {showBreakdown && (
               <p className="mt-2.5 pt-2.5 border-t border-line-soft text-[11.5px] leading-snug text-fg-dim">
@@ -537,6 +565,13 @@ const MeasurementDock = ({
             )}
           </Card>
         </div>
+
+        {/* ── How this area was calculated ──
+            Directly under the figure it explains, so the sum reads downward
+            from the number rather than being filed with the outlines. Renders
+            nothing at all while the preference is off, which is the default —
+            the same component on both shells, like every other card here. */}
+        <WorkCard unit={unit} />
 
         {/* ── Outlines ── */}
         {(perimeterTraces.length > 1
@@ -689,7 +724,7 @@ const MeasurementDock = ({
                   : 'Not set'}
               </span>
             </div>
-            <p className="mt-1 text-[12px] text-fg-3">{scaleProvenance}</p>
+            <p className="mt-1 text-[12px] text-fg-3">{provenance}</p>
 
             {/* The two ways to correct a scale, where the scale is read. A bad
                 room implies a px/ft that can be 58-90% out, and area goes as

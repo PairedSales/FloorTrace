@@ -1,5 +1,18 @@
 import { create } from 'zustand';
 
+const SHOW_WORK_KEY = 'floortrace:showWork';
+
+// Off unless a previous session turned it on. Read once at module load rather
+// than per render, matching `useTheme` and `useEnhancedOcr`; a blocked or full
+// localStorage costs the user their preference and nothing else.
+const readShowWork = () => {
+  try {
+    return localStorage.getItem(SHOW_WORK_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
 /**
  * State that belongs to the *application window*, not to any one plan.
  *
@@ -45,6 +58,14 @@ const useWorkspaceStore = create((set, get) => ({
   // React state because App re-renders the whole shell and a hover must not.
   toolHint: null,
 
+  // Whether the Area card's derivation is expanded — the full chain from the
+  // scale's evidence through each outline's pixels to the printed total.
+  //
+  // Here rather than in `appStore`: it answers "does this change when I switch
+  // plan?" with no. Persisted, unlike `dockOpen`, because it is an opt-in for
+  // people who audit the number rather than a panel they happened to collapse.
+  showWork: readShowWork(),
+
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
@@ -72,6 +93,17 @@ const useWorkspaceStore = create((set, get) => ({
   // whichever button the pointer landed on next had already set.
   clearToolHint: (id) => set((s) => (s.toolHint?.id === id ? { toolHint: null } : {})),
   setDockOpen: (v) => set({ dockOpen: v }),
+
+  setShowWork: (v) => {
+    const next = !!v;
+    set({ showWork: next });
+    try {
+      localStorage.setItem(SHOW_WORK_KEY, String(next));
+    } catch {
+      // persistence is best-effort
+    }
+  },
+
   setShowExportDialog: (v) => set({ showExportDialog: v }),
   setMenuOpen: (v) => set({ menuOpen: v }),
 
