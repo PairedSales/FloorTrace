@@ -3,6 +3,7 @@ import {
   Moon, Brush, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
+import useWorkspaceStore from '../../store/workspaceStore';
 
 const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
 const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
@@ -63,6 +64,10 @@ const MobileMenuSheet = ({
   theme, onCycleTheme, onHelpOpen,
 }) => {
   const ThemeIcon = THEME_ICON[theme] ?? MonitorSmartphone;
+  // Window state, read where it is used rather than threaded through
+  // MobileChrome — the same two fields the dock and the top bar read.
+  const showWork = useWorkspaceStore((s) => s.showWork);
+  const setShowWork = useWorkspaceStore((s) => s.setShowWork);
 
   return (
     <BottomSheet open={open} onClose={onClose} title="FloorTrace" subtitle="Menu" detent="full">
@@ -160,6 +165,12 @@ const MobileMenuSheet = ({
             label="Snap to walls"
             checked={autoSnapEnabled}
             onToggle={() => onAutoSnapChange(!autoSnapEnabled)}
+          />
+          <Toggle
+            label="Show the area calculation"
+            detail="The math behind the GLA, under the figure"
+            checked={showWork}
+            onToggle={() => setShowWork(!showWork)}
           />
           <Row
             icon={ThemeIcon}
