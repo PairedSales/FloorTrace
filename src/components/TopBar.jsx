@@ -294,7 +294,21 @@ const TopBar = ({
           thing in it that does nothing. Below 1280 the mark carries the identity
           alone and the commands get the width. */}
       <span className="flex items-center gap-2 pr-1.5 xl:pr-2.5 shrink-0 text-[12.5px] font-semibold text-fg">
-        <FloorTraceMark className="w-[15px] h-[15px] text-fg-3" />
+        {/* The mark alone is the button, not the word beside it — the word stays
+            plain text so this stays out of the row's "only three labelled verbs"
+            contract. `onCloseAllPlans` already confirms per plan when there is
+            work to lose and empties the last one in place, which is exactly
+            "start fresh" for one plan or several. */}
+        <button
+          type="button"
+          onClick={onCloseAllPlans}
+          disabled={isProcessing}
+          aria-label="Start fresh — close every open plan"
+          title="Start fresh — close every open plan"
+          className="rounded text-fg-3 hover:text-fg disabled:opacity-40 disabled:pointer-events-none"
+        >
+          <FloorTraceMark className="w-[15px] h-[15px]" />
+        </button>
         <span className="hidden xl:inline">FloorTrace</span>
       </span>
 
