@@ -1,6 +1,28 @@
 import { create } from 'zustand';
 
 const SHOW_WORK_KEY = 'floortrace:showWork';
+const UNIT_KEY = 'floortrace:unit';
+
+// 'auto' plus the three the dock's pill group offers. Kept here rather than
+// imported from a formatter: this is the *preference's* vocabulary, and 'auto'
+// is not a unit anything can format in.
+export const UNIT_PREFERENCES = ['auto', 'decimal', 'inches', 'metric'];
+
+export const UNIT_PREFERENCE_LABEL = {
+  auto: 'Match the plan',
+  decimal: 'Feet',
+  inches: 'Feet & inches',
+  metric: 'Meters',
+};
+
+const readUnitPreference = () => {
+  try {
+    const saved = localStorage.getItem(UNIT_KEY);
+    return UNIT_PREFERENCES.includes(saved) ? saved : 'auto';
+  } catch {
+    return 'auto';
+  }
+};
 
 // Off unless a previous session turned it on. Read once at module load rather
 // than per render, matching `useTheme` and `useEnhancedOcr`; a blocked or full
@@ -66,6 +88,18 @@ const useWorkspaceStore = create((set, get) => ({
   // people who audit the number rather than a panel they happened to collapse.
   showWork: readShowWork(),
 
+  // Which unit the user wants to read every plan in, or 'auto' to take it from
+  // whatever the scan found printed on the drawing.
+  //
+  // Workspace-level and persisted, unlike `appStore.unit`, which is the unit
+  // one plan is *currently* displayed in. That field has to stay per-plan — it
+  // rides along in a `.floorplan` and in a park — but it was the only answer
+  // there was, so a scan that read a metric plan moved a user who works in feet
+  // off feet, and every new plan started at the default again. This is the
+  // standing answer; `unit` is the live one, and `useUnitPreference` is what
+  // keeps the second following the first.
+  unitPreference: readUnitPreference(),
+
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
@@ -99,6 +133,18 @@ const useWorkspaceStore = create((set, get) => ({
     set({ showWork: next });
     try {
       localStorage.setItem(SHOW_WORK_KEY, String(next));
+    } catch {
+      // persistence is best-effort
+    }
+  },
+
+  // Anything not in the vocabulary is ignored rather than stored: this value is
+  // read back into `appStore.unit`, where an unrecognised one formats nothing.
+  setUnitPreference: (v) => {
+    if (!UNIT_PREFERENCES.includes(v)) return;
+    set({ unitPreference: v });
+    try {
+      localStorage.setItem(UNIT_KEY, v);
     } catch {
       // persistence is best-effort
     }

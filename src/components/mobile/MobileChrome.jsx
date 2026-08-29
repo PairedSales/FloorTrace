@@ -269,6 +269,7 @@ const MobileChrome = ({
         onShowSideLengthsChange={onShowSideLengthsChange}
         autoSnapEnabled={autoSnapEnabled}
         onAutoSnapChange={onAutoSnapChange}
+        onUnitChange={onUnitChange}
         saveOnExit={saveOnExit}
         onSaveOnExitChange={onSaveOnExitChange}
         enhancedOcr={enhancedOcr}

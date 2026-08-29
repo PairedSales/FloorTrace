@@ -54,6 +54,7 @@ import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
+import useUnitPreference from './hooks/useUnitPreference';
 
 // The desktop chrome a top-centre toast has to clear: one top band of 40 (the
 // menu titles and the command bar share it) + the status band's 26 + 10 px of
@@ -253,6 +254,9 @@ function App() {
   const { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan } = usePlanManager();
   const { saveOnExit, handleSaveOnExitChange, clearAutosavedDraft } = useAutosave();
   const { enhancedOcr, handleEnhancedOcrChange } = useEnhancedOcr();
+  // Workspace-level, and the reason the pinned unit survives a scan, a new
+  // plan and a project someone else saved in metres.
+  const { chooseUnit } = useUnitPreference();
   const { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale } = useAutoScale();
   // The scan runs before the exterior trace is even defined in this file, and
   // the automatic path needs both. A ref rather than a reordering: moving
@@ -453,7 +457,10 @@ function App() {
           // recognised.
           const uiUnit = detectedFormat === 'meters' ? 'metric' : detectedFormat;
           let unitNote = '';
-          if (uiUnit && unit !== uiUnit) {
+          // Only when the user has not said which unit they want. A pinned
+          // preference is a standing instruction, and the drawing does not get
+          // to overrule it — that is the whole point of pinning one.
+          if (uiUnit && unit !== uiUnit && useWorkspaceStore.getState().unitPreference === 'auto') {
             setUnit(uiUnit);
             const label = uiUnit === 'inches' ? 'feet-inches'
               : uiUnit === 'metric' ? 'meters' : 'decimal feet';
@@ -1414,10 +1421,14 @@ function App() {
       }
     }, 1200);
   }, [setRoomDimensions, updateScale]);
+  // The pill group is the only place a unit is picked by hand, so picking one
+  // there is what "my preferred unit" means — there is no second gesture that
+  // says "and keep it". View > Units is how you hand the choice back to the
+  // plan.
   const handleUnitChange = useCallback((u) => {
     undoManager.save();
-    setUnit(u);
-  }, [setUnit]);
+    chooseUnit(u);
+  }, [chooseUnit]);
 
   const handleShowSideLengthsChange = useCallback((value) => {
     setShowSideLengths(value);
@@ -1782,6 +1793,7 @@ function App() {
         onShowSideLengthsChange={handleShowSideLengthsChange}
         autoSnapEnabled={autoSnapEnabled}
         onAutoSnapChange={handleAutoSnapChange}
+        onUnitChange={handleUnitChange}
         saveOnExit={saveOnExit}
         onSaveOnExitChange={handleSaveOnExitChangeWithToast}
         enhancedOcr={enhancedOcr}

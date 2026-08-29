@@ -3,7 +3,7 @@ import {
   Moon, Brush, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
-import useWorkspaceStore from '../../store/workspaceStore';
+import useWorkspaceStore, { UNIT_PREFERENCES, UNIT_PREFERENCE_LABEL } from '../../store/workspaceStore';
 
 const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
 const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
@@ -59,7 +59,7 @@ const MobileMenuSheet = ({
   onFileOpen, onTakePhoto, onExport, onCopyExhibit, onSaveProject, onCloseActivePlan,
   onFindRoomSize, onTracePerimeter, onDrawExterior, onOutlineByVertex, onAddFloor, canAddOutline,
   onFitToWindow, showSideLengths, onShowSideLengthsChange,
-  autoSnapEnabled, onAutoSnapChange,
+  autoSnapEnabled, onAutoSnapChange, onUnitChange,
   saveOnExit, onSaveOnExitChange, enhancedOcr, onEnhancedOcrChange,
   theme, onCycleTheme, onHelpOpen,
 }) => {
@@ -68,6 +68,8 @@ const MobileMenuSheet = ({
   // MobileChrome — the same two fields the dock and the top bar read.
   const showWork = useWorkspaceStore((s) => s.showWork);
   const setShowWork = useWorkspaceStore((s) => s.setShowWork);
+  const unitPreference = useWorkspaceStore((s) => s.unitPreference);
+  const setUnitPreference = useWorkspaceStore((s) => s.setUnitPreference);
 
   return (
     <BottomSheet open={open} onClose={onClose} title="FloorTrace" subtitle="Menu" detent="full">
@@ -172,6 +174,17 @@ const MobileMenuSheet = ({
             checked={showWork}
             onToggle={() => setShowWork(!showWork)}
           />
+          {/* The measurement sheet's pill group switches the unit and pins it;
+              this list is where the fourth answer lives — let the plan decide —
+              and where the three two-letter pills get their names. */}
+          {UNIT_PREFERENCES.map((id) => (
+            <Toggle
+              key={id}
+              label={id === 'auto' ? 'Units: match the plan' : `Units: ${UNIT_PREFERENCE_LABEL[id].toLowerCase()}`}
+              checked={unitPreference === id}
+              onToggle={() => (id === 'auto' ? setUnitPreference(id) : onUnitChange(id))}
+            />
+          ))}
           <Row
             icon={ThemeIcon}
             label="Theme"
