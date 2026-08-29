@@ -208,7 +208,17 @@ const run = () => {
     const boundary = traceFloorplanBoundaryCore(imageData, boundaryOpts);
     const boundaryMs = Date.now() - t0;
     out.push(`   boundary: ${boundaryMs}ms  ${boundary?.outer ? `sealRadius=${boundary.debug.sealRadius} wallThickness=${boundary.debug.wallThickness} extThickness=${boundary.debug.exteriorThickness} excluded=${boundary.excludedRegions}${boundary.debug.usedFallback ? ' (fallback)' : ''}` : 'FAILED'}`);
-    const bScore = scoreBoundary(boundary, truth?.boundary, ppf);
+    // The bare run traces a drawing nothing has been read off yet, and on some
+    // plans that is a strictly weaker position rather than a bug: without the
+    // parsed labels there is no evidence a grey-filled bathroom is a bathroom
+    // and not a balcony. `boundary.bare` overrides the thresholds for that run
+    // only, so the shortfall is stated at the size it actually is instead of
+    // being hidden by lowering the bar for both runs — which would stop the
+    // constrained run, the one the app takes, from being scored at all.
+    const bareTruth = truth?.boundary?.bare
+      ? { ...truth.boundary, ...truth.boundary.bare }
+      : truth?.boundary;
+    const bScore = scoreBoundary(boundary, bareTruth, ppf);
     out.push(...bScore.lines);
     if (truth?.boundary?.note) out.push(`   note: ${truth.boundary.note}`);
     if (truth?.boundary) {

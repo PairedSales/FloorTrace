@@ -182,8 +182,19 @@ export const scoreCandidate = (candidate, ctx) => {
   if (constraintScore) terms.push({ w: ctx.brush ? 0.08 : 0.22, v: constraintScore.fit });
   if (brushFit !== null) terms.push({ w: 0.25, v: brushFit });
   const weight = terms.reduce((sum, t) => sum + t.w, 0);
+
+  // Excluding known-inside evidence is a contradiction, not a lower mark, so
+  // it is subtracted outside the weighted mean — the same place `annex` and
+  // `incomplete` sit, and for the same reason. Inside the mean, one label in
+  // nine moves 22/122 of the score by 0.11, which a tidy closing radius buys
+  // back on `economy` alone: on a plan whose bottom-right corner is drawn open,
+  // the only candidate enclosing every label lost by 0.005 to one that left a
+  // whole storage room outside, and the reward term had already been paid.
+  // Draw mode keeps the reduced pull it has above — a user who paints around
+  // the garage wants it out, and a penalty here would reward annexing it back.
+  const excluded = constraintScore ? 1 - constraintScore.fit : 0;
   const score = terms.reduce((sum, t) => sum + t.w * t.v, 0) / weight
-    - 0.3 * annex - 0.3 * incomplete;
+    - 0.3 * annex - 0.3 * incomplete - (ctx.brush ? 0.1 : 0.3) * excluded;
 
   return {
     ...candidate,

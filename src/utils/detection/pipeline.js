@@ -249,8 +249,17 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
       // list above only covers exclusions the app knew about before the trace;
       // geometric garage detection finds its own, and without them the tracer
       // reported the garage it had just carved as a label outside the outline.
+      //
+      // Only carves something *said* was excluded — an OCR keyword, or the
+      // garage detector's door evidence. A `shaded` carve is a guess from tint
+      // alone at 0.5 confidence, and letting it exempt the labels it removed
+      // switches off the one check that could contradict it: two tinted
+      // bathrooms came off this plan at 93% confidence with nothing said,
+      // because the carve that took them also silenced their labels.
       carvedRegions: (boundary.floors ?? []).flatMap(
-        (floor) => (floor.excludedRegions ?? []).filter((r) => r.bbox).map((r) => ({
+        (floor) => (floor.excludedRegions ?? []).filter(
+          (r) => r.bbox && (r.sources ?? [r.source]).some((src) => src !== 'shaded'),
+        ).map((r) => ({
           x: r.bbox.minX / scaleX,
           y: r.bbox.minY / scaleY,
           width: (r.bbox.maxX - r.bbox.minX + 1) / scaleX,
@@ -335,6 +344,12 @@ const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis
   () => traceBoundary(analysis, {
     ...options.boundary,
     autoGarage: false,
+    // The other half of the same intent, and it was missing: a tinted bathroom
+    // floor reads to `findShadedPockets` exactly as a condo terrace does, so
+    // the clamp came back with both baths cut out of it and a click on either
+    // label landed outside the rail and returned nothing at all. Draw mode
+    // already turns this pair off together, for the same reason.
+    autoShaded: false,
     inclusive: true,
     searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
   }),
@@ -420,12 +435,33 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
     const py = Math.min(analysis.height - 1, Math.max(0, Math.round(workPoint.y)));
     const clickedFloor = (boundary.floors ?? [])
       .find((floor) => floor.footprintMask[py * analysis.width + px]);
-    const target = clickedFloor ?? boundary;
-    footprintInfo = {
-      footprintMask: target.footprintMask,
-      footprintArea: target.footprintArea,
-      satFootprint: footprintSat(target, analysis),
-    };
+    // A clamp the click falls *outside* is not a tighter rail, it is a refusal
+    // with no words: growth starts outside its own bound, `growRoomRect`
+    // returns null, and the user clicks a room and nothing happens. Falling
+    // back to the whole boundary never helped — that is the footprint the
+    // click is already outside of. The bbox is what separates the two cases,
+    // and it also carries the refusal the clamp used to carry by accident:
+    // inside it, a click the mask rejects is a hole the tracer left in a
+    // building it did enclose, so drop the clamp and let wall coverage bound
+    // the growth as the unclamped path already does; outside it, the click is
+    // on blank page and the answer is still nothing, which is what the clamp —
+    // and only the clamp — was stopping, so it is refused here in its own
+    // words. ExampleFloorplan9's bottom-right corner is drawn open, so the
+    // seal floods in and takes the storage room: clamped it is undetectable,
+    // unclamped it is an ordinary walled rectangle.
+    const inFootprintBbox = (bbox) => bbox && px >= bbox.minX && px <= bbox.maxX
+      && py >= bbox.minY && py <= bbox.maxY;
+    const target = clickedFloor
+      ?? ((boundary.floors ?? []).find((floor) => inFootprintBbox(floor.footprintBbox))
+        ?? (inFootprintBbox(boundary.footprintBbox) ? boundary : null));
+    if (!target) return null;
+    if (target.footprintMask[py * analysis.width + px]) {
+      footprintInfo = {
+        footprintMask: target.footprintMask,
+        footprintArea: target.footprintArea,
+        satFootprint: footprintSat(target, analysis),
+      };
+    }
   }
   const labelBbox = options.labelBbox
     ? {

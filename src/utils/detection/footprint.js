@@ -330,11 +330,15 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
 
   const carveWarnings = [];
   const anchorOf = (bbox) => ({ kind: 'ring', rings: [bboxRing(bbox)] });
-  // Stated, never counted: `area-excluded` is the detector working, and its
-  // severity keeps it out of the "things to check" count. The number is here
-  // rather than only in a toast because it is the largest discretionary
-  // subtraction the app makes.
+  // A carve the plan *stated* — an OCR keyword, the garage detector's door
+  // evidence — is the detector working, and `info` keeps it out of the "things
+  // to check" count. A carve whose only evidence is tint is not: nothing said
+  // anything, `findShadedPockets` is the weakest source in the file at 0.5, and
+  // it removed the largest discretionary subtraction the app makes. Two tinted
+  // bathrooms came off a house this way and the trace still read 93% clean,
+  // which is the exact shape of wrong answer this pipeline is most prone to.
   for (const region of excludedRegions) {
+    const stated = (region.sources ?? [region.source]).some((src) => src !== 'shaded');
     carveWarnings.push(warning('area-excluded', {
       keyword: region.keyword ?? null,
       sources: region.sources ?? [region.source],
@@ -344,7 +348,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
       // foot, so a square-footage figure here could only ever have been wrong.
       shareOfFootprint: preCarveArea > 0 ? region.size / preCarveArea : 0,
       bbox: region.bbox,
-    }, 'info', anchorOf(region.bbox)));
+    }, stated ? 'info' : 'warn', anchorOf(region.bbox)));
   }
   // A near-miss the carve already settled says nothing: the garage detector
   // doubts a cavity another source carved, and "not removed" printed beside

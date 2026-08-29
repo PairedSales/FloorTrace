@@ -585,6 +585,30 @@ describe('detectRoomFromClickCore', () => {
     expect(detectRoomFromClickCore(img, { x: 30, y: 30 })).toBeNull();
   });
 
+  // The clamp is a rail, not a definition of living area, and its two failure
+  // modes are not symmetric. Here the building's bottom-right corner is drawn
+  // open — 40px of neither wall — so the seal floods in and the clamp comes
+  // back without the right-hand room in it. Clicking that room used to return
+  // nothing at all and say nothing about why.
+  it('detects a room the clamp lost through a corner the drawing leaves open', () => {
+    const plan = () => {
+      const img = createImage(700, 400);
+      wall(img, 100, 100, 600, 100, 8);
+      wall(img, 100, 100, 100, 300, 8);
+      wall(img, 100, 300, 560, 300, 8);   // stops 40px short of the corner
+      wall(img, 600, 100, 600, 260, 8);   // stops 40px short of the corner
+      wall(img, 400, 100, 400, 300, 8);   // partition: right-hand room
+      return img;
+    };
+    const room = detectRoomFromClickCore(plan(), { x: 500, y: 200 });
+    expect(room).toBeTruthy();
+    const [x1, y1, x2, y2] = bboxOf(room);
+    expect(x1).toBeGreaterThan(395);
+    expect(x2).toBeLessThan(605);
+    expect(y1).toBeGreaterThan(95);
+    expect(y2).toBeLessThan(310);
+  });
+
   it('maps results back to original pixel space when downscaled', () => {
     const img = createImage(3000, 2000);
     wall(img, 300, 300, 2700, 300, 24);
@@ -776,5 +800,82 @@ describe('mapAnchor', () => {
   it('grows coordinates whenever the raster was downscaled', () => {
     const { x } = mapAnchor({ kind: 'rect', x: 700, y: 0, width: 1, height: 1 }, 0.35, 0.35);
     expect(x).toBeGreaterThan(700);
+  });
+});
+
+// A tinted room floor is drawn exactly as a condo plan draws a balcony, and
+// `findShadedPockets` cannot tell them apart from the tint alone. What can is
+// the OCR pass: a parsed dimension label sitting on the tint says someone
+// measured this as a room. A balcony the plan actually names still carves —
+// that goes through the `label` source, on the keyword and not on the tint.
+describe('shaded pockets vs tinted rooms', () => {
+  // Two rooms across the bottom of a building, both floors tinted, the right
+  // one with a bath drawn on it so its tint is split into two components the
+  // way a real fixture splits one.
+  const tintedBaths = () => {
+    const img = createImage(700, 500);
+    wall(img, 50, 50, 650, 50, 10);
+    wall(img, 50, 450, 650, 450, 10);
+    wall(img, 50, 50, 50, 450, 10);
+    wall(img, 650, 50, 650, 450, 10);
+    // Doorways, or the rooms seal into enclosed voids and never reach the tint
+    // detector at all.
+    wall(img, 50, 300, 170, 300, 10);
+    wall(img, 230, 300, 470, 300, 10);
+    wall(img, 530, 300, 650, 300, 10);
+    wall(img, 350, 300, 350, 450, 10);  // partition between them
+    fillRect(img, 56, 306, 344, 444, 215);
+    fillRect(img, 356, 306, 644, 444, 215);
+    // A bath: a thin outline on the right-hand tint, splitting it in two.
+    wall(img, 500, 306, 500, 444, 2);
+    return img;
+  };
+  const onTheTint = [
+    { x: 200, y: 400, name: "9'10\" x 5'2\"" },
+    { x: 600, y: 400, name: "9'7\" x 5'2\"" },
+  ];
+
+  const carvedShare = (traced) => (traced.quality.warnings ?? [])
+    .filter((w) => w.code === 'area-excluded')
+    .reduce((sum, w) => sum + (w.detail?.shareOfFootprint ?? 0), 0);
+
+  it('carves tint nothing has been read off', () => {
+    const traced = traceFloorplanBoundaryCore(tintedBaths());
+    expect(carvedShare(traced)).toBeGreaterThan(0.1);
+  });
+
+  it('says so out loud rather than as a note', () => {
+    const traced = traceFloorplanBoundaryCore(tintedBaths());
+    const excluded = traced.quality.warnings.filter((w) => w.code === 'area-excluded');
+    expect(excluded.length).toBeGreaterThan(0);
+    // Nothing stated this exclusion, so it is a thing to check, not an `info`
+    // note about the detector doing its job.
+    expect(excluded.every((w) => w.severity === 'warn')).toBe(true);
+  });
+
+  it('keeps tint a parsed dimension label is written on', () => {
+    const traced = traceFloorplanBoundaryCore(tintedBaths(), {
+      constraints: { rooms: [], interiorPoints: onTheTint },
+    });
+    expect(carvedShare(traced)).toBe(0);
+  });
+
+  // The label sits on the floor, never on the bath, so per fragment the bath's
+  // own tint is an unlabelled pocket and comes out on its own.
+  it('keeps the fragments of that tint the fixture ink splits off', () => {
+    const traced = traceFloorplanBoundaryCore(tintedBaths(), {
+      constraints: { rooms: [], interiorPoints: onTheTint },
+    });
+    expect(traced.quality.warnings.some((w) => w.code === 'area-excluded')).toBe(false);
+  });
+
+  it('still carves an area the plan itself labels', () => {
+    const traced = traceFloorplanBoundaryCore(tintedBaths(), {
+      constraints: { rooms: [], interiorPoints: onTheTint },
+      excludeRegions: [{ x: 560, y: 380, width: 60, height: 12, keyword: 'BALCONY' }],
+    });
+    const excluded = traced.quality.warnings.filter((w) => w.code === 'area-excluded');
+    expect(excluded.length).toBeGreaterThan(0);
+    expect(excluded.some((w) => w.detail?.sources?.includes('label'))).toBe(true);
   });
 });
