@@ -175,6 +175,43 @@ describe('every command that left the row still has a home', () => {
   });
 });
 
+/**
+ * The one item in this band that leaves the app. It is worth a test because
+ * the failure is silent in both directions: a renamed build output 404s a menu
+ * item that still looks fine, and an item that forgets `external` opens a new
+ * tab with nothing saying it will.
+ */
+describe('the walkthrough opens out of the app', () => {
+  const item = (view) =>
+    within(openMenu(view, 'View')).getByRole('menuitem', { name: /How the outline is traced/ });
+
+  it('sits in View, and says it leaves', () => {
+    expect(item(bar()).getAttribute('aria-label')).toBe(
+      'How the outline is traced — opens in a new tab',
+    );
+  });
+
+  it('opens the page the build actually writes, in a new tab', () => {
+    const calls = [];
+    const real = window.open;
+    window.open = (...args) => { calls.push(args); return null; };
+    try {
+      fireEvent.click(item(bar()));
+    } finally {
+      window.open = real;
+    }
+    expect(calls).toHaveLength(1);
+    const [url, target, features] = calls[0];
+    expect(url.endsWith('/tracing-tutorial.html')).toBe(true);
+    expect(target).toBe('_blank');
+    expect(features).toContain('noopener');
+  });
+
+  it('is available with no plan open — it is how you find out what the app does', () => {
+    expect(item(bar({ image: null })).disabled).toBe(false);
+  });
+});
+
 describe('one dropdown, and the keyboard knows about it', () => {
   it('tells the keyboard guard while any of the four is open', () => {
     // `shortcutsBlocked` reads this. Without it `1` entered draw mode behind an

@@ -14,7 +14,8 @@
     "bench:scale": "node scripts/scaleBenchmark.mjs",
     "bench:ocr": "node scripts/ocrBenchmark.mjs",
     "probe:exterior": "node scripts/syntheticProbe.mjs",
-    "probe:memory": "node --expose-gc scripts/memoryProbe.mjs"
+    "probe:memory": "node --expose-gc scripts/memoryProbe.mjs",
+    "tutorial": "node scripts/tutorialStages.mjs fixtures/ExampleFloorplan8.png tutorial-stages.json && node scripts/buildTutorial.mjs tutorial-stages.json"
   },
   "dependencies": {
     "@fontsource/fira-code": "^5.3.0",

@@ -1,0 +1,1871 @@
+<title>Floorplan to Polygon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&family=Source+Serif+4:opsz,wght@8..60,300..600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Floorplan to Polygon — visual system
+   Ground: plan-set paper, faintly green-grey, never cream.
+   Type:   Archivo (expanded grotesque) / Source Serif 4 / IBM Plex Mono.
+   Colour: three semantic overlay hues that ARE the figure colours —
+           teal = evidence & the answer, amber = a hypothesis,
+           magenta = something removed or lost.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --bg:          #F2F3F0;
+  --surface:     #FBFBF9;
+  --surface-2:   #E7E9E4;
+  --sheet:       #FFFFFF;
+  --ink:         #191C18;
+  --ink-2:       #4C5249;
+  --ink-3:       #7B8177;
+  --rule:        #D5D8D0;
+  --rule-strong: #B9BEB3;
+
+  --accent:      #16697F;
+  --accent-2:    #1E8AA6;
+  --accent-soft: #DCEAEE;
+  --amber:       #8E680B;
+  --amber-soft:  #F2E7C9;
+  --drop:        #A62F51;
+  --drop-soft:   #F4DDE4;
+
+  --fig-bg:      #FBFBF9;
+  --fig-grid:    #E2E5DE;
+
+  --shadow: 0 1px 2px rgba(25, 28, 24, .05), 0 8px 24px -12px rgba(25, 28, 24, .14);
+
+  --step--1: 0.8125rem;
+  --step-0:  1.0625rem;
+  --step-1:  1.1875rem;
+  --step-2:  1.5rem;
+  --step-3:  2rem;
+  --step-4:  2.75rem;
+  --step-5:  4rem;
+
+  --measure: 66ch;
+  --rail: 236px;
+  --main: 1140px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:          #121512;
+    --surface:     #1A1E1A;
+    --surface-2:   #232823;
+    --sheet:       #E8E8E4;
+    --ink:         #E9ECE6;
+    --ink-2:       #A6ADA2;
+    --ink-3:       #767D72;
+    --rule:        #2C322B;
+    --rule-strong: #414940;
+
+    --accent:      #5FBBD4;
+    --accent-2:    #86D2E6;
+    --accent-soft: #143139;
+    --amber:       #D6A745;
+    --amber-soft:  #3A2F14;
+    --drop:        #E8788E;
+    --drop-soft:   #3B1C26;
+
+    --fig-bg:      #1A1E1A;
+    --fig-grid:    #262C26;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px -14px rgba(0, 0, 0, .7);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:          #121512;
+  --surface:     #1A1E1A;
+  --surface-2:   #232823;
+  --sheet:       #E8E8E4;
+  --ink:         #E9ECE6;
+  --ink-2:       #A6ADA2;
+  --ink-3:       #767D72;
+  --rule:        #2C322B;
+  --rule-strong: #414940;
+
+  --accent:      #5FBBD4;
+  --accent-2:    #86D2E6;
+  --accent-soft: #143139;
+  --amber:       #D6A745;
+  --amber-soft:  #3A2F14;
+  --drop:        #E8788E;
+  --drop-soft:   #3B1C26;
+
+  --fig-bg:      #1A1E1A;
+  --fig-grid:    #262C26;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px -14px rgba(0, 0, 0, .7);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Source Serif 4", Charter, Georgia, "Times New Roman", serif;
+  font-size: var(--step-0);
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, .display, .eyebrow, .rail a, .btn, th, .stat-k, .tag {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+}
+
+code, kbd, .mono, .num, td.num, .readout, .chip {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-2); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* ── shell ─────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  gap: 0 clamp(24px, 4vw, 72px);
+  max-width: calc(var(--rail) + var(--main) + 100px);
+  margin: 0 auto;
+  padding: 0 clamp(20px, 3vw, 44px);
+}
+
+.rail-col { position: relative; }
+
+.rail {
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 40px 0 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--step--1);
+}
+
+.rail-title {
+  font-family: Archivo, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+  padding-left: 26px;
+}
+
+.rail a {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 10px 7px 8px;
+  border-radius: 3px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-weight: 500;
+  line-height: 1.35;
+  border-left: 2px solid transparent;
+}
+.rail a .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-3); }
+.rail a .q { display: block; font-family: "Source Serif 4", serif; font-weight: 400; font-style: italic; color: var(--ink-3); font-size: 12.5px; margin-top: 1px; }
+.rail a:hover { background: var(--surface-2); color: var(--ink); }
+.rail a[aria-current="true"] { border-left-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.rail a[aria-current="true"] .n { color: var(--accent); }
+
+main { padding: 0 0 140px; min-width: 0; }
+
+/* ── typography blocks ────────────────────────────────── */
+
+.prose { max-width: var(--measure); }
+.prose > * { margin: 0; }
+.prose > * + * { margin-top: 1.1em; }
+.prose > h3 + p { margin-top: .55em; }
+.prose > * + h3 { margin-top: 1.9em; }
+.prose strong { font-weight: 600; }
+
+h1 {
+  font-size: var(--step-5);
+  font-weight: 800;
+  font-stretch: 118%;
+  line-height: .96;
+  letter-spacing: -.02em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: var(--step-3);
+  font-weight: 700;
+  font-stretch: 112%;
+  line-height: 1.08;
+  letter-spacing: -.015em;
+  margin: 0 0 6px;
+  text-wrap: balance;
+  max-width: 22ch;
+}
+
+h3 {
+  font-size: var(--step-1);
+  font-weight: 700;
+  font-stretch: 105%;
+  line-height: 1.25;
+  margin: 0 0 4px;
+  text-wrap: balance;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+}
+
+.q-line {
+  font-style: italic;
+  color: var(--ink-2);
+  font-size: var(--step-1);
+  margin: 0 0 26px;
+  max-width: 46ch;
+  padding-left: 14px;
+  border-left: 2px solid var(--accent);
+}
+
+section { padding: 76px 0 0; scroll-margin-top: 24px; }
+section.sec + section.sec { border-top: 1px solid var(--rule); }
+
+.sec-head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 18px; margin-bottom: 30px; }
+.sec-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  padding-top: 10px;
+  border-top: 2px solid var(--accent);
+}
+.sec-body { grid-column: 2; }
+
+/* ── hero ─────────────────────────────────────────────── */
+
+.hero { padding: clamp(48px, 7vh, 96px) 0 8px; }
+.hero .lede {
+  font-size: var(--step-2);
+  line-height: 1.42;
+  color: var(--ink-2);
+  max-width: 34ch;
+  margin: 22px 0 0;
+  font-weight: 300;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(0, 640px);
+  gap: 40px;
+  align-items: end;
+  margin-top: 40px;
+}
+.byline {
+  margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--rule);
+  font-size: var(--step--1); color: var(--ink-3); max-width: 46ch;
+}
+
+/* ── figures ──────────────────────────────────────────── */
+
+figure { margin: 30px 0 0; }
+.fig {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.fig-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px;
+  padding: 12px 16px; border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
+}
+.fig-title { font-family: Archivo, sans-serif; font-weight: 700; font-size: 13px; letter-spacing: .01em; }
+.fig-note { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+.fig-body { padding: 16px; display: grid; gap: 16px; }
+.fig-cols { display: grid; grid-template-columns: 600px minmax(220px, 1fr); gap: 20px; align-items: start; }
+.fig-cols.narrow { grid-template-columns: 460px minmax(200px, 1fr); }
+.fig-cols.even { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1100px) { .fig-cols, .fig-cols.narrow { grid-template-columns: 1fr; } }
+figcaption {
+  padding: 12px 16px; border-top: 1px solid var(--rule);
+  font-size: 13.5px; color: var(--ink-2); background: var(--surface-2);
+  max-width: none;
+}
+figcaption b { font-weight: 600; color: var(--ink); }
+
+.plan {
+  display: block; width: 100%; height: auto;
+  background: var(--fig-bg);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  image-rendering: pixelated;
+}
+.sheet {
+  background: var(--sheet);
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  padding: 10px;
+}
+.sheet img { display: block; width: 100%; height: auto; }
+
+/* ── controls ─────────────────────────────────────────── */
+
+.ctl { display: grid; gap: 10px; }
+.ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.ctl label {
+  font-family: Archivo, sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 22px; background: transparent; flex: 1 1 180px; min-width: 140px; margin: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px; background: var(--rule-strong); border-radius: 2px;
+}
+input[type="range"]::-moz-range-track { height: 3px; background: var(--rule-strong); border-radius: 2px; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; margin-top: -6px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--surface); cursor: grab;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--surface); cursor: grab;
+}
+
+.seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 3px; overflow: hidden; }
+.seg button {
+  font-family: Archivo, sans-serif; font-size: 12px; font-weight: 600;
+  padding: 6px 11px; border: 0; border-right: 1px solid var(--rule-strong);
+  background: var(--surface); color: var(--ink-2); cursor: pointer; line-height: 1.3;
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--surface-2); color: var(--ink); }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--surface-2); }
+tbody tr.win:hover td { background: var(--accent-soft); }
+
+.btn {
+  font-size: 12px; font-weight: 600; padding: 6px 12px; cursor: pointer;
+  background: var(--surface); color: var(--ink-2);
+  border: 1px solid var(--rule-strong); border-radius: 3px;
+}
+.btn:hover { background: var(--surface-2); color: var(--ink); }
+
+.check { display: flex; align-items: center; gap: 7px; font-family: Archivo, sans-serif; font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; }
+.check input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+/* ── readouts ─────────────────────────────────────────── */
+
+.readout { display: grid; gap: 2px; font-size: 12.5px; }
+.readout .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 4px 0; border-bottom: 1px dotted var(--rule); }
+.readout .row.hi { color: var(--accent); font-weight: 600; }
+.readout .k { color: var(--ink-3); font-family: Archivo, sans-serif; font-weight: 500; letter-spacing: .01em; }
+.readout .v { font-weight: 500; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); font-family: Archivo, sans-serif; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.stat { background: var(--surface); padding: 12px 14px; }
+.stat-k { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.stat-v { display: block; font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 500; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.stat-v small { font-size: 12px; color: var(--ink-3); font-weight: 400; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); border-bottom-color: var(--rule-strong); }
+td.num { font-variant-numeric: tabular-nums; }
+tr.win td { background: var(--accent-soft); font-weight: 600; }
+tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.win td:first-child::after { content: " ← picked"; font-family: Archivo, sans-serif; font-size: 10px; letter-spacing: .08em; color: var(--accent); font-weight: 700; }
+.tbl-wrap { overflow-x: auto; }
+
+/* ── callouts ─────────────────────────────────────────── */
+
+.thesis {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 22px 26px;
+  margin: 30px 0 0;
+  max-width: 62ch;
+}
+.thesis p { margin: 0; font-size: var(--step-2); line-height: 1.35; font-weight: 300; }
+.thesis .eyebrow { color: var(--accent); margin-bottom: 8px; }
+
+.aside {
+  border-left: 2px solid var(--rule-strong);
+  padding: 2px 0 2px 18px;
+  margin: 26px 0 0;
+  max-width: 58ch;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.aside .eyebrow { margin-bottom: 6px; }
+.aside > * + * { margin-top: .8em; }
+
+.warnbox {
+  border: 1px solid var(--drop);
+  background: var(--drop-soft);
+  border-radius: 4px;
+  padding: 18px 22px;
+  margin: 26px 0 0;
+  max-width: 62ch;
+}
+.warnbox .eyebrow { color: var(--drop); margin-bottom: 6px; }
+.warnbox p { margin: 0; }
+.warnbox p + p { margin-top: .7em; }
+
+.chip {
+  display: inline-block; font-size: 11.5px; padding: 1px 6px; border-radius: 3px;
+  background: var(--surface-2); border: 1px solid var(--rule); color: var(--ink-2);
+}
+code { font-size: .9em; background: var(--surface-2); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--rule); }
+.formula {
+  font-family: "IBM Plex Mono", monospace; font-size: 13.5px; line-height: 1.7;
+  background: var(--surface); border: 1px solid var(--rule); border-left: 2px solid var(--accent);
+  border-radius: 3px; padding: 12px 16px; margin: 18px 0 0; max-width: 62ch; overflow-x: auto;
+}
+.formula b { color: var(--accent); font-weight: 500; }
+
+.terms { display: grid; gap: 0; margin: 22px 0 0; max-width: 66ch; }
+.term { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 16px; padding: 14px 0; border-top: 1px solid var(--rule); }
+.term:last-child { border-bottom: 1px solid var(--rule); }
+.term .w { font-family: "IBM Plex Mono", monospace; font-size: 15px; color: var(--accent); font-weight: 500; }
+.term .w small { display: block; font-family: Archivo, sans-serif; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin-bottom: 2px; }
+.term p { margin: 0; font-size: 15px; }
+.term p + p { margin-top: .5em; }
+.term b { font-weight: 600; }
+.term.sub .w { color: var(--drop); }
+
+.coda { margin-top: 90px; padding: 40px 0 0; border-top: 2px solid var(--ink); }
+.coda .prose { max-width: 60ch; }
+
+.cmds { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; display: grid; gap: 4px; margin-top: 34px; max-width: 780px; }
+.cmds div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 230px); gap: 20px; align-items: baseline; padding: 7px 0; border-bottom: 1px dotted var(--rule); }
+.cmds span { color: var(--ink-3); font-family: "Source Serif 4", serif; font-style: italic; }
+
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail-col { display: none; }
+  .hero-grid { grid-template-columns: 1fr; }
+  .fig-cols.even { grid-template-columns: 1fr; }
+}
+
+.fig { transition: border-color .2s ease; }
+</style>
+
+<div class="shell">
+  <div class="rail-col">
+    <nav class="rail" aria-label="Stages">
+      <p class="rail-title">The argument</p>
+      <a href="#problem"><span class="n">00</span><span>The problem<span class="q">why a picture isn’t a shape</span></span></a>
+      <a href="#ink"><span class="n">01</span><span>Ink<span class="q">which pixels are drawn?</span></span></a>
+      <a href="#walls"><span class="n">02</span><span>Walls<span class="q">which ink is structure?</span></span></a>
+      <a href="#regions"><span class="n">03</span><span>Regions<span class="q">what does it enclose?</span></span></a>
+      <a href="#scoring"><span class="n">04</span><span>Scoring<span class="q">which reading is right?</span></span></a>
+      <a href="#polygon"><span class="n">05</span><span>Polygon<span class="q">pixels into vertices</span></span></a>
+      <a href="#doubt"><span class="n">06</span><span>Doubt<span class="q">how does it know?</span></span></a>
+      <a href="#coda"><span class="n">→</span><span>The shape of it</span></a>
+    </nav>
+  </div>
+
+  <main>
+
+  <!-- ══ HERO ══════════════════════════════════════════ -->
+  <header class="hero">
+    <p class="eyebrow">FloorTrace · exterior boundary detection</p>
+    <div class="hero-grid">
+      <div>
+        <h1>Floorplan<br>to Polygon</h1>
+        <p class="lede">A floorplan is a picture of a building. Square footage needs a <em>polygon</em>.</p>
+        <p class="byline">This page follows one 600 × 370 scan through the tracer that turns the first into the second. Every figure is real output from the pipeline in <span class="mono">src/utils/detection/</span> — not a redrawing of it. The argument is that almost every step exists not to <em>find</em> the outline, but to stop a wrong outline from looking right.</p>
+      </div>
+      <div>
+        <div class="sheet"><img id="hero-img" alt="The example floorplan: a second storey with two bedrooms, a laundry closet, a stair and a bay window."></div>
+        <div class="stats" style="margin-top:14px;grid-template-columns:repeat(3,1fr)" id="hero-stats"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══ 00 PROBLEM ════════════════════════════════════ -->
+  <section class="sec" id="problem">
+    <div class="sec-head">
+      <div class="sec-num">00</div>
+      <div class="sec-body">
+        <h2>A picture is not a shape</h2>
+        <p class="q-line">What exactly are we being asked for?</p>
+        <div class="prose">
+          <p>The input is a raster: a grid of colours with no notion of a wall, a room or a building. The output has to be a closed polygon in image coordinates, because everything downstream — area, the interior envelope, the exclusion of a garage — is polygon arithmetic. Between those two lies the whole problem.</p>
+          <p>Three answers look obvious and all three are wrong in instructive ways.</p>
+          <p><b>“Take the bounding box of the ink.”</b> Buildings have notches. On this plan the true outline is 147,888 px² and its bounding box is 161,280 px² — <b>9.1% larger</b>, or 46 ft² of a 512 ft² floor. A bounding box also passes every sanity check you could write for it, which is the problem.</p>
+          <p><b>“Flood-fill the inside.”</b> From where? And the drawing leaks: every doorway is a literal gap in the wall, so a flood from inside runs out through the front door and covers the page.</p>
+          <p><b>“Find the largest closed contour.”</b> There isn’t one. The exterior wall of a real plan is interrupted by every window, every slider, every garage bay. The outline you are looking for is not drawn.</p>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The target, and the tempting shortcut</span><span class="fig-note">the traced outline against its own bounding box</span></div>
+      <div class="fig-body">
+        <div class="fig-cols">
+          <canvas class="plan" id="c-target" width="600" height="370"></canvas>
+          <div>
+            <div class="legend" style="margin-bottom:12px">
+              <span><i style="background:var(--accent)"></i>traced outline</span>
+              <span><i style="background:var(--drop)"></i>bounding box</span>
+            </div>
+            <div class="readout" id="r-target"></div>
+            <p style="font-size:13px;color:var(--ink-2);margin-top:14px">The four notches the box ignores are a bay window, a stair landing, a closet wall and an entry step. None is optional: on a 2,400 ft² house the same 9% is 216 ft².</p>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="thesis reveal">
+      <p class="eyebrow">The move the whole pipeline turns on</p>
+      <p>You cannot compute the outline from the pixels. You can only <b>propose</b> outlines and <b>measure</b> which one the drawing supports.</p>
+    </div>
+
+    <div class="prose" style="margin-top:26px">
+      <p>That reframing is what makes the rest tractable. Instead of one clever heuristic that must be right, the tracer runs four stages: reduce the picture to <em>graded evidence</em>; enumerate every reading of that evidence a careful person might defend; <em>score</em> each reading against the evidence rather than against a threshold; and hand over the winner with the reasons it might be wrong still attached to it.</p>
+      <p>The rest of this page is those four stages on one drawing.</p>
+    </div>
+  </section>
+
+  <!-- ══ 01 INK ════════════════════════════════════════ -->
+  <section class="sec" id="ink">
+    <div class="sec-head">
+      <div class="sec-num">01</div>
+      <div class="sec-body">
+        <h2>Which pixels are drawn at all?</h2>
+        <p class="q-line">From 24-bit colour to one bit per pixel.</p>
+        <div class="prose">
+          <p>Every later stage is a question about <em>sets of pixels</em> — does this set enclose that set, how thick is this run, what fraction of this edge has ink behind it. Those questions are cheap on a binary mask and expensive on colour, so the first thing that happens is a reduction to one bit per pixel: <code>ink[y * width + x] ∈ {0, 1}</code>.</p>
+          <p>Colour collapses to luminance with an integer BT.601 luma, <code>(r·77 + g·150 + b·29) &gt;&gt; 8</code>, and the 256-bin histogram is accumulated in the same pass — a floorplan photographed at 50 MP would otherwise pay for a second full walk just to count.</p>
+          <p>Then the threshold. A scan has no canonical “black”: paper is not 255, ink is not 0, and both drift with the scanner. <b>Otsu’s method</b> answers this without a magic number. Imagine sliding a threshold <i>t</i> and splitting every pixel into two piles. Score the split by how far apart the two piles’ means are, weighted by how big the piles are — that product is the <em>between-class variance</em>. The threshold that maximises it is the one where the two piles are most convincingly two things rather than one thing cut in half.</p>
+        </div>
+        <div class="formula">σ²<sub>between</sub>(t) = ω<sub>0</sub>(t)·ω<sub>1</sub>(t)·(μ<sub>0</sub>(t) − μ<sub>1</sub>(t))²&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;t* = <b>134</b> on this plan</div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">Otsu, live</span><span class="fig-note">drag the threshold — the curve is this image’s real between-class variance</span></div>
+      <div class="fig-body">
+        <div id="otsu-chart"></div>
+        <div class="ctl-row">
+          <label for="otsu-t">Threshold</label>
+          <input type="range" id="otsu-t" min="1" max="254" value="134">
+          <span class="mono" id="otsu-val" style="min-width:9ch">t = 134</span>
+          <button class="btn" id="otsu-reset">Back to Otsu’s pick</button>
+        </div>
+        <div class="fig-cols even">
+          <div><canvas class="plan" id="c-gray" width="600" height="370"></canvas><p class="fig-note" style="margin:6px 0 0">grayscale, working scale</p></div>
+          <div><canvas class="plan" id="c-thresh" width="600" height="370"></canvas><p class="fig-note" style="margin:6px 0 0">ink mask at the chosen threshold</p></div>
+        </div>
+      </div>
+      <figcaption>Slide low and the walls thin out while the grey window bands stay invisible; slide high and paper texture floods in as ink, wrecking the connected-component counts the next stage depends on. The curve peaks at exactly <b>134</b> — but notice how <em>flat</em> it is: on a drawing this cleanly bi-level, any threshold from <b>86 to 174</b> scores within 2% of optimal. Otsu is not finding a knife edge here, it is landing in the middle of a plateau, which is precisely why the answer survives a different scanner. Nothing about 134 is hard-coded; a bluish scan of the same drawing lands somewhere else and everything downstream follows.</figcaption>
+    </figure>
+
+    <div class="aside reveal">
+      <p class="eyebrow">Two guards on a textbook algorithm</p>
+      <p>Plain Otsu fails twice in this domain, so <code>inkThreshold</code> wraps it. On a <b>colour-styled plan</b> the split lands between the tinted room fills and the page white, turning whole floors into one solid slab with the walls, cavities and text swallowed inside it. So when the dark class comes back implausibly large for line work — over 14% of the page — the dark class is split <em>again</em>, and the lower threshold is kept only if the two dark modes are genuinely far apart, which distinguishes strokes-plus-fills from grey hatching. This drawing sits at <b>11.9%</b> dark, just under the trigger, so plain Otsu stands.</p>
+      <p>And the result is clamped to <code>[60, 220]</code>. For a perfectly bi-level input, between-class variance is maximised at the bottom of the range, so plain Otsu returns 0 and classifies <em>nothing</em> as ink. The clamp is not a fudge factor; it is the fix for a degenerate case the formula genuinely has.</p>
+    </div>
+
+    <div class="aside reveal">
+      <p class="eyebrow">The downscale that isn’t here</p>
+      <p>Above 1,400 px on the long edge the raster is reduced — and it is reduced <em>after</em> thresholding, by <b>OR-pooling</b>: a working pixel is ink if <em>any</em> source pixel in its cell was. Averaging or nearest-neighbour sampling both delete one-pixel hairlines, and a hairline is often the only thing drawn along a bay window. The greyscale is box-averaged alongside in the same pass, because the tint tests further down need tone, not just presence. This plan is 600 px wide, so none of it runs: <code>scaleX = 1.0</code>, and every coordinate on this page is a real image coordinate.</p>
+    </div>
+  </section>
+
+  <!-- ══ 02 WALLS ══════════════════════════════════════ -->
+  <section class="sec" id="walls">
+    <div class="sec-head">
+      <div class="sec-num">02</div>
+      <div class="sec-body">
+        <h2>Which ink is a wall?</h2>
+        <p class="q-line">Most of what is drawn is not structure.</p>
+        <div class="prose">
+          <p>The ink mask contains the walls and also: room names, dimension strings, a toilet, a sink, a stair and its treads, every door swing, cabinet outlines and a dashed soffit line. All of it is equally black. Three filters separate structure from the rest, and each asks a different question.</p>
+        </div>
+
+        <h3 style="margin-top:30px">a. Size — connected components</h3>
+        <div class="prose">
+          <p>A 4-connected labelling pass (a scanline flood that pushes whole <em>spans</em> onto its stack rather than pixels) finds every maximal blob of touching ink. This drawing has <b id="cc-total">372</b> of them. <b id="cc-drop">366</b> fit inside an <b>18 px</b> box and are erased: 98% of the components, but only <b id="cc-pct">6.2%</b> of the ink. What survives is six components, the largest of which — 24,182 px — is the wall network itself.</p>
+          <p>The 18 comes from <code>max(14, 3% of the long edge)</code>. Every threshold in this pipeline is expressed relative to the drawing rather than to the paper, because “small” means small compared to the building, not small in absolute pixels.</p>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">Why the door swings vanish here</span><span class="fig-note">one doorway at 5×, ink mask</span></div>
+      <div class="fig-body">
+        <div class="fig-cols narrow">
+          <canvas class="plan" id="c-door" width="550" height="450"></canvas>
+          <div>
+            <div class="legend" style="margin-bottom:12px">
+              <span><i style="background:var(--ink)"></i>kept</span>
+              <span><i style="background:var(--drop)"></i>dropped as a speck</span>
+            </div>
+            <p style="font-size:14px;color:var(--ink-2)">A door swing is drawn light enough that thresholding <em>shatters</em> it: the arc comes back as a dotted line of fragments, none of them 18 px across, and the size filter takes them one by one.</p>
+            <p style="font-size:14px;color:var(--ink-2);margin-top:.8em">On a plan that draws its arcs solid and dark, the size filter keeps them and the <em>shape</em> filter below is what removes them. Two filters, one outcome — which is the point of having both.</p>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="sec-head" style="margin-top:44px"><div class="sec-num" style="border:0"></div><div class="sec-body">
+      <h3>b. Shape — long straight runs</h3>
+      <div class="prose">
+        <p>A drafted line has a property nothing else in the drawing has: it runs straight for a long way. So the mask is scanned for runs of at least <b>12 px</b> in four directions — horizontal, vertical, and both diagonals — on a copy dilated by one pixel, so a scan line that wobbles by a pixel over 40 px still reads as one run rather than four short ones. Union that with everything surviving a 5 × 5 morphological opening, which catches thick walls of any shape, and you have <code>wallMask</code>.</p>
+      </div>
+
+      <h3 style="margin-top:30px">c. Thickness — how thick is a wall <em>here</em>?</h3>
+      <div class="prose">
+        <p>Nothing downstream can be written in absolute pixels, because the same building might arrive at 600 px or 4,000. So the pipeline measures one number and derives the rest from it. Every ink run in every row and column is histogrammed by length, each weighted <em>by its own length</em> so that pixel mass decides rather than run count, and the mode is taken.</p>
+      </div>
+    </div></div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The wall-thickness vote</span><span class="fig-note">ink-run lengths, weighted by mass</span></div>
+      <div class="fig-body">
+        <div id="thick-chart"></div>
+      </div>
+      <figcaption>Two populations, clearly separated: a hump at <b>3–4 px</b> — cabinet lines, stair treads, the dashed soffit — and a spike at <b>10–11 px</b>, the walls. The mode is <b>11</b>, and that single number then sets the closing ladder’s ceiling, the network grouping radius, the evidence tolerance, the simplification epsilon, the filament shave radius and the interior-envelope fallback. Get it wrong and every one of those is wrong together.</figcaption>
+    </figure>
+
+    <div class="sec-head" style="margin-top:44px"><div class="sec-num" style="border:0"></div><div class="sec-body">
+      <h3>Three masks, three readers</h3>
+      <div class="prose">
+        <p>The stage does not produce one answer to “is this a wall”, because two consumers need different answers and pretending otherwise breaks one of them.</p>
+      </div>
+      <div class="terms">
+        <div class="term"><div class="w"><small>strict</small>33,805</div><div><p><b><code>wallMask</code></b> — long runs plus thick blobs. <b>Room detection</b> uses this one. If a door arc read as wall here, a room rectangle would stop growing at the door instead of at the wall behind it.</p></div></div>
+        <div class="term"><div class="w"><small>structural</small>27,020</div><div><p><b><code>thickMask</code></b> — <code>wallMask</code> opened at 3 px (0.3 × wall thickness). Strokes thick enough to be load-bearing. This is what “full evidence” means when a candidate outline is scored.</p></div></div>
+        <div class="term"><div class="w"><small>generous</small>35,959</div><div><p><b><code>boundaryMask</code></b> — <code>wallMask</code> plus rescued line-like residual ink plus screened glazing. <b>The exterior tracer</b> uses this one, because a bay window drawn in hairlines is still the outside of the building even though no room rectangle should ever stop against it.</p></div></div>
+      </div>
+    </div></div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">Ink becoming structure</span><span class="fig-note">step through the filters</span></div>
+      <div class="fig-body">
+        <div class="ctl-row">
+          <label>Stage</label>
+          <div class="seg" id="layer-steps"></div>
+        </div>
+        <div class="fig-cols">
+          <canvas class="plan" id="c-layers" width="600" height="370"></canvas>
+          <div>
+            <div class="legend" id="layer-legend" style="margin-bottom:12px"></div>
+            <div class="readout" id="layer-readout"></div>
+            <p id="layer-note" style="font-size:13.5px;color:var(--ink-2);margin-top:14px"></p>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="sec-head" style="margin-top:44px"><div class="sec-num" style="border:0"></div><div class="sec-body">
+      <h3>The rescue that pays for itself: screened glazing</h3>
+      <div class="prose">
+        <p>Some plans draw a window as two black rails with paper showing between them. This one draws it as a <em>grey band filling the wall</em>. Above the ink threshold that band is not there at all — so as far as every filter above is concerned, the exterior wall has a hole in it exactly the width of the window.</p>
+        <p>You cannot fix this by relaxing the threshold, because the same grey is used for stair treads and floor tint. And you cannot fix it by widening the gap-welding, because a window that runs to within a wall-thickness of a corner leaves a stub too short to weld against — and the minimum stub length cannot be relaxed either, since one wall-thickness is also what a scan line sees crossing a <em>diagonal</em> wall.</p>
+        <p>So the band is rescued directly, under five conditions that together describe “this grey band <em>is</em> the wall”: it is screened (at least 12 levels below the page’s own modal tone); it is at least half a wall thick and three walls long; it is no thicker than 1.8 × the wall; it fills at least 55% of its own bounding box; and — the test that does the real work — at <b>both</b> ends it continues into a wall whose cross-section is the band’s own.</p>
+        <p>That last condition is what separates a window from everything else drawn in the same grey. A stair tread runs <em>between</em> two walls, so the wall it meets <em>crosses</em> it rather than lining up with it. On this plan the rescue finds five bands, 2,154 px.</p>
+      </div>
+    </div></div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The ablation</span><span class="fig-note">the same tracer, run once with the glazing rescue and once without</span></div>
+      <div class="fig-body">
+        <div class="fig-cols even">
+          <div>
+            <canvas class="plan" id="c-abl-on" width="600" height="370"></canvas>
+            <div class="stats" style="margin-top:10px" id="abl-on-stats"></div>
+          </div>
+          <div>
+            <canvas class="plan" id="c-abl-off" width="600" height="370"></canvas>
+            <div class="stats" style="margin-top:10px" id="abl-off-stats"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption>Left, the shipped pipeline. Right, the identical search over <code>wallMask</code> instead of <code>boundaryMask</code> — the one difference being that the window bands are not there. The outside flood comes in through the window on the right-hand wall and takes the whole right bedroom with it. The outline it returns follows real, drawn wall for its entire length; it is perfectly sealed; it reports the <b>same 0.96 confidence</b> and raises <b>no warnings at all</b>.</figcaption>
+    </figure>
+
+    <div class="warnbox reveal">
+      <p class="eyebrow">The failure mode everything after this is built against</p>
+      <p>Not a crash, not an obviously broken outline — <b>a wrong answer that looks right</b>. 24.5% of the building, 125 ft², missing, at 96% confidence, silently. Every remaining stage of the pipeline should be read as an answer to the question: <em>how would we have caught this?</em></p>
+    </div>
+  </section>
+
+  <!-- ══ 03 REGIONS ════════════════════════════════════ -->
+  <section class="sec" id="regions">
+    <div class="sec-head">
+      <div class="sec-num">03</div>
+      <div class="sec-body">
+        <h2>What does this ink enclose?</h2>
+        <p class="q-line">Turning strokes into regions — and refusing to pick just one.</p>
+        <div class="prose">
+          <p>Before anything can be enclosed, the page has to be divided into <em>buildings</em>. A single sheet often carries four plans; a plan often carries a legend, a north arrow and a title block. So the wall mask is dilated by twice the wall thickness to associate nearby strokes, the result is labelled, and the original wall pixels are projected back onto those groups. Each group is a <b>wall network</b>.</p>
+          <p>Groups then merge, but under a rule with two halves that a plain bounding-box overlap cannot express:</p>
+          <ul style="margin:0;padding-left:20px">
+            <li style="margin-bottom:.5em"><b>Extents must interleave, not contain.</b> A floor outline broken into pieces by a long window has pieces that each cover part of the same region — their boxes overlap partially. A legend drawn inside an L-plan’s notch is <em>contained</em>. Those are opposite cases and look identical to “do the boxes overlap”.</li>
+            <li><b>Neither piece may seal on its own.</b> If two groups each close into their own footprint, they are two drawings — however neatly their walls happen to line up on the page. This is what stops two floor plans stacked on a sheet, sharing a left-wall coordinate, from being welded into one impossible building.</li>
+          </ul>
+          <p>This plan is a single network: 35,959 wall pixels, spanning [20, 25] to [580, 360].</p>
+        </div>
+
+        <h3 style="margin-top:34px">Closing, flooding, labelling</h3>
+        <div class="prose">
+          <p>Given one network, turning it into a region is three primitives. <b>Morphological closing</b> at radius <i>r</i> — dilate by <i>r</i>, then erode by <i>r</i> — welds shut any gap narrower than 2<i>r</i> while leaving everything wider than that alone; it is what makes a doorway stop being a hole. Then <b>flood from the page border</b>: every pixel the outside can reach is outside. Invert, and what remains is enclosed. <b>Label</b> the result and take the largest component, and you have a <em>footprint</em>.</p>
+          <p>Which leaves exactly one question: what is <i>r</i>?</p>
+        </div>
+
+        <div class="thesis" style="margin-top:26px">
+          <p class="eyebrow">The second move the pipeline turns on</p>
+          <p>Don’t pick <i>r</i>. <b>Climb it</b>, and keep every rung as a competing hypothesis.</p>
+        </div>
+
+        <div class="prose" style="margin-top:26px">
+          <p>The ladder is geometric — <code>r ← round(1.45·r) + 1</code> from <i>r</i> = 2, capped at <code>max(32, 4.5% of the long edge)</code> — giving <b>2, 4, 7, 11, 17, 26, 32</b> here. Every rung whose enclosed area actually changed becomes a candidate. Two evidence variants are climbed independently: <b><code>all</code></b>, everything in the boundary mask, and <b><code>structural</code></b>, only strokes surviving a 3 px opening. And a connectivity policy sits under each: <code>weld</code> welds collinear runs across gaps but refuses to weld across a notch mouth; <code>raw</code> welds nothing, kept as a control on whether the welding invented the answer; <code>span</code> paints wall lines across their full extent, a rescue that runs only when nothing enclosed at all.</p>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The closing ladder</span><span class="fig-note">seven rungs, two evidence variants — every one of these is a real candidate</span></div>
+      <div class="fig-body">
+        <div class="ctl-row">
+          <label>Evidence</label>
+          <div class="seg" id="ladder-variant">
+            <button data-i="0" aria-pressed="true">all / weld</button>
+            <button data-i="1" aria-pressed="false">structural / weld</button>
+          </div>
+          <label for="ladder-r" style="margin-left:10px">Closing radius</label>
+          <input type="range" id="ladder-r" min="0" max="6" value="0" step="1" style="flex:0 1 200px">
+          <span class="mono" id="ladder-rv" style="min-width:7ch">r = 2</span>
+        </div>
+        <div class="fig-cols">
+          <div>
+            <canvas class="plan" id="c-ladder" width="600" height="370"></canvas>
+            <div class="legend" style="margin-top:10px">
+              <span><i style="background:var(--ink)"></i>wall ink</span>
+              <span><i style="background:var(--drop)"></i>added by the closing</span>
+              <span><i style="background:var(--amber);opacity:.55"></i>enclosed footprint</span>
+            </div>
+          </div>
+          <div>
+            <div id="ladder-chart"></div>
+            <div class="readout" id="ladder-readout" style="margin-top:14px"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption id="ladder-caption"></figcaption>
+    </figure>
+
+    <div class="prose" style="margin-top:34px;max-width:var(--measure)">
+      <h3>Sealed is not the same as complete</h3>
+      <p>Switch the widget above to <b>structural / weld</b> and hold it at <i>r</i> = 2. That footprint seals perfectly. Its <em>cover</em> — how much of the wall network’s bounding box it spans — is 0.86; its <em>solidity</em> — how much of its own box it fills — is 0.56; the combined seal score is <b>1.00</b>. Its outline is drawn as wall along 95.2% of its length, <em>better</em> than the candidate that eventually wins. It passes every test that can be applied to it in isolation.</p>
+      <p>And it is missing an entire bedroom.</p>
+      <p>Nothing local can see this. The only thing that can is the ladder itself: the <em>same evidence</em>, climbed to <i>r</i> = 26, encloses 149,071 px instead of 90,305. That ratio is <code>completeness = 0.606</code>, and it is the sole reason the pipeline does not return a plan with a room cut off it.</p>
+    </div>
+
+    <div class="aside reveal">
+      <p class="eyebrow">Choosing the ladder’s reference</p>
+      <p>“The most the same evidence eventually enclosed” cannot just be the largest rung, because a large enough radius eventually swallows the neighbouring plan. So the reference is taken from a truncated ladder: cut at the first rung that <em>fuses</em> two separate enclosures into one — that rung joined two drawings — then drop a trailing tail still growing faster than 3% per rung — that is annexation, not sealing — and take the maximum of what is left. A sealed footprint gains only rounding slack from extra radius; one still growing at the top of the ladder is eating the page.</p>
+    </div>
+  </section>
+
+  <!-- ══ 04 SCORING ════════════════════════════════════ -->
+  <section class="sec" id="scoring">
+    <div class="sec-head">
+      <div class="sec-num">04</div>
+      <div class="sec-body">
+        <h2>Which reading is the building?</h2>
+        <p class="q-line">Five candidates, four measurements, three contradictions.</p>
+        <div class="prose">
+          <p>The search produced five distinct footprints for this network. Each is scored on four things the drawing can be asked about, combined as a weighted mean — and then three quantities are <em>subtracted from outside that mean</em>, which turns out to be the most consequential design decision in the file.</p>
+        </div>
+
+        <div class="terms">
+          <div class="term"><div class="w"><small>weight</small>0.34</div><div><p><b>seal</b> — did it close, and does it fill its own network? <code>√(coverScore × solidScore)</code>, where cover is the footprint’s box against the wall network’s box and solidity is the footprint against its own box. A <em>geometric</em> mean, so a half-sealed wing reads as “not sealed yet” rather than “close enough on average”.</p></div></div>
+          <div class="term"><div class="w"><small>weight</small>0.30</div><div><p><b>support</b> — is this outline actually drawn as a wall? Walk the polygon in 2 px steps and look up the evidence level within 10 px (⌈0.9 × wall thickness⌉). Graded, never binary: <b>structural ink = 1.0</b>, any wall stroke = 0.45, raw ink = 0.2, nothing = 0. Length-weighted mean. The grading is what lets a fabricated edge across blank paper be told apart from a real bay drawn in hairlines.</p><p>It also records the <em>longest unsupported run</em>. The mean says how much of the outline is drawn; the run says whether the missing part is one invented wall or noise spread thin.</p></div></div>
+          <div class="term"><div class="w"><small>weight</small>0.26</div><div><p><b>coverage</b> — of the wall ink in this network, weighted by how structural it is (thick 1.0, thin 0.25), what fraction ends up <em>inside</em>? Leaving drawn wall outside your outline does not mean you were conservative; it means you lost part of the building.</p></div></div>
+          <div class="term"><div class="w"><small>weight</small>0.10</div><div><p><b>economy</b> — <code>1 − (0.6·r/r<sub>max</sub> + 0.4·spanCost)</code>. Closing radius and welded span are both <em>fabrication</em>. Between two readings that fit the drawing equally well, prefer the one that invented less.</p></div></div>
+          <div class="term sub"><div class="w"><small>subtract</small>0.30</div><div><p><b>annex</b> — the footprint’s box reaches beyond the wall network it grew from. It has taken something that is not this floor.</p></div></div>
+          <div class="term sub"><div class="w"><small>subtract</small>0.30</div><div><p><b>incomplete</b> — <code>(0.97 − completeness)/0.2</code>, clamped. The bedroom-losing candidate, caught.</p></div></div>
+          <div class="term sub"><div class="w"><small>subtract</small>0.30</div><div><p><b>excluded</b> — a room or a parsed dimension label that the rest of the app already established is <em>inside</em> the building, and this outline puts outside.</p></div></div>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The scorecard</span><span class="fig-note">real candidates, real measurements — move the weights and watch the ranking change</span></div>
+      <div class="fig-body">
+        <div class="fig-cols">
+          <div>
+            <canvas class="plan" id="c-cand" width="600" height="370"></canvas>
+            <p class="fig-note" id="cand-label" style="margin:8px 0 0"></p>
+          </div>
+          <div class="ctl" id="weight-ctl"></div>
+        </div>
+        <div class="tbl-wrap">
+          <table id="score-table">
+            <thead><tr>
+              <th>hypothesis</th><th>seal</th><th>support</th><th>coverage</th><th>economy</th>
+              <th>− annex</th><th>− incomplete</th><th>score</th><th>area px²</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p style="font-size:13px;color:var(--ink-3);margin:0">Click a row to see that hypothesis on the drawing.</p>
+      </div>
+      <figcaption>With the shipped weights these scores reproduce the pipeline’s own output to four decimals. Push <b>economy</b> up and <code>structural/weld @ r26</code> — which needed a 26 px closing — stops being punished for it. Pull the <b>contradiction penalty</b> to zero and the candidate that loses a bedroom scores <b>0.9735</b> — within 0.005 of the winner, and third of five. That margin is not a coincidence: it is the same 0.005 by which a real plan’s correct outline once lost.</figcaption>
+    </figure>
+
+    <div class="prose" style="margin-top:34px;max-width:var(--measure)">
+      <h3>Why three terms sit outside the mean</h3>
+      <p>Inside a weighted mean, a contradiction is just a low mark, and good behaviour elsewhere buys it back. That is not a theoretical worry — it was measured. As a <em>reward</em> term, holding all the known-inside labels was worth 22/122 of the score, times one label in nine. On a plan whose bottom-right corner is drawn open, the only candidate that enclosed every label lost by <b>0.005</b> to one that left an entire storage room outside — because the winner had a tidier closing radius and bought the miss back on <code>economy</code> alone.</p>
+      <p>Leaving a room outside is not a slightly worse outline. It is a <em>contradiction</em> with something already known, and it belongs in the same place as <code>annex</code> and <code>incomplete</code>: subtracted, after the averaging, where nothing can pay for it.</p>
+
+      <h3 style="margin-top:30px">Ties break toward the cheaper hypothesis</h3>
+      <p>Here <code>all/weld @ r2</code> and <code>all/raw @ r2</code> score <b>identically</b>: 0.9782, same seal, same support, same area. The tie-break order is <em>less invented evidence, then less closing, then less bridging</em> — so <code>raw</code>, which welded nothing at all, wins. The welding was never needed on this drawing, and the pipeline says so by preferring the hypothesis that didn’t use it.</p>
+      <p>One subtlety worth stealing: “within ε of each other” is <em>not transitive</em>, so it cannot be a sort comparator. Three candidates with a≈b, b≈c, a&lt;c made the winner a function of the order they happened to be pushed in — reversing the input array changed the returned footprint. Candidates are now compared against the <em>leader</em>, and only then broken by cost.</p>
+
+      <h3 style="margin-top:30px">Confidence is not the score</h3>
+      <p>The score <em>ranks</em>; the confidence <em>reports</em>, and it is computed separately and pessimistically. It starts at <code>seal × (0.3 + 0.7 × support)</code> and is then multiplied down by every defect found: unsealed ×0.35, weak support ×0.75, a bridged opening scaled by its length, a heavy closing ×0.85, annexation, incompleteness ×0.7, wall left outside, a missing constraint. It is clamped to <code>[0.05, 0.98]</code> — this tracer is never allowed to say it is certain.</p>
+      <div class="formula">confidence = 1.000 × (0.3 + 0.7 × 0.940) = <b>0.958</b>&nbsp;&nbsp;<span style="color:var(--ink-3)">— no penalties applied on this plan</span></div>
+    </div>
+  </section>
+
+  <!-- ══ 05 POLYGON ════════════════════════════════════ -->
+  <section class="sec" id="polygon">
+    <div class="sec-head">
+      <div class="sec-num">05</div>
+      <div class="sec-body">
+        <h2>From a region to fourteen vertices</h2>
+        <p class="q-line">The winner is still a bitmap. Area needs geometry.</p>
+        <div class="prose">
+          <p><b>Moore boundary tracing</b> walks the outside of the component: from a start pixel, scan the 8-neighbourhood clockwise beginning just past the direction you came from, step to the first neighbour that belongs to the region, and repeat. The subtle part is knowing when to stop. Stopping when you re-enter the start <em>pixel</em> is wrong — a one-pixel isthmus makes the walk pass through the start mid-loop, and the ring is silently truncated with part of the outline missing. <b>Jacob’s criterion</b> stops on the repeated <em>state</em>: same pixel <em>and</em> same incoming direction. That returns <b>1,800</b> boundary pixels here.</p>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">The filament shave</span><span class="fig-note">before the polygon is simplified, the mask is cleaned</span></div>
+      <div class="fig-body">
+        <div class="fig-cols even">
+          <div><canvas class="plan" id="c-shave-a" width="600" height="370"></canvas><p class="fig-note" style="margin:6px 0 0">winning footprint, as flooded — note the spike at the bottom</p></div>
+          <div><canvas class="plan" id="c-shave-b" width="600" height="370"></canvas><p class="fig-note" style="margin:6px 0 0">after an 8 px opening, largest component kept</p></div>
+        </div>
+      </div>
+      <figcaption>The front-door swing welded a hair-thin excursion onto the footprint, running 46 px below the building. It carries almost no area, so it would barely move the square footage — but it puts three spurious vertices in the outline and drags the bounding box down with it. It is fixed on the <b>mask</b>, not on the polygon: open at <code>⌈0.75 × 11⌉ = 8</code> px, keep the largest component, and accept the result only if it retained <b>≥ 97%</b> of the area. The guard is deliberately that tight — an earlier 15% allowance let this step quietly amputate a real wing whenever the footprint had a narrow neck.</figcaption>
+    </figure>
+
+    <div class="prose" style="margin-top:34px;max-width:var(--measure)">
+      <h3>Ramer–Douglas–Peucker</h3>
+      <p>1,800 points is a staircase, not an outline. RDP simplifies it recursively: take the chord from the first point to the last, find the point farthest from that chord, and if it is farther than ε, keep it and recurse on both halves; otherwise discard everything between. What survives is exactly the points that carry shape.</p>
+      <p>ε is <code>max(2, 0.35 × wallThickness)</code> = <b>3.85 px</b> — scale-relative again, so a 4,000 px scan of the same building simplifies to the same corners. One detail matters more than it looks: the ring is first rotated to start at the point farthest from its centroid, which is almost certainly a corner. RDP’s first chord is its entire frame of reference, and anchoring it mid-wall makes every later split worse.</p>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">Simplification, live</span><span class="fig-note">real RDP over the real 1,800-point contour</span></div>
+      <div class="fig-body">
+        <div class="ctl-row">
+          <label for="rdp-e">Epsilon</label>
+          <input type="range" id="rdp-e" min="20" max="3000" value="385" step="5">
+          <span class="mono" id="rdp-ev" style="min-width:11ch">ε = 3.8 px</span>
+          <button class="btn" id="rdp-reset">Pipeline ε</button>
+          <label class="check" style="margin-left:6px"><input type="checkbox" id="rdp-fit"> rectilinear fit</label>
+        </div>
+        <div class="fig-cols">
+          <canvas class="plan" id="c-rdp" width="600" height="370"></canvas>
+          <div>
+            <div class="readout" id="rdp-readout"></div>
+            <p style="font-size:13px;color:var(--ink-2);margin-top:14px">Below ε ≈ 2 the staircase survives as dozens of one-pixel jogs. Above ε ≈ 12 real corners start disappearing — the bay window is the first to go, then the entry step. The pipeline sits at 3.85, well inside the plateau where the vertex count is stable.</p>
+          </div>
+        </div>
+      </div>
+      <figcaption id="rdp-caption"></figcaption>
+    </figure>
+
+    <div class="prose" style="margin-top:34px;max-width:var(--measure)">
+      <h3>The rectilinear fit</h3>
+      <p>RDP puts corners in roughly the right places but leaves edges at 89.4°, because it is choosing from pixels on a staircase. Buildings are drawn on axes, so the ring is refit: classify every edge as horizontal, vertical or genuinely diagonal within a 14° tolerance; refit each as a line, weighted by length; merge consecutive same-orientation lines sitting within 6 px (half a wall thickness) of each other, which removes RDP’s jitter along a single wall face; insert a perpendicular jog between consecutive parallel lines, which restores a real step whose short connector RDP dropped; then <em>intersect consecutive lines</em> to produce the vertices. 17 points become <b>14</b>.</p>
+      <p>Intersecting rather than snapping is the point. Snapping moves each vertex independently and opens the ring at the corners; intersecting two fitted lines yields one point that both edges agree on by construction.</p>
+      <p>Before any of that, the ring’s dominant orientation is measured — a length-weighted histogram of edge angles at 0.5° resolution, folded into 90° and smoothed so a chamfer cannot out-vote the walls — and if it lands between 0.75° and 20°, the ring is rotated flat, fitted, and rotated back. Scans and phone photos routinely sit several degrees off axis, and fitting such a ring straight onto the image axes flattens the shape while leaving the area almost unchanged, which means no area check and no bounding-box check can ever catch it. This plan measures <b>0.25°</b>, so the de-skew does not fire — but the measured angle is reported either way, because past 20° the ring really is squashed onto the page’s axes and that is precisely the case worth telling someone about.</p>
+
+      <h3 style="margin-top:30px">Area, and the sign that matters</h3>
+      <p>Area is the signed shoelace sum, with holes subtracted. <em>Signed</em>, deliberately, and the absolute value is taken as late as possible: fold it in early and a self-intersecting polygon’s lobes cancel, so the area quietly under-reports instead of the self-intersection being detected.</p>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="fig-head"><span class="fig-title">One outline, two answers</span><span class="fig-note">exterior faces and the interior envelope</span></div>
+      <div class="fig-body">
+        <div class="ctl-row">
+          <label>Show</label>
+          <div class="seg" id="env-mode">
+            <button data-m="both" aria-pressed="true">both</button>
+            <button data-m="outer" aria-pressed="false">exterior</button>
+            <button data-m="inner" aria-pressed="false">interior</button>
+          </div>
+          <label class="check" style="margin-left:8px"><input type="checkbox" id="env-insets" checked> per-edge insets</label>
+        </div>
+        <div class="fig-cols">
+          <canvas class="plan" id="c-env" width="600" height="370"></canvas>
+          <div>
+            <div class="readout" id="env-readout"></div>
+            <p style="font-size:13px;color:var(--ink-2);margin-top:14px">Offsetting by one global number would inset a 4 px partition by an 18 px measurement taken on the thick front wall. Instead each edge marches inward from up to 48 sample points, counts the depth of the wall band behind <em>that</em> edge — treating gaps up to 22 px as still wall, because a double-line wall has a cavity — and takes the median. A wall-thickness in from each end is skipped — capped at a quarter of the edge — or the march near a corner runs along the perpendicular wall and measures <em>its</em> length instead.</p>
+          </div>
+        </div>
+      </div>
+      <figcaption>The four long edges land on 10–12 px, agreeing with the measured wall thickness of 11. The wild ones — 55 px on an 11 px edge — are short edges where only three samples exist; the offset step tolerates them because it re-intersects the offset <em>lines</em> rather than moving vertices, and a bad inset on an 11 px edge moves a corner, not a wall.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ══ 06 DOUBT ══════════════════════════════════════ -->
+  <section class="sec" id="doubt">
+    <div class="sec-head">
+      <div class="sec-num">06</div>
+      <div class="sec-body">
+        <h2>How does it know when it’s wrong?</h2>
+        <p class="q-line">Nothing above proves the answer is right.</p>
+        <div class="prose">
+          <p>Everything so far produces a polygon. None of it produces a <em>guarantee</em>. So the last thing the tracer does is carry its own doubts forward: alongside the geometry it returns <code>warnings[]</code>, each with a code, a severity, a sentence in plain English, and an <b>anchor</b> — the place on the image to look. A warning nobody can point at is unactionable, and “a 34 px opening was bridged” is exactly that until you can see which opening.</p>
+          <p>Twenty-five codes carry a written explanation, and three more are raised by the non-GLA stage. <code>unsealed</code>, <code>weak-wall-support</code>, <code>bridged-opening</code>, <code>heavy-closing</code>, <code>annexation</code>, <code>incomplete-enclosure</code>, <code>wall-left-outside</code>, <code>spanned-walls</code>, <code>self-intersecting</code>, <code>label-outside</code>, <code>enclosed-void</code>. This plan raises none of them, which is why its confidence stays at the value the formula produced.</p>
+        </div>
+
+        <h3 style="margin-top:32px">Searching again, on evidence the search cannot see</h3>
+        <div class="prose">
+          <p>If the winner comes back below 0.75 effective confidence, or excludes a room the app already knows is inside, the whole search runs a second time under two strategies. <b><code>join</code></b> re-runs the wall networks surrounding a stranded room as a <em>single</em> network — the case where one drawing was partitioned into pieces, which no closing radius can ever reach, because closing operates within a network and the mistake was the partition. <b><code>escalate</code></b> forces every rescue policy and doubles the ladder over the same partition.</p>
+          <p>Two details are load-bearing. Adjudication is on <em>effective</em> confidence — the detector’s own number multiplied by a constraint factor — because constraints are scoped per network, so inside the network that caused the miss the miss is invisible: the base attempt can honestly report 0.93 while the app is showing the user 0.47. And <code>escalate</code> is <em>gated</em> on the ladder’s ceiling actually having been reached. The ladder is climbed from <i>r</i> = 2 with every rung scored, so a winner that sealed well below the top has already beaten every wider rung that exists; extending the ladder only appends rungs that score worse on <code>economy</code>. Ungated, that pass doubled the trace time of every merely-fair plan and was never once accepted.</p>
+        </div>
+
+        <h3 style="margin-top:32px">Evidence flowing backwards</h3>
+        <div class="prose">
+          <p>The OCR pass that reads <span class="mono">12'2" × 12'5"</span> off this drawing is not only producing a scale. Every parsed label is a point that is <em>inside the building by construction</em>, and every confirmed room is a rectangle that is inside it. Those arrive back at the tracer as constraints: geometry that excludes one is scored down, and a winner that still excludes one is re-searched. A pipeline stage that runs later feeding a stage that runs earlier is unusual, and it is the single most valuable input the tracer gets, because it is the only evidence that did not come from the same pixels it is judging.</p>
+        </div>
+
+        <h3 style="margin-top:32px">And what is <em>not</em> living area</h3>
+        <div class="prose">
+          <p>A traced footprint is the building; gross living area is less than that. Four detectors propose regions to remove — OCR keyword votes, label floods, geometric garage evidence, and shaded pockets — overlapping proposals <em>merge</em> into one region carrying both sources, and a single pass removes them under a cumulative bound, so the result cannot depend on which detector ran first.</p>
+          <p>The shaded-pocket detector is treated differently in three separate places, and the reason is a good closing note for the whole page: <b>a tinted bathroom floor and a condo balcony are the same pixels.</b> Only a label can tell them apart. So a pocket that a parsed dimension is written on is refused outright; the carve does not join the region list that exempts labels from the “label outside the outline” check, so it cannot silence the very evidence that contradicts it; and its warning is severity <code>warn</code> rather than <code>info</code>, so it is counted among the things a person should check. Ungoverned, those three together once deleted two bathrooms from a house at <b>93% confidence with nothing said</b> — the same failure as the ablation at the top of this page, arriving by a completely different route.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ CODA ══════════════════════════════════════════ -->
+  <section class="coda" id="coda">
+    <div class="prose">
+      <p class="eyebrow">The shape of it</p>
+      <h2 style="max-width:26ch">Generate, measure, explain</h2>
+      <p>Read as a list of steps, this pipeline is a dozen morphological operations in a row. Read as an argument, it is one idea applied four times: <b>the picture cannot be asked what the building is, so ask it many questions whose answers can be compared.</b></p>
+      <p>Reduce the image to graded evidence rather than to a decision. Enumerate every reading of that evidence a careful person might defend, including the ones you expect to lose. Score them against the evidence instead of thresholding any single one. Then hand over the winner with its confidence and its doubts still attached, because the alternative — a clean number with no provenance — is the one outcome that cannot be caught downstream.</p>
+      <p>That shape is why the tracer can be right about a drawing nobody anticipated. It is also why, on the drawing where it is wrong, it can usually say so.</p>
+    </div>
+    <div class="cmds">
+        <div><code>npm run bench:detection</code><span>score every fixture on polygon shape and square footage</span></div>
+        <div><code>node scripts/traceDebug.mjs fixtures/ExampleFloorplan8.png</code><span>the networks, candidates and ladders on this page</span></div>
+        <div><code>node scripts/tutorialStages.mjs fixtures/ExampleFloorplan8.png out.json</code><span>regenerate every figure above</span></div>
+      <div><code>npm run probe:exterior</code><span>synthetic scenarios with exact ground truth</span></div>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<script id="stages" type="application/json">__STAGES__</script>
+<script>
+(() => {
+'use strict';
+const D = JSON.parse(document.getElementById('stages').textContent);
+const W = D.working.width, H = D.working.height;
+// px per foot for this fixture, from four hand measurements of printed
+// dimensions against the wall faces they span (fixtures/*.truth.json).
+const PPF = 17.0, PPF2 = PPF * PPF;
+
+/* ── formatting ─────────────────────────────────────── */
+const n0 = (v) => Math.round(v).toLocaleString('en-US');
+const n2 = (v) => v.toFixed(2);
+const n3 = (v) => v.toFixed(3);
+const ft = (px) => n0(px / PPF2);
+
+/* ── theme-aware painting ───────────────────────────── */
+const repaints = [];
+const onRepaint = (fn) => { repaints.push(fn); return fn; };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const imgCache = new Map();
+function load(src) {
+  if (!src) return Promise.resolve(null);
+  if (imgCache.has(src)) return imgCache.get(src);
+  const p = new Promise((res) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => res(null);
+    i.src = src;
+  });
+  imgCache.set(src, p);
+  return p;
+}
+
+const tintMaps = new WeakMap();
+function tint(img, color) {
+  let m = tintMaps.get(img);
+  if (!m) { m = new Map(); tintMaps.set(img, m); }
+  let c = m.get(color);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-in';
+    x.fillStyle = color;
+    x.fillRect(0, 0, c.width, c.height);
+    m.set(color, c);
+  }
+  return c;
+}
+
+const canvasMeta = new WeakMap();
+function ctxOf(canvas) {
+  let rec = canvasMeta.get(canvas);
+  if (!rec) {
+    const lw = canvas.width, lh = canvas.height;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(lw * dpr);
+    canvas.height = Math.round(lh * dpr);
+    canvas.style.aspectRatio = lw + ' / ' + lh;
+    rec = { ctx: canvas.getContext('2d'), lw, lh, dpr };
+    canvasMeta.set(canvas, rec);
+  }
+  rec.ctx.setTransform(rec.dpr, 0, 0, rec.dpr, 0, 0);
+  return rec;
+}
+
+// layers: [{img, color, alpha}] drawn over the figure ground.
+// crop: [sx, sy, sw, sh] in source px, stretched to the canvas.
+function paint(canvas, layers, crop) {
+  const { ctx, lw, lh } = ctxOf(canvas);
+  ctx.clearRect(0, 0, lw, lh);
+  ctx.fillStyle = css('--fig-bg');
+  ctx.fillRect(0, 0, lw, lh);
+  ctx.imageSmoothingEnabled = false;
+  for (const L of layers) {
+    if (!L || !L.img) continue;
+    ctx.globalAlpha = L.alpha == null ? 1 : L.alpha;
+    const t = tint(L.img, L.color);
+    if (crop) ctx.drawImage(t, crop[0], crop[1], crop[2], crop[3], 0, 0, lw, lh);
+    else ctx.drawImage(t, 0, 0, lw, lh);
+  }
+  ctx.globalAlpha = 1;
+  return ctx;
+}
+
+const pts = (p) => p.map((q) => (Array.isArray(q) ? { x: q[0], y: q[1] } : q));
+function poly(ctx, points, o) {
+  const P = pts(points);
+  if (P.length < 2) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(P[0].x, P[0].y);
+  for (let i = 1; i < P.length; i += 1) ctx.lineTo(P[i].x, P[i].y);
+  if (o.close !== false) ctx.closePath();
+  if (o.fill) { ctx.fillStyle = o.fill; ctx.globalAlpha = o.fillAlpha == null ? 0.18 : o.fillAlpha; ctx.fill(); ctx.globalAlpha = 1; }
+  if (o.stroke) {
+    ctx.strokeStyle = o.stroke;
+    ctx.lineWidth = o.width == null ? 2 : o.width;
+    ctx.lineJoin = 'round';
+    if (o.dash) ctx.setLineDash(o.dash);
+    ctx.stroke();
+  }
+  if (o.dots) {
+    ctx.fillStyle = o.dotColor || o.stroke;
+    for (const p of P) { ctx.beginPath(); ctx.arc(p.x, p.y, o.dots, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
+const readout = (el, rows) => {
+  el.innerHTML = rows.map((r) => r === null
+    ? '<div style="height:8px"></div>'
+    : '<div class="row' + (r[2] ? ' hi' : '') + '"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>').join('');
+};
+const stats = (el, items) => {
+  el.innerHTML = items.map((i) => '<div class="stat"><span class="stat-k">' + i[0] + '</span><span class="stat-v">' + i[1] + '</span></div>').join('');
+};
+const svgEl = (vb, inner) =>
+  '<svg viewBox="' + vb + '" style="width:100%;height:auto;display:block" role="img">' + inner + '</svg>';
+
+/* ── the drawing, as a reusable base layer ──────────── */
+let M = {};
+const base = (alphaInk) => [
+  { img: M.ink, color: css('--ink-3'), alpha: alphaInk == null ? 0.35 : alphaInk },
+  { img: M.wall, color: css('--ink'), alpha: 1 },
+];
+
+/* ══ hero ═══════════════════════════════════════════ */
+document.getElementById('hero-img').src = D.source.image;
+stats(document.getElementById('hero-stats'), [
+  ['pixels', W + '×' + H],
+  ['ink px', n0(D.counts.ink)],
+  ['wall networks', D.networks.length],
+  ['candidates', D.scoredAll.length],
+  ['vertices', D.trace.outerPolygon.length],
+  ['confidence', n2(D.trace.confidence)],
+]);
+
+/* ══ 00 target vs bounding box ══════════════════════ */
+{
+  const P = pts(D.trace.outerPolygon);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of P) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  const boxArea = (x1 - x0) * (y1 - y0);
+  const polyArea = D.trace.polygonArea;
+  const c = document.getElementById('c-target');
+  onRepaint(() => {
+    const ctx = paint(c, base());
+    poly(ctx, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], { stroke: css('--drop'), width: 2, dash: [7, 5] });
+    poly(ctx, P, { stroke: css('--accent'), width: 2.5, fill: css('--accent'), fillAlpha: 0.13 });
+  })();
+  readout(document.getElementById('r-target'), [
+    ['traced outline', n0(polyArea) + ' px²'],
+    ['', ft(polyArea) + ' ft²'],
+    null,
+    ['bounding box', n0(boxArea) + ' px²'],
+    ['', ft(boxArea) + ' ft²'],
+    null,
+    ['overstated by', ((boxArea / polyArea - 1) * 100).toFixed(1) + '%', true],
+    ['', '+' + ft(boxArea - polyArea) + ' ft²', true],
+    null,
+    ['vertices', P.length + '  vs  4'],
+  ]);
+}
+
+/* ══ 01 Otsu ════════════════════════════════════════ */
+{
+  const slider = document.getElementById('otsu-t');
+  const val = document.getElementById('otsu-val');
+  const cg = document.getElementById('c-gray');
+  const ct = document.getElementById('c-thresh');
+  const hist = D.otsu.histogram, bv = D.otsu.betweenVariance, pick = D.otsu.threshold;
+  let gray = null, out = null;
+
+  const chart = () => {
+    const CW = 700, CH = 150, PAD = 18;
+    let maxH = 0, maxV = 0;
+    for (let i = 0; i < 256; i += 1) { maxH = Math.max(maxH, hist[i]); maxV = Math.max(maxV, bv[i]); }
+    const bx = (i) => PAD + (i / 255) * (CW - 2 * PAD);
+    const by = (v) => CH - 22 - Math.sqrt(v / maxH) * (CH - 40);
+    let bars = '';
+    for (let i = 0; i < 256; i += 1) {
+      if (!hist[i]) continue;
+      const y = by(hist[i]);
+      bars += '<rect x="' + bx(i).toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + ((CW - 2 * PAD) / 256).toFixed(2) + '" height="' + (CH - 22 - y).toFixed(2) + '"/>';
+    }
+    let curve = '';
+    for (let i = 0; i < 256; i += 1) {
+      curve += (i ? 'L' : 'M') + bx(i).toFixed(2) + ' ' + (CH - 22 - (bv[i] / maxV) * (CH - 40)).toFixed(2) + ' ';
+    }
+    // The band of thresholds within 2% of optimal. On a cleanly bi-level scan
+    // this is wide, which is the honest thing to show: Otsu is not finding a
+    // knife edge here, it is landing in the middle of a plateau.
+    let lo = 255, hi = 0;
+    for (let i = 0; i < 256; i += 1) if (bv[i] > 0.98 * maxV) { lo = Math.min(lo, i); hi = Math.max(hi, i); }
+    const yTop = 8, yBase = CH - 22;
+    return svgEl('0 0 ' + CW + ' ' + CH,
+      '<rect x="' + bx(lo) + '" y="' + yTop + '" width="' + (bx(hi) - bx(lo)) + '" height="' + (yBase - yTop)
+        + '" fill="' + css('--amber') + '" opacity=".10"/>'
+      + '<g fill="' + css('--rule-strong') + '">' + bars + '</g>'
+      + '<path d="' + curve + '" fill="none" stroke="' + css('--amber') + '" stroke-width="1.6"/>'
+      + '<line id="otsu-mark" x1="0" x2="0" y1="' + yTop + '" y2="' + yBase + '" stroke="' + css('--accent') + '" stroke-width="1.5"/>'
+      + '<line x1="' + bx(pick) + '" x2="' + bx(pick) + '" y1="' + yTop + '" y2="' + yBase + '" stroke="' + css('--accent') + '" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>'
+      + '<text x="' + (bx(pick) + 5) + '" y="16" font-family="IBM Plex Mono, monospace" font-size="10" fill="' + css('--accent') + '">Otsu t* = ' + pick + '</text>'
+      + '<text x="' + (bx(lo) + 4) + '" y="' + (yBase - 6) + '" font-family="Archivo, sans-serif" font-size="9.5" letter-spacing=".06em" fill="' + css('--amber') + '">' + lo + '–' + hi + ': WITHIN 2% OF OPTIMAL</text>'
+      + '<text x="' + (bx(4) + 4) + '" y="' + (yBase - 44) + '" font-family="Archivo, sans-serif" font-size="9.5" fill="' + css('--ink-3') + '">ink</text>'
+      + '<text x="' + (bx(250) - 4) + '" y="' + (yBase - 76) + '" text-anchor="end" font-family="Archivo, sans-serif" font-size="9.5" fill="' + css('--ink-3') + '">paper</text>'
+      + '<text x="' + PAD + '" y="' + (CH - 7) + '" font-family="IBM Plex Mono, monospace" font-size="10" fill="' + css('--ink-3') + '">0 · black</text>'
+      + '<text x="' + (CW - PAD) + '" y="' + (CH - 7) + '" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="' + css('--ink-3') + '">255 · white</text>'
+      + '<text x="' + (CW / 2) + '" y="' + (CH - 7) + '" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" letter-spacing=".1em" fill="' + css('--amber') + '">BETWEEN-CLASS VARIANCE</text>');
+  };
+
+  const drawThresh = () => {
+    if (!gray) return;
+    const t = +slider.value;
+    const inkC = css('--ink'), bgC = css('--fig-bg');
+    const pc = (hex) => {
+      const s = hex.replace('#', '');
+      const v = s.length === 3 ? s.split('').map((ch) => ch + ch).join('') : s;
+      return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+    };
+    const A = pc(inkC), B = pc(bgC);
+    for (let i = 0, j = 0; i < gray.length; i += 1, j += 4) {
+      const on = gray[i] < t;
+      out.data[j] = on ? A[0] : B[0];
+      out.data[j + 1] = on ? A[1] : B[1];
+      out.data[j + 2] = on ? A[2] : B[2];
+      out.data[j + 3] = 255;
+    }
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    off.getContext('2d').putImageData(out, 0, 0);
+    const { ctx, lw, lh } = ctxOf(ct);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, lw, lh);
+    val.textContent = 't = ' + t;
+    const mark = document.getElementById('otsu-mark');
+    if (mark) {
+      const x = 18 + (t / 255) * (700 - 36);
+      mark.setAttribute('x1', x); mark.setAttribute('x2', x);
+    }
+  };
+
+  load(D.otsu.gray).then((img) => {
+    if (!img) return;
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const ox = off.getContext('2d');
+    ox.drawImage(img, 0, 0);
+    const id = ox.getImageData(0, 0, W, H);
+    gray = new Uint8Array(W * H);
+    for (let i = 0, j = 0; i < gray.length; i += 1, j += 4) gray[i] = id.data[j];
+    out = ox.createImageData(W, H);
+    onRepaint(() => {
+      const { ctx, lw, lh } = ctxOf(cg);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, lw, lh);
+      document.getElementById('otsu-chart').innerHTML = chart();
+      drawThresh();
+    })();
+  });
+
+  slider.addEventListener('input', drawThresh);
+  document.getElementById('otsu-reset').addEventListener('click', () => { slider.value = pick; drawThresh(); });
+}
+
+/* ══ 02a component counts + door zoom ═══════════════ */
+{
+  const s = D.speckDetail;
+  document.getElementById('cc-total').textContent = n0(s.total);
+  document.getElementById('cc-drop').textContent = n0(s.dropped);
+  document.getElementById('cc-pct').textContent = (100 * s.droppedPx / D.counts.ink).toFixed(1) + '%';
+  const c = document.getElementById('c-door');
+  onRepaint(() => paint(c, [
+    { img: M.cleaned, color: css('--ink') },
+    { img: M.specks, color: css('--drop') },
+  ], [180, 118, 110, 90]));
+}
+
+/* ══ 02c thickness histogram ════════════════════════ */
+{
+  const h = D.thicknessHistogram, peak = D.wallThickness;
+  const draw = () => {
+    const CW = 700, CH = 176, PAD = 34;
+    let max = 0;
+    for (let i = 1; i < h.length; i += 1) max = Math.max(max, h[i]);
+    const bw = (CW - 2 * PAD) / (h.length - 1);
+    let bars = '';
+    for (let i = 1; i < h.length; i += 1) {
+      const x = PAD + (i - 1) * bw;
+      const hh = (h[i] / max) * (CH - 62);
+      const isPeak = i === peak;
+      bars += '<rect x="' + (x + 1.5).toFixed(1) + '" y="' + (CH - 42 - hh).toFixed(1) + '" width="' + (bw - 3).toFixed(1)
+        + '" height="' + Math.max(0.6, hh).toFixed(1) + '" fill="' + (isPeak ? css('--accent') : css('--rule-strong')) + '"/>';
+      if (i % 2 === 1 || isPeak) {
+        bars += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (CH - 28) + '" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="'
+          + (isPeak ? css('--accent') : css('--ink-3')) + '">' + i + '</text>';
+      }
+    }
+    const px = PAD + (peak - 1) * bw + bw / 2;
+    const peakTop = CH - 42 - (h[peak] / max) * (CH - 62);
+    return svgEl('0 0 ' + CW + ' ' + CH, bars
+      + '<line x1="' + (px + bw * 0.6) + '" x2="' + (px + bw * 1.6) + '" y1="' + (peakTop + 6) + '" y2="' + (peakTop + 6) + '" stroke="' + css('--accent') + '" stroke-width="1"/>'
+      + '<text x="' + (px + bw * 1.9) + '" y="' + (peakTop + 9.5) + '" font-family="Archivo, sans-serif" font-weight="700" font-size="11" fill="' + css('--accent') + '">wallThickness = ' + peak + ' px</text>'
+      + '<text x="' + (PAD + 3.5 * bw) + '" y="' + (CH - 42 - (h[3] / max) * (CH - 62) - 8) + '" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" fill="' + css('--ink-3') + '">fixture lines</text>'
+      + '<text x="' + PAD + '" y="12" font-family="Archivo, sans-serif" font-size="10" letter-spacing=".1em" fill="' + css('--ink-3') + '">PIXEL MASS ↑</text>'
+      + '<text x="' + (CW - PAD) + '" y="' + (CH - 8) + '" text-anchor="end" font-family="Archivo, sans-serif" font-size="10" letter-spacing=".1em" fill="' + css('--ink-3') + '">RUN LENGTH IN PX →</text>');
+  };
+  const host = document.getElementById('thick-chart');
+  onRepaint(() => { host.innerHTML = draw(); })();
+}
+
+/* ══ 02d layer stepper ══════════════════════════════ */
+{
+  const STEPS = [
+    { name: 'ink',
+      layers: () => [{ img: M.ink, color: css('--ink') }],
+      legend: () => [['--ink', 'ink (below t = 134)']],
+      rows: () => [['ink pixels', n0(D.counts.ink)], ['components', n0(D.speckDetail.total)], ['of the page', (100 * D.counts.ink / (W * H)).toFixed(1) + '%']],
+      note: 'Room names, dimension strings, a toilet, a stair with all its treads and every door swing are in here, and all equally black.' },
+    { name: '− specks',
+      layers: () => [{ img: M.cleaned, color: css('--ink') }, { img: M.specks, color: css('--drop') }],
+      legend: () => [['--ink', 'kept'], ['--drop', 'dropped (< 18 px)']],
+      rows: () => [['components dropped', n0(D.speckDetail.dropped) + ' of ' + n0(D.speckDetail.total)], ['pixels dropped', n0(D.counts.specks)], ['remaining', n0(D.counts.cleaned)]],
+      note: 'Almost every component is noise, and almost none of the ink is. Six components survive; the largest is 24,182 px — the wall network.' },
+    { name: 'wall mask',
+      layers: () => [{ img: M.wall, color: css('--ink') }],
+      legend: () => [['--ink', 'wallMask']],
+      rows: () => [['wall pixels', n0(D.counts.wall)], ['min run', '12 px, 4 directions'], ['plus', 'opening at r = 2']],
+      note: 'Long straight runs in four directions, plus anything thick enough to survive a 5 × 5 opening. This is the strict mask room detection uses.' },
+    { name: 'thick only',
+      layers: () => [{ img: M.wall, color: css('--ink-3'), alpha: 0.4 }, { img: M.thick, color: css('--ink') }],
+      legend: () => [['--ink', 'thickMask'], ['--ink-3', 'thin linework, dropped']],
+      rows: () => [['structural px', n0(D.counts.thick)], ['dropped', n0(D.counts.wall - D.counts.thick)], ['opening radius', D.ladderParams.thickRadius + ' px']],
+      note: 'Opened at 0.3 × wall thickness. What is left is load-bearing stroke — this is what “full evidence” means when an outline is scored.' },
+    { name: '+ glazing',
+      layers: () => [{ img: M.wall, color: css('--ink') }, { img: M.glazing, color: css('--accent') }],
+      legend: () => [['--ink', 'wallMask'], ['--accent', 'screened glazing, rescued']],
+      rows: () => [['boundaryMask', n0(D.counts.boundary)], ['glazing rescued', n0(D.counts.glazing) + ' px'], ['line ink rescued', n0(D.counts.rescued) + ' px']],
+      note: 'The line-rescue finds nothing on this drawing, so the entire difference between wallMask and boundaryMask — 2,154 px — is window glazing.' },
+  ];
+  let step = 0;
+  const seg = document.getElementById('layer-steps');
+  seg.innerHTML = STEPS.map((s, i) => '<button data-i="' + i + '" aria-pressed="' + (i === 0) + '">' + s.name + '</button>').join('');
+  const c = document.getElementById('c-layers');
+  const draw = onRepaint(() => {
+    const S = STEPS[step];
+    paint(c, S.layers());
+    document.getElementById('layer-legend').innerHTML = S.legend()
+      .map((l) => '<span><i style="background:var(' + l[0] + ')"></i>' + l[1] + '</span>').join('');
+    readout(document.getElementById('layer-readout'), S.rows());
+    document.getElementById('layer-note').textContent = S.note;
+  });
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    step = +b.dataset.i;
+    [...seg.children].forEach((x, i) => x.setAttribute('aria-pressed', String(i === step)));
+    draw();
+  });
+}
+
+/* ══ 02e ablation ═══════════════════════════════════ */
+{
+  const on = document.getElementById('c-abl-on');
+  const off = document.getElementById('c-abl-off');
+  let ablImg = null, shaved = null;
+  Promise.all([load(D.ablation.footprintMask), load(D.polygonStages.shavedFootprint)]).then(([a, s]) => {
+    ablImg = a; shaved = s;
+    onRepaint(() => {
+      const c1 = paint(on, [
+        { img: shaved, color: css('--amber'), alpha: 0.42 },
+        { img: M.boundary, color: css('--ink') },
+      ]);
+      poly(c1, D.trace.outerPolygon, { stroke: css('--accent'), width: 2.5 });
+      const c2 = paint(off, [
+        { img: ablImg, color: css('--drop'), alpha: 0.34 },
+        { img: M.wall, color: css('--ink') },
+      ]);
+      poly(c2, D.ablation.outerPolygon, { stroke: css('--drop'), width: 2.5 });
+    })();
+  });
+  stats(document.getElementById('abl-on-stats'), [
+    ['with glazing', ft(D.trace.polygonArea) + '<small> ft²</small>'],
+    ['vertices', D.trace.outerPolygon.length],
+    ['confidence', n2(D.trace.confidence)],
+    ['warnings', D.trace.warnings.length],
+  ]);
+  stats(document.getElementById('abl-off-stats'), [
+    ['without', ft(D.ablation.polygonArea) + '<small> ft²</small>'],
+    ['vertices', D.ablation.outerPolygon.length],
+    ['confidence', n2(D.ablation.confidence)],
+    ['warnings', D.ablation.warnings.length],
+  ]);
+}
+
+/* ══ 03 closing ladder ══════════════════════════════ */
+{
+  let vi = 0, ri = 0;
+  const c = document.getElementById('c-ladder');
+  const rSlider = document.getElementById('ladder-r');
+  const segV = document.getElementById('ladder-variant');
+  const rungImgs = D.ladders.map((l) => l.rungs.map(() => ({ fp: null, closed: null })));
+  const baseKey = [() => M.boundary, () => M.structural];
+
+  const CAPTIONS = [
+    () => 'The <code>all</code> ladder seals on its very first rung and never changes materially again — every gap in this drawing is narrower than 4 px. Extra radius buys nothing, which is exactly why <code>economy</code> should prefer the small one.',
+    () => (ri <= 4
+      ? 'Sealed. Well supported. <b>Missing an entire bedroom.</b> Nothing measurable about this footprint on its own says so — only the fact that the same evidence, four rungs higher, encloses 65% more.'
+      : 'At r = 26 the closing finally spans the gap the bay window left in the thick-stroke mask, and the enclosed area jumps from 91,313 to 149,071 px. That jump is what makes every rung below it read as incomplete.'),
+  ];
+
+  const chart = () => {
+    const CW = 300, CH = 150, PL = 44, PB = 26, PT = 12, PR = 8;
+    const rad = D.ladderParams.radii;
+    const maxA = 160000;
+    const x = (i) => PL + (i / (rad.length - 1)) * (CW - PL - PR);
+    const y = (a) => CH - PB - (a / maxA) * (CH - PB - PT);
+    let g = '';
+    for (let a = 0; a <= 150000; a += 50000) {
+      g += '<line x1="' + PL + '" x2="' + (CW - PR) + '" y1="' + y(a) + '" y2="' + y(a) + '" stroke="' + css('--fig-grid') + '"/>'
+        + '<text x="' + (PL - 5) + '" y="' + (y(a) + 3) + '" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="8.5" fill="' + css('--ink-3') + '">' + (a / 1000) + 'k</text>';
+    }
+    let series = '';
+    D.ladders.forEach((l, li) => {
+      let d = '';
+      l.rungs.forEach((rg, i) => { d += (i ? 'L' : 'M') + x(i) + ' ' + y(rg.enclosed) + ' '; });
+      series += '<path d="' + d + '" fill="none" stroke="' + (li === vi ? css('--accent') : css('--rule-strong')) + '" stroke-width="' + (li === vi ? 2 : 1.2) + '"/>';
+      l.rungs.forEach((rg, i) => {
+        series += '<circle cx="' + x(i) + '" cy="' + y(rg.enclosed) + '" r="' + (li === vi && i === ri ? 4.5 : 2) + '" fill="'
+          + (li === vi ? css('--accent') : css('--rule-strong')) + '"/>';
+      });
+    });
+    let ticks = '';
+    rad.forEach((r, i) => {
+      ticks += '<text x="' + x(i) + '" y="' + (CH - 10) + '" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="8.5" fill="'
+        + (i === ri ? css('--accent') : css('--ink-3')) + '">' + r + '</text>';
+    });
+    return svgEl('0 0 ' + CW + ' ' + CH, g + series + ticks
+      + '<text x="' + (CW / 2) + '" y="9" text-anchor="middle" font-family="Archivo, sans-serif" font-size="9" letter-spacing=".08em" fill="' + css('--ink-3') + '">ENCLOSED PX BY CLOSING RADIUS</text>');
+  };
+
+  const draw = onRepaint(() => {
+    const L = D.ladders[vi], rg = L.rungs[ri], im = rungImgs[vi][ri];
+    paint(c, [
+      { img: im.fp, color: css('--amber'), alpha: 0.40 },
+      { img: im.closed, color: css('--drop'), alpha: 0.28 },
+      { img: baseKey[vi](), color: css('--ink'), alpha: 1 },
+    ]);
+    document.getElementById('ladder-rv').textContent = 'r = ' + rg.radius;
+    document.getElementById('ladder-chart').innerHTML = chart();
+    readout(document.getElementById('ladder-readout'), [
+      ['enclosed', n0(rg.enclosed) + ' px'],
+      ['components', rg.parts],
+      null,
+      ['cover', n3(rg.cover)],
+      ['solidity', n3(rg.solidity)],
+      ['seal', n3(rg.seal), rg.seal >= 0.999],
+      null,
+      ['completeness', n3(rg.completeness), rg.completeness < 0.9],
+      ['reference', n0(L.referenceEnclosure) + ' px'],
+    ]);
+    document.getElementById('ladder-caption').innerHTML = CAPTIONS[vi]();
+  });
+
+  const ensure = () => {
+    const L = D.ladders[vi], rg = L.rungs[ri], slot = rungImgs[vi][ri];
+    if (slot.fp) { draw(); return; }
+    Promise.all([load(rg.footprint), load(rg.closedInk)]).then(([f, cl]) => { slot.fp = f; slot.closed = cl; draw(); });
+  };
+  rSlider.addEventListener('input', () => { ri = +rSlider.value; ensure(); });
+  segV.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    vi = +b.dataset.i;
+    [...segV.children].forEach((x, i) => x.setAttribute('aria-pressed', String(i === vi)));
+    ensure();
+  });
+  ensure();
+}
+
+/* ══ 04 scorecard ═══════════════════════════════════ */
+{
+  const DEF = { seal: 0.34, support: 0.30, coverage: 0.26, economy: 0.10, pen: 0.30 };
+  const wts = Object.assign({}, DEF);
+  const CAND = D.scoredAll;
+  let selected = 0;
+  const candImgs = CAND.map(() => null);
+  const c = document.getElementById('c-cand');
+
+  const label = (k) => k === 'pen' ? 'contradiction penalty' : k;
+  document.getElementById('weight-ctl').innerHTML =
+    Object.keys(DEF).map((k) => '<div class="ctl-row"><label style="flex:0 0 132px" for="w-' + k + '">' + label(k)
+      + '</label><input type="range" id="w-' + k + '" min="0" max="60" step="1" value="' + Math.round(DEF[k] * 100) + '">'
+      + '<span class="mono" id="wv-' + k + '" style="min-width:4.5ch">' + DEF[k].toFixed(2) + '</span></div>').join('')
+    + '<div class="ctl-row"><button class="btn" id="w-reset">Shipped weights</button>'
+    + '<span style="font-size:12px;color:var(--ink-3)">seal + support + coverage + economy = <span class="mono" id="w-sum">1.00</span></span></div>';
+
+  const scoreOf = (cd) => {
+    const sum = wts.seal + wts.support + wts.coverage + wts.economy;
+    if (sum <= 0) return -1;
+    const mean = (wts.seal * cd.seal + wts.support * cd.support + wts.coverage * cd.coverage + wts.economy * cd.economy) / sum;
+    const incomplete = Math.max(0, Math.min(1, (0.97 - cd.completeness) / 0.2));
+    return mean - wts.pen * cd.annex - wts.pen * incomplete;
+  };
+  const invention = (cd) => (cd.variant === 'structural' ? 1 : 0);
+
+  const render = onRepaint(() => {
+    const rows = CAND.map((cd, i) => ({ i, cd, s: scoreOf(cd) }));
+    const sorted = [...rows].sort((a, b) => b.s - a.s || a.cd.radius - b.cd.radius
+      || a.cd.variant.localeCompare(b.cd.variant) || a.cd.policy.localeCompare(b.cd.policy));
+    const lead = sorted[0].s;
+    const best = sorted.filter((r) => lead - r.s <= 0.015).reduce((won, r) =>
+      (invention(r.cd) - invention(won.cd) || r.cd.radius - won.cd.radius
+        || won.s - r.s || r.cd.policy.localeCompare(won.cd.policy)) < 0 ? r : won);
+    const tb = document.querySelector('#score-table tbody');
+    tb.innerHTML = sorted.map((r) => {
+      const cd = r.cd;
+      const inc = Math.max(0, Math.min(1, (0.97 - cd.completeness) / 0.2));
+      return '<tr data-i="' + r.i + '" class="' + (r === best ? 'win ' : '') + (r.i === selected ? 'sel' : '') + '">'
+        + '<td>' + cd.variant + ' / ' + cd.policy + ' <span class="chip">r' + cd.radius + '</span></td>'
+        + '<td class="num">' + n3(cd.seal) + '</td>'
+        + '<td class="num">' + n3(cd.support) + '</td>'
+        + '<td class="num">' + n3(cd.coverage) + '</td>'
+        + '<td class="num">' + n3(cd.economy) + '</td>'
+        + '<td class="num">' + (cd.annex > 0.001 ? '−' + n2(wts.pen * cd.annex) : '·') + '</td>'
+        + '<td class="num">' + (inc > 0.001 ? '−' + n2(wts.pen * inc) : '·') + '</td>'
+        + '<td class="num"><b>' + r.s.toFixed(4) + '</b></td>'
+        + '<td class="num">' + n0(cd.areaPx) + '</td></tr>';
+    }).join('');
+    document.getElementById('w-sum').textContent = (wts.seal + wts.support + wts.coverage + wts.economy).toFixed(2);
+    const cd = CAND[selected];
+    paint(c, [
+      { img: candImgs[selected], color: css('--amber'), alpha: 0.40 },
+      { img: M.boundary, color: css('--ink') },
+    ]);
+    const ctx = ctxOf(c).ctx;
+    poly(ctx, cd.polygon, { stroke: css('--accent'), width: 2.5 });
+    document.getElementById('cand-label').innerHTML = '<b>' + cd.variant + ' / ' + cd.policy + ' @ r' + cd.radius + '</b> — '
+      + n0(cd.areaPx) + ' px², ' + cd.verts + ' vertices, ' + ft(cd.areaPx) + ' ft²';
+  });
+
+  const pick = (i) => {
+    selected = i;
+    if (candImgs[i]) { render(); return; }
+    load(CAND[i].footprint).then((img) => { candImgs[i] = img; render(); });
+  };
+  document.querySelector('#score-table tbody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr');
+    if (tr) pick(+tr.dataset.i);
+  });
+  Object.keys(DEF).forEach((k) => {
+    const el = document.getElementById('w-' + k);
+    el.addEventListener('input', () => {
+      wts[k] = +el.value / 100;
+      document.getElementById('wv-' + k).textContent = wts[k].toFixed(2);
+      render();
+    });
+  });
+  document.getElementById('w-reset').addEventListener('click', () => {
+    Object.keys(DEF).forEach((k) => {
+      wts[k] = DEF[k];
+      document.getElementById('w-' + k).value = Math.round(DEF[k] * 100);
+      document.getElementById('wv-' + k).textContent = DEF[k].toFixed(2);
+    });
+    render();
+  });
+  const shipped = CAND.findIndex((c) => c.variant === D.trace.candidate.variant
+    && c.policy === D.trace.candidate.policy && c.radius === D.trace.candidate.radius);
+  pick(shipped >= 0 ? shipped : 0);
+}
+
+/* ══ 05 filament shave ══════════════════════════════ */
+{
+  const a = document.getElementById('c-shave-a');
+  const b = document.getElementById('c-shave-b');
+  Promise.all([load(D.polygonStages.winnerFootprint), load(D.polygonStages.shavedFootprint)]).then(([u, s]) => {
+    onRepaint(() => {
+      const c1 = paint(a, [{ img: u, color: css('--amber'), alpha: 0.45 }, { img: M.boundary, color: css('--ink') }]);
+      c1.save();
+      c1.strokeStyle = css('--drop'); c1.lineWidth = 2;
+      c1.beginPath(); c1.arc(276, 337, 26, 0, Math.PI * 2); c1.stroke();
+      c1.restore();
+      paint(b, [{ img: s, color: css('--amber'), alpha: 0.45 }, { img: M.boundary, color: css('--ink') }]);
+    })();
+  });
+}
+
+/* ══ 05 RDP, ported from src/utils/detection/polygon.js ══ */
+function perpDistSq(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  if (dx === 0 && dy === 0) { const px = p.x - a.x, py = p.y - a.y; return px * px + py * py; }
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
+  const ex = p.x - (a.x + t * dx), ey = p.y - (a.y + t * dy);
+  return ex * ex + ey * ey;
+}
+function rdpCollect(P, lo, hi, epsSq, keep) {
+  if (hi - lo < 2) return;
+  let maxD = 0, idx = -1;
+  for (let i = lo + 1; i < hi; i += 1) {
+    const d = perpDistSq(P[i], P[lo], P[hi]);
+    if (d > maxD) { maxD = d; idx = i; }
+  }
+  if (maxD > epsSq && idx !== -1) {
+    rdpCollect(P, lo, idx, epsSq, keep);
+    keep.push(idx);
+    rdpCollect(P, idx, hi, epsSq, keep);
+  }
+}
+function simplifyRing(ring, eps) {
+  if (ring.length < 4) return ring.slice();
+  let cx = 0, cy = 0;
+  for (const p of ring) { cx += p.x; cy += p.y; }
+  cx /= ring.length; cy /= ring.length;
+  let anchor = 0, bestD = -1;
+  for (let i = 0; i < ring.length; i += 1) {
+    const d = (ring[i].x - cx) ** 2 + (ring[i].y - cy) ** 2;
+    if (d > bestD) { bestD = d; anchor = i; }
+  }
+  const rot = ring.slice(anchor).concat(ring.slice(0, anchor));
+  rot.push(rot[0]);
+  const keep = [0];
+  rdpCollect(rot, 0, rot.length - 1, eps * eps, keep);
+  keep.push(rot.length - 1);
+  keep.sort((a, b) => a - b);
+  const out = keep.map((i) => rot[i]);
+  out.pop();
+  return out;
+}
+function segClass(a, b, tol) {
+  const ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI);
+  if (ang <= tol || ang >= 180 - tol) return 'h';
+  if (Math.abs(ang - 90) <= tol) return 'v';
+  return 'd';
+}
+function intersectLines(l1, l2, fb) {
+  if (l1.kind === 'h' && l2.kind === 'h') return fb;
+  if (l1.kind === 'v' && l2.kind === 'v') return fb;
+  if (l1.kind === 'h' && l2.kind === 'v') return { x: l2.c, y: l1.c };
+  if (l1.kind === 'v' && l2.kind === 'h') return { x: l1.c, y: l2.c };
+  const par = (l) => l.kind === 'h' ? { px: 0, py: l.c, dx: 1, dy: 0 }
+    : l.kind === 'v' ? { px: l.c, py: 0, dx: 0, dy: 1 }
+      : { px: l.a.x, py: l.a.y, dx: l.b.x - l.a.x, dy: l.b.y - l.a.y };
+  const p = par(l1), q = par(l2);
+  const den = p.dx * q.dy - p.dy * q.dx;
+  if (Math.abs(den) < 1e-9) return fb;
+  const t = ((q.px - p.px) * q.dy - (q.py - p.py) * q.dx) / den;
+  return { x: p.px + t * p.dx, y: p.py + t * p.dy };
+}
+function rectilinearFit(ring, tolDeg, mergeTol) {
+  const n = ring.length;
+  if (n < 3) return ring.slice();
+  const lines = [];
+  for (let i = 0; i < n; i += 1) {
+    const a = ring[i], b = ring[(i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-6) continue;
+    const kind = segClass(a, b, tolDeg);
+    if (kind === 'h') lines.push({ kind, c: (a.y + b.y) / 2, weight: len, a, b });
+    else if (kind === 'v') lines.push({ kind, c: (a.x + b.x) / 2, weight: len, a, b });
+    else lines.push({ kind, weight: len, a, b });
+  }
+  if (lines.length < 3) return ring.slice();
+  let merged = lines;
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+    const next = [];
+    for (const line of merged) {
+      const prev = next[next.length - 1];
+      if (prev && line.kind !== 'd' && prev.kind === line.kind && Math.abs(prev.c - line.c) <= mergeTol) {
+        const w = prev.weight + line.weight;
+        prev.c = (prev.c * prev.weight + line.c * line.weight) / w;
+        prev.weight = w; prev.b = line.b; changed = true; continue;
+      }
+      next.push(Object.assign({}, line));
+    }
+    if (next.length > 1) {
+      const f = next[0], l = next[next.length - 1];
+      if (f.kind !== 'd' && f.kind === l.kind && Math.abs(f.c - l.c) <= mergeTol) {
+        const w = f.weight + l.weight;
+        f.c = (f.c * f.weight + l.c * l.weight) / w;
+        f.weight = w; f.a = l.a; next.pop(); changed = true;
+      }
+    }
+    merged = next;
+    if (!changed) break;
+  }
+  if (merged.length < 3) return ring.slice();
+  const withJogs = [];
+  for (let i = 0; i < merged.length; i += 1) {
+    const curr = merged[i], nx = merged[(i + 1) % merged.length];
+    withJogs.push(curr);
+    if (curr.kind !== 'd' && curr.kind === nx.kind) {
+      const jk = curr.kind === 'h' ? 'v' : 'h';
+      const cc = curr.kind === 'h' ? (curr.b.x + nx.a.x) / 2 : (curr.b.y + nx.a.y) / 2;
+      withJogs.push({ kind: jk, c: cc, weight: 0.1, a: curr.b, b: nx.a });
+    }
+  }
+  const m = withJogs.length, out = [];
+  for (let i = 0; i < m; i += 1) {
+    const prev = withJogs[(i + m - 1) % m], curr = withJogs[i];
+    out.push(intersectLines(prev, curr, { x: curr.a.x, y: curr.a.y }));
+  }
+  const cleaned = [];
+  for (const p of out) {
+    const prev = cleaned[cleaned.length - 1];
+    if (prev && Math.abs(prev.x - p.x) < 0.75 && Math.abs(prev.y - p.y) < 0.75) continue;
+    cleaned.push(p);
+  }
+  if (cleaned.length > 1) {
+    const f = cleaned[0], l = cleaned[cleaned.length - 1];
+    if (Math.abs(f.x - l.x) < 0.75 && Math.abs(f.y - l.y) < 0.75) cleaned.pop();
+  }
+  for (let i = cleaned.length - 2; i >= 1; i -= 1) {
+    if (perpDistSq(cleaned[i], cleaned[i - 1], cleaned[i + 1]) < 0.25) cleaned.splice(i, 1);
+  }
+  return cleaned.length >= 3 ? cleaned : ring.slice();
+}
+const shoelace = (P) => {
+  let s = 0;
+  for (let i = 0; i < P.length; i += 1) {
+    const a = P[i], b = P[(i + 1) % P.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s / 2);
+};
+
+{
+  const RING = pts(D.polygonStages.rawRing);
+  const EPS = D.ladderParams.epsilon;
+  const slider = document.getElementById('rdp-e');
+  const c = document.getElementById('c-rdp');
+  const fitBox = document.getElementById('rdp-fit');
+  let eps = EPS;
+
+  const draw = onRepaint(() => {
+    const simp = simplifyRing(RING, eps);
+    const fitted = rectilinearFit(simp, 14, Math.max(2, Math.round(D.wallThickness * 0.5)));
+    const ctx = paint(c, [{ img: M.boundary, color: css('--ink-3'), alpha: 0.45 }]);
+    poly(ctx, RING, { stroke: css('--rule-strong'), width: 1 });
+    if (fitBox.checked) {
+      poly(ctx, simp, { stroke: css('--ink-3'), width: 1, dash: [4, 4] });
+      poly(ctx, fitted, { stroke: css('--amber'), width: 2.5, dots: 3 });
+    } else {
+      poly(ctx, simp, { stroke: css('--accent'), width: 2.2, dots: 2.6 });
+    }
+    document.getElementById('rdp-ev').textContent = 'ε = ' + eps.toFixed(2) + ' px';
+    readout(document.getElementById('rdp-readout'), [
+      ['contour pixels', n0(RING.length)],
+      ['after RDP', simp.length, true],
+      ['after fit', fitted.length, fitBox.checked],
+      null,
+      ['RDP area', n0(shoelace(simp)) + ' px²'],
+      ['fit area', n0(shoelace(fitted)) + ' px²'],
+      null,
+      ['pipeline ε', EPS.toFixed(2) + ' px'],
+      ['pipeline result', '1,800 → 17 → 14'],
+    ]);
+    document.getElementById('rdp-caption').innerHTML = 'At ε = <b>' + eps.toFixed(2) + '</b> px the 1,800-pixel contour keeps <b>'
+      + simp.length + '</b> points'
+      + (fitBox.checked ? ', which the rectilinear fit then resolves to <b>' + fitted.length + '</b> vertices.' : '.')
+      + ' The three points near the bottom edge that refuse to disappear are the filament — geometrically real, which is why it has to be removed from the mask rather than argued away by the simplifier.';
+  });
+
+  slider.addEventListener('input', () => { eps = +slider.value / 100; draw(); });
+  fitBox.addEventListener('change', draw);
+  document.getElementById('rdp-reset').addEventListener('click', () => {
+    eps = EPS; slider.value = Math.round(EPS * 100); draw();
+  });
+  slider.value = Math.round(EPS * 100);
+}
+
+/* ══ 05 interior envelope ═══════════════════════════ */
+{
+  const c = document.getElementById('c-env');
+  const outer = pts(D.trace.outerPolygon);
+  const inner = D.trace.innerPolygon ? pts(D.trace.innerPolygon) : null;
+  const ins = D.trace.perEdgeInset || [];
+  let mode = 'both';
+  const segM = document.getElementById('env-mode');
+  const box = document.getElementById('env-insets');
+
+  const draw = onRepaint(() => {
+    const ctx = paint(c, base(0.25));
+    if (mode !== 'inner') poly(ctx, outer, { stroke: css('--accent'), width: 2.5 });
+    if (inner && mode !== 'outer') poly(ctx, inner, { stroke: css('--amber'), width: 2, dash: [6, 4] });
+    if (box.checked && ins.length) {
+      ctx.save();
+      ctx.font = '600 10px "IBM Plex Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const sign = 1;
+      outer.forEach((a, i) => {
+        const rec = ins[i];
+        if (!rec || rec.len < 34) return;
+        const b = outer[(i + 1) % outer.length];
+        const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+        const nx = (sign * -dy) / len, ny = (sign * dx) / len;
+        const mx = a.x + dx / 2 + nx * 20, my = a.y + dy / 2 + ny * 20;
+        const t = rec.inset + ' px';
+        const w = ctx.measureText(t).width + 8;
+        ctx.fillStyle = css('--surface');
+        ctx.globalAlpha = 0.92;
+        ctx.fillRect(mx - w / 2, my - 8, w, 16);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = css('--rule');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(mx - w / 2, my - 8, w, 16);
+        ctx.fillStyle = css('--ink-2');
+        ctx.fillText(t, mx, my + 0.5);
+      });
+      ctx.restore();
+    }
+    const sorted = ins.map((r) => r.inset).sort((a, b) => a - b);
+    readout(document.getElementById('env-readout'), [
+      ['exterior faces', n0(D.trace.polygonArea) + ' px²'],
+      ['', ft(D.trace.polygonArea) + ' ft²', true],
+      null,
+      ['interior faces', n0(D.trace.innerArea) + ' px²'],
+      ['', ft(D.trace.innerArea) + ' ft²', true],
+      null,
+      ['difference', ft(D.trace.polygonArea - D.trace.innerArea) + ' ft²'],
+      ['measured wall', D.wallThickness + ' px'],
+      ['median inset', sorted[sorted.length >> 1] + ' px'],
+      ['edges measured', ins.length],
+    ]);
+  });
+  segM.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    mode = b.dataset.m;
+    [...segM.children].forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.m === mode)));
+    draw();
+  });
+  box.addEventListener('change', draw);
+}
+
+/* ══ boot: masks, theme, scroll ═════════════════════ */
+// Only the layers a figure actually draws — the dump carries more.
+const MASK_KEYS = ['ink', 'cleaned', 'specks', 'wall', 'thick', 'glazing', 'boundary', 'structural'];
+Promise.all(MASK_KEYS.map((k) => load(D.masks[k]))).then((loaded) => {
+  MASK_KEYS.forEach((k, i) => { M[k] = loaded[i]; });
+  repaints.forEach((fn) => fn());
+});
+
+const redraw = () => repaints.forEach((fn) => fn());
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw);
+new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+const links = [...document.querySelectorAll('.rail a')];
+const secs = links.map((a) => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+let spyTick = false;
+const spy = () => {
+  spyTick = false;
+  const mark = window.scrollY + window.innerHeight * 0.3;
+  let active = secs[0];
+  for (const s of secs) if (s.offsetTop <= mark) active = s;
+  links.forEach((a) => a.setAttribute('aria-current', String(active && a.getAttribute('href') === '#' + active.id)));
+};
+window.addEventListener('scroll', () => {
+  if (spyTick) return;
+  spyTick = true;
+  requestAnimationFrame(spy);
+}, { passive: true });
+spy();
+})();
+</script>

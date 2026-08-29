@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { ArrowUpRight, Check } from 'lucide-react';
 
 /**
  * The one menu surface in the top band.
@@ -14,12 +14,19 @@ import { Check } from 'lucide-react';
  * prefix shifted the word ~12 px every time the preference was toggled, in a
  * list whose other rows did not move — so the one item you had just acted on
  * was the one that jumped.
+ *
+ * `external` marks an item that leaves the app, and it borrows the trailing
+ * slot the keybinding hint uses — every item that goes somewhere else has no
+ * shortcut, so the two never compete. It is on the shared surface rather than
+ * spelled into a label because a `↗` typed into one menu's copy is exactly the
+ * drift this module exists to prevent.
  */
-export const MenuItem = ({ label, keys, checked, disabled, danger, onSelect, close }) => (
+export const MenuItem = ({ label, keys, checked, disabled, danger, external, onSelect, close }) => (
   <button
     type="button"
     role="menuitem"
     disabled={disabled}
+    aria-label={external ? `${label} — opens in a new tab` : undefined}
     onClick={() => { close(); onSelect?.(); }}
     className={`flex w-full items-center justify-between gap-6 px-2.5 py-1.5 rounded text-[12.5px]
       text-left transition-colors disabled:opacity-40 disabled:cursor-default cursor-pointer
@@ -36,6 +43,7 @@ export const MenuItem = ({ label, keys, checked, disabled, danger, onSelect, clo
       <span className="truncate">{label}</span>
     </span>
     {keys && <span className="font-mono text-[11px] text-fg-dim shrink-0">{keys}</span>}
+    {!keys && external && <ArrowUpRight className="w-3.5 h-3.5 text-fg-dim shrink-0" aria-hidden="true" />}
   </button>
 );
 
