@@ -21,6 +21,7 @@ npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 npm run probe:memory       # what the detection memo retains per image (needs --expose-gc)
 npm run icons              # rasterise public/ icons + favicon from the app mark
+npm run tutorial           # rebuild public/tracing-tutorial.html from a real trace
 ```
 
 Vitest tests live under `src/utils/**/__tests__/`, `src/store/__tests__/`,
@@ -450,6 +451,29 @@ bar, which is the bug `FloorTraceMark.jsx` documents having already fixed once,
 in the place where nobody can see that the mark is missing. iOS composites a
 transparent `apple-touch-icon` onto black on the home screen; that black is
 Apple's, not ours.
+
+**`public/tracing-tutorial.html` is build output too, and it is generated from
+the pipeline rather than written about it.** `npm run tutorial` runs
+`scripts/tutorialStages.mjs` — a real `analyzeFloorplan` + `traceBoundary` over
+`fixtures/ExampleFloorplan8.png`, dumping every intermediate mask as a PNG data
+URI plus the ladders, the scored candidates and the polygon chain — and
+`scripts/buildTutorial.mjs` inlines that into `docs/tracing-tutorial.src.html`.
+**Edit the template, never the built page.** Two consequences worth knowing:
+
+- **A detection change that would make the page lie shows up as a diff in it**,
+  because the figures are that run's output and not a drawing of it. The page
+  quotes exact numbers — 0.978 for the winning candidate, 1,800 → 17 → 14
+  vertices, `wallThickness = 11` — and the widgets recompute them in the
+  browser from ports of `polygon.js` and `scoring.js`. If those stop matching,
+  one of the two is wrong.
+- **It is 516 kB of committed base64**, so regenerating adds another copy to
+  git history — the same caveat as the OCR models above. Replace rather than
+  accumulate, and do not regenerate it for an unrelated change.
+
+The fixture is byte-identical to `public/example-plan.png`, so the walkthrough
+explains the exact drawing the welcome screen offers. Both shells' View menu
+opens it through `utils/tracingTutorial.js`, which owns the URL so the desktop
+and mobile copies cannot drift apart.
 
 `vite.config.js` sets `base: '/FloorTrace/'` for GitHub Pages, hashes all output filenames for cache-busting, and assigns `tesseract.js`, `konva`/`react-konva`, React and rollup's CommonJS interop helper to named chunks.
 

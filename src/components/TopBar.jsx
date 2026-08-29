@@ -6,6 +6,7 @@ import {
 import FloorTraceMark from './FloorTraceMark';
 import { MenuItem, Sep, Popover } from './menuSurface';
 import { MOD, ALT } from '../utils/keySymbols';
+import { openTracingTutorial } from '../utils/tracingTutorial';
 import { THEME_LABEL } from '../hooks/useTheme';
 import { planStage } from '../utils/planStage';
 import useUndoHistory from '../hooks/useUndoHistory';
@@ -419,6 +420,16 @@ const TopBar = ({
           <MenuItem
             label={`Theme: ${THEME_LABEL[theme] ?? 'System'}`}
             onSelect={onCycleTheme}
+            close={close}
+          />
+          {/* Last, and behind its own rule: everything above changes what is on
+              screen, and this leaves the app. It is the walkthrough of the
+              tracer, built from the real pipeline against the same drawing the
+              welcome screen offers as its example. */}
+          <MenuItem
+            label="How the outline is traced"
+            external
+            onSelect={openTracingTutorial}
             close={close}
           />
         </Title>

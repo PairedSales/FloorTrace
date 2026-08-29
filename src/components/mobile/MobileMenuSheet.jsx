@@ -1,8 +1,9 @@
 import {
-  Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Layers, Maximize,
-  Moon, Brush, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
+  ArrowUpRight, Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Layers, Maximize,
+  Moon, Brush, Route, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
+import { openTracingTutorial } from '../../utils/tracingTutorial';
 import useWorkspaceStore, { UNIT_PREFERENCES, UNIT_PREFERENCE_LABEL } from '../../store/workspaceStore';
 
 const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
@@ -190,6 +191,17 @@ const MobileMenuSheet = ({
             label="Theme"
             detail={THEME_LABEL[theme]}
             onSelect={onCycleTheme}
+          />
+          {/* Same item, same section, same words as the desktop View menu —
+              the one place it differs is that a touch list has room to say
+              what it is. */}
+          <Row
+            icon={Route}
+            label="How the outline is traced"
+            detail="A walkthrough of the tracer, in a new tab"
+            onSelect={openTracingTutorial}
+            close={onClose}
+            trailing={<ArrowUpRight className="w-[18px] h-[18px] text-fg-3 shrink-0" aria-hidden="true" />}
           />
         </Section>
 
