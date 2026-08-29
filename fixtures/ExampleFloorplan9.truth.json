@@ -1,0 +1,68 @@
+{
+  "_provenance": "Sketch 2026-08-29.floorplan, supplied with the correct outline already traced. Every figure below is read off the drawing's own wall faces rather than off a detector run: the exterior faces from the first/last dark pixel on each scan line, the room faces from the ink runs crossing each room.",
+  "_whyThisPlanIsHere": "Two failures no other fixture reproduces, both along the bottom edge. (1) The two baths are drawn with a tinted floor, which the shaded-pocket detector read as a condo terrace and carved out — and the carve then exempted the very labels that contradicted it, so it happened at 93% confidence with nothing said. (2) The bottom-right corner is drawn OPEN: the bottom wall stops at x=1366 and the right wall at y=691, so the outside floods in and takes the Storage room, and only a 58px closing radius shuts it. That candidate held all nine labels and still lost by 0.005 on the economy of the radius.",
+  "scale": {
+    "pixelsPerFoot": 17.93,
+    "tolerance": 0.04,
+    "provenance": "Twelve spans measured by hand between interior wall faces, against the dimension printed on each: Sitting Room 223px/12'4\" and 313px/17'5\", W.I.C. 223px/12'4\" and 92px/5'2\", Eat-in Kitchen 275px/15'4\" and 149px/8'3\", Bath-left 176px/9'10\" and 92px/5'2\", Bath-right 173px/9'7\" and 92px/5'2\", Storage 211px/11'10\" and 107px/6'0\". Range 17.81-18.08, mean 17.93."
+  },
+  "boundary": {
+    "_comment": "One rectangle. The outer faces of the exterior walls are x=43/1397 (ink 43-51 and 1388-1396) and y=294/723 (ink 294-302 and 714-722). The open bottom-right corner is a defect in the drawing, not a notch in the building: the supplied trace closes it.",
+    "outerBbox": [43, 294, 1397, 723],
+    "outerPolygon": [[43, 294], [1397, 294], [1397, 723], [43, 723]],
+    "minOuterIou": 0.98,
+    "bare": {
+      "_why": "With no labels read off the page there is no evidence the two tinted bathroom floors are bathrooms rather than the balcony a condo plan shades the same way, so `findShadedPockets` carves them and the outline loses 10.8%. This is the app's degraded path — a scan runs on load and the trace that follows is always constrained — but it is reachable when OCR fails, so the number is scored here at the size it actually is rather than hidden by lowering the bar for both runs. Anything worse than losing the two baths is a regression.",
+      "minOuterIou": 0.88
+    },
+    "outerAreaSqFt": 1807,
+    "floors": [[43, 294, 1397, 723]],
+    "minConfidence": 0.7
+  },
+  "rooms": [
+    {
+      "name": "Sitting Room",
+      "click": [163, 473],
+      "labelBbox": [126, 468, 75, 10],
+      "dims": [12.3333, 17.4167],
+      "rect": [52, 303, 274, 615]
+    },
+    {
+      "name": "W.I.C.",
+      "click": [164, 673],
+      "labelBbox": [130, 668, 68, 10],
+      "dims": [12.3333, 5.1667],
+      "rect": [52, 622, 274, 713]
+    },
+    {
+      "name": "Eat-in Kitchen",
+      "click": [587, 496],
+      "labelBbox": [553, 491, 68, 11],
+      "dims": [15.3333, 8.25],
+      "rect": [449, 426, 723, 574]
+    },
+    {
+      "name": "Bath (left)",
+      "_comment": "Tinted floor. The label sits on the floor tint, never on the bath, so the tub reads as a terrace of its own unless the tint fields are grouped across the thin ink that splits them.",
+      "click": [608, 687],
+      "labelBbox": [581, 683, 54, 9],
+      "dims": [9.8333, 5.1667],
+      "rect": [541, 622, 716, 713]
+    },
+    {
+      "name": "Bath (right)",
+      "click": [830, 686],
+      "labelBbox": [809, 682, 43, 9],
+      "dims": [9.5833, 5.1667],
+      "rect": [724, 622, 896, 713]
+    },
+    {
+      "name": "Storage",
+      "_comment": "The room the open bottom-right corner costs: it is inside the building and outside every candidate the ladder reaches below r=58.",
+      "click": [1281, 665],
+      "labelBbox": [1244, 660, 75, 11],
+      "dims": [11.8333, 6.0],
+      "rect": [1177, 607, 1387, 713]
+    }
+  ]
+}

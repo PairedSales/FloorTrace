@@ -119,13 +119,84 @@ const floodLabelledRegion = (region, footprint, barrier, width, height) => {
   return { mask, size, bbox: { minX, minY, maxX, maxY } };
 };
 
+// The nearest labelled component to a point, or -1. A dimension label's own
+// glyphs are ink and the tint under them is not, so its centre is a hole in
+// the mask — the neighbourhood, not the one pixel under the point, is what
+// answers "which tinted area is this label written on".
+//
+// `labelComponents` numbers from 0 and marks background -1, so every test here
+// is against -1 and never against 0: `> 0` silently drops the first component
+// on the page, which is one whole tinted room kept or carved by where the
+// scan happened to start.
+const labelNear = (labels, point, reach, width, height) => {
+  const cx = Math.round(point.x);
+  const cy = Math.round(point.y);
+  for (let r = 0; r <= reach; r += 1) {
+    for (let dy = -r; dy <= r; dy += 1) {
+      const yy = cy + dy;
+      if (yy < 0 || yy >= height) continue;
+      const row = yy * width;
+      for (let dx = -r; dx <= r; dx += 1) {
+        if (r > 0 && Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const xx = cx + dx;
+        if (xx < 0 || xx >= width) continue;
+        if (labels[row + xx] >= 0) return labels[row + xx];
+      }
+    }
+  }
+  return -1;
+};
+
+// Which tinted areas belong to one field of tint. Ink drawn *on* a tint does
+// not make it two tints: a tub outline splits a bathroom floor into three
+// components, a counter edge into four. `floodLabelledRegion` already makes
+// this argument for a door arc across a patio; the same closing is what lets
+// the guard below judge the bathroom rather than each fragment of it.
+//
+// Blocked by the *thick* strokes, and blocking on their own pixels is what
+// makes the radius safe: a dilation cannot become 4-connected across a stroke
+// of any thickness, so this can only ever join tint on one side of a wall. It
+// has to be `thickMask` and not `wallMask`: a bath is drawn as a thin curve
+// that the strict wall mask keeps and the thick one does not, which is the
+// difference between grouping a bathroom with its bath and carving the bath
+// out of the house on its own.
+const groupTintFields = (shaded, wall, width, height, gap) => {
+  const spread = dilateRect(shaded, width, height, gap);
+  for (let i = 0; i < spread.length; i += 1) {
+    if (wall && wall[i] && !shaded[i]) spread[i] = 0;
+  }
+  return labelComponents(spread, width, height).labels;
+};
+
+// The tint field a component belongs to, or -1. Every pixel of a component is
+// inside its own dilation, so the first one settles it.
+const groupOf = (groups, labels, comp, width) => {
+  if (!groups) return -1;
+  for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
+    const row = y * width;
+    for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
+      if (labels[row + x] === comp.id) return groups[row + x];
+    }
+  }
+  return -1;
+};
+
 // Screened (grey-filled) pockets: condo plans shade terraces/balconies instead
 // of labelling them. Works on the footprint's grayscale directly — a narrow
 // terrace is swallowed whole by a large seal closing, so it never shows up as
 // an open cavity.
-const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exteriorThickness) => {
+const findShadedPockets = (
+  gray, ink, wall, footprint, width, height, minCavity, exteriorThickness, measured,
+) => {
   if (!gray || !ink) return null;
-  const hist = new Uint32Array(256);
+  // 257 long, and the extra slot is not padding: the scan below reads
+  // `hist[v + 1]`, and `v` has to reach 255. It stopped at 254, which mostly
+  // worked by accident — a page of pure white contributes its whole mass to
+  // v=254 through that `hist[v + 1]` term. It stops working when the tint is
+  // more than half the paper inside the footprint: the tint's own bin is
+  // counted twice, so it outvotes a page it can never be, and the threshold
+  // lands below the tint this function exists to find.
+  const hist = new Uint32Array(257);
   let count = 0;
   for (let i = 0; i < footprint.mask.length; i += 1) {
     if (footprint.mask[i] && !ink[i]) {
@@ -140,7 +211,7 @@ const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exter
   // or the room fill the plan is drawn on.
   let pageMode = 255;
   let bestMass = -1;
-  for (let v = 1; v < 255; v += 1) {
+  for (let v = 1; v <= 255; v += 1) {
     const mass = hist[v - 1] + hist[v] * 2 + hist[v + 1];
     if (mass > bestMass) {
       bestMass = mass;
@@ -154,6 +225,21 @@ const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exter
     shaded[i] = footprint.mask[i] && !ink[i] && gray[i] < thr ? 1 : 0;
   }
   const { labels, components } = labelComponents(shaded, width, height);
+  const labelReach = Math.max(4, Math.round(exteriorThickness * 2));
+  // Which fields of tint the app already knows are rooms. Grouping first and
+  // asking once is not an optimisation: a bathroom's label sits on its floor,
+  // never on its bath, so per-fragment the tub is a terrace with no label in
+  // it and comes off the plan on its own.
+  const groups = measured.length
+    ? groupTintFields(shaded, wall, width, height, Math.max(2, Math.round(exteriorThickness / 2)))
+    : null;
+  const measuredGroups = new Set();
+  if (groups) {
+    for (const point of measured) {
+      const id = labelNear(groups, point, labelReach, width, height);
+      if (id >= 0) measuredGroups.add(id);
+    }
+  }
   const found = [];
   for (const comp of components) {
     if (comp.size < minCavity || comp.size > 0.45 * footprint.area) continue;
@@ -197,6 +283,19 @@ const findShadedPockets = (gray, ink, footprint, width, height, minCavity, exter
       }
     }
     if (p90 - p10 > 10) continue;
+    // A measured room, not a terrace. Bathrooms, laundries and kitchens are
+    // routinely drawn with a tinted floor, and nothing about the tint's shape
+    // separates it from the one a condo plan puts on a balcony — but the OCR
+    // pass can: a parsed dimension label inside the pocket says someone
+    // measured this as a room. Refusing here costs nothing on a balcony the
+    // plan actually names, because that is carved by the `label` source at
+    // 0.9 against this detector's 0.5, from the keyword and not from the tint.
+    // Silent, like every other guard above it: a tinted bathroom is the
+    // ordinary case, and "an area that looks like a garage or porch was found
+    // but not removed" on every one of them is noise in the count of things to
+    // check.
+    const group = groupOf(groups, labels, comp, width);
+    if (group >= 0 && measuredGroups.has(group)) continue;
     found.push({ id: comp.id, comp, labels });
   }
   return found.length ? { labels, found } : null;
@@ -357,8 +456,18 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   }
 
   if (options.autoShaded !== false) {
+    // Everywhere the app already knows a room is: parsed dimension labels, and
+    // the rectangles a room click confirmed. Both arrive in working-raster px.
+    const measured = [
+      ...(options.constraints?.interiorPoints ?? []),
+      ...(options.constraints?.rooms ?? []).map((r) => ({
+        x: (r.rect.left + r.rect.right) / 2,
+        y: (r.rect.top + r.rect.bottom) / 2,
+      })),
+    ];
     const pockets = findShadedPockets(
-      analysis.gray, analysis.ink, footprint, width, height, minCavity, exteriorThickness,
+      analysis.gray, analysis.ink, analysis.thickMask ?? wallMask, footprint,
+      width, height, minCavity, exteriorThickness, measured,
     );
     for (const pocket of pockets?.found ?? []) {
       regions.push({
