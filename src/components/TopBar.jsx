@@ -9,7 +9,7 @@ import { MOD, ALT } from '../utils/keySymbols';
 import { THEME_LABEL } from '../hooks/useTheme';
 import { planStage } from '../utils/planStage';
 import useUndoHistory from '../hooks/useUndoHistory';
-import useWorkspaceStore from '../store/workspaceStore';
+import useWorkspaceStore, { UNIT_PREFERENCES, UNIT_PREFERENCE_LABEL } from '../store/workspaceStore';
 import * as undoManager from '../store/undoManager';
 
 /**
@@ -260,6 +260,7 @@ const TopBar = ({
   onShowSideLengthsChange,
   autoSnapEnabled,
   onAutoSnapChange,
+  onUnitChange,
   // preferences
   saveOnExit,
   onSaveOnExitChange,
@@ -274,6 +275,8 @@ const TopBar = ({
   // workflow decision, and the dock reads the same two fields directly.
   const showWork = useWorkspaceStore((s) => s.showWork);
   const setShowWork = useWorkspaceStore((s) => s.setShowWork);
+  const unitPreference = useWorkspaceStore((s) => s.unitPreference);
+  const setUnitPreference = useWorkspaceStore((s) => s.setUnitPreference);
 
   // Only the two fields that decide weight; the dock's StageSpine feeds the
   // same function the rest and prints all four stages from it. `ocrFailed` and
@@ -398,6 +401,20 @@ const TopBar = ({
             onSelect={() => setShowWork(!showWork)}
             close={close}
           />
+          <Sep />
+          {/* The dock's pill group already switches the unit and already pins
+              it. What only lives here is the fourth answer — hand the choice
+              back to the drawing — and a name for what the pills are doing,
+              which three two-letter labels cannot carry. */}
+          {UNIT_PREFERENCES.map((id) => (
+            <MenuItem
+              key={id}
+              label={id === 'auto' ? 'Units: match the plan' : `Units: ${UNIT_PREFERENCE_LABEL[id].toLowerCase()}`}
+              checked={unitPreference === id}
+              onSelect={() => (id === 'auto' ? setUnitPreference(id) : onUnitChange(id))}
+              close={close}
+            />
+          ))}
           <Sep />
           <MenuItem
             label={`Theme: ${THEME_LABEL[theme] ?? 'System'}`}

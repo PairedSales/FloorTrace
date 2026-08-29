@@ -161,14 +161,15 @@ A switch is *park → adopt*, and its correctness rests on three things:
   of it is parked, because none of it is a fact about the plan. It dies with the tree.
 
 **Hooks are workspace-level or per-plan, and it matters where they mount.**
-`App.jsx` mounts thirteen; the `key` is on `<Canvas>` only, so none of them remount
+`App.jsx` mounts fourteen; the `key` is on `<Canvas>` only, so none of them remount
 today — but before reaching for a keyed subtree, know which is which.
 
 *Workspace-level, must never sit inside a keyed subtree:* `useAutosave`,
 `useEnhancedOcr` (a ~10 s WebGL warmup), `useOcrWarmup`, `useTheme`,
 `useKeyboardShortcuts`, `useIsMobile`, `usePlanAreaIndex` (it follows whichever
-plan is live, and records what that plan contributes to the property), and
-`usePlanManager` —
+plan is live, and records what that plan contributes to the property),
+`useUnitPreference` (same shape — it pulls whichever plan is live onto the
+pinned unit), and `usePlanManager` —
 which *performs* the switch, so inside the keyed subtree it would be torn down
 mid-adopt.
 
@@ -248,6 +249,22 @@ broken once already:
 - `src/store/traceManager.js` (mixed into the store via `createTraceSlice`) manages multiple named "perimeter traces" (one polygon per floor/level) against a single shared calibration — this is the model backing multi-floor support. `selectActivePerimeterOverlay` / `selectActiveAreaByType` in `appStore.js` are memoized selectors (manual reference-equality caching, not reselect) — follow that pattern if adding similar derived state rather than introducing a new library. (`selectCombinedArea` is a one-line read of `.total` off the second, not a memo of its own.)
 
   Both memos are **module state with one slot**, so they answer for whichever state called last — harmless with one plan, a trap with several. Anything handed a state rather than subscribing to the live store must not go through them: `computeAreaByType` is the un-memoised twin for exactly that, because the exhibit builder describes the state it was *given*, and alternating callers would thrash a shared memo into handing over the other plan's numbers. The memo on `selectActiveAreaByType` is a correctness requirement rather than an optimisation: it returns an object, so zustand's `Object.is` would otherwise re-render every consumer on every unrelated `set()`.
+
+**The unit is two fields, and the second one is the answer.** `appStore.unit` is
+what the plan on screen is *currently* displayed in, and has to stay per-plan —
+it rides in a `.floorplan`, in a park and in an undo snapshot. It was also the
+only field there was, so every arrival path got to decide it: a scan that read a
+metric drawing switched a user who works in feet off feet, a new plan fell back
+to the default, and a project someone else saved arrived in their unit.
+`workspaceStore.unitPreference` (`'auto' | 'decimal' | 'inches' | 'metric'`,
+persisted at `floortrace:unit`) is the standing answer, and `useUnitPreference`
+is the one place it is enforced — an effect on the live plan, deliberately not a
+check at each of the five arrival paths, because those are the paths that keep
+being added to and a sixth would not know to ask. The dock's pill group **is**
+the setter: picking a unit there pins it, because that is the only place a unit
+is picked by hand and there is no second gesture that would mean "and keep it".
+View > Units carries the fourth answer the three pills cannot — hand the choice
+back to the plan — and the names those two-letter labels do not have.
 
 **The measurement dock is ordered by what a person reads, not by what the app computes.** Room size first and in 19 px type — it is a measurement of the building, checked against the plan by eye and corrected by hand — then Area, then the outlines, then **the Scale card, small**, and **Checks last**. The first two used to be one card with those weights reversed, headlining `1 ft = 91.0 px`: a derived, technical number in the position that says "read this first". Scale still has to be *available* (an unstated scale is how a plan gets measured at someone else's px/ft) and `#dock-scale` stays that card's id, because it holds the provenance and both ways to correct the scale — pick a different room, or measure a length you know. `MeasurementDock` is the same component on mobile, so the order changes there too — that is the rule, not an oversight.
 
