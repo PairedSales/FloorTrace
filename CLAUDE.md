@@ -17,6 +17,7 @@ npm test            # vitest run (all tests)
 npx vitest run <path/to/file.test.js>   # run a single test file
 npm run bench:detection    # detection accuracy against fixtures/ (runs in CI)
 npm run bench:scale        # scale selection against fixtures/ (runs in CI)
+npm run bench:cubicasa     # tracer + scale against CubiCasa5K's test plans (local only, see datasets/README.md)
 npm run bench:ocr          # OCR accuracy/timing benchmark (Node, Tesseract path only)
 npm run probe:exterior     # exterior tracer on synthetic scenarios with exact truth
 npm run probe:memory       # what the detection memo retains per image (needs --expose-gc)
@@ -66,6 +67,8 @@ covered now is the layer between the store and the UI:
   not been done.
 
 **Always run `npm run bench:detection` before and after a detection change.** It scores polygon shape and square feet, not just bounding boxes — a tracer that returns each building's bounding rectangle passes a box check while discarding every notch and wing. `npm run probe:exterior` prints the same scenarios `exterior-failures.test.js` asserts (wide openings, U-notches, dimension strings, courtyards, legends, garage doors, nested plans, mixed wall thickness) with IoU/area/confidence, which is the fastest way to see what a change did. `npm run probe:exterior draw` does the same for draw mode, re-tracing those scenarios from a synthetic sloppy brush stroke (`strokeAround` in `synthetic.js`) — jitter and brush width should not move the numbers.
+
+**`bench:detection` is the gate; `bench:cubicasa` is the wide check.** Nine fixtures are what CI holds. CubiCasa5K is 5,000 plans with exact outlines and scale, on any machine that has downloaded it (`datasets/README.md`). Run it with `--compare` against a saved run before and after a detection change: a change that fixes a fixture and quietly breaks forty apartments only shows up there. Its truth is living area, and it splits each plan's error into non-GLA space kept, anything else taken in, and living space missed, and sets the app's confidence against the error it sat on.
 
 ## Architecture
 
