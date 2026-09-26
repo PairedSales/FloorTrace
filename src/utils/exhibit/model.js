@@ -77,8 +77,8 @@ const edgeLabels = (vertices, feetPerPixel, unit, unitStyle) => {
   });
 };
 
-// Through `traceIssues`, not re-derived: CLAUDE.md makes "the count is derived
-// once" an invariant for this exact quantity, and the exhibit printing a
+// Through `traceIssues`, not re-derived: `.claude/rules/ui-shell.md` makes "the
+// count is derived once" an invariant for this exact quantity, and the exhibit printing a
 // different number of stale voids from the dock is the failure that rule
 // exists to prevent.
 const voidNote = (holes, feetPerPixel, unit) => {

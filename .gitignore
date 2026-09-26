@@ -24,8 +24,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Claude Code local settings
+# Claude Code personal files. .claude/settings.json, rules/ and skills/ are
+# shared and committed; these two are per-person.
 .claude/settings.local.json
+CLAUDE.local.md
 
 # Claude Code worktrees. Each is a full checkout of this repo living inside it;
 # git must never see them as content. Also excluded in .git/info/exclude on the

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm ci)",
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(node scripts/*)",
+      "Bash(node --expose-gc scripts/*)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run list *)",
+      "PowerShell(npm ci)",
+      "PowerShell(npm test)",
+      "PowerShell(npm test *)",
+      "PowerShell(npm run *)",
+      "PowerShell(npx vitest *)",
+      "PowerShell(npx eslint *)",
+      "PowerShell(node scripts/*)",
+      "PowerShell(node --expose-gc scripts/*)",
+      "PowerShell(gh pr view *)",
+      "PowerShell(gh pr diff *)",
+      "PowerShell(gh pr checks *)",
+      "PowerShell(gh pr list *)",
+      "PowerShell(gh run view *)",
+      "PowerShell(gh run list *)"
+    ]
+  }
+}
