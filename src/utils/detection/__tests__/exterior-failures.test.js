@@ -6,11 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { traceFloorplanBoundaryCore } from '../pipeline.js';
-import { polygonArea } from '../polygon.js';
+import { pointInPolygon, polygonArea } from '../polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
   garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, strokeAround,
-  polygonIou, bboxIou, bboxOf,
+  balconyHouse, patioWings, polygonIou, bboxIou, bboxOf,
 } from './synthetic.js';
 
 const truthBbox = (truth) => [
@@ -154,6 +154,57 @@ describe('non-GLA classification does not turn on one pixel', () => {
     });
     expect(traced.excludedRegions).toBe(1);
     expect(polygonIou(traced.outer.polygon, truth)).toBeGreaterThan(0.95);
+  });
+});
+
+describe('a space the plan labels non-GLA', () => {
+  const reasons = (traced) => (traced.quality.warnings)
+    .filter((w) => w.code === 'non-gla-not-removed')
+    .map((w) => w.detail?.reason);
+  const inside = (traced, labels) => labels.filter((p) => traced.floors.some(
+    (f) => pointInPolygon(p, f.outer.polygon, f.holes ?? []),
+  ));
+
+  // The carve's barrier is thick wall, and between a balcony and the room it
+  // opens off there is only glazing. On CubiCasa5K a third of the balconies a
+  // plan names stayed in the outline this way, with nothing said.
+  it('is carved from behind a wall of glazing', () => {
+    const { img, truth, balcony, labels } = balconyHouse();
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [balcony], constraints: { interiorPoints: labels },
+    });
+    expect(traced.excludedRegions).toBe(1);
+    expect(polygonIou(traced.outer.polygon, truth)).toBeGreaterThan(0.95);
+  });
+
+  it('is reported when nothing separates it from the room it opens off', () => {
+    const { img, balcony, labels } = balconyHouse({ glazed: false });
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [balcony], constraints: { interiorPoints: labels },
+    });
+    expect(traced.excludedRegions).toBe(0);
+    expect(reasons(traced)).toContain('no-separable-region');
+  });
+
+  // The carve keeps the largest piece of what it leaves, so a patio between
+  // two wings took the smaller wing with it.
+  it('is not carved when that would cut a wing off the building', () => {
+    const { img, labels, patio } = patioWings(2);
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [patio], constraints: { interiorPoints: labels },
+    });
+    expect(inside(traced, labels)).toHaveLength(labels.length);
+    expect(reasons(traced)).toContain('splits-footprint');
+  });
+
+  it('is carved when all it cuts off is one room, and the room is named', () => {
+    const { img, small, labels, patio } = patioWings(1);
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [patio], constraints: { interiorPoints: labels },
+    });
+    expect(traced.excludedRegions).toBe(1);
+    expect(inside(traced, small)).toHaveLength(0);
+    expect(warningCodes(traced)).toContain('label-outside');
   });
 });
 
