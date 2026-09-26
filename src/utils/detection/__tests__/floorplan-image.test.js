@@ -165,21 +165,21 @@ describe('room detection on ExampleFloorplan.png', () => {
       expect(withRooms.excludedGarages).toBe(1);
     });
 
-    // Asserting the garage as known-inside is factually wrong input — it is the
-    // region the same trace is carving out — but it does not currently move the
-    // answer, because candidates are scored on a mask that still contains the
-    // garage and the carve happens afterwards in buildFloor. Pinned rather than
-    // assumed: if constraint scoring ever moves to after the carve, this room
-    // starts contradicting the exclusion and this test is where it shows up.
-    // App.jsx's boundaryConstraints drops it by keyword regardless.
-    it('is unmoved by the garage being asserted inside, carve or no carve', () => {
+    // Asserting the garage as known-inside is wrong input when the app knows it
+    // is a garage — App.jsx's boundaryConstraints drops it by keyword — but it
+    // is exactly what arrives when its size was read without its keyword. The
+    // geometric carve then contradicts a room the app measured, and a measured
+    // room outranks a door-shaped side (a wall of windows is one too), so the
+    // garage is kept and the refusal is stated rather than carved in silence.
+    it('keeps a garage asserted as a measured room, and says so', () => {
       const rooms = [asConstraint([778, 672], [20.58, 9.5])];
       const withGarage = traceFloorplanBoundaryCore(image, { constraints: { rooms } });
-      expect(withGarage.excludedGarages).toBe(1);
-      expect(bboxIou(bboxOf(withGarage.floors[1].outer.overlay), [29, 491, 620, 878]))
-        .toBeGreaterThan(0.9);
-      expect((withGarage.floors[1].warnings ?? []).some((w) => w.code === 'room-outside'))
-        .toBe(false);
+      expect(withGarage.excludedGarages).toBe(0);
+      const warnings = withGarage.floors[1].warnings ?? [];
+      expect(warnings.some(
+        (w) => w.code === 'non-gla-not-removed' && w.detail?.reason === 'room-label-inside',
+      )).toBe(true);
+      expect(warnings.some((w) => w.code === 'room-outside')).toBe(false);
     });
   });
 
