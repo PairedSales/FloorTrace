@@ -1,5 +1,9 @@
 # FloorTrace — image-load-to-area performance analysis
 
+> **A dated record, not a live plan** (August 2026; was `optimization-plan.md` at the repo
+> root). Kept for the measurements and for §5's "explicitly rejected" list, which is the reason
+> not to re-attempt those ideas. Later changes are not folded back in.
+>
 > **Implementation status (items 1–6 and 8 are done).** Measured result on the fixtures:
 > **~25–30% off the end-to-end clock**, plus ~1 s on the large inputs that trip §4.2 — slightly
 > ahead of the 20–28% this plan estimated. Detection output is byte-identical throughout

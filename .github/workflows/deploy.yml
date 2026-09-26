@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Node 20 reached end of life in April 2026. It was not merely stale: a
       # devDependency's `engines` can require newer, and the failure lands only
@@ -51,7 +51,7 @@ jobs:
       # >= 22.19, so the hook-test harness passed locally and failed this job
       # with unhandled TypeErrors while every test reported green.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'npm'
@@ -80,16 +80,26 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The entry must modulepreload only `interop` and `react`. Any other
+      # chunk there is code meant to load lazily (konva, OCR, OpenCV) that a
+      # static import has pulled back onto the critical path — which the
+      # manualChunks config cannot show, because splitting is not deferring.
+      - name: Check bundle shape
+        run: npm run check:bundle
+
       # Pages steps are for the real deploy only. On a pull_request the job
       # exists to run the checks above; configuring Pages from a PR would at
       # best waste a step and at worst publish unmerged code.
       - name: Setup Pages
         if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
+      # v4+ leaves dotfiles out of the artifact. `public/` has none, so the
+      # site is unaffected; a dotfile added there would need
+      # `include-hidden-files`.
       - name: Upload artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './dist'
 
@@ -103,4 +113,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

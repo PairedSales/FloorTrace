@@ -2,7 +2,8 @@
 
 > **A dated record, not a live plan.** This is the measurement pass that produced the 1.8×
 > speed-up, kept because the numbers and the two benchmarked-shut "free wins" in §6 are the
-> reason not to re-attempt them. Later changes are not folded back in; CLAUDE.md is current.
+> reason not to re-attempt them. Later changes are not folded back in; `.claude/rules/ocr.md`
+> is current.
 
 Scope: `detectAllDimensions` / `detectDimensionsCore` (`src/utils/dimensions/`). Accuracy is
 currently good; this is about the ~6–9s it takes. All numbers below are measured on this machine

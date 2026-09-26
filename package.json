@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:bundle": "node scripts/checkBundle.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "icons": "node scripts/generateIcons.mjs",
