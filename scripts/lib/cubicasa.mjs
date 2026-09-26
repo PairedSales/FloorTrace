@@ -8,17 +8,46 @@
 // F1_scaled.png is drawn at 30.48 px/ft, and every plan has a known area.
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import {
   dilateRect, openRect, floodOutside, labelComponents,
 } from '../../src/utils/detection/raster.js';
 import { loadPng } from './benchUtils.mjs';
 
-export const CUBICASA_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), '../../datasets/cubicasa5k/cubicasa5k',
-);
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+// datasets/ is git-ignored and gigabytes, so it is downloaded once, into the
+// main checkout, while most work happens in worktrees under .claude/worktrees/
+// whose datasets/ holds only the README. $FLOORTRACE_DATASETS wins; then this
+// checkout's datasets/ if the corpus is there; then the main checkout's, found
+// through git's common directory. Saved runs live beside the corpus, so a
+// baseline outlives the worktree that measured it.
+const resolveDatasetsDir = () => {
+  if (process.env.FLOORTRACE_DATASETS) return path.resolve(process.env.FLOORTRACE_DATASETS);
+  const own = path.join(REPO_ROOT, 'datasets');
+  if (fs.existsSync(path.join(own, 'cubicasa5k'))) return own;
+  try {
+    const common = execSync('git rev-parse --git-common-dir', {
+      cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    const main = path.join(path.dirname(path.resolve(REPO_ROOT, common)), 'datasets');
+    if (fs.existsSync(path.join(main, 'cubicasa5k'))) return main;
+  } catch {
+    // Not a git checkout; this checkout's datasets/ is the only candidate.
+  }
+  return own;
+};
+
+export const DATASETS_DIR = resolveDatasetsDir();
+export const CUBICASA_ROOT = path.join(DATASETS_DIR, 'cubicasa5k', 'cubicasa5k');
 export const PX_PER_FOOT = 30.48;
 const SPLITS = ['train', 'val', 'test'];
+
+// A fixed slice of train for the edit-and-measure loop: about two minutes
+// where all of train takes fifteen, and weighted toward the listing-style
+// categories, which an even spread of train would hand ~40 plans of 400.
+const DEV_SLICE = { colorful: 100, high_quality: 150, high_quality_architectural: 150 };
 
 // Truth-mask resolution, in image px per cell (2 cm).
 const CELL = 2;
@@ -35,12 +64,27 @@ const DEEP_PX = 20;
 // Share of its bounding box a room must fill to count as a rectangle.
 const RECTANGULAR = 0.95;
 
-export const listPlans = (split = 'test', root = CUBICASA_ROOT) => (
-  split === 'all' ? SPLITS : [split]
-).flatMap((name) => fs.readFileSync(path.join(root, `${name}.txt`), 'utf8')
+const readSplit = (name, root) => fs.readFileSync(path.join(root, `${name}.txt`), 'utf8')
   .split(/\r?\n/)
   .map((line) => line.trim().replace(/^\/+|\/+$/g, ''))
-  .filter(Boolean));
+  .filter(Boolean);
+
+// An even spread of `count` from `ids`, the same plans every time.
+export const evenSpread = (ids, count) => {
+  if (!(count > 0) || ids.length <= count) return ids;
+  const step = ids.length / count;
+  return Array.from({ length: count }, (_, i) => ids[Math.floor(i * step)]);
+};
+
+export const listPlans = (split = 'test', root = CUBICASA_ROOT) => {
+  if (split === 'dev') {
+    const train = readSplit('train', root);
+    return Object.entries(DEV_SLICE).flatMap(([category, count]) => evenSpread(
+      train.filter((id) => id.startsWith(`${category}/`)), count,
+    ));
+  }
+  return (split === 'all' ? SPLITS : [split]).flatMap((name) => readSplit(name, root));
+};
 
 const IDENTITY = [1, 0, 0, 1, 0, 0];
 
