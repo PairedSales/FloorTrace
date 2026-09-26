@@ -12,6 +12,7 @@
 
 import { bboxAreaOf, bridgeRuns, dilateRect, labelComponents, openRect } from './raster.js';
 import { findGarageCavities } from './garage.js';
+import { matchExteriorFeature } from '../dimensions/exteriorLabels.js';
 
 const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);
@@ -117,6 +118,20 @@ const floodLabelledRegion = (region, footprint, barrier, width, height) => {
   }
   if (maxX < 0) return null;
   return { mask, size, bbox: { minX, minY, maxX, maxY } };
+};
+
+// Whether a region mask covers the neighbourhood of a point. A label's centre
+// is often glyph ink the region's flood never entered.
+const maskNear = (mask, point, reach, width, height) => {
+  const cx = Math.round(point.x);
+  const cy = Math.round(point.y);
+  for (let yy = Math.max(0, cy - reach); yy <= Math.min(height - 1, cy + reach); yy += 1) {
+    const row = yy * width;
+    for (let xx = Math.max(0, cx - reach); xx <= Math.min(width - 1, cx + reach); xx += 1) {
+      if (mask[row + xx]) return true;
+    }
+  }
+  return false;
 };
 
 // The nearest labelled component to a point, or -1. A dimension label's own
@@ -329,6 +344,16 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   const exteriorThickness = options.exteriorThickness;
   const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
   const regions = [];
+  // Everywhere the app already knows a room is: parsed dimension labels, and
+  // the rectangles a room click confirmed. Both arrive in working-raster px.
+  const measured = [
+    ...(options.constraints?.interiorPoints ?? []),
+    ...(options.constraints?.rooms ?? []).map((r) => ({
+      x: (r.rect.left + r.rect.right) / 2,
+      y: (r.rect.top + r.rect.bottom) / 2,
+      name: r.name,
+    })),
+  ];
 
   const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
   const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
@@ -456,15 +481,6 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   }
 
   if (options.autoShaded !== false) {
-    // Everywhere the app already knows a room is: parsed dimension labels, and
-    // the rectangles a room click confirmed. Both arrive in working-raster px.
-    const measured = [
-      ...(options.constraints?.interiorPoints ?? []),
-      ...(options.constraints?.rooms ?? []).map((r) => ({
-        x: (r.rect.left + r.rect.right) / 2,
-        y: (r.rect.top + r.rect.bottom) / 2,
-      })),
-    ];
     const pockets = findShadedPockets(
       analysis.gray, analysis.ink, analysis.thickMask ?? wallMask, footprint,
       width, height, minCavity, exteriorThickness, measured,
@@ -481,7 +497,40 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
     }
   }
 
-  return { regions, nearMisses };
+  // A region a living room's own label sits in is that room, whatever voted
+  // for it. The garage test reads a long thin exterior side as a door, which a
+  // wall of windows also is, and a balcony's label votes for whatever cavity
+  // its door opens into: both carved a living room and bedroom off CubiCasa
+  // plans at 91% with nothing said, because a carve exempts the labels it
+  // removes. A label that names a non-GLA feature does not count, nor do a
+  // keyword's own lines — the size printed under it (TWO CAR GARAGE /
+  // 22-5x22-0) is the garage's. The refusal is stated, because the label can
+  // be the one that is wrong: a garage whose size was read without its
+  // keyword is kept, and has to be checked. Tint alone gives way silently, as
+  // `findShadedPockets` already does with the same points.
+  const living = measured.filter((p) => !matchExteriorFeature(p.name)
+    && !(options.excludeRegions ?? []).some((r) => (
+      p.x >= r.x - r.width && p.x <= r.x + 2 * r.width
+      && p.y >= r.y - 3 * r.height && p.y <= r.y + 4 * r.height)));
+  const reach = Math.max(2, wallThickness);
+  const holdsRoom = (mask) => living.some((p) => maskNear(mask, p, reach, width, height));
+  const kept = [];
+  for (const region of regions) {
+    if (!living.length || !holdsRoom(region.mask)) {
+      kept.push(region);
+      continue;
+    }
+    if (region.source === 'shaded') continue;
+    nearMisses.push({
+      source: region.source,
+      keyword: region.keyword,
+      size: region.size,
+      bbox: region.bbox,
+      reason: 'room-label-inside',
+    });
+  }
+
+  return { regions: kept, nearMisses };
 };
 
 // Merge candidates covering the same physical area: two sources agreeing is

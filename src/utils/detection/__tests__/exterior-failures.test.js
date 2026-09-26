@@ -131,6 +131,30 @@ describe('non-GLA classification does not turn on one pixel', () => {
     expect(traced.excludedRegions).toBe(0);
     expect(polygonArea(traced.outer.polygon)).toBeGreaterThan(1.2 * polygonArea(truth));
   });
+
+  // A thin exterior side is also what a wall of windows looks like. On
+  // CubiCasa5K the door test carved sunlit living rooms and bedrooms at 91%
+  // confidence, their own labels inside the carve and nothing said.
+  it('keeps a wing a living room\'s label is written in, and says so', () => {
+    const { img, truth } = garageHouse(2);
+    const traced = traceFloorplanBoundaryCore(img, {
+      constraints: { interiorPoints: [{ x: 630, y: 300, name: "SUNROOM 12'x20'" }] },
+    });
+    expect(traced.excludedRegions).toBe(0);
+    expect(polygonArea(traced.outer.polygon)).toBeGreaterThan(1.2 * polygonArea(truth));
+    expect(traced.quality.warnings.some(
+      (w) => w.code === 'non-gla-not-removed' && w.detail?.reason === 'room-label-inside',
+    )).toBe(true);
+  });
+
+  it('still carves it when the label names the garage', () => {
+    const { img, truth } = garageHouse(2);
+    const traced = traceFloorplanBoundaryCore(img, {
+      constraints: { interiorPoints: [{ x: 630, y: 300, name: "GARAGE 20'x22'" }] },
+    });
+    expect(traced.excludedRegions).toBe(1);
+    expect(polygonIou(traced.outer.polygon, truth)).toBeGreaterThan(0.95);
+  });
 });
 
 describe('interior envelope', () => {
