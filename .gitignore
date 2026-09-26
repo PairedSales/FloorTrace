@@ -57,3 +57,8 @@ tutorial-stages.json
 
 # Real-world appraisal order artifacts (never commit)
 cmp-vendors.*
+
+# Large third-party datasets (e.g. CubiCasa5K, ~6 GB). Downloaded locally,
+# never committed — see datasets/README.md for where to get them.
+datasets/*
+!datasets/README.md
