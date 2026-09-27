@@ -28,8 +28,12 @@
       "ids": ["high_quality/12076", "high_quality/13695"]
     },
     "non-gla-kept": {
-      "about": "A labelled balcony, porch or terrace left in the outline after the glazing fix: partly carved, drawn with a tiled floor, or named in handwriting.",
-      "ids": ["colorful/10469", "colorful/34", "high_quality/3733"]
+      "about": "A labelled balcony, porch or terrace left in the outline after the glazing fix: partly carved, drawn with a tiled floor, or named in handwriting. A balcony whose door onto the room sits at a corner leaks into the room too (12511, 10403): the carve's barrier closes a door gap only where wall continues on both sides of it.",
+      "ids": ["colorful/10469", "colorful/34", "high_quality/3733", "high_quality/12511", "high_quality/10403"]
+    },
+    "boarded-decks": {
+      "about": "Decks, terraces and balconies drawn in boards or tiles, which the carve's barrier reads as wall: the label lands on the boards or in a strip between two. The boards carve takes 11194, 11195, 4054 and 6296; 3721's hatching is fused into solid ink, and 107's paving grid is spaced wider than a board.",
+      "ids": ["colorful/11194", "colorful/11195", "colorful/4054", "colorful/6296", "colorful/3721", "high_quality/107"]
     }
   }
 }
