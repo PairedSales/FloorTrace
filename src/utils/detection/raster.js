@@ -78,13 +78,17 @@ const histOf = (gray) => {
 // for line work, split it again and keep the lower threshold only when it
 // separates two well-spaced modes (strokes vs fills); a genuinely ink-dense
 // B&W plan has a single dark mode and keeps plain Otsu.
+//
+// Returns the threshold and plain Otsu's `t1`: when they differ, the tones
+// between them are what the split set aside as fill.
 const inkThreshold = (gray, prebuiltHist) => {
   const hist = prebuiltHist ?? histOf(gray);
   const total = gray.length;
   const t1 = otsuHist(hist, 0, 256);
+  const plain = { threshold: t1, t1 };
   let darkCount = 0;
   for (let v = 0; v < t1; v += 1) darkCount += hist[v];
-  if (darkCount <= 0.14 * total) return t1;
+  if (darkCount <= 0.14 * total) return plain;
 
   const t2 = otsuHist(hist, 0, t1);
   let inkCount = 0;
@@ -102,8 +106,107 @@ const inkThreshold = (gray, prebuiltHist) => {
   // Fills must dominate the dark class. When most dark pixels survive the
   // re-split, the "excess" was grey linework/hatching (strokes worth
   // keeping), not tinted room fills — keep plain Otsu.
-  if (inkCount < 0.002 * total || inkCount > 0.4 * darkCount || fillCount === 0) return t1;
-  return fillSum / fillCount - inkSum / inkCount >= 35 ? t2 : t1;
+  if (inkCount < 0.002 * total || inkCount > 0.4 * darkCount || fillCount === 0) return plain;
+  return fillSum / fillCount - inkSum / inkCount >= 35 ? { threshold: t2, t1 } : plain;
+};
+
+// The tone the split sets aside is not always fill. On a plan whose walls are
+// drawn in it — green, grey or tan bands on a white page — the split set aside
+// the walls and left the tracer the fixtures and the text: on CubiCasa5K that
+// was 38 of the 48 listing plans the split fired on, nearly all traced wrong,
+// several with nothing found at all. So the set-aside tone goes back into the
+// ink wherever it is drawn like a wall. Four tests, each ruling out one thing
+// the same tone also draws:
+// - a body: most of the piece survives a two-pixel erosion, so it is at least
+//   ~5 px thick — not the anti-aliased rim of a black stroke, and not a scan's
+//   grey line work (dashes, fixtures, a terrace's paving grid), which loses
+//   most of itself;
+// - a span: it runs at least a tenth of the page, as a wall does and a
+//   nightstand or a chair does not;
+// - no bulk: an erosion by ~1% of the page takes nearly all of it, so it is
+//   made of bands — a room fill or a balcony keeps its width less the erosion;
+// - the page on both sides: most of its edge looks out on something much
+//   lighter than the band, past at most a thin outline. A room fill shaded
+//   darker toward its walls (ExampleFloorplan7) makes a band of the same tone
+//   and width, but that band has the room's black wall on one side and the
+//   rest of its own fill, barely lighter, on the other. Lighter than the band
+//   rather than as light as the page, because a scanned page is not white.
+const BAND_BODY = 0.5;
+const BAND_BODY_PX = 2;
+const BAND_SPAN = 0.1;
+const BAND_BULK = 0.2;
+const BAND_ERODE = 0.012;
+const BAND_BORDER = 0.5;
+// How much lighter than the band its border must be to be the page around a
+// wall; a shaded fill's rim is under 30 lighter than the fill beyond it.
+const BORDER_CONTRAST = 40;
+// Ink this thin at a band's edge is an outline drawn on the wall's face, and
+// the border is read past it; a thicker run is a wall of its own.
+const OUTLINE_PX = 4;
+// The border is read this far out, past the anti-aliased pixels at an edge,
+// which are neither the band's tone nor the page's.
+const BORDER_REACH = 3;
+
+const keepBands = (ink, band, gray, width, height) => {
+  const { labels, components } = labelComponents(band, width, height);
+  if (!components.length) return;
+  const body = erodeRect(band, width, height, BAND_BODY_PX);
+  const bulk = erodeRect(band, width, height, Math.max(4, Math.round(BAND_ERODE * Math.max(width, height))));
+  const span = BAND_SPAN * Math.max(width, height);
+  const toneSum = new Float64Array(components.length);
+  const bodyCount = new Uint32Array(components.length);
+  const bulkCount = new Uint32Array(components.length);
+  for (let i = 0; i < labels.length; i += 1) {
+    const id = labels[i];
+    if (id < 0) continue;
+    toneSum[id] += gray[i];
+    if (body[i]) bodyCount[id] += 1;
+    if (bulk[i]) bulkCount[id] += 1;
+  }
+  const edgeCount = new Uint32Array(components.length);
+  const lightCount = new Uint32Array(components.length);
+  // Step away from the band, over a thin outline if there is one, and take
+  // the lightest tone within reach beyond it.
+  const border = (id, i, dx, dy) => {
+    let x = i % width;
+    let y = (i / width) | 0;
+    for (let k = 0; k < OUTLINE_PX; k += 1) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= width || yy >= height || !ink[yy * width + xx]) break;
+      x = xx;
+      y = yy;
+    }
+    let lightest = 0;
+    for (let k = 1; k <= BORDER_REACH; k += 1) {
+      const xx = x + dx * k;
+      const yy = y + dy * k;
+      if (xx < 0 || yy < 0 || xx >= width || yy >= height) break;
+      if (gray[yy * width + xx] > lightest) lightest = gray[yy * width + xx];
+    }
+    edgeCount[id] += 1;
+    if (lightest >= toneSum[id] / components[id].size + BORDER_CONTRAST) lightCount[id] += 1;
+  };
+  for (let i = 0; i < labels.length; i += 1) {
+    const id = labels[i];
+    if (id < 0) continue;
+    const x = i % width;
+    if (x > 0 && labels[i - 1] !== id) border(id, i, -1, 0);
+    if (x < width - 1 && labels[i + 1] !== id) border(id, i, 1, 0);
+    if (i >= width && labels[i - width] !== id) border(id, i, 0, -1);
+    if (i + width < labels.length && labels[i + width] !== id) border(id, i, 0, 1);
+  }
+  const keep = new Uint8Array(components.length);
+  for (const comp of components) {
+    const { minX, minY, maxX, maxY } = comp.bbox;
+    keep[comp.id] = bodyCount[comp.id] >= BAND_BODY * comp.size
+      && Math.max(maxX - minX, maxY - minY) + 1 >= span
+      && bulkCount[comp.id] <= BAND_BULK * comp.size
+      && lightCount[comp.id] >= BAND_BORDER * edgeCount[comp.id] ? 1 : 0;
+  }
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] >= 0 && keep[labels[i]]) ink[i] = 1;
+  }
 };
 
 // Binarize at full resolution, then OR-pool down to the working scale so
@@ -114,18 +217,25 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
   const { gray, hist } = toGrayscale(imageData.data, ow * oh);
   // Clamp Otsu away from extremes so faint paper texture or near-black scans
   // still split ink from paper sensibly.
-  const threshold = Math.min(Math.max(inkThreshold(gray, hist), 60), 220);
+  const split = inkThreshold(gray, hist);
+  const threshold = Math.min(Math.max(split.threshold, 60), 220);
+  // The tones the fill-aware split set aside, if it did (see `keepBands`).
+  const bandTop = split.threshold < split.t1 ? split.t1 : threshold;
 
   const longest = Math.max(ow, oh);
   const width = longest > maxDimension ? Math.max(1, Math.round((ow * maxDimension) / longest)) : ow;
   const height = longest > maxDimension ? Math.max(1, Math.round((oh * maxDimension) / longest)) : oh;
   const ink = new Uint8Array(width * height);
   const grayWork = new Uint8Array(width * height);
+  const band = bandTop > threshold ? new Uint8Array(width * height) : null;
 
   if (width === ow && height === oh) {
     for (let i = 0; i < gray.length; i += 1) {
       ink[i] = gray[i] < threshold ? 1 : 0;
       grayWork[i] = gray[i];
+    }
+    if (band) {
+      for (let i = 0; i < gray.length; i += 1) band[i] = gray[i] >= threshold && gray[i] < bandTop ? 1 : 0;
     }
   } else {
     // Box-average the grayscale alongside the OR-pooled ink (screened fills
@@ -153,6 +263,7 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
         const dst = dstRow + xMap[sx];
         const v = gray[srcRow + sx];
         if (v < threshold) ink[dst] = 1;
+        else if (band && v < bandTop) band[dst] = 1;
         sums[dst] += v;
         counts[dst] += 1;
       }
@@ -161,6 +272,7 @@ export const binarizeToWorkingScale = (imageData, maxDimension = 1400) => {
       grayWork[i] = counts[i] > 0 ? Math.round(sums[i] / counts[i]) : 255;
     }
   }
+  if (band) keepBands(ink, band, grayWork, width, height);
 
   return { width, height, scaleX: width / ow, scaleY: height / oh, ink, gray: grayWork, threshold };
 };
