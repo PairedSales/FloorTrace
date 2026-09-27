@@ -540,6 +540,61 @@ export const twoPlansSheet = () => {
   };
 };
 
+// Two plans drawn side by side a couple of wall thicknesses apart, their top
+// and bottom walls on one line, with a window just below the second plan's
+// corner facing the first. Close enough that the partitioner's grouping
+// radius makes them one wall network, and the window leaves too short a run
+// of wall below that corner for the weld's notch test to see: the weld closes
+// the gap along both lines and the two plans trace as one outline with the gap
+// inside it (CubiCasa5K: 159 of 190 listing sheets with several floors).
+export const closeDrawingsSheet = (gap = 26) => {
+  const t = 14;
+  const img = createImage(900 + gap, 520);
+  const plan = (x0, x1, windowOnLeft) => {
+    wall(img, x0, 60, x1, 60, t);
+    wall(img, x0, 460, x1, 460, t);
+    wall(img, x1, 60, x1, 460, t);
+    if (windowOnLeft) {
+      wall(img, x0, 60, x0, 85, t);
+      wall(img, x0, 165, x0, 460, t);
+      // The window's frame: two hairlines across the opening.
+      fillRect(img, x0 - 7, 85, x0 - 6, 165);
+      fillRect(img, x0 + 5, 85, x0 + 6, 165);
+    } else {
+      wall(img, x0, 60, x0, 460, t);
+    }
+    const mid = (x0 + x1) >> 1;
+    wall(img, mid, 60, mid, 300, 6);
+    wall(img, x0, 300, x1 - 120, 300, 6);
+  };
+  const aX1 = 420;
+  const bX0 = aX1 + t + gap;
+  plan(40, aX1, false);
+  plan(bX0, bX0 + 400, true);
+  return {
+    img,
+    floors: [outerFaceRect(40, 60, aX1, 460, t), outerFaceRect(bX0, 60, bX0 + 400, 460, t)],
+  };
+};
+
+// One house: thick exterior walls, a thin partition running its full height,
+// and a doorway in each exterior wall where the partition meets it. A band of
+// columns no thick stroke crosses runs through it, with rooms either side —
+// what a cut between two drawings must not take for a gap.
+export const thinPartitionHouse = () => {
+  const t = 14;
+  const img = createImage(820, 520);
+  const door = 40;
+  wall(img, 40, 60, 400 - door / 2, 60, t);
+  wall(img, 400 + door / 2, 60, 780, 60, t);
+  wall(img, 40, 460, 400 - door / 2, 460, t);
+  wall(img, 400 + door / 2, 460, 780, 460, t);
+  wall(img, 40, 60, 40, 460, t);
+  wall(img, 780, 60, 780, 460, t);
+  wall(img, 400, 60, 400, 460, 3);
+  return { img, truth: outerFaceRect(40, 60, 780, 460, t) };
+};
+
 // Mixed wall thickness: 16px top/bottom, 4px left/right. The interior envelope
 // must inset each edge by its own wall, not by one global scalar.
 export const mixedThicknessHouse = () => {

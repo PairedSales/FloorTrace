@@ -13,7 +13,7 @@ import { bboxAreaOf, dilateRect, labelComponents, openRect } from './raster.js';
 import { pointInPolygon } from './polygon.js';
 import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
-  generateCandidates, footprintEntry, measureFootprint, netSelfSeals,
+  generateCandidates, footprintEntry, measureFootprint, netSelfSeals, netEnclosure, INDEPENDENT_SEAL,
 } from './candidates.js';
 import { scoreCandidate, pickCandidate, candidateConfidence, warning, bboxRing } from './scoring.js';
 import { buildFloor } from './footprint.js';
@@ -66,9 +66,268 @@ const nestedIn = (bbox, floors) => {
   return floors.some((f) => pointInPolygon(p, f.outerPolygon));
 };
 
+// Two drawings on one sheet — a floor beside the floor above it, a house
+// beside its garage — share one wall network whenever they sit closer than the
+// grouping radius or a dimension string reaches across the gap, and the weld
+// and the closing then fuse them, gap and all, into one outline: on CubiCasa5K
+// 159 of the 190 listing sheets with several floors were traced as fewer
+// outlines than drawings. So a network is cut where a straight band of page
+// crosses it that no thick stroke crosses, and the cut is kept only when it
+// separates two drawings rather than two halves of one:
+// - each side encloses itself, by the reading `netSelfSeals` takes;
+// - each side encloses a tenth of what the whole did — a drawing, not a title
+//   box;
+// - the cut costs nothing the whole enclosed but the band: a band through a
+//   row of aligned windows and doors loses the rooms either side of it;
+// - each side faces the band with thick wall of its own: a band running along
+//   a thin interior wall has rooms beside it, not exterior walls;
+// - what the whole encloses in the band is open page the weld or the closing
+//   reached across, not a space drawn closed: a patio or a courtyard with a
+//   door onto it from each side makes the sides wings of one building, and
+//   the carve (with its guard against cutting off a wing) is what answers it.
+// On the 870 listing plans of CubiCasa5K's train split, the five together
+// split 92 of the 190 sheets with several floors, and one of the 680 with one:
+// a sheet that draws two buildings.
+const CUT_MIN_SIDE = 0.1;
+const CUT_SLACK = 0.03;
+// Share of the band's enclosed area that, drawn closed without weld or
+// closing, makes it a space rather than a gap.
+const CUT_DRAWN = 0.5;
+// Share of the span both sides cover that each faces with thick wall. A cut
+// between two drawings measured 0.38 and up, a slice along a thin interior
+// wall 0.2 and below: windows and a shorter neighbour keep the first from 1.
+const CUT_FACE = 0.3;
+// How far from the band that wall may stand, in wall thicknesses: the band
+// stops at the first thick stroke, which in a gap can be a porch or a stair
+// drawn in it rather than the next drawing's wall.
+const CUT_FACE_REACH = 3;
+// The widest bands tried per network; a plan's gaps are among its widest.
+const CUT_TRIES = 6;
+
+// One pass over a network: the lines a thick stroke of it crosses, and where
+// its ink starts and ends along every row and column (relative to its box).
+// Everything a band has to pass before its sides are worth enclosing is read
+// off this, so a band through one building costs no split and no enclosure.
+const scanNet = (net, thick, width) => {
+  const { mask, bbox } = net;
+  const w = bbox.maxX - bbox.minX + 1;
+  const h = bbox.maxY - bbox.minY + 1;
+  const scan = {
+    colBlocked: new Uint8Array(w),
+    rowBlocked: new Uint8Array(h),
+    rowFirst: new Int32Array(h).fill(-1),
+    rowLast: new Int32Array(h).fill(-1),
+    colFirst: new Int32Array(w).fill(-1),
+    colLast: new Int32Array(w).fill(-1),
+  };
+  for (let y = bbox.minY; y <= bbox.maxY; y += 1) {
+    const row = y * width;
+    const ry = y - bbox.minY;
+    for (let x = bbox.minX; x <= bbox.maxX; x += 1) {
+      const i = row + x;
+      if (!mask[i]) continue;
+      const rx = x - bbox.minX;
+      if (scan.rowFirst[ry] < 0) scan.rowFirst[ry] = rx;
+      scan.rowLast[ry] = rx;
+      if (scan.colFirst[rx] < 0) scan.colFirst[rx] = ry;
+      scan.colLast[rx] = ry;
+      if (thick[i]) {
+        scan.colBlocked[rx] = 1;
+        scan.rowBlocked[ry] = 1;
+      }
+    }
+  }
+  return scan;
+};
+
+// Bands across a network's extent — columns for axis 'x', rows for 'y' — that
+// no thick stroke of it crosses, widest first. A band touching the extent's
+// edge is not between two things.
+const clearBands = (scan, bbox, minWidth) => {
+  const bands = [];
+  const collect = (blocked, axis, origin) => {
+    let start = -1;
+    for (let k = 0; k < blocked.length; k += 1) {
+      if (!blocked[k]) {
+        if (start < 0) start = k;
+        continue;
+      }
+      if (start > 0 && k - start >= minWidth) bands.push({ axis, from: origin + start, to: origin + k - 1 });
+      start = -1;
+    }
+  };
+  collect(scan.colBlocked, 'x', bbox.minX);
+  collect(scan.rowBlocked, 'y', bbox.minY);
+  return bands.sort((a, b) => (b.to - b.from) - (a.to - a.from));
+};
+
+// How far each side of a cut at `at` runs along the band — rows for a band of
+// columns, columns for a band of rows — or null when a side has no ink.
+const sideSpans = (scan, bbox, band, at) => {
+  const alongX = band.axis === 'y';
+  const first = alongX ? scan.colFirst : scan.rowFirst;
+  const last = alongX ? scan.colLast : scan.rowLast;
+  const across = alongX ? bbox.minY : bbox.minX;
+  const along = alongX ? bbox.minX : bbox.minY;
+  const spans = [[Infinity, -1], [Infinity, -1]];
+  for (let k = 0; k < first.length; k += 1) {
+    if (first[k] < 0) continue;
+    const line = along + k;
+    if (first[k] + across < at) {
+      if (line < spans[0][0]) spans[0][0] = line;
+      spans[0][1] = line;
+    }
+    if (last[k] + across >= at) {
+      if (line < spans[1][0]) spans[1][0] = line;
+      spans[1][1] = line;
+    }
+  }
+  return spans[0][1] < 0 || spans[1][1] < 0 ? null : spans;
+};
+
+// Over the span both sides cover along the band, the share of lines on which
+// each has a thick stroke within `reach` of the band's edge. Everything before
+// the band's first line is the first side's and everything past its last the
+// second's, so the network's own mask answers for both.
+const faceShares = (net, thick, band, spans, width, height, reach) => {
+  const lo = Math.max(spans[0][0], spans[1][0]);
+  const hi = Math.min(spans[0][1], spans[1][1]);
+  if (hi < lo) return [0, 0];
+  const alongX = band.axis === 'y';
+  const limit = alongX ? height : width;
+  const faces = (edge, step) => {
+    let hits = 0;
+    for (let q = lo; q <= hi; q += 1) {
+      for (let k = 1; k <= reach; k += 1) {
+        const p = edge + step * k;
+        if (p < 0 || p >= limit) break;
+        const i = alongX ? p * width + q : q * width + p;
+        if (net.mask[i] && thick[i]) {
+          hits += 1;
+          break;
+        }
+      }
+    }
+    return hits / (hi - lo + 1);
+  };
+  return [faces(band.from, -1), faces(band.to, 1)];
+};
+
+// The network's ink either side of the line at `at`. Each side keeps the weld
+// reach of the network it came from (see `generateCandidates`).
+const splitNet = (net, width, axis, at) => {
+  const sides = [0, 1].map(() => ({
+    mask: new Uint8Array(net.mask.length),
+    bbox: { minX: Infinity, minY: Infinity, maxX: -1, maxY: -1 },
+    wallSize: 0,
+    reach: net.reach ?? net.bbox,
+  }));
+  const { bbox } = net;
+  for (let y = bbox.minY; y <= bbox.maxY; y += 1) {
+    const row = y * width;
+    for (let x = bbox.minX; x <= bbox.maxX; x += 1) {
+      if (!net.mask[row + x]) continue;
+      const side = sides[(axis === 'x' ? x : y) < at ? 0 : 1];
+      side.mask[row + x] = 1;
+      side.wallSize += 1;
+      if (x < side.bbox.minX) side.bbox.minX = x;
+      if (x > side.bbox.maxX) side.bbox.maxX = x;
+      if (y < side.bbox.minY) side.bbox.minY = y;
+      if (y > side.bbox.maxY) side.bbox.maxY = y;
+    }
+  }
+  return sides;
+};
+
+// What a group encloses on its own: the pieces of its footprint worth
+// counting (the ladder's two percent), their area, its seal, and a membership
+// test in page coordinates.
+const enclosed = (mask, width, height, bbox, wallThickness, reach) => {
+  const enclosure = netEnclosure(mask, width, height, bbox, wallThickness, reach);
+  if (!enclosure) return null;
+  const { labels, frame, components, largest } = enclosure.measured;
+  const counted = new Set();
+  let area = 0;
+  for (const c of components) {
+    if (c.size < 0.02 * largest.size) continue;
+    counted.add(c.id);
+    area += c.size;
+  }
+  const inside = frame
+    ? (x, y) => {
+      const fx = x - frame.x0;
+      const fy = y - frame.y0;
+      return fx >= 0 && fy >= 0 && fx < frame.w && fy < frame.h && counted.has(labels[fy * frame.w + fx]);
+    }
+    : (x, y) => counted.has(labels[y * width + x]);
+  return { area, seal: enclosure.seal, inside };
+};
+
+// Is (x, y) inside a footprint `measureFootprint` returned?
+const enclosedAt = (measured, width, x, y) => {
+  const { labels, frame } = measured;
+  if (!frame) return labels[y * width + x] >= 0;
+  const fx = x - frame.x0;
+  const fy = y - frame.y0;
+  return fx >= 0 && fy >= 0 && fx < frame.w && fy < frame.h && labels[fy * frame.w + fx] >= 0;
+};
+
+// One network as the drawings it holds (see above). Recursive: a sheet of
+// three drawings is cut twice. `rootArea` is what the original network
+// enclosed, so that a deep cut cannot shave off a sliver of it as a drawing.
+// The tests run cheapest first; each enclosure is a closing at wall radius.
+const cutDrawings = (net, width, height, wallThickness, thick, rootArea = null) => {
+  const scan = scanNet(net, thick, width);
+  const bands = clearBands(scan, net.bbox, Math.max(4, Math.round(wallThickness * 0.5)));
+  if (!bands.length) return [net];
+  const reach = Math.max(3, Math.round(wallThickness * CUT_FACE_REACH));
+  const reachOf = net.reach ?? net.bbox;
+  let whole;
+  let drawn;
+  for (const band of bands.slice(0, CUT_TRIES)) {
+    const at = (band.from + band.to + 1) >> 1;
+    const spans = sideSpans(scan, net.bbox, band, at);
+    if (!spans) continue;
+    const [faceA, faceB] = faceShares(net, thick, band, spans, width, height, reach);
+    if (Math.min(faceA, faceB) < CUT_FACE) continue;
+    const sides = splitNet(net, width, band.axis, at);
+    const ea = enclosed(sides[0].mask, width, height, sides[0].bbox, wallThickness, reachOf);
+    if (!ea || ea.seal < INDEPENDENT_SEAL) continue;
+    const eb = enclosed(sides[1].mask, width, height, sides[1].bbox, wallThickness, reachOf);
+    if (!eb || eb.seal < INDEPENDENT_SEAL) continue;
+    if (whole === undefined) whole = enclosed(net.mask, width, height, net.bbox, wallThickness, reachOf);
+    if (!whole) return [net];
+    const root = rootArea ?? whole.area;
+    if (Math.min(ea.area, eb.area) < CUT_MIN_SIDE * root) continue;
+    let inBand = 0;
+    const alongX = band.axis === 'y';
+    const q0 = alongX ? net.bbox.minX : net.bbox.minY;
+    const q1 = alongX ? net.bbox.maxX : net.bbox.maxY;
+    for (let p = band.from; p <= band.to; p += 1) {
+      for (let q = q0; q <= q1; q += 1) {
+        if (alongX ? whole.inside(q, p) : whole.inside(p, q)) inBand += 1;
+      }
+    }
+    if (whole.area - ea.area - eb.area > inBand + CUT_SLACK * whole.area) continue;
+    if (drawn === undefined) drawn = measureFootprint(net.mask, width, height, 2, net.bbox);
+    let drawnInBand = 0;
+    for (let p = band.from; p <= band.to && drawn; p += 1) {
+      for (let q = q0; q <= q1; q += 1) {
+        const x = alongX ? q : p;
+        const y = alongX ? p : q;
+        if (whole.inside(x, y) && enclosedAt(drawn, width, x, y)) drawnInBand += 1;
+      }
+    }
+    if (inBand > 0 && drawnInBand >= CUT_DRAWN * inBand) continue;
+    return sides.flatMap((side) => cutDrawings(side, width, height, wallThickness, thick, root));
+  }
+  return [net];
+};
+
 // Partition the wall mask into disconnected wall networks (one per floor
 // outline drawn on the page): dilate to associate nearby strokes, label, and
-// project the original wall pixels onto the groups.
+// project the original wall pixels onto the groups; then cut apart drawings
+// that one network holds together (`cutDrawings`).
 export const partitionWallNetworks = (wallMask, width, height, wallThickness, maxNetworks) => {
   const groupR = Math.max(6, wallThickness * 2);
   const grouped = dilateRect(wallMask, width, height, groupR);
@@ -163,9 +422,16 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
   const minSize = Math.max(200, 0.1 * nets[0].size);
   const minBbox = 0.008 * width * height;
   const passed = nets.filter((n) => n.size >= minSize && bboxAreaOf(n.bbox) >= minBbox);
-  const kept = passed
-    .slice(0, maxNetworks)
-    .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }));
+  // The structural strokes, opened once for the page: networks sit further
+  // apart than the opening reaches, so each reads its own from this.
+  const thick = passed.length
+    ? openRect(wallMask, width, height, Math.max(1, Math.round(wallThickness * 0.3)))
+    : null;
+  const drawings = passed
+    .map((n) => ({ mask: maskFor(n), bbox: n.bbox, wallSize: n.size }))
+    .flatMap((net) => cutDrawings(net, width, height, wallThickness, thick))
+    .sort((a, b) => b.wallSize - a.wallSize);
+  const kept = drawings.slice(0, maxNetworks);
 
   // What this filter threw away, so assembleFloors can report it instead of
   // losing it. Only networks whose extent already cleared the "could be a
@@ -176,7 +442,7 @@ export const partitionWallNetworks = (wallMask, width, height, wallThickness, ma
   kept.dropped = [
     ...nets.filter((n) => n.size < minSize && bboxAreaOf(n.bbox) >= minBbox)
       .map((n) => ({ reason: DROP.thinInk, bbox: n.bbox })),
-    ...passed.slice(maxNetworks).map((n) => ({ reason: DROP.limit, bbox: n.bbox })),
+    ...drawings.slice(maxNetworks).map((n) => ({ reason: DROP.limit, bbox: n.bbox })),
   ];
   return kept;
 };

@@ -20,8 +20,8 @@
       "ids": ["high_quality/1644", "high_quality/3097", "colorful/6182"]
     },
     "drawings-merged": {
-      "about": "Two floors or units drawn side by side, closed into one outline across the gap between them.",
-      "ids": ["colorful/9192", "high_quality/14678"]
+      "about": "Two floors or units drawn side by side, closed into one outline across the gap between them. The drawings cut separates 14678. Still merged: 9192, whose right-hand drawing closes a room only with a weld reaching across the gap, so the cut would lose it; 3692 and 13013, where an entrance or a stair drawn in the gap leaves too narrow a clear band for the gap the weld closed; 5912, whose drawings overlap along both axes, so no straight band separates them.",
+      "ids": ["colorful/9192", "high_quality/14678", "high_quality/3692", "high_quality/13013", "high_quality/5912"]
     },
     "stuck-to-outline": {
       "about": "Text, a watermark or a door swing touching the exterior wall, taken into the outline.",

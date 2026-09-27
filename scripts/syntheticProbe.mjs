@@ -8,6 +8,7 @@ import { polygonArea } from '../src/utils/detection/polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
   garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, twoPlansSheet,
+  closeDrawingsSheet, thinPartitionHouse,
   createImage, outerFaceRect, strokeAround,
   polygonIou, bboxIou, bboxOf, areaError,
 } from '../src/utils/detection/__tests__/synthetic.js';
@@ -85,6 +86,22 @@ const scenarios = {
     (traced?.floors ?? []).forEach((f, i) => {
       if (f.outer) report(`  nested floor ${i}`, { outer: f.outer, quality: traced.quality }, floors[i]);
     });
+  },
+  // Two plans one wall network holds together, and one house the cut between
+  // them must leave whole.
+  drawings: () => {
+    for (const gap of [12, 26, 60]) {
+      const { img, floors } = closeDrawingsSheet(gap);
+      const traced = traceFloorplanBoundaryCore(img);
+      console.log(`close drawings ${gap}px apart: got ${traced?.floors?.length ?? 0} floors, expect 2`);
+      (traced?.floors ?? []).forEach((f, i) => {
+        const best = floors.reduce((a, b) => (polygonIou(f.outer.polygon, a) >= polygonIou(f.outer.polygon, b) ? a : b));
+        if (f.outer) report(`  floor ${i}`, { outer: f.outer, quality: traced.quality }, best);
+      });
+    }
+    const { img, truth } = thinPartitionHouse();
+    const traced = traceFloorplanBoundaryCore(img);
+    report('thin partition, two doorways', traced, truth, `floors=${traced?.floors?.length ?? 0} (expect 1)`);
   },
   // Draw mode: the same scenarios traced from a sloppy brush stroke instead of
   // from the page. The stroke is offset outward and wobbled, so a high IoU
