@@ -10,6 +10,8 @@
  *   --category NAME              colorful | high_quality | high_quality_architectural
  *   --limit N                    an even spread of N plans from the selection
  *   --ids a/1,b/2                exactly these plans
+ *   --watch NAME                 the plans lib/cubicasaReview.json lists under
+ *                                NAME: one failure, found by looking, in seconds
  *   --workers N                  parallel workers (default: half the cores)
  *   --out NAME                   results file (default latest), under
  *                                datasets/cubicasa5k_runs/ beside the corpus
@@ -46,43 +48,35 @@ import {
   traceFloorplanBoundaryCore,
 } from '../src/utils/detection/pipeline.js';
 import { pointInPolygon, ringSetArea } from '../src/utils/detection/polygon.js';
-import { labelComponents, openRect } from '../src/utils/detection/raster.js';
 import { selectProjectScale } from '../src/utils/detection/scale.js';
-import { QUALITY_GOOD } from '../src/utils/boundaryQuality.js';
 import { bboxIou, pct } from './lib/benchUtils.mjs';
 import {
-  CUBICASA_ROOT, DATASETS_DIR, PX_PER_FOOT, buildTruth, cropImage, evenSpread, fillPolygon,
-  listPlans, loadPlan, wallInkAgreement,
+  CUBICASA_ROOT, DATASETS_DIR, PX_PER_FOOT, TRUTH_VERSION, buildTruth, cropImage, evenSpread,
+  fillPolygon, listPlans, loadPlan, wallInkAgreement,
 } from './lib/cubicasa.mjs';
+import {
+  FIXES, FIX_MAX_SHARE, MIN_REGION_SHARE, PERFECT_IOU, SCOREBOARD, VERDICTS, scoreMask,
+  scoreboardLines, share,
+} from './lib/verdict.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUNS_DIR = path.join(DATASETS_DIR, 'cubicasa5k_runs');
 
 // Below this share of walls on ink the truth is misregistered, not the tracer.
 const MIN_WALL_AGREEMENT = 0.6;
+// Past this share of its rooms untyped, too little of a plan is scored to
+// judge it (see `spaceRoles` in lib/cubicasa.mjs).
+const MAX_UNKNOWN_SHARE = 0.5;
+// What looking at plans has settled: plans whose answer key cannot be trusted
+// in a way no rule catches, and lists of plans that show one failure, for a
+// fix to be tried on in seconds (`--watch`).
+const REVIEW = JSON.parse(fs.readFileSync(new URL('./lib/cubicasaReview.json', import.meta.url), 'utf8'));
 // What an OCR hit on a room label spans at CubiCasa's 1 px = 1 cm.
 const LABEL_BOX = { width: 90, height: 30 };
 const GOOD_AREA = 0.05;
 const BAD_AREA = 0.1;
 const ROOM_IOU = 0.75;
 
-// The verdict (docs/accuracy-roadmap.md). A trace is perfect when its IoU with
-// the truth reaches PERFECT_IOU; measured on the test split, every plan that
-// does has its area within 3%, and half within 1%. It is near-perfect when
-// fixing at most FIXES error regions, each no more than FIX_MAX_SHARE of the
-// true area, would make it perfect: a balcony left in, a closet left out, a
-// wing cut short — what a user sees and corrects with one edit. A region
-// bigger than that is a redraw, not a fix. Anything else is wrong.
-const PERFECT_IOU = 0.97;
-const FIXES = 2;
-const FIX_MAX_SHARE = 0.2;
-// Error no thicker than twice this many truth cells (2 cm each) is the outline
-// sitting on another face of a wall: no single edit fixes it, so it stays in
-// the residual instead of counting as a region.
-const SLIVER_CELLS = 4;
-// Regions under this share of the true area are noise, not something to fix.
-const MIN_REGION_SHARE = 0.005;
-const VERDICTS = ['perfect', 'near', 'wrong'];
 // colorful and high_quality are single units on a clean sheet, the closest
 // thing here to a listing plan; the architectural sheets carry neighbouring
 // flats and tile-grid wet rooms, so they are reported beside them, not mixed in.
@@ -93,21 +87,14 @@ const GROUPS = [
   ['architectural', (r) => r.category === 'high_quality_architectural'],
   ['all', () => true],
 ];
-// The scoreboard (docs/accuracy-roadmap.md): the three numbers the tracer's
-// work is steered by, on the listing-like plans, each against its target. A
-// wrong verdict the app would chip green — QUALITY_GOOD or better — is the
-// answer that looks right, and no one has a reason to check it.
-const SCOREBOARD = [
-  { name: 'near-perfect', test: (r) => r.app.verdict !== 'wrong', target: 0.9, higher: true },
-  { name: 'perfect', test: (r) => r.app.verdict === 'perfect', target: 0.75, higher: true },
-  {
-    name: 'wrong but shown as good',
-    test: (r) => r.app.verdict === 'wrong' && r.app.confidence >= QUALITY_GOOD,
-    target: 0.02,
-    higher: false,
-  },
-];
+// The scoreboard (`lib/verdict.mjs`) is read on these.
 const listingLike = GROUPS[0][1];
+// Kinds of plan the road in docs/accuracy-roadmap.md works on, from what the
+// answer key states rather than from anything the tracer did.
+const SLICES = [
+  ['- several floors', (r) => r.floorsTruth > 1],
+  ['- labelled non-GLA', (r) => r.nonGlaLabels > 0],
+];
 
 const round = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
 
@@ -117,8 +104,6 @@ const median = (values) => {
   const mid = sorted.length >> 1;
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
-
-const share = (list, test) => (list.length ? list.filter(test).length / list.length : 0);
 
 const labelRegion = (point, keyword) => ({
   x: point[0] - LABEL_BOX.width / 2,
@@ -140,53 +125,6 @@ const tracedFloors = (result) => {
 
 const compactRing = (ring) => ring.map((p) => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]);
 
-// The trace's error as discrete regions: connected pieces of the difference
-// between outline and truth once slivers along the wall faces are trimmed off,
-// each with its cause and its size as a share of the true area.
-const errorRegions = (mask, truth, truthCells) => {
-  const { width, height } = truth.grid;
-  const over = new Uint8Array(mask.length);
-  const missed = new Uint8Array(mask.length);
-  for (let i = 0; i < mask.length; i += 1) {
-    if (mask[i] && !truth.footprint[i]) over[i] = 1;
-    else if (!mask[i] && truth.footprint[i]) missed[i] = 1;
-  }
-  const regions = [];
-  for (const [kind, diff] of [['over', over], ['missed', missed]]) {
-    const { labels, components } = labelComponents(openRect(diff, width, height, SLIVER_CELLS), width, height);
-    for (const comp of components) {
-      if (comp.size < MIN_REGION_SHARE * truthCells) continue;
-      let nonGla = 0;
-      if (kind === 'over') {
-        for (let y = comp.bbox.minY; y <= comp.bbox.maxY; y += 1) {
-          for (let x = comp.bbox.minX; x <= comp.bbox.maxX; x += 1) {
-            const i = y * width + x;
-            if (labels[i] === comp.id && truth.nonGla[i]) nonGla += 1;
-          }
-        }
-      }
-      regions.push({
-        cause: kind === 'missed' ? 'missed' : (nonGla > comp.size / 2 ? 'nonGla' : 'other'),
-        share: comp.size / truthCells,
-      });
-    }
-  }
-  return regions.sort((a, b) => b.share - a.share);
-};
-
-// Fixing a region takes it out of the union when the outline took it in, and
-// adds it to the intersection when the outline left it out.
-const verdictOf = (inter, union, truthCells, regions) => {
-  if (union && inter / union >= PERFECT_IOU) return 'perfect';
-  let i = inter;
-  let u = union;
-  for (const region of regions.filter((r) => r.share <= FIX_MAX_SHARE).slice(0, FIXES)) {
-    if (region.cause === 'missed') i += region.share * truthCells;
-    else u -= region.share * truthCells;
-  }
-  return u && i / u >= PERFECT_IOU ? 'near' : 'wrong';
-};
-
 const scoreTrace = (result, truth, ms) => {
   const floors = tracedFloors(result);
   const { width, height, cell } = truth.grid;
@@ -195,33 +133,10 @@ const scoreTrace = (result, truth, ms) => {
     fillPolygon(mask, width, height, floor.outer, { cell });
     for (const hole of floor.holes) fillPolygon(mask, width, height, hole, { cell, value: 0 });
   }
-  let inter = 0;
-  let union = 0;
-  let truthCells = 0;
-  let overNonGla = 0;
-  let overOther = 0;
-  for (let i = 0; i < mask.length; i += 1) {
-    if (truth.footprint[i]) truthCells += 1;
-    if (mask[i] && truth.footprint[i]) inter += 1;
-    if (mask[i] || truth.footprint[i]) union += 1;
-    if (mask[i] && !truth.footprint[i]) {
-      if (truth.nonGla[i]) overNonGla += 1;
-      else overOther += 1;
-    }
-  }
   const areaPx = floors.reduce((sum, f) => sum + ringSetArea(f.outer, f.holes), 0);
   const quality = result?.quality;
-  const regions = errorRegions(mask, truth, truthCells);
   return {
-    verdict: verdictOf(inter, union, truthCells, regions),
-    iou: round(union ? inter / union : 0, 4),
-    areaErr: round(areaPx / (truth.areaSqFt * PX_PER_FOOT * PX_PER_FOOT) - 1, 4),
-    // The error by cause, each as a share of the true area: non-GLA space the
-    // outline kept, anything else it took in, and living space it left out.
-    overNonGla: round(truthCells ? overNonGla / truthCells : 0, 4),
-    overOther: round(truthCells ? overOther / truthCells : 0, 4),
-    missed: round(truthCells ? (truthCells - inter) / truthCells : 0, 4),
-    regions: regions.slice(0, 4).map((r) => ({ cause: r.cause, share: round(r.share, 4) })),
+    ...scoreMask(mask, truth),
     areaPx: Math.round(areaPx),
     floors: floors.length,
     confidence: round(quality?.confidence ?? 0, 3),
@@ -239,6 +154,9 @@ const scoreTrace = (result, truth, ms) => {
 
 const evaluatePlan = (id, boundary) => {
   const started = Date.now();
+  if (REVIEW.exclude[id]) {
+    return { id, category: id.split('/')[0], skipped: 'excluded-in-review', reason: REVIEW.exclude[id] };
+  }
   const plan = loadPlan(id);
   const truth = buildTruth(plan.model, plan.image);
   if (!truth) return { id, category: plan.category, skipped: 'no-living-space' };
@@ -253,8 +171,10 @@ const evaluatePlan = (id, boundary) => {
     voidsTruth: truth.voids,
     garageTruth: truth.rooms.some((r) => r.keyword === 'GARAGE' || r.keyword === 'CARPORT'),
     wallAgreement: round(agreement, 3),
+    unknownShare: round(truth.unknownShare, 3),
   };
   if (agreement < MIN_WALL_AGREEMENT) return { ...base, skipped: 'truth-misregistered' };
+  if (truth.unknownShare > MAX_UNKNOWN_SHARE) return { ...base, skipped: 'rooms-untyped' };
 
   const cacheKey = `cubicasa:${id}`;
   let t = Date.now();
@@ -266,9 +186,10 @@ const evaluatePlan = (id, boundary) => {
   // prints feet-inches on rectangles, so only rectangles carry them here.
   t = Date.now();
   const labels = truth.rooms.filter((r) => r.point && r.dims && r.rectangular);
-  const nonGla = truth.rooms
-    .filter((r) => r.excluded && r.point)
-    .map((r) => labelRegion(r.point, r.keyword));
+  // Only what an English plan would print a word for that the app reads: a
+  // shed is non-GLA but carries no label here.
+  const nonGlaRooms = truth.rooms.filter((r) => r.excluded && r.point && r.keyword);
+  const nonGla = nonGlaRooms.map((r) => labelRegion(r.point, r.keyword));
   const measured = [];
   labels.forEach((room, i) => {
     const labelDims = { width: room.dims[0], height: room.dims[1] };
@@ -312,8 +233,10 @@ const evaluatePlan = (id, boundary) => {
     excludeRegions: nonGla,
     constraints: {
       rooms: decision.contributors.map((c) => ({ name: c.name, rect: c.rect })),
+      // Living rooms only: an untyped space could be the terrace, and its label
+      // would hold the terrace in.
       interiorPoints: truth.rooms
-        .filter((r) => !r.excluded && r.point)
+        .filter((r) => r.role === 'living' && r.point)
         .map((r) => ({ x: r.point[0], y: r.point[1], name: r.name })),
     },
   });
@@ -321,7 +244,7 @@ const evaluatePlan = (id, boundary) => {
   // Every non-GLA label the app's outline still holds: the carve was told this
   // space was a balcony or a garage and counted it anyway.
   const appFloors = tracedFloors(appResult);
-  app.nonGlaInside = truth.rooms.filter((r) => r.excluded && r.point && appFloors.some(
+  app.nonGlaInside = nonGlaRooms.filter((r) => appFloors.some(
     (f) => pointInPolygon({ x: r.point[0], y: r.point[1] }, f.outer, f.holes),
   )).length;
 
@@ -337,7 +260,7 @@ const evaluatePlan = (id, boundary) => {
       medianIou: round(median(roomIous), 3),
     },
     // What the user would read: the app's outline at the app's own scale.
-    reportedErr: ppf ? round(app.areaPx / (ppf * ppf) / truth.areaSqFt - 1, 4) : null,
+    reportedErr: ppf ? round((1 + app.areaErr) * (PX_PER_FOOT / ppf) ** 2 - 1, 4) : null,
     ms: Date.now() - started,
   };
 };
@@ -364,7 +287,7 @@ const parseArgs = (argv) => {
     if (key === 'boundary') {
       args.boundary = JSON.parse(value);
       i += 1;
-    } else if (['split', 'category', 'out', 'compare'].includes(key)) {
+    } else if (['split', 'category', 'out', 'compare', 'watch'].includes(key)) {
       args[key] = value;
       i += 1;
     } else if (['limit', 'workers', 'draw'].includes(key)) {
@@ -456,12 +379,12 @@ const summarise = (results) => {
 
   const listing = scored.filter(listingLike);
   if (listing.length) {
-    lines.push(`\nScoreboard: ${listing.length} listing-like plans (docs/accuracy-roadmap.md)`);
-    for (const { name, test, target, higher } of SCOREBOARD) {
-      const value = share(listing, test);
-      const met = higher ? value >= target : value <= target;
-      lines.push(`   ${name.padEnd(24)} ${pct(value).padStart(6)}   target ${higher ? '>=' : '<='} ${pct(target)}`
-        + `${met ? '   met' : ''}`);
+    lines.push(...scoreboardLines(listing, 'listing-like plans'));
+    for (const [name, test] of SLICES) {
+      const slice = listing.filter(test);
+      if (!slice.length) continue;
+      lines.push(`   ${name.padEnd(24)} ${String(slice.length).padStart(4)} plans: ${SCOREBOARD
+        .map((s) => `${s.name} ${pct(share(slice, s.test))}`).join(', ')}`);
     }
   }
 
@@ -600,6 +523,11 @@ const verdictChanges = (pairs) => pairs
 
 const compareRuns = (results, baseline, name) => {
   const lines = [`\n=== Against ${name} (${baseline.meta?.git ?? '?'}) ===`];
+  const version = baseline.meta?.truth ?? 1;
+  if (version !== TRUTH_VERSION) {
+    return [...lines, `   ${name} was scored against answer key v${version} and this run against`
+      + ` v${TRUTH_VERSION}: re-run it with this benchmark before comparing`];
+  }
   const pairs = pairRuns(results, baseline);
   if (!pairs.length) return [...lines, '   no plans in common'];
   const listing = pairs.filter(([, a]) => listingLike(a));
@@ -658,9 +586,12 @@ const strokeRing = (png, ring, [r, g, b]) => {
 };
 
 // Over the crop the tracer saw: the app trace's error tinted by cause (non-GLA
-// space kept blue, anything else taken in red, living space left out yellow),
-// then truth green (its edge cells), app red, bare orange.
-const ERROR_TINTS = { nonGla: [60, 110, 255], other: [255, 40, 40], missed: [255, 210, 0] };
+// space kept blue, anything else taken in red, living space left out yellow,
+// space the answer key never typed grey), then truth green (its edge cells),
+// app red, bare orange.
+const ERROR_TINTS = {
+  nonGla: [60, 110, 255], other: [255, 40, 40], missed: [255, 210, 0], ignored: [150, 150, 150],
+};
 
 const drawOverlay = (result, file) => {
   const plan = loadPlan(result.id);
@@ -679,7 +610,8 @@ const drawOverlay = (result, file) => {
     for (let px = 0; px < png.width; px += 1) {
       const g = row + Math.min(gw - 1, Math.floor(px / cell));
       let tint = null;
-      if (traced[g] && !truth.footprint[g]) tint = truth.nonGla[g] ? ERROR_TINTS.nonGla : ERROR_TINTS.other;
+      if (truth.ignore[g]) tint = ERROR_TINTS.ignored;
+      else if (traced[g] && !truth.footprint[g]) tint = truth.nonGla[g] ? ERROR_TINTS.nonGla : ERROR_TINTS.other;
       else if (!traced[g] && truth.footprint[g]) tint = ERROR_TINTS.missed;
       if (!tint) continue;
       const idx = (py * png.width + px) * 4;
@@ -729,7 +661,12 @@ const main = async () => {
     process.exitCode = 2;
     return;
   }
-  let ids = args.ids ?? listPlans(args.split);
+  if (args.watch && !REVIEW.watch[args.watch]) {
+    console.error(`no watch list ${args.watch}: ${Object.keys(REVIEW.watch).join(', ')}`);
+    process.exitCode = 2;
+    return;
+  }
+  let ids = args.ids ?? REVIEW.watch[args.watch]?.ids ?? listPlans(args.split);
   if (args.category) ids = ids.filter((id) => id.startsWith(`${args.category}/`));
   ids = evenSpread(ids, args.limit);
   console.log(`CubiCasa5K: ${ids.length} plans, ${Math.min(args.workers, ids.length)} workers`);
@@ -737,7 +674,7 @@ const main = async () => {
 
   fs.mkdirSync(RUNS_DIR, { recursive: true });
   const outFile = path.join(RUNS_DIR, `${args.out}.json`);
-  const meta = { date: new Date().toISOString(), git: gitRevision(), args };
+  const meta = { date: new Date().toISOString(), git: gitRevision(), truth: TRUTH_VERSION, args };
   fs.writeFileSync(outFile, JSON.stringify({ meta, results }));
   for (const line of summarise(results)) console.log(line);
   let baseline = null;
@@ -748,7 +685,7 @@ const main = async () => {
       for (const line of compareRuns(results, baseline, args.compare)) console.log(line);
     } else console.log(`\nno results named ${args.compare} to compare against`);
   }
-  if (args.drawChanged && baseline) {
+  if (args.drawChanged && baseline && (baseline.meta?.truth ?? 1) === TRUTH_VERSION) {
     const dir = path.join(RUNS_DIR, args.out, 'changed');
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });

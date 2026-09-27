@@ -46,6 +46,7 @@ checkout's (through git's common directory), so worktrees need no copy;
 `cubicasa5k_runs/`, so a baseline outlives the worktree that measured it.
 
 ```
+npm run bench:cubicasa -- --watch light-walls              # one failure's examples, in seconds
 npm run bench:cubicasa -- --split dev                      # 400 of train, listing-style weighted: the edit loop, ~2 min
 npm run bench:cubicasa -- --out mine --compare baseline    # per-plan deltas and verdict moves against a saved run
 npm run bench:cubicasa -- --compare baseline --draw-changed # overlays of every plan whose verdict moved
@@ -54,10 +55,54 @@ npm run bench:cubicasa -- --boundary '{"autoGarage":false}' # try an option befo
 ```
 
 Overlays tint the app trace's error by cause: blue non-GLA kept, red anything
-else taken in, yellow living space left out; truth green, app red, bare orange.
+else taken in, yellow living space left out, grey space the answer key does
+not decide; truth green, app red, bare orange.
 
-Iterate on `dev`, confirm on `train` and `val`, and run `test` only at
-milestones, so the test numbers stay an honest measure. Read results by category: most plans
-(`high_quality_architectural`) are architectural sheets with neighbouring flats
-on the page and wet rooms drawn as tile grids, while `colorful` and
-`high_quality` are the closest thing here to a listing floor plan.
+Iterate on a watch list and `dev`, confirm on `train` and `val`, and run
+`test` only at milestones, so the test numbers stay an honest measure. Read
+results by category: most plans (`high_quality_architectural`) are
+architectural sheets with neighbouring flats on the page and wet rooms drawn
+as tile grids, while `colorful` and `high_quality` are the closest thing here
+to a listing floor plan.
+
+#### The answer key
+
+`buildTruth` in `scripts/lib/cubicasa.mjs` turns each `model.svg` into the
+living area a US appraiser would count. Its rules are versioned
+(`TRUTH_VERSION`, recorded in every run); `--compare` refuses a baseline scored
+under another version.
+
+- Living area is every room plus the walls within reach of one, to their outer
+  face.
+- Non-GLA: outdoor space, garages and carports, and anything the annotators
+  typed as a room but named as outdoor space (PARVEKE, TERASSI, KUISTI, PIHA,
+  PATIO, LASITETTU…); sheds and woodstores; and a storage room, sauna or
+  boiler room with no other room within a wall's reach, which is an
+  outbuilding.
+- Rooms the annotators never typed (`Undefined`) are scored neither way: some
+  are rooms, some glazed terraces. A plan more than half untyped is skipped.
+- Also skipped: plans whose walls do not land on the drawing's ink
+  (misregistered), and plans listed under `exclude` in
+  `scripts/lib/cubicasaReview.json`, each with the reason a person gave.
+
+`cubicasaReview.json` also holds the **watch lists**: plans that show one
+failure, found by looking at overlays, for a fix to be tried on first. Add to
+both as you review; keep test plans out of them.
+
+## Real plans: `npm run bench:real`
+
+The same scoreboard on real listing plans, where the answer key is an outline a
+person checked. To add one:
+
+1. Open the plan in FloorTrace and let it scan and trace.
+2. Correct each outline to the exterior face of the walls, and set its type:
+   GLA (or Below grade) for the building, Garage or Porch/patio for non-GLA
+   space. Unfinished outlines are not scored.
+3. Save the project (`.floorplan`) into `datasets/real/`.
+
+`npm run bench:real` replays the app's own trace on each saved plan, with the
+labels its scan read, and judges it against your outlines; `--draw` writes an
+overlay per plan and `--compare` shows verdict moves. `--fixtures` adds the
+plans in `fixtures/` that have polygon truth — but those are the plans the
+tracer was developed on, so only fresh plans are a fair test. Listing plans
+belong to whoever drew them: keep them in `datasets/real/`, which git ignores.
