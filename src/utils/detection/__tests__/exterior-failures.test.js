@@ -10,7 +10,8 @@ import { pointInPolygon, polygonArea } from '../polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
   garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, strokeAround,
-  balconyHouse, patioWings, closeDrawingsSheet, thinPartitionHouse, polygonIou, bboxIou, bboxOf,
+  balconyHouse, patioWings, boardedDeckHouse, closeDrawingsSheet, thinPartitionHouse,
+  polygonIou, bboxIou, bboxOf,
 } from './synthetic.js';
 
 const truthBbox = (truth) => [
@@ -204,6 +205,29 @@ describe('a space the plan labels non-GLA', () => {
     });
     expect(traced.excludedRegions).toBe(0);
     expect(reasons(traced)).toContain('no-separable-region');
+  });
+
+  // The barrier reads boards as wall: the label lands in a strip between two,
+  // smaller than any space, and on master the deck stayed in, a quarter of
+  // the outline, with only "no separable region" said.
+  it('is carved when it is drawn in boards', () => {
+    const { img, truth, deck, labels } = boardedDeckHouse();
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [deck], constraints: { interiorPoints: labels },
+    });
+    expect(traced.excludedRegions).toBe(1);
+    expect(polygonIou(traced.outer.polygon, truth)).toBeGreaterThan(0.95);
+  });
+
+  it('is not carved from boards that hold a living room', () => {
+    const { img, deck, labels } = boardedDeckHouse();
+    // Clear of the band under a keyword that is read as its own lines.
+    const onDeck = { x: deck.x + deck.width / 2, y: deck.y + 155, name: 'SUN ROOM' };
+    const traced = traceFloorplanBoundaryCore(img, {
+      excludeRegions: [deck], constraints: { interiorPoints: [...labels, onDeck] },
+    });
+    expect(traced.excludedRegions).toBe(0);
+    expect(reasons(traced)).toContain('room-label-inside');
   });
 
   // The carve keeps the largest piece of what it leaves, so a patio between

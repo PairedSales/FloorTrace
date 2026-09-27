@@ -362,6 +362,44 @@ export const balconyHouse = ({ glazed = true } = {}) => {
 };
 
 /**
+ * A thin-walled house with a deck off one side, the deck drawn as a railing
+ * and boards running up and down: 4px boards 3px apart, the way CubiCasa5K
+ * draws its terraces. The boards are as thick as the house's partitions, so
+ * the carve's barrier reads them as wall and the label lands in a strip
+ * between two of them, smaller than any space it would carve.
+ */
+export const boardedDeckHouse = () => {
+  const img = createImage(900, 620);
+  const ext = 12;
+  wall(img, 80, 80, 560, 80, ext);
+  wall(img, 80, 540, 560, 540, ext);
+  wall(img, 80, 80, 80, 540, ext);
+  // The wall onto the deck, with a door.
+  wall(img, 560, 80, 560, 280, ext);
+  wall(img, 560, 340, 560, 540, ext);
+  wall(img, 320, 80, 320, 540, 4);
+  wall(img, 80, 300, 320, 300, 4);
+  const x0 = 560 + Math.floor(ext / 2);
+  const x1 = 820;
+  const y0 = 140;
+  const y1 = 480;
+  fillRect(img, x0, y0, x1, y0 + 2);
+  fillRect(img, x0, y1 - 2, x1, y1);
+  fillRect(img, x1 - 2, y0, x1, y1);
+  for (let x = x0 + 3; x + 4 < x1 - 2; x += 7) fillRect(img, x, y0 + 3, x + 3, y1 - 3);
+  return {
+    img,
+    truth: outerFaceRect(80, 80, 560, 540, ext),
+    deck: { x: 640, y: 300, width: 90, height: 30, keyword: 'PATIO' },
+    labels: [
+      { x: 200, y: 190, name: 'LIVING ROOM' },
+      { x: 440, y: 300, name: 'KITCHEN' },
+      { x: 200, y: 420, name: 'BEDROOM' },
+    ],
+  };
+};
+
+/**
  * Two wings joined only through a patio between them, labelled PATIO, with a
  * door from each wing onto it. Carving the patio cuts the building in two, and
  * the carve keeps the larger side: `smallRooms` is how many labelled rooms the

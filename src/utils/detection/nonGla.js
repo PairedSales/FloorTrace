@@ -325,8 +325,120 @@ const overlapFrac = (a, b) => {
 const SOURCE_CONFIDENCE = {
   label: 0.9,
   'label-flood': 0.7,
+  'label-boards': 0.7,
   garage: 0.65,
   shaded: 0.5,
+};
+
+// A deck, terrace or balcony drawn in boards or tiles is a run of parallel
+// lines, and the carve's barrier reads those lines as wall: fused into one
+// slab under the label, or split into strips between boards each smaller
+// than any space. On CubiCasa5K that was more than half the labelled
+// outdoor spaces left in the outline with nothing to carve. On each row (for
+// boards running up and down) and each column (boards running across), a
+// chain of BOARDS_MIN or more short ink runs, each no further than a board's
+// spacing from the last, is drawn across the space; the union of those
+// chains' spans, opened to drop the thin chains a dashed line or a word
+// makes, is the boarded area. Scaled to the page, not to the wall: how far
+// apart boards are drawn has nothing to do with how thick the walls are.
+const BOARDS_MIN = 4;
+const BOARD_RUN = 0.006;
+const BOARD_GAP = 0.025;
+// A deck fills most of its box: the ones found on CubiCasa5K filled 0.62 and
+// up. Chains of hatching and dimension strings webbed across a whole drawing
+// make a piece a tenth as dense, and carved a floor's bedrooms off with it.
+const BOARD_FILL = 0.5;
+
+const boardedArea = (ink, width, height) => {
+  const longest = Math.max(width, height);
+  const maxRun = Math.max(4, Math.round(longest * BOARD_RUN));
+  const maxGap = Math.max(6, Math.round(longest * BOARD_GAP));
+  const spans = new Uint8Array(width * height);
+  const scan = (lines, length, at) => {
+    for (let a = 0; a < lines; a += 1) {
+      let count = 0;
+      let first = 0;
+      let lastEnd = 0;
+      const flush = () => {
+        if (count >= BOARDS_MIN) for (let b = first; b < lastEnd; b += 1) spans[at(a, b)] = 1;
+        count = 0;
+      };
+      let b = 0;
+      while (b < length) {
+        if (!ink[at(a, b)]) {
+          b += 1;
+          continue;
+        }
+        let end = b;
+        while (end < length && ink[at(a, end)]) end += 1;
+        if (end - b > maxRun) {
+          flush();
+        } else {
+          if (count && b - lastEnd > maxGap) flush();
+          if (!count) first = b;
+          count += 1;
+          lastEnd = end;
+        }
+        b = end;
+      }
+      flush();
+    }
+  };
+  scan(height, width, (y, x) => y * width + x);
+  scan(width, height, (x, y) => y * width + x);
+  return openRect(spans, width, height, 2);
+};
+
+// The boarded area inside a footprint, as connected pieces, and how much of
+// each piece lies along the outline: within `margin` of the page outside it.
+// A margin rather than touching, because a deck's outer edge is a railing
+// too thick to chain as a board, so its boards stop that far short of the
+// outline.
+const boardedPieces = (footprint, ink, width, height, margin) => {
+  const area = boardedArea(ink, width, height);
+  const outside = new Uint8Array(area.length);
+  for (let i = 0; i < area.length; i += 1) {
+    if (!footprint.mask[i]) {
+      area[i] = 0;
+      outside[i] = 1;
+    }
+  }
+  const nearOutside = dilateRect(outside, width, height, margin);
+  const { labels, components } = labelComponents(area, width, height);
+  const rim = new Uint32Array(components.length);
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] >= 0 && nearOutside[i]) rim[labels[i]] += 1;
+  }
+  return { labels, components, rim };
+};
+
+// The boarded piece a label sits on, if it passes: most of the label's sample
+// points on it, a space's size, at most the share of the footprint any carve
+// may take, and a rim along the outline.
+const boardedRegion = (region, boarded, footprint, width, height, { minSize, minEdge }) => {
+  const votes = new Map();
+  for (let sy = 0; sy <= 4; sy += 1) {
+    for (let sx = 0; sx <= 4; sx += 1) {
+      const x = Math.round(region.x + (region.width * sx) / 4);
+      const y = Math.round(region.y + (region.height * sy) / 4);
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const id = boarded.labels[y * width + x];
+      if (id >= 0) votes.set(id, (votes.get(id) ?? 0) + 1);
+    }
+  }
+  let best = -1;
+  let bestVotes = 0;
+  for (const [id, count] of votes) {
+    if (count > bestVotes) {
+      best = id;
+      bestVotes = count;
+    }
+  }
+  if (best < 0 || bestVotes < 13) return null;
+  const comp = boarded.components[best];
+  if (comp.size < minSize || comp.size > 0.45 * footprint.area || boarded.rim[best] < minEdge) return null;
+  if (comp.size < BOARD_FILL * bboxAreaOf(comp.bbox)) return null;
+  return { mask: componentMask(boarded.labels, comp, width), size: comp.size, bbox: comp.bbox };
 };
 
 // Everywhere the app already knows a room is: parsed dimension labels, and
@@ -569,6 +681,36 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
     }
   }
 
+  // A label inside the footprint that nothing above answered, on a boarded
+  // deck (`boardedArea`): the piece of boarded area under it, offered when the
+  // label sits mostly on it, it is a space's size, and it reaches the outline.
+  // Outdoor spaces sit at the perimeter; a stair's treads or a run of
+  // cabinets, which chain the same way, sit inside the building, and a piece
+  // that swallowed them holds a living room's label and is refused below.
+  const centre = (r) => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+  let boarded = null;
+  for (const region of options.excludeRegions ?? []) {
+    const p = centre(region);
+    const px = Math.round(p.x);
+    const py = Math.round(p.y);
+    if (px < 0 || py < 0 || px >= width || py >= height || !footprint.mask[py * width + px]) continue;
+    if (regions.some((r) => maskNear(r.mask, p, reach, width, height))) continue;
+    boarded = boarded ?? boardedPieces(
+      footprint, analysis.ink, width, height, Math.max(2, (exteriorThickness ?? wallThickness) + 2),
+    );
+    const found = boardedRegion(region, boarded, footprint, width, height, {
+      minSize: Math.max(minCavity, 3 * region.width * region.height),
+      minEdge: 2 * wallThickness,
+    });
+    if (!found) continue;
+    regions.push({
+      source: 'label-boards',
+      keyword: region.keyword ?? null,
+      ...found,
+      confidence: SOURCE_CONFIDENCE['label-boards'],
+    });
+  }
+
   // A region a living room's own label sits in is that room, whatever voted
   // for it. The garage test reads a long thin exterior side as a door, which a
   // wall of windows also is, and a balcony's label votes for whatever cavity
@@ -598,7 +740,6 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   // carved, or refused with a reason — is a balcony or a garage counted as
   // living area. That was the one outcome with nothing said: a cavity too big
   // to carve, a label whose vote landed on ink, a flood that found nothing.
-  const centre = (r) => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
   for (const region of options.excludeRegions ?? []) {
     const p = centre(region);
     const px = Math.round(p.x);

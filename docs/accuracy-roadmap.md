@@ -130,7 +130,19 @@ list, measured on dev, then train and val.
    room only with a weld across the gap. A garage drawn apart from the house
    now traces as a floor of its own, which the carve cannot take whole (item 4).
 4. **Labelled non-GLA space still kept**: a tinted fill that reads as solid
-   wall, a tiled floor, a partial carve (`non-gla-kept`).
+   wall, a tiled floor, a partial carve (`non-gla-kept`). *Done for decks
+   drawn in boards* (`boarded-decks`), the largest group: on train, 70 listing
+   plans had a labelled space inside the outline that no route of the carve
+   answered, and on about half the label sat on boards or tiles the carve's
+   barrier read as wall. The boards carve takes those whose boards chain
+   cleanly: on train it leaves fewer labelled spaces inside the outline on 12
+   listing plans and 160 architectural sheets, and more on none. Still kept:
+   a balcony whose door onto the room sits
+   at a corner (the barrier closes a door only between collinear wall), a
+   balcony and room one cavity even with window lines as wall, hatching dense
+   enough to fuse solid, paving spaced wider than a board, a label in
+   handwriting, and a garage drawn apart from the house, which now traces as
+   a floor of its own that the carve cannot take whole.
 5. **Things stuck to the outline**: door swings outside the exterior wall, entry
    steps, watermark text against a wall (`stuck-to-outline`), and page borders
    (`page-border`).
@@ -173,3 +185,5 @@ Listing-like plans. Numbers under different answer keys are not comparable.
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 50.3% | 11.7% |
 | 2026-09-27 | Cut apart drawings one wall network holds together (#267) | 2 | train | 870 | 89.1% | 59.2% | 7.4% |
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 54.5% | 11.7% |
+| 2026-09-27 | Carve labelled decks drawn in boards | 2 | train | 870 | 89.1% | 59.4% | 7.4% |
+| 2026-09-27 | (same) | 2 | val | 145 | 85.5% | 55.2% | 11.0% |
