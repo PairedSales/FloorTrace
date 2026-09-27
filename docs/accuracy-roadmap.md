@@ -14,11 +14,11 @@ the dataset to a listing plan. The architectural sheets (three quarters of the
 dataset, with neighbouring flats and dimension strings on the page) are
 reported beside them, not mixed in.
 
-| Number | Target | Test split at `15a0d86` |
-|---|---|---|
-| **Near-perfect** | ≥ 90% | 80.8% |
-| **Perfect** | ≥ 75% | 45.4% |
-| **Wrong but shown as good** | ≤ 2% | 12.3% |
+| Number | Target | Test split at `15a0d86` | Test split now |
+|---|---|---|---|
+| **Near-perfect** | ≥ 90% | 80.8% | 86.2% |
+| **Perfect** | ≥ 75% | 45.4% | 55.4% |
+| **Wrong but shown as good** | ≤ 2% | 12.3% | 7.7% |
 
 - **Perfect**: the traced outline overlaps the true living area by at least
   97%. On the plans that reach it, the area is within 2% nine times in ten.
@@ -74,7 +74,7 @@ In order of how much each is worth. Each is its own PR, measured on dev, then
 train and val.
 
 1. **Labelled non-GLA space behind glazing.** Carve it from behind the window
-   wall, and say so whenever a labelled space cannot be separated.
+   wall, and say so whenever a labelled space cannot be separated. *Done.*
 2. **Labelled non-GLA space with a tinted fill**, which reads as solid wall.
 3. **Things stuck to the outline**: door swings outside the exterior wall, entry
    steps, watermark text against a wall, page borders.
@@ -103,4 +103,8 @@ Listing-like plans. Train is 971 plans, test 130.
 | Date | Change | Split | Near-perfect | Perfect | Wrong, shown good |
 |---|---|---|---|---|---|
 | 2026-09-26 | Baseline, `15a0d86` | train | 83.5% | 41.8% | 10.4% |
+| 2026-09-26 | Baseline, `15a0d86` | val | 79.4% | 42.6% | 12.3% |
 | 2026-09-26 | Baseline, `15a0d86` | test | 80.8% | 45.4% | 12.3% |
+| 2026-09-26 | Carve labelled balconies behind glazing; refuse a carve that cuts off a wing | train | 86.6% | 52.7% | 7.9% |
+| 2026-09-26 | (same) | val | 83.9% | 50.3% | 9.0% |
+| 2026-09-26 | (same) | test | 86.2% | 55.4% | 7.7% |
