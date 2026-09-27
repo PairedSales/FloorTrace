@@ -97,8 +97,8 @@ sheet of several units; untyped rooms, since unscored). Of the tracer's 19:
   text or a door swing into the outline (one of them also light-walled); 3
   traced an exterior wall drawn as two lines along the inner one.
 
-Sheets with several floors do worst of any slice: 13% perfect on dev, against
-53% overall.
+Sheets with several floors do worst of any slice: 38% perfect on dev, against
+58% overall (13% against 54% before the drawings were cut apart).
 
 ## The road
 
@@ -121,7 +121,14 @@ list, measured on dev, then train and val.
    pass of remediation refuses to rejoin them, as it refuses two separate
    drawings.
 3. **Sheets with several floors**: floors missed, or closed together into one
-   outline (`drawings-merged`).
+   outline (`drawings-merged`). *Done where open page separates the drawings.*
+   One wall network held both, and the weld closed the gap along their aligned
+   walls; now the network is cut along a clear band between them. On train, 117
+   of the 190 sheets trace as many outlines as they draw, up from 29, and 37%
+   are perfect, up from 17%. Still merged: a gap with an entrance or a stair
+   drawn in it, drawings that overlap along both axes, and one that closes a
+   room only with a weld across the gap. A garage drawn apart from the house
+   now traces as a floor of its own, which the carve cannot take whole (item 4).
 4. **Labelled non-GLA space still kept**: a tinted fill that reads as solid
    wall, a tiled floor, a partial carve (`non-gla-kept`).
 5. **Things stuck to the outline**: door swings outside the exterior wall, entry
@@ -164,3 +171,5 @@ Listing-like plans. Numbers under different answer keys are not comparable.
 | 2026-09-26 | (same) | 2 | test | 116 | 85.3% | 54.3% | 8.6% |
 | 2026-09-27 | Give back walls the fill-aware split set aside (#265) | 2 | train | 870 | 88.4% | 54.8% | 7.7% |
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 50.3% | 11.7% |
+| 2026-09-27 | Cut apart drawings one wall network holds together (#267) | 2 | train | 870 | 89.1% | 59.2% | 7.4% |
+| 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 54.5% | 11.7% |

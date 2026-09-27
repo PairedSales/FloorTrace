@@ -151,15 +151,23 @@ const sealMetrics = (entry, wallBboxArea) => {
 // building, and what the old "merge whenever the bounding boxes overlap" rule
 // could not express at all.
 //
-// Here rather than in boundary.js because both users of the rule need it and
+// Here rather than in boundary.js because every user of the rule needs it and
 // they must not answer differently: the partitioner applies it when deciding
-// what to keep apart, and remediate.js applies the same test when a known-
-// inside constraint says a partition was wrong. Two copies would have drifted.
-const INDEPENDENT_SEAL = 0.75;
+// what to keep apart and when cutting two drawings out of one network, and
+// remediate.js applies the same test when a known-inside constraint says a
+// partition was wrong. Two copies would have drifted.
+export const INDEPENDENT_SEAL = 0.75;
 
-export const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
-  const compW = bbox.maxX - bbox.minX + 1;
-  const compH = bbox.maxY - bbox.minY + 1;
+/**
+ * What a group of strokes encloses on its own: the footprint, and how well
+ * its largest piece fills the group's extent (`seal`). `reach` is the extent
+ * the weld's span is scaled to — the group's own by default; a side cut from
+ * a network passes the network's, so that it is welded as it was before the
+ * cut and only the welds across the cut are lost.
+ */
+export const netEnclosure = (mask, width, height, bbox, wallThickness, reach = bbox) => {
+  const compW = reach.maxX - reach.minX + 1;
+  const compH = reach.maxY - reach.minY + 1;
   const bridged = bridgeRuns(
     mask, width, height,
     Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3)),
@@ -169,13 +177,18 @@ export const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
   // box, and `bridgeRuns` only fills gaps *between* existing runs, so it cannot
   // add ink outside them. Handing it over skips a full-page scan.
   const fp = measureFootprint(bridged, width, height, Math.max(4, wallThickness), bbox);
-  if (!fp) return false;
+  if (!fp) return null;
   // The two scalars sealMetrics reads. footprintEntry would build a page-sized
   // component mask here, once per candidate net, and drop it unread.
-  const seal = sealMetrics(
+  const { seal } = sealMetrics(
     { area: fp.largest.size, bboxArea: bboxAreaOf(fp.largest.bbox) }, bboxAreaOf(bbox),
   );
-  return seal.seal >= INDEPENDENT_SEAL;
+  return { measured: fp, seal };
+};
+
+export const netSelfSeals = (mask, width, height, bbox, wallThickness) => {
+  const enclosure = netEnclosure(mask, width, height, bbox, wallThickness);
+  return Boolean(enclosure) && enclosure.seal >= INDEPENDENT_SEAL;
 };
 
 // Is this opening a window the wall spans, or the mouth of a genuine notch?
@@ -277,8 +290,14 @@ const SEALED = 0.9;
  */
 export const generateCandidates = (net, analysis, options = {}) => {
   const { width, height, wallThickness } = analysis;
-  const compW = net.bbox.maxX - net.bbox.minX + 1;
-  const compH = net.bbox.maxY - net.bbox.minY + 1;
+  // How far the weld and the span rescue reach scales with the extent of the
+  // drawing. A drawing cut from a shared network (`cutDrawings`) keeps the
+  // network's, so that the cut takes away the welds across it and nothing
+  // else: scaled to its own smaller extent, a long run of windows the whole
+  // network welded shut stays open, and the room behind it is lost.
+  const reach = net.reach ?? net.bbox;
+  const compW = reach.maxX - reach.minX + 1;
+  const compH = reach.maxY - reach.minY + 1;
   const wallBboxArea = bboxAreaOf(net.bbox);
   const longest = Math.max(width, height);
   const maxGap = Math.max(24, wallThickness * 12, Math.round(Math.max(compW, compH) * 0.3));

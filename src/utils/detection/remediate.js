@@ -78,7 +78,12 @@ export const measureHold = (floors, constraints, analysis) => {
   const total = rooms.length + points.length;
   if (!total) return { held: 0, total: 0, missed: [] };
 
-  const carved = floors.flatMap((f) => f.excludedRegions ?? []).filter((r) => r.bbox);
+  // Carves only. The thin-structure region is not one: it is what the winning
+  // hypothesis left out, and its box is the union of scattered hairline areas
+  // (boundary.js), which can span the whole floor — exempting everything in
+  // it hid a living room lost behind a window from the pass that finds it.
+  const carved = floors.flatMap((f) => f.excludedRegions ?? [])
+    .filter((r) => r.bbox && !(r.sources ?? [r.source]).every((s) => s === 'thin-structure'));
   const exempt = (x, y) => carved.some((r) =>
     x >= r.bbox.minX - wallThickness && x <= r.bbox.maxX + wallThickness
     && y >= r.bbox.minY - wallThickness && y <= r.bbox.maxY + wallThickness);

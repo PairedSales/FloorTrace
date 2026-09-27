@@ -10,7 +10,7 @@ import { pointInPolygon, polygonArea } from '../polygon.js';
 import {
   sliderHouse, uPlanHouse, dimensionStringHouse, courtyardHouse, legendPlan,
   garageHouse, nestedFloorsPlan, mixedThicknessHouse, windowedHouse, strokeAround,
-  balconyHouse, patioWings, polygonIou, bboxIou, bboxOf,
+  balconyHouse, patioWings, closeDrawingsSheet, thinPartitionHouse, polygonIou, bboxIou, bboxOf,
 } from './synthetic.js';
 
 const truthBbox = (truth) => [
@@ -109,6 +109,26 @@ describe('drawings that are not buildings', () => {
       expect(polygonIou(traced.floors[i].outer.polygon, floors[i])).toBeGreaterThan(0.93);
     }
     expect(warningCodes(traced)).not.toContain('floors-overlap');
+  });
+
+  // Master traced this as one outline at 0.98 confidence, the gap inside it.
+  it('cuts two plans that one wall network holds together apart at the gap', () => {
+    const { img, floors } = closeDrawingsSheet();
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced.floors.length).toBe(2);
+    const byLeft = [...traced.floors].sort(
+      (a, b) => Math.min(...a.outer.polygon.map((p) => p.x)) - Math.min(...b.outer.polygon.map((p) => p.x)),
+    );
+    for (let i = 0; i < 2; i += 1) {
+      expect(polygonIou(byLeft[i].outer.polygon, floors[i])).toBeGreaterThan(0.95);
+    }
+  });
+
+  it('does not cut one house along a thin partition that meets two doorways', () => {
+    const { img, truth } = thinPartitionHouse();
+    const traced = traceFloorplanBoundaryCore(img);
+    expect(traced.floors.length).toBe(1);
+    expect(polygonIou(traced.outer.polygon, truth)).toBeGreaterThan(0.95);
   });
 });
 
