@@ -2,6 +2,18 @@ import { create } from 'zustand';
 
 const SHOW_WORK_KEY = 'floortrace:showWork';
 const UNIT_KEY = 'floortrace:unit';
+const ANNOTATION_SIZE_KEY = 'floortrace:annotationSize';
+
+// Ctrl+wheel multiplies the on-canvas labels and handles by this much per
+// notch, within these bounds. Below 0.5 a vertex is too small to grab; above
+// 2.5 a side-length label covers the edge it names.
+export const ANNOTATION_SIZE_MIN = 0.5;
+export const ANNOTATION_SIZE_MAX = 2.5;
+export const ANNOTATION_SIZE_STEP = 1.1;
+
+// Rounded so notching up and back down lands on exactly 1 again.
+const clampAnnotationSize = (v) =>
+  Math.round(Math.min(ANNOTATION_SIZE_MAX, Math.max(ANNOTATION_SIZE_MIN, v)) * 1000) / 1000;
 
 // 'auto' plus the three the dock's pill group offers. Kept here rather than
 // imported from a formatter: this is the *preference's* vocabulary, and 'auto'
@@ -21,6 +33,15 @@ const readUnitPreference = () => {
     return UNIT_PREFERENCES.includes(saved) ? saved : 'auto';
   } catch {
     return 'auto';
+  }
+};
+
+const readAnnotationSize = () => {
+  try {
+    const saved = Number(localStorage.getItem(ANNOTATION_SIZE_KEY));
+    return saved > 0 ? clampAnnotationSize(saved) : 1;
+  } catch {
+    return 1;
   }
 };
 
@@ -100,6 +121,12 @@ const useWorkspaceStore = create((set, get) => ({
   // keeps the second following the first.
   unitPreference: readUnitPreference(),
 
+  // How large the canvas draws its labels and vertex handles, as a multiple of
+  // their normal screen size. A view preference like the theme — it never
+  // reaches the exhibit or a `.floorplan` — and the same on every plan, so it
+  // is here and persisted rather than per-plan.
+  annotationSize: readAnnotationSize(),
+
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
@@ -145,6 +172,17 @@ const useWorkspaceStore = create((set, get) => ({
     set({ unitPreference: v });
     try {
       localStorage.setItem(UNIT_KEY, v);
+    } catch {
+      // persistence is best-effort
+    }
+  },
+
+  setAnnotationSize: (v) => {
+    if (!(v > 0)) return;
+    const next = clampAnnotationSize(v);
+    set({ annotationSize: next });
+    try {
+      localStorage.setItem(ANNOTATION_SIZE_KEY, String(next));
     } catch {
       // persistence is best-effort
     }
