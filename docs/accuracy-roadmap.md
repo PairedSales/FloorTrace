@@ -4,7 +4,7 @@ The goal is an outline that is right, or one or two easy fixes from right, on
 90% of the plans the app sees. This file says how that is measured, where the
 tracer stands, what stands in the way, and keeps a log of every change that
 moved the numbers. `npm run bench:cubicasa` prints the scoreboard at the top of
-every run.
+every run; `npm run bench:real` prints it for real listing plans.
 
 ## The scoreboard
 
@@ -14,11 +14,11 @@ the dataset to a listing plan. The architectural sheets (three quarters of the
 dataset, with neighbouring flats and dimension strings on the page) are
 reported beside them, not mixed in.
 
-| Number | Target | Test split at `15a0d86` | Test split now |
-|---|---|---|---|
-| **Near-perfect** | ≥ 90% | 80.8% | 86.2% |
-| **Perfect** | ≥ 75% | 45.4% | 55.4% |
-| **Wrong but shown as good** | ≤ 2% | 12.3% | 7.7% |
+| Number | Target | Test split, `e8379f6` |
+|---|---|---|
+| **Near-perfect** | ≥ 90% | 85.3% |
+| **Perfect** | ≥ 75% | 54.3% |
+| **Wrong but shown as good** | ≤ 2% | 8.6% |
 
 - **Perfect**: the traced outline overlaps the true living area by at least
   97%. On the plans that reach it, the area is within 2% nine times in ten.
@@ -30,81 +30,124 @@ reported beside them, not mixed in.
 
 Near-perfect is the goal; perfect is the stricter number, and the one to push
 once the goal is in reach; the third is the one that must not grow while the
-other two do.
+other two do. Each run also shows the three numbers for two slices: sheets with
+**several floors**, and plans that **label a non-GLA space**.
+
+The answer key is CubiCasa's annotation turned into what a US appraiser counts
+(`datasets/README.md`): outdoor spaces the annotators typed as rooms and
+outbuildings are non-GLA, rooms they never typed are not scored, and plans
+whose answer key cannot be trusted are skipped with a reason. It is versioned;
+the numbers above are under version 2. Tightening it lowered the scoreboard by
+about a point — the old key forgave some mistakes and charged some correct
+traces, and neither belongs in the score.
 
 ## Running it
 
 The corpus is downloaded once per machine (`datasets/README.md`).
 
+- `npm run bench:cubicasa -- --watch NAME` — the plans that show one failure,
+  listed in `scripts/lib/cubicasaReview.json`: seconds, for the first try.
 - `npm run bench:cubicasa -- --split dev` — 400 plans of train, weighted toward
   the listing-like ones, about two minutes. The loop for a change in progress.
 - `--split train` (4,200 plans) and `--split val` to confirm a change;
   `--split test` only at milestones, so its numbers stay honest.
 - `--compare <run>` puts a change against a saved run, plan by plan, scoreboard
   first; `--draw-changed` draws every plan whose verdict moved.
+- `npm run bench:real` — the scoreboard on real listing plans saved as
+  corrected `.floorplan` files in `datasets/real/`.
 
 A detection change reports the scoreboard before and after in its PR and adds
-a row to the log below.
+a row to the log below. Saved runs to compare against are named for the commit
+they measured: `master-<sha>-<split>`.
 
 ## Where the errors are
 
-Train split at `15a0d86`, listing-like plans (971):
+Measured on train at `15a0d86` under the first answer key, 971 listing-like
+plans, before the glazing fix:
 
 - **Non-GLA space the plan names stays in the outline.** 29.5% of the balconies,
   terraces, porches and garages a plan labels were counted as living area, on a
   third of the plans. Three mechanisms: the space sits behind a wall of glazing
-  and merges with the room it opens off (58–87% of cases); its tinted fill reads
-  as solid wall, so there is no space to carve (9–22%); its label falls in a
-  pocket too small to be the space (3–20%).
+  and merges with the room it opens off (58–87% of cases; fixed since); its
+  tinted fill reads as solid wall, so there is no space to carve (9–22%); its
+  label falls in a pocket too small to be the space (3–20%).
 - **The wrong plans (16.5%)** are mostly one big mistake: a whole floor or wing
   missed (46 plans), a large non-GLA space kept (35), or a large area that is not
   a room taken in — a page border, a courtyard between wings, part of the yard
   (35). The rest have several smaller mistakes (44).
 - **The near-perfect ones** mostly need a non-GLA space removed: 256 of the 405
   that are not already perfect.
-- **Confidence** does not yet separate right from wrong: 10.4% of plans are wrong
-  and shown as good.
+- **Confidence** does not yet separate right from wrong: 10.4% of plans were
+  wrong and shown as good.
 - **Scale**: with every label read perfectly, 54.5% of these plans get a scale
   within 2%. CubiCasa's feet-inches are converted from metric sizes, which the
   scale selection reads as metric labels, so part of this is the dataset.
 
+After the glazing fix, 24 of the 130 listing-like train plans still wrong were
+looked at one by one: 19 were the tracer's mistake, 2 were the answer key's (a
+terrace and a lawn typed as rooms, since fixed by rule), and 3 were ambiguous (a
+sheet of several units; untyped rooms, since unscored). Of the tracer's 19:
+
+- **8 have walls drawn in a light tone** — grey, green, tan, blue. The tracer
+  follows the fixtures and line work and misses rooms, or the whole plan. The
+  largest single class.
+- 3 left a labelled balcony, porch or terrace in (partly carved, a tiled
+  terrace floor, a label written by hand).
+- 2 traced a page border; 2 closed two drawings side by side into one; 2 took
+  text or a door swing into the outline (one of them also light-walled); 3
+  traced an exterior wall drawn as two lines along the inner one.
+
+Sheets with several floors do worst of any slice: 13% perfect on dev, against
+53% overall.
+
 ## The road
 
-In order of how much each is worth. Each is its own PR, measured on dev, then
-train and val.
+In order of how much each is worth. Each is its own PR: tried on its watch
+list, measured on dev, then train and val.
 
 1. **Labelled non-GLA space behind glazing.** Carve it from behind the window
    wall, and say so whenever a labelled space cannot be separated. *Done.*
-2. **Labelled non-GLA space with a tinted fill**, which reads as solid wall.
-3. **Things stuck to the outline**: door swings outside the exterior wall, entry
-   steps, watermark text against a wall, page borders.
-4. **Missing floors and wings** on sheets with several plans.
-5. **Courtyards and gaps between wings** closed over.
-6. **Unlabelled balconies and decks**: find them from the drawing, or at least
+2. **Light-toned walls** (watch list `light-walls`). A third of the wrong plans
+   in the review; four of the eight are missed whole.
+3. **Sheets with several floors**: floors missed, or closed together into one
+   outline (`drawings-merged`).
+4. **Labelled non-GLA space still kept**: a tinted fill that reads as solid
+   wall, a tiled floor, a partial carve (`non-gla-kept`).
+5. **Things stuck to the outline**: door swings outside the exterior wall, entry
+   steps, watermark text against a wall (`stuck-to-outline`), and page borders
+   (`page-border`).
+6. **Exterior walls drawn as two lines**, traced along the inner one
+   (`double-line-walls`).
+7. **Unlabelled balconies and decks**: find them from the drawing, or at least
    flag them.
-7. **Confidence that predicts the verdict**, so a wrong outline is not shown
+8. **Confidence that predicts the verdict**, so a wrong outline is not shown
    green.
-8. **One-click fixes in the app**: click a space to take it out of the outline,
+9. **One-click fixes in the app**: click a space to take it out of the outline,
    or put it back. This is what makes a near-perfect outline quick to finish.
-9. **Scale**: separate what CubiCasa's converted labels cause from real errors.
+10. **Scale**: separate what CubiCasa's converted labels cause from real errors.
 
 ## Beyond CubiCasa
 
 - CubiCasa5K is Finnish plans; the app sees US listing plans. The last word on
   the scoreboard should come from 50–100 real listing plans, scored the same
-  way, with the truth drawn by correcting the app's own outline.
+  way by `npm run bench:real`, with the truth drawn by correcting the app's own
+  outline. The nine fixtures score perfect there, but they are the plans the
+  tracer was developed on; only fresh plans are a fair test.
 - The dataset is CC BY-NC-SA 4.0: measure with it, ship nothing derived from
   it. A model trained on it would carry the non-commercial terms into the app.
 
 ## Log
 
-Listing-like plans. Train is 971 plans, test 130.
+Listing-like plans. Numbers under different answer keys are not comparable.
 
-| Date | Change | Split | Near-perfect | Perfect | Wrong, shown good |
-|---|---|---|---|---|---|
-| 2026-09-26 | Baseline, `15a0d86` | train | 83.5% | 41.8% | 10.4% |
-| 2026-09-26 | Baseline, `15a0d86` | val | 79.4% | 42.6% | 12.3% |
-| 2026-09-26 | Baseline, `15a0d86` | test | 80.8% | 45.4% | 12.3% |
-| 2026-09-26 | Carve labelled balconies behind glazing; refuse a carve that cuts off a wing | train | 86.6% | 52.7% | 7.9% |
-| 2026-09-26 | (same) | val | 83.9% | 50.3% | 9.0% |
-| 2026-09-26 | (same) | test | 86.2% | 55.4% | 7.7% |
+| Date | Change | Key | Split | Plans | Near-perfect | Perfect | Wrong, shown good |
+|---|---|---|---|---|---|---|---|
+| 2026-09-26 | Baseline, `15a0d86` | 1 | train | 971 | 83.5% | 41.8% | 10.4% |
+| 2026-09-26 | Baseline, `15a0d86` | 1 | val | 155 | 79.4% | 42.6% | 12.3% |
+| 2026-09-26 | Baseline, `15a0d86` | 1 | test | 130 | 80.8% | 45.4% | 12.3% |
+| 2026-09-26 | Carve labelled balconies behind glazing (#262) | 1 | train | 971 | 86.6% | 52.7% | 7.9% |
+| 2026-09-26 | (same) | 1 | val | 155 | 83.9% | 50.3% | 9.0% |
+| 2026-09-26 | (same) | 1 | test | 130 | 86.2% | 55.4% | 7.7% |
+| 2026-09-26 | Answer key 2 (the tracer unchanged), `e8379f6` | 2 | train | 870 | 86.4% | 53.3% | 7.8% |
+| 2026-09-26 | (same) | 2 | val | 145 | 80.7% | 46.9% | 11.7% |
+| 2026-09-26 | (same) | 2 | test | 116 | 85.3% | 54.3% | 8.6% |
