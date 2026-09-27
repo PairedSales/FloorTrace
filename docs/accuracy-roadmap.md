@@ -185,5 +185,5 @@ Listing-like plans. Numbers under different answer keys are not comparable.
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 50.3% | 11.7% |
 | 2026-09-27 | Cut apart drawings one wall network holds together (#267) | 2 | train | 870 | 89.1% | 59.2% | 7.4% |
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 54.5% | 11.7% |
-| 2026-09-27 | Carve labelled decks drawn in boards | 2 | train | 870 | 89.1% | 59.4% | 7.4% |
+| 2026-09-27 | Carve labelled decks drawn in boards (#268) | 2 | train | 870 | 89.1% | 59.4% | 7.4% |
 | 2026-09-27 | (same) | 2 | val | 145 | 85.5% | 55.2% | 11.0% |
