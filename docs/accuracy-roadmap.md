@@ -171,5 +171,5 @@ Listing-like plans. Numbers under different answer keys are not comparable.
 | 2026-09-26 | (same) | 2 | test | 116 | 85.3% | 54.3% | 8.6% |
 | 2026-09-27 | Give back walls the fill-aware split set aside (#265) | 2 | train | 870 | 88.4% | 54.8% | 7.7% |
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 50.3% | 11.7% |
-| 2026-09-27 | Cut apart drawings one wall network holds together | 2 | train | 870 | 89.1% | 59.2% | 7.4% |
+| 2026-09-27 | Cut apart drawings one wall network holds together (#267) | 2 | train | 870 | 89.1% | 59.2% | 7.4% |
 | 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 54.5% | 11.7% |
