@@ -30,7 +30,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - The Node harnesses pass no `cacheKey`, so every room there is a cold trace (~0.7 s); in the browser rooms after the first cost 1–5 ms. `utils/perfMarks.js` (DEV only) times the real path.
 - `node scripts/traceDebug.mjs <image>` prints networks, candidates, scores and carve decisions.
 - Truth files do not all follow one convention for where a room edge sits. Measure the ink before believing a truth rect. `benchUtils.bboxOf` is half-open.
-- Synthetic test images: draw walls in black. Otsu binarisation drops mid-grey walls when the histogram has only two levels.
+- Synthetic test images: draw walls in black. Otsu binarisation drops mid-grey walls when the histogram has only two levels. A test that needs a grey tone gives it a spread and softens the edges, as `binarize.test.js` does.
 
 ## Stages
 
@@ -57,6 +57,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - **A label whose cavity fails is voted again behind the glazing.** The carve's barrier is thick wall, which a wall of windows is not, so a balcony's cavity can hold the room it opens off: too big to carve, or holding that room's label. Only then does the label vote on `boundaryMask`, where window frames are wall, and the cavity it finds is opened by an exterior wall's thickness before it is offered. Only then, because the finer barrier also splits a hatched deck into its boards.
 - **Every labelled non-GLA space inside a footprint is answered**: carved, or refused with a reason. One no region answers is stated as `non-gla-not-removed` with `no-separable-region`.
 - **A carve may not cut off a wing.** Only the largest piece survives a carve, so `applyRegions` tries each region as it would actually be carved and refuses one whose cut-off piece holds two or more labelled rooms (`splits-footprint`). A single room reached only across the carved space goes with it, and `label-outside` names it.
+- **The fill-aware split gives back walls drawn in the tone it sets aside** (`keepBands`, `raster.js`). A set-aside piece is ink again only when it has a body (most of it survives a 2 px erosion), spans a tenth of the page, has no bulk (an erosion of ~1% of the page takes nearly all of it) and mostly looks out on something much lighter, past at most a thin outline. Each test answers one thing the same tone also draws — anti-aliasing and a scan's grey line work, furniture, room fills and balconies, a room fill's shaded rim (ExampleFloorplan7, whose scale went 12% wrong without the last). Don't drop one to rescue another plan.
 - **Glazing rescue** only where the grey band lines up with wall at both ends. Don't relax `minFlank` in `bridgeRunsGuarded`: one wall thickness is also what a scan line sees of a diagonal wall.
 - **The room-click clamp (`roomClampBoundary`) is a rail.** It asks for the widest hypothesis (`autoGarage: false`, `autoShaded: false`); a click inside its bbox but outside its mask drops the clamp; a click outside the bbox is refused in words. Too tight means a click that silently does nothing.
 - **`options.foreignPoints`** (every other parsed label) is passed by all three room-detection callers: the scan batch, a pill click, a manual click.

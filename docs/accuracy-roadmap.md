@@ -108,7 +108,14 @@ list, measured on dev, then train and val.
 1. **Labelled non-GLA space behind glazing.** Carve it from behind the window
    wall, and say so whenever a labelled space cannot be separated. *Done.*
 2. **Light-toned walls** (watch list `light-walls`). A third of the wrong plans
-   in the review; four of the eight are missed whole.
+   in the review; four of the eight are missed whole. *Done for walls the
+   binarizer's fill-aware split set aside as tinted fill* — six of the eight.
+   The other two lose a room for a different reason: its exterior wall is a
+   run of windows drawn in thin, light lines, and the gap is not closed — on a
+   diagonal wall (`13695`), and where the wall-thickness estimate comes from
+   the fixtures' 4 px lines instead of the grey walls, so the closing reaches
+   too short (`9417`). `colorful/1680` went from perfect to wrong the same way
+   once its grey walls were found: that gap is the next thing to close.
 3. **Sheets with several floors**: floors missed, or closed together into one
    outline (`drawings-merged`).
 4. **Labelled non-GLA space still kept**: a tinted fill that reads as solid
@@ -151,3 +158,5 @@ Listing-like plans. Numbers under different answer keys are not comparable.
 | 2026-09-26 | Answer key 2 (the tracer unchanged), `e8379f6` | 2 | train | 870 | 86.4% | 53.3% | 7.8% |
 | 2026-09-26 | (same) | 2 | val | 145 | 80.7% | 46.9% | 11.7% |
 | 2026-09-26 | (same) | 2 | test | 116 | 85.3% | 54.3% | 8.6% |
+| 2026-09-27 | Give back walls the fill-aware split set aside | 2 | train | 870 | 88.4% | 54.8% | 7.7% |
+| 2026-09-27 | (same) | 2 | val | 145 | 84.8% | 50.3% | 11.7% |
