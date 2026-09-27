@@ -329,6 +329,34 @@ const SOURCE_CONFIDENCE = {
   shaded: 0.5,
 };
 
+// Everywhere the app already knows a room is: parsed dimension labels, and
+// the rectangles a room click confirmed. Both arrive in working-raster px.
+const measuredPoints = (options) => [
+  ...(options.constraints?.interiorPoints ?? []),
+  ...(options.constraints?.rooms ?? []).map((r) => ({
+    x: (r.rect.left + r.rect.right) / 2,
+    y: (r.rect.top + r.rect.bottom) / 2,
+    name: r.name,
+    rect: r.rect,
+  })),
+];
+
+// The measured points that are living rooms: not a label naming a non-GLA
+// feature, nor a keyword's own lines — the size printed under it (TWO CAR
+// GARAGE / 22-5x22-0) is the garage's.
+const livingPoints = (options) => measuredPoints(options).filter((p) => !matchExteriorFeature(p.name)
+  && !(options.excludeRegions ?? []).some((r) => (
+    p.x >= r.x - r.width && p.x <= r.x + 2 * r.width
+    && p.y >= r.y - 3 * r.height && p.y <= r.y + 4 * r.height)));
+
+// One point per room. A confirmed room's rectangle holds its own label, so
+// counting both would make a lone storage room two rooms.
+const distinctRooms = (points) => {
+  const labels = points.filter((p) => !p.rect);
+  return [...labels, ...points.filter((p) => p.rect && !labels.some((q) => (
+    q.x >= p.rect.left && q.x <= p.rect.right && q.y >= p.rect.top && q.y <= p.rect.bottom)))];
+};
+
 /**
  * Candidate non-GLA regions for one footprint, from every evidence source.
  * Returns first-class region objects; nothing is removed here.
@@ -344,16 +372,7 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   const exteriorThickness = options.exteriorThickness;
   const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
   const regions = [];
-  // Everywhere the app already knows a room is: parsed dimension labels, and
-  // the rectangles a room click confirmed. Both arrive in working-raster px.
-  const measured = [
-    ...(options.constraints?.interiorPoints ?? []),
-    ...(options.constraints?.rooms ?? []).map((r) => ({
-      x: (r.rect.left + r.rect.right) / 2,
-      y: (r.rect.top + r.rect.bottom) / 2,
-      name: r.name,
-    })),
-  ];
+  const measured = measuredPoints(options);
 
   const fpW = footprint.bbox.maxX - footprint.bbox.minX + 1;
   const fpH = footprint.bbox.maxY - footprint.bbox.minY + 1;
@@ -369,20 +388,58 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   // clamped floor — profiled at ~15% of step 4, of which bridgeRuns is ~64%.
   const wantsCavities = (options.excludeRegions?.length ?? 0) > 0
     || options.autoGarage !== false;
+  const maxGap = Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3));
+  const minFlank = Math.max(8, wallThickness * 2);
   const barrier = wantsCavities
-    ? bridgeRuns(
-      analysis.thickMask, width, height,
-      Math.max(24, wallThickness * 12, Math.round(Math.max(fpW, fpH) * 0.3)),
-      Math.max(8, wallThickness * 2),
-    )
+    ? bridgeRuns(analysis.thickMask, width, height, maxGap, minFlank)
     : null;
   const cavities = wantsCavities
     ? openCavities(footprint, barrier, width, height)
     : { labels: null, components: [] };
   const resolved = [];
   const unresolved = [];
-  const garageCavityIds = new Set();
   const nearMisses = [];
+
+  // The living rooms, for the guard at the end: see there.
+  const living = livingPoints(options);
+  const reach = Math.max(2, wallThickness);
+  const holdsRoom = (mask) => living.some((p) => maskNear(mask, p, reach, width, height));
+
+  // The barrier is thick wall bridged across door and window gaps, and a
+  // balcony behind a wall of glazing has none between it and the room it
+  // opens off — window frames, stubs of pier, a door. Its label then votes
+  // for one cavity holding both, too big to carve or holding the living
+  // room's own label, and on CubiCasa5K that left a third of the balconies
+  // and terraces a plan names inside the outline. For those labels only,
+  // vote again with the boundary mask's line ink as wall, where the frames
+  // that separate the two spaces on the drawing separate them here too. Only
+  // those: the finer barrier also splits a hatched deck into its boards,
+  // which the thick one keeps whole.
+  //
+  // What the finer barrier finds is trimmed before it is offered. Its
+  // cavities follow every line on the page, so the one a balcony's label votes
+  // for can trail a strip of floor running the length of the building between
+  // the outline and a thin line; opening it by an exterior wall's thickness
+  // keeps the balcony and drops the strip.
+  let glazed = null;
+  const glazedRegion = (region) => {
+    if (!analysis.boundaryMask) return null;
+    glazed = glazed ?? openCavities(
+      footprint, bridgeRuns(analysis.boundaryMask, width, height, maxGap, minFlank), width, height,
+    );
+    const id = cavityVote(region, glazed.labels, width, height);
+    if (id < 0) return null;
+    const comp = glazed.components[id];
+    if (comp.size < minCavity || comp.size > 0.45 * footprint.area) return null;
+    const trimmed = labelComponents(
+      openRect(componentMask(glazed.labels, comp, width), width, height, Math.max(2, exteriorThickness)),
+      width, height,
+    );
+    const core = trimmed.components[cavityVote(region, trimmed.labels, width, height)];
+    if (!core || core.size < minCavity) return null;
+    const mask = componentMask(trimmed.labels, core, width);
+    return holdsRoom(mask) ? null : { mask, size: core.size, bbox: core.bbox };
+  };
 
   if (cavities.components.length) {
     for (const region of options.excludeRegions ?? []) {
@@ -392,17 +449,32 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
         continue;
       }
       const comp = cavities.components[id];
-      if (comp.size < minCavity || comp.size > 0.45 * footprint.area) continue;
+      if (comp.size < minCavity) continue;
+      const mask = comp.size <= 0.45 * footprint.area
+        ? componentMask(cavities.labels, comp, width)
+        : null;
+      if (!mask || holdsRoom(mask)) {
+        const found = glazedRegion(region);
+        if (found) {
+          regions.push({
+            source: 'label',
+            keyword: region.keyword ?? null,
+            ...found,
+            confidence: SOURCE_CONFIDENCE.label,
+          });
+          continue;
+        }
+      }
+      if (!mask) continue;
       resolved.push({ region, id });
       regions.push({
         source: 'label',
         keyword: region.keyword ?? null,
-        mask: componentMask(cavities.labels, comp, width),
+        mask,
         size: comp.size,
         bbox: comp.bbox,
         confidence: SOURCE_CONFIDENCE.label,
       });
-      if (region.keyword && /garage/i.test(region.keyword)) garageCavityIds.add(id);
     }
 
     if (options.autoGarage !== false) {
@@ -502,18 +574,10 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
   // wall of windows also is, and a balcony's label votes for whatever cavity
   // its door opens into: both carved a living room and bedroom off CubiCasa
   // plans at 91% with nothing said, because a carve exempts the labels it
-  // removes. A label that names a non-GLA feature does not count, nor do a
-  // keyword's own lines — the size printed under it (TWO CAR GARAGE /
-  // 22-5x22-0) is the garage's. The refusal is stated, because the label can
-  // be the one that is wrong: a garage whose size was read without its
-  // keyword is kept, and has to be checked. Tint alone gives way silently, as
-  // `findShadedPockets` already does with the same points.
-  const living = measured.filter((p) => !matchExteriorFeature(p.name)
-    && !(options.excludeRegions ?? []).some((r) => (
-      p.x >= r.x - r.width && p.x <= r.x + 2 * r.width
-      && p.y >= r.y - 3 * r.height && p.y <= r.y + 4 * r.height)));
-  const reach = Math.max(2, wallThickness);
-  const holdsRoom = (mask) => living.some((p) => maskNear(mask, p, reach, width, height));
+  // removes. The refusal is stated, because the label can be the one that is
+  // wrong: a garage whose size was read without its keyword is kept, and has
+  // to be checked. Tint alone gives way silently, as `findShadedPockets`
+  // already does with the same points.
   const kept = [];
   for (const region of regions) {
     if (!living.length || !holdsRoom(region.mask)) {
@@ -527,6 +591,33 @@ export const collectNonGlaRegions = (footprint, analysis, options) => {
       size: region.size,
       bbox: region.bbox,
       reason: 'room-label-inside',
+    });
+  }
+
+  // A label the plan printed inside this footprint that no region answers —
+  // carved, or refused with a reason — is a balcony or a garage counted as
+  // living area. That was the one outcome with nothing said: a cavity too big
+  // to carve, a label whose vote landed on ink, a flood that found nothing.
+  const centre = (r) => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+  for (const region of options.excludeRegions ?? []) {
+    const p = centre(region);
+    const px = Math.round(p.x);
+    const py = Math.round(p.y);
+    if (px < 0 || py < 0 || px >= width || py >= height || !footprint.mask[py * width + px]) continue;
+    if (kept.some((r) => maskNear(r.mask, p, reach, width, height))) continue;
+    if (nearMisses.some((m) => m.bbox && px >= m.bbox.minX && px <= m.bbox.maxX
+      && py >= m.bbox.minY && py <= m.bbox.maxY)) continue;
+    nearMisses.push({
+      source: 'label',
+      keyword: region.keyword ?? null,
+      size: null,
+      bbox: {
+        minX: Math.round(region.x),
+        minY: Math.round(region.y),
+        maxX: Math.round(region.x + region.width),
+        maxY: Math.round(region.y + region.height),
+      },
+      reason: 'no-separable-region',
     });
   }
 
@@ -578,43 +669,76 @@ export const refusedRegion = (region, reason) => ({
  * Remove accepted regions from the footprint in ONE pass, so the result cannot
  * depend on detector order, and stop at a cumulative bound so three
  * individually-safe carves cannot between them remove most of the building.
+ *
+ * Only the largest piece of what a carve leaves survives it, which is how the
+ * fingers and slivers a carve leaves along its edge go — and how a building it
+ * cuts in two loses the smaller side. Two patio carves, each safe alone, cut a
+ * CubiCasa sheet whose two floors touched at both ends in two and took a whole
+ * floor with them. So each region is tried as the carve would actually be
+ * made, and one that would cut off a wing — two or more rooms the plan labels
+ * as living space — is refused and says so. A single room reached only across
+ * the carved space goes with it: a storage room off a terrace or a garage, on
+ * every plan where this came up, and `label-outside` names it. Without labels
+ * nothing can tell a second porch beyond a garage from a wing, and the largest
+ * piece stands.
  */
 export const applyRegions = (footprint, regions, analysis, options) => {
-  const { width, height } = analysis;
+  const { width, height, wallThickness } = analysis;
   const exteriorThickness = options.exteriorThickness;
   const maxCumulative = options.maxCumulativeRemoval ?? 0.5;
   const originalArea = footprint.area;
+  const openR = Math.max(2, exteriorThickness + 2);
+  const rooms = distinctRooms(livingPoints(options));
+  const reach = Math.max(2, wallThickness);
+
+  // The footprint left by removing `remove`, and whether a piece that does not
+  // survive holds a wing. Clip an opening back to the carved mask so its
+  // dilation cannot refill what was removed, and apply it only near the carved
+  // regions — a global opening would also shave every narrow footprint
+  // protrusion (bay windows) far away.
+  const carve = (remove) => {
+    const mask = footprint.mask.slice();
+    for (let i = 0; i < mask.length; i += 1) if (remove[i]) mask[i] = 0;
+    const opened = openRect(mask, width, height, openR);
+    const zone = dilateRect(remove, width, height, openR * 2 + 2);
+    for (let i = 0; i < opened.length; i += 1) {
+      if (!mask[i]) opened[i] = 0;
+      else if (!zone[i]) opened[i] = mask[i];
+    }
+    const labeled = largestComponent(opened, width, height);
+    const roomsCutOff = new Map();
+    for (const p of labeled ? rooms : []) {
+      const id = labelNear(labeled.labels, p, reach, width, height);
+      if (id >= 0 && id !== labeled.component.id) roomsCutOff.set(id, (roomsCutOff.get(id) ?? 0) + 1);
+    }
+    return { labeled, cutsWing: [...roomsCutOff.values()].some((n) => n >= 2) };
+  };
 
   const accepted = [];
   const rejected = [];
   const remove = new Uint8Array(footprint.mask.length);
   let removedArea = 0;
+  let carved = null;
   for (const region of regions) {
     if (removedArea + region.size > maxCumulative * originalArea) {
       rejected.push(refusedRegion(region, 'cumulative-bound'));
       continue;
     }
-    for (let i = 0; i < remove.length; i += 1) if (region.mask[i]) remove[i] = 1;
+    const trial = remove.slice();
+    for (let i = 0; i < trial.length; i += 1) if (region.mask[i]) trial[i] = 1;
+    const attempt = carve(trial);
+    if (attempt.cutsWing) {
+      rejected.push(refusedRegion(region, 'splits-footprint'));
+      continue;
+    }
+    remove.set(trial);
     removedArea += region.size;
     accepted.push(region);
+    carved = attempt;
   }
   if (!accepted.length) return { footprint, accepted: [], rejected, removed: null };
 
-  const mask = footprint.mask.slice();
-  for (let i = 0; i < mask.length; i += 1) if (remove[i]) mask[i] = 0;
-
-  // Clip an opening back to the carved mask so its dilation cannot refill what
-  // was removed, and apply it only near the carved regions — a global opening
-  // would also shave every narrow footprint protrusion (bay windows) far away.
-  const openR = Math.max(2, exteriorThickness + 2);
-  const opened = openRect(mask, width, height, openR);
-  const zone = dilateRect(remove, width, height, openR * 2 + 2);
-  for (let i = 0; i < opened.length; i += 1) {
-    if (!mask[i]) opened[i] = 0;
-    else if (!zone[i]) opened[i] = mask[i];
-  }
-
-  const labeled = largestComponent(opened, width, height);
+  const { labeled } = carved;
   if (!labeled || labeled.component.size < 0.35 * originalArea) {
     return {
       footprint,

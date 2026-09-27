@@ -323,6 +323,72 @@ export const legendPlan = () => {
   };
 };
 
+/**
+ * A house with a balcony off its top wall, labelled BALCONY, and a living room
+ * and a bedroom either side of a partition. Where the balcony meets the house
+ * the wall is `glazed`: three short piers, two windows drawn as thin-lined
+ * boxes the wall's thickness, and a door — which leaves no thick wall between
+ * the balcony and the living room for the carve's barrier to find. With
+ * `glazed: false` the balcony is simply open to the room. Truth is the house.
+ */
+export const balconyHouse = ({ glazed = true } = {}) => {
+  const img = createImage(900, 720);
+  const t = 12;
+  const h = Math.floor(t / 2);
+  wall(img, 100, 600, 700, 600, t);
+  wall(img, 100, 260, 100, 600, t);
+  wall(img, 700, 260, 700, 600, t);
+  wall(img, 100, 260, 240, 260, t);
+  wall(img, 560, 260, 700, 260, t);
+  wall(img, 400, 260, 400, 600, 6);
+  if (glazed) {
+    for (const x of [240, 392, 548]) fillRect(img, x, 260 - h, x + 11, 260 - h + t - 1);
+    for (const [x0, x1] of [[252, 391], [472, 547]]) {
+      fillRect(img, x0, 260 - h, x1, 260 - h + 1);
+      fillRect(img, x0, 259, x1, 260);
+      fillRect(img, x0, 260 - h + t - 2, x1, 260 - h + t - 1);
+    }
+    fillRect(img, 404, 200, 406, 259);
+  }
+  wall(img, 240, 110, 240, 260, t);
+  wall(img, 560, 110, 560, 260, t);
+  fillRect(img, 240 - h, 108, 560 + h, 111);
+  return {
+    img,
+    truth: outerFaceRect(100, 260, 700, 600, t),
+    balcony: { x: 360, y: 170, width: 80, height: 22, keyword: 'BALCONY' },
+    labels: [{ x: 250, y: 430, name: 'LIVING ROOM' }, { x: 550, y: 430, name: 'BEDROOM' }],
+  };
+};
+
+/**
+ * Two wings joined only through a patio between them, labelled PATIO, with a
+ * door from each wing onto it. Carving the patio cuts the building in two, and
+ * the carve keeps the larger side: `smallRooms` is how many labelled rooms the
+ * smaller wing holds — two make it a wing, one a storage room off a patio.
+ */
+export const patioWings = (smallRooms) => {
+  const img = createImage(1100, 620);
+  const t = 10;
+  wallRect(img, 60, 100, 400, 500, t);
+  wallRect(img, 640, 80, 1040, 520, t);
+  if (smallRooms > 1) wall(img, 230, 100, 230, 500, 5);
+  wall(img, 840, 80, 840, 520, 5);
+  fillRect(img, 400, 219, 640, 221);
+  fillRect(img, 400, 379, 640, 381);
+  fillRect(img, 396, 280, 404, 330, 255);
+  fillRect(img, 636, 280, 644, 330, 255);
+  const small = smallRooms > 1
+    ? [{ x: 140, y: 300, name: 'BEDROOM' }, { x: 315, y: 300, name: 'BATH' }]
+    : [{ x: 230, y: 300, name: 'STORAGE' }];
+  return {
+    img,
+    small,
+    labels: [...small, { x: 740, y: 300, name: 'KITCHEN' }, { x: 940, y: 300, name: 'LIVING ROOM' }],
+    patio: { x: 480, y: 290, width: 80, height: 22, keyword: 'PATIO' },
+  };
+};
+
 // House plus attached garage, the garage door drawn at `doorThickness`.
 export const garageHouse = (doorThickness) => {
   const img = createImage(900, 560);
