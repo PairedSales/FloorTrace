@@ -14,6 +14,7 @@
     "bench:detection": "node scripts/detectionBenchmark.mjs",
     "bench:scale": "node scripts/scaleBenchmark.mjs",
     "bench:cubicasa": "node scripts/cubicasaBenchmark.mjs",
+    "bench:real": "node scripts/realBenchmark.mjs",
     "bench:ocr": "node scripts/ocrBenchmark.mjs",
     "probe:exterior": "node scripts/syntheticProbe.mjs",
     "probe:memory": "node --expose-gc scripts/memoryProbe.mjs",

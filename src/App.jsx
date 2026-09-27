@@ -29,7 +29,7 @@ import {
 } from './utils/detection/validate';
 import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
-import { roomIsNonGla } from './utils/dimensions/exteriorLabels';
+import { boundaryConstraints, nonGlaExcludeRegions } from './utils/traceInputs';
 import { DEFAULT_TRACE_TYPE, traceTypeLabel } from './utils/traceTypes';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
@@ -69,41 +69,6 @@ const desktopChromePx = (planCount) => 40 + (planCount > 1 ? 30 : 0) + 26 + 10;
 // "Tracing exterior walls…", so a user who watched one of them fail had no way
 // to tell it was the same operation as the button labelled Find outline.
 const FIND_OUTLINE_MESSAGE = 'Finding the outline…';
-
-// OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
-// be reported distinctly from porch/patio carves).
-const nonGlaExcludeRegions = () =>
-  useAppStore.getState().exteriorLabels.map((l) => ({ ...l.bbox, keyword: l.keyword }));
-
-// What the rest of the app already knows about this building, handed to the
-// tracer as constraints. Rooms are inside by construction; a parsed dimension
-// label is inside by definition — geometry that excludes either is provably
-// wrong, and the detector had no way to be told so.
-const boundaryConstraints = () => {
-  const state = useAppStore.getState();
-  const nonGla = state.exteriorLabels.map((l) => l.bbox);
-  const overlapsNonGla = (bbox) => nonGla.some((n) =>
-    bbox.x < n.x + n.width && n.x < bbox.x + bbox.width
-    && bbox.y < n.y + n.height && n.y < bbox.y + bbox.height);
-  return {
-    // A garage is inside the drawing but is exactly what the tracer is being
-    // asked to carve out, so asserting it as known-inside is wrong input even
-    // where it happens not to change the answer (candidates are scored before
-    // the carve — see floorplan-image.test.js). Same rule the interior points
-    // below have always followed; `rooms` only escaped it while it held the one
-    // room the user had clicked.
-    rooms: state.rooms
-      .filter((r) => r.rect && !roomIsNonGla(r, nonGla))
-      .map((r) => ({ name: r.name ?? null, rect: r.rect })),
-    interiorPoints: state.detectedDimensions
-      .filter((d) => d.bbox && !overlapsNonGla(d.bbox))
-      .map((d) => ({
-        x: d.bbox.x + d.bbox.width / 2,
-        y: d.bbox.y + d.bbox.height / 2,
-        name: d.text ?? null,
-      })),
-  };
-};
 
 // Pixels per foot the project already believes in, for the room detector to
 // size the next room against. Prefers the rooms measured so far — a median
@@ -907,8 +872,8 @@ function App() {
     const work = beginWork('trace');
     try {
       const traced = await traceFloorplanBoundary(image, {
-        excludeRegions: nonGlaExcludeRegions(),
-        constraints: boundaryConstraints(),
+        excludeRegions: nonGlaExcludeRegions(useAppStore.getState()),
+        constraints: boundaryConstraints(useAppStore.getState()),
         ...(brush ? { brush } : {}),
       });
 
