@@ -1,0 +1,35 @@
+{
+  "about": "What looking at CubiCasa5K plans has settled, for scripts/cubicasaBenchmark.mjs. `exclude`: plans whose answer key cannot be trusted in a way no rule in lib/cubicasa.mjs catches, each with its reason; the benchmark skips them. `watch`: plans that show one failure, found by looking, so a fix can be tried on them in seconds (--watch NAME) before the dev split checks it broke nothing else. Train and val plans only: test stays unseen.",
+  "exclude": {
+    "high_quality/11847": "Several units on one sheet: the answer key covers one of them and nothing in the image says which."
+  },
+  "watch": {
+    "light-walls": {
+      "about": "Walls drawn in a grey, green, tan or blue tone rather than black: the tracer follows the fixtures and line work and misses the rooms, or the whole plan.",
+      "ids": [
+        "high_quality/13261", "high_quality/2111", "high_quality/470", "high_quality/507",
+        "high_quality/13695", "high_quality/6148", "high_quality/7958", "high_quality/9417"
+      ]
+    },
+    "page-border": {
+      "about": "A frame around the page traced as the building.",
+      "ids": ["high_quality/10173", "high_quality/12919"]
+    },
+    "double-line-walls": {
+      "about": "An exterior wall drawn as two lines, traced along the inner one, so a band of wall is missing all round.",
+      "ids": ["high_quality/1644", "high_quality/3097", "colorful/6182"]
+    },
+    "drawings-merged": {
+      "about": "Two floors or units drawn side by side, closed into one outline across the gap between them.",
+      "ids": ["colorful/9192", "high_quality/14678"]
+    },
+    "stuck-to-outline": {
+      "about": "Text, a watermark or a door swing touching the exterior wall, taken into the outline.",
+      "ids": ["high_quality/12076", "high_quality/13695"]
+    },
+    "non-gla-kept": {
+      "about": "A labelled balcony, porch or terrace left in the outline after the glazing fix: partly carved, drawn with a tiled floor, or named in handwriting.",
+      "ids": ["colorful/10469", "colorful/34", "high_quality/3733"]
+    }
+  }
+}
