@@ -48,6 +48,7 @@ import {
 import { pointInPolygon, ringSetArea } from '../src/utils/detection/polygon.js';
 import { labelComponents, openRect } from '../src/utils/detection/raster.js';
 import { selectProjectScale } from '../src/utils/detection/scale.js';
+import { QUALITY_GOOD } from '../src/utils/boundaryQuality.js';
 import { bboxIou, pct } from './lib/benchUtils.mjs';
 import {
   CUBICASA_ROOT, DATASETS_DIR, PX_PER_FOOT, buildTruth, cropImage, evenSpread, fillPolygon,
@@ -92,6 +93,21 @@ const GROUPS = [
   ['architectural', (r) => r.category === 'high_quality_architectural'],
   ['all', () => true],
 ];
+// The scoreboard (docs/accuracy-roadmap.md): the three numbers the tracer's
+// work is steered by, on the listing-like plans, each against its target. A
+// wrong verdict the app would chip green — QUALITY_GOOD or better — is the
+// answer that looks right, and no one has a reason to check it.
+const SCOREBOARD = [
+  { name: 'near-perfect', test: (r) => r.app.verdict !== 'wrong', target: 0.9, higher: true },
+  { name: 'perfect', test: (r) => r.app.verdict === 'perfect', target: 0.75, higher: true },
+  {
+    name: 'wrong but shown as good',
+    test: (r) => r.app.verdict === 'wrong' && r.app.confidence >= QUALITY_GOOD,
+    target: 0.02,
+    higher: false,
+  },
+];
+const listingLike = GROUPS[0][1];
 
 const round = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
 
@@ -438,6 +454,17 @@ const summarise = (results) => {
     + `${errors.length ? `, ${errors.length} errors` : ''} ===`);
   if (!scored.length) return lines;
 
+  const listing = scored.filter(listingLike);
+  if (listing.length) {
+    lines.push(`\nScoreboard: ${listing.length} listing-like plans (docs/accuracy-roadmap.md)`);
+    for (const { name, test, target, higher } of SCOREBOARD) {
+      const value = share(listing, test);
+      const met = higher ? value >= target : value <= target;
+      lines.push(`   ${name.padEnd(24)} ${pct(value).padStart(6)}   target ${higher ? '>=' : '<='} ${pct(target)}`
+        + `${met ? '   met' : ''}`);
+    }
+  }
+
   lines.push(`\nVerdict (perfect: IoU >= ${pct(PERFECT_IOU)}; near-perfect: perfect once at most ${FIXES}`
     + ` error regions of <= ${pct(FIX_MAX_SHARE)} of the area each are fixed):`);
   lines.push(`   ${''.padEnd(14)}    n | app perfect | near-perfect |  wrong | bare near-perfect`);
@@ -575,6 +602,12 @@ const compareRuns = (results, baseline, name) => {
   const lines = [`\n=== Against ${name} (${baseline.meta?.git ?? '?'}) ===`];
   const pairs = pairRuns(results, baseline);
   if (!pairs.length) return [...lines, '   no plans in common'];
+  const listing = pairs.filter(([, a]) => listingLike(a));
+  if (listing.length && listing.every(([b]) => b.app.verdict)) {
+    lines.push(`   scoreboard, ${listing.length} listing-like plans: ${SCOREBOARD.map(({ name, test }) => (
+      `${name} ${pct(share(listing, ([b]) => test(b)))} -> ${pct(share(listing, ([, a]) => test(a)))}`
+    )).join(' | ')}`);
+  }
   for (const run of ['bare', 'app']) {
     const deltas = pairs.map(([b, a]) => ({ id: a.id, d: a[run].iou - b[run].iou, b: b[run], a: a[run] }));
     const good = (s) => Math.abs(s.areaErr) <= GOOD_AREA;

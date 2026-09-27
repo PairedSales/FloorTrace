@@ -36,7 +36,9 @@ truth. The header of `scripts/cubicasaBenchmark.mjs` says what is measured and
 how. Every trace gets a verdict — **perfect** (IoU ≥ 97%), **near-perfect**
 (perfect once at most two error regions of ≤ 20% of the area are fixed) or
 **wrong** — and the error is split into regions by cause: non-GLA space kept,
-anything else taken in, living space left out.
+anything else taken in, living space left out. Each run opens with the
+scoreboard from `docs/accuracy-roadmap.md`: those numbers on the listing-like
+plans, against their targets.
 
 The corpus is found in this checkout's `datasets/`, else in the main
 checkout's (through git's common directory), so worktrees need no copy;
