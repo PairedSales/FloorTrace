@@ -22,7 +22,7 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 | `npm run bench:detection` | Boundary and room accuracy on `fixtures/` (CI gate) |
 | `npm run bench:scale` | Project-scale selection on `fixtures/` (CI gate) |
 | `npm run bench:ocr` | OCR accuracy and timing (Node, Tesseract only) |
-| `npm run bench:cubicasa` | Tracer and scale on CubiCasa5K (local only; see `datasets/README.md`) |
+| `npm run bench:cubicasa` | The accuracy scoreboard: tracer and scale on CubiCasa5K (local only; see `datasets/README.md`) |
 | `npm run probe:exterior [draw]` | Synthetic exterior-tracer scenarios with exact truth |
 | `npm run probe:memory` | What the detection memo retains per image |
 | `npm run icons`, `npm run tutorial` | Regenerate committed outputs in `public/` |
@@ -72,6 +72,7 @@ Rules for each subsystem load automatically when you open its files: `.claude/ru
 ## Docs
 
 - `docs/architecture.md` — pipeline overview and quality model.
+- `docs/accuracy-roadmap.md` — the accuracy scoreboard and its targets, what stands in the way, and a log of every change that moved it.
 - `docs/remediation-plan.md` — open findings. `docs/tools-and-options-backlog.md` — ideas not yet built.
 - `docs/ocr-performance.md`, `docs/load-to-area-performance.md` — dated measurement records. `docs/CODE_REVIEW.md` — historical review from July 2026.
 - `Reference Data for Wall Detection System/` — papers behind the detector. `datasets/README.md` — getting CubiCasa5K.
