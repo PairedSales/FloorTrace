@@ -110,12 +110,16 @@ list, measured on dev, then train and val.
 2. **Light-toned walls** (watch list `light-walls`). A third of the wrong plans
    in the review; four of the eight are missed whole. *Done for walls the
    binarizer's fill-aware split set aside as tinted fill* — six of the eight.
-   The other two lose a room for a different reason: its exterior wall is a
-   run of windows drawn in thin, light lines, and the gap is not closed — on a
-   diagonal wall (`13695`), and where the wall-thickness estimate comes from
-   the fixtures' 4 px lines instead of the grey walls, so the closing reaches
-   too short (`9417`). `colorful/1680` went from perfect to wrong the same way
-   once its grey walls were found: that gap is the next thing to close.
+   The other two lose a room behind a run of windows drawn in thin, light
+   lines that nothing closes. In `13695` the windows sit in a diagonal wall.
+   In `9417` a 330 px window is drawn as three light strips, and the glazing
+   rescue reads only one solid band. Its wall-thickness estimate also misses
+   the 26 px grey walls: runs longer than 3% of the page are not counted.
+   `colorful/1680` went from perfect to wrong through its windows too, by
+   another route. The windows split the house into two wings with the living
+   room between them. Now that each wing's grey walls enclose it, the `join`
+   pass of remediation refuses to rejoin them, as it refuses two separate
+   drawings.
 3. **Sheets with several floors**: floors missed, or closed together into one
    outline (`drawings-merged`).
 4. **Labelled non-GLA space still kept**: a tinted fill that reads as solid

@@ -5,7 +5,7 @@
   },
   "watch": {
     "light-walls": {
-      "about": "Walls drawn in a grey, green, tan or blue tone rather than black: the tracer followed the fixtures and line work and missed the rooms, or the whole plan. Six were walls the fill-aware split set aside, now given back. 13695 and 9417 lose one room each behind a run of windows drawn in thin light lines: on a diagonal wall in 13695; in 9417 the wall-thickness estimate comes from the fixtures, so the closing reaches too short.",
+      "about": "Walls drawn in a grey, green, tan or blue tone rather than black: the tracer followed the fixtures and line work and missed the rooms, or the whole plan. Six were walls the fill-aware split set aside, now given back. 13695 and 9417 lose one room each behind a run of windows drawn in thin light lines: on a diagonal wall in 13695; in 9417 a 330 px window drawn as three light strips, which the glazing rescue does not read as one band.",
       "ids": [
         "high_quality/13261", "high_quality/2111", "high_quality/470", "high_quality/507",
         "high_quality/13695", "high_quality/6148", "high_quality/7958", "high_quality/9417"
