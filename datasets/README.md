@@ -106,3 +106,44 @@ overlay per plan and `--compare` shows verdict moves. `--fixtures` adds the
 plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
 belong to whoever drew them: keep them in `datasets/real/`, which git ignores.
+
+### The set so far
+
+75 pages of 17 US house-plan books, 1914 to 1963, each named for its book, its
+year and its place in the book (`aladdin62-n15`). Most are one storey; 57 have
+a garage or carport, 70 a porch, patio or terrace, and 23 draw two levels side
+by side. They are plan-book pages, not listing sketches, so drives, planting
+and terraces are drawn around the house. Drawings in the extruded 3D style,
+walls drawn as raised blocks, are left out: no listing plan is drawn that way.
+
+The outlines follow these conventions:
+
+- To the exterior face of the walls. A wall the house shares with its garage
+  belongs to the house.
+- Porches, patios, terraces, decks, stoops and breezeways are Porch/patio;
+  carports and garage storage are Garage; a lower level is Below grade.
+- Eave storage behind knee walls, chimney masses and space the drawing does not
+  decide are Unfinished, so not scored. Steps, planters and walks are not
+  outlined.
+
+**None has been checked by a person yet.** Claude drew every key, and each file
+says so in its `answerKey` record (`by: "Claude (draft for review)"`, with notes
+on the judgment calls). Check a plan by opening it in FloorTrace, correcting it
+and saving it: the app does not write that record, so a plan saved from the app
+no longer claims to be a draft.
+
+### Moving keys without their plans
+
+A plan is a megabyte of image; its key is a few hundred bytes. A session that
+can only upload small files to where the set is kept hands its keys over in one
+file:
+
+```
+node scripts/realKeys.mjs export   # every key and its record -> datasets/real/answer-keys.json
+node scripts/realKeys.mjs apply    # that file into the plans in datasets/real/
+```
+
+`apply` gives a plan still holding the app's untouched trace its key and record.
+A plan whose outlines a person corrected differently is kept and listed;
+`--force` replaces it. It also repairs the first drafts, which the app refused
+to open for their trace record (`lastTraceOutcome.level: null`).
