@@ -132,6 +132,19 @@ on the judgment calls). Check a plan by opening it in FloorTrace, correcting it
 and saving it: the app does not write that record, so a plan saved from the app
 no longer claims to be a draft.
 
+### Drafts from images
+
+```
+node scripts/realDrafts.mjs PLAN.jpg [--name NAME] [--crop X,Y,W,H]
+```
+
+writes the `.floorplan` the app would save after scanning the image: the labels
+it reads, the rooms that set the scale, the scale, and the app's own trace,
+ready for its outlines to be corrected. Each step is the app's own code; the
+scan is the Tesseract path, without the browser's PaddleOCR rescue. It makes
+the set's first drafts exactly as they were made. The draft records its
+`source`, the image and crop it was made from.
+
 ### Moving keys without their plans
 
 A plan is a megabyte of image; its key is a few hundred bytes. A session that
@@ -147,3 +160,9 @@ node scripts/realKeys.mjs apply    # that file into the plans in datasets/real/
 A plan whose outlines a person corrected differently is kept and listed;
 `--force` replaces it. It also repairs the first drafts, which the app refused
 to open for their trace record (`lastTraceOutcome.level: null`).
+
+The keys file also carries each plan's `source`: a URL, or a file under the
+folder, with its crop and its size. `apply` makes a plan the folder does not
+have yet from its source before writing its key, so the set grows by that file
+rather than by its images. An image of any other size is refused, since the
+key is coordinates on it.

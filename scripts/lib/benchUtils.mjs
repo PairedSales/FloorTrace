@@ -13,6 +13,24 @@ export const imageDataOf = (png) => ({
 
 export const loadPng = (filePath) => imageDataOf(readPng(filePath));
 
+// Image bytes as `{width, height, data}`. PNG decodes in pure JS; a JPEG or
+// WebP is decoded by the canvas pdf.js already brings in.
+export const decodeImage = async (bytes, mime) => {
+  if (mime === 'image/png') return imageDataOf(PNG.sync.read(bytes));
+  let canvas;
+  try {
+    canvas = await import('@napi-rs/canvas');
+  } catch {
+    throw new Error(`cannot decode ${mime} without @napi-rs/canvas; use a PNG`);
+  }
+  const image = await canvas.loadImage(bytes);
+  const surface = canvas.createCanvas(image.width, image.height);
+  const ctx = surface.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  const { data } = ctx.getImageData(0, 0, image.width, image.height);
+  return { width: image.width, height: image.height, data: new Uint8ClampedArray(data) };
+};
+
 // The pipeline hands `env.toOcrInput` a gray `{data, width, height}`; pngjs
 // wants w*h*4 RGBA, so the expansion the browser encoder no longer needs
 // happens here instead.
