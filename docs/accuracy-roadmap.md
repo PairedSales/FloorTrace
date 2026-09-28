@@ -166,6 +166,31 @@ list, measured on dev, then train and val.
 - The dataset is CC BY-NC-SA 4.0: measure with it, ship nothing derived from
   it. A model trained on it would carry the non-commercial terms into the app.
 
+### Real plans
+
+75 pages of US house-plan books, 1914 to 1963 (`datasets/README.md`). Claude
+drew every answer key and no person has checked one yet, so these numbers are
+provisional: a key corrected later moves them.
+
+| Date | Tracer | Plans | Near-perfect | Perfect | Wrong, shown good |
+|---|---|---|---|---|---|
+| 2026-09-28 | `61e28d8` | 75 | 44.0% | 12.0% | 49.3% |
+
+The same tracer scores 85.5%, 55.2% and 11.0% on CubiCasa's listing-like val
+plans. Here it fails one way: it takes in too much. Living space left out
+averages 0.5% of the home; non-GLA space kept averages 18.3%, anything else
+taken in 13.6%.
+
+- **A porch, terrace or garage kept** (road item 4) is the largest mistake on
+  30 of the 42 wrong plans and 16 of the 24 near-perfect ones. The scan read a
+  non-GLA label on 20 of those 30, and the app said it could not remove one
+  (`non-gla-not-removed`) on 9.
+- **Something else taken in** is the largest mistake on the other 12 wrong
+  plans: drive courts, planting and terraces drawn around the house, dimension
+  lines, an unexcavated basement, two drawings joined (items 3 and 5).
+- **Confidence does not warn**: 37 of the 42 wrong plans would show green.
+- Traced bare, without the scan's rooms, 33.3% are near-perfect.
+
 ## Log
 
 Listing-like plans. Numbers under different answer keys are not comparable.
