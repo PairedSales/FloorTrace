@@ -275,6 +275,13 @@ The outlines follow these conventions:
 - Unfinished space shares boundaries with its neighbours and does not overlap
   scored outlines: it stops where the GLA, Garage or Porch outline starts
   (`["ref", k, i]` vertices make the boundary exactly shared).
+- Optional and expansion additions a builder draws dashed and labels "OPT.",
+  "OPTIONAL" or "EXP." (an optional covered lanai, an extended garage, an extra
+  bedroom) are not part of the base plan and are not outlined: only what the
+  plan draws as built, in solid walls, is.
+- A sheet that draws only one level of a house whose other level is on a
+  separate sheet is outlined as the one level it draws; the missing level is not
+  guessed.
 
 **None has been checked by a person yet.** Claude drew every key, and each file
 says so in its `answerKey` record (`by: "Claude (draft for review)"`, with notes
