@@ -22,12 +22,17 @@ const STEP = 0.25;
 // MIN_FRACTION of the samples along the edge.
 const BAND_SHARE = 0.45;
 const MIN_FRACTION = 0.15;
-// A second band this close beyond the face used is worth a look.
+// A second band this close beyond the face used is worth a look, if it holds
+// this share of the darkest offset's fraction: a stroke along the whole edge.
 const LOOK_BEYOND = 10;
+const CONTINUOUS_SHARE = 0.75;
 export const DEFAULT_R = 14;
 export const DEFAULT_BRIDGE = 2.5;
 // An edge that moved more than this is flagged 'far'.
 export const FAR_PX = 4;
+// An edge whose face reads this far from where it was just put, when read again
+// from there, is flagged 'unstable': the answer depends on where it was drawn.
+export const UNSTABLE_PX = 1;
 
 // The page's ink threshold: Otsu's split of a 256-bin luma histogram, taken as
 // the midpoint of the two classes' means. Otsu's own index is the last bin of
@@ -160,8 +165,16 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
   const [s, e] = runs[at];
   const next = runs[at + 1];
   const prev = runs[at - 1];
-  const beyondOuter = next ? (next[0] - e - 1) * STEP : null;
-  const beyondInner = prev ? (s - prev[1] - 1) * STEP : null;
+  // Ink past the face counts only when it runs along most of the edge, as a
+  // second stroke of a wall or a dimension line does: window sills and frames
+  // drawn proud of the wall cover a part of it.
+  const strong = (run) => {
+    let top = 0;
+    for (let q = run[0]; q <= run[1]; q += 1) if (frac[q] > top) top = frac[q];
+    return top >= CONTINUOUS_SHARE * peak;
+  };
+  const beyondOuter = next && strong(next) ? (next[0] - e - 1) * STEP : null;
+  const beyondInner = prev && strong(prev) ? (s - prev[1] - 1) * STEP : null;
   return {
     found: true,
     peak,
@@ -173,6 +186,26 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
     beyondOuter: beyondOuter !== null && beyondOuter <= LOOK_BEYOND ? beyondOuter : null,
     beyondInner: beyondInner !== null && beyondInner <= LOOK_BEYOND ? beyondInner : null,
   };
+};
+
+// A word for an edge that is within 1.5 degrees of level or plumb without being
+// so, its ends at least half a pixel apart (less is the rounding of a key): a
+// warning to draw both ends alike or to say `tilt`.
+const SKEW_MAX_DEG = 1.5;
+const SKEW_MIN_PX = 0.5;
+// The wall face differing this much between the two ends of a long edge (so a
+// level edge is a pixel off at each end) is a lean worth naming.
+const LEAN_WARN_PX = 2;
+const skewOf = (i, a, b) => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const theta = Math.atan2(Math.abs(dy), Math.abs(dx));
+  const horizontal = theta < Math.PI / 4;
+  const deg = ((horizontal ? theta : Math.PI / 2 - theta) * 180) / Math.PI;
+  const across = horizontal ? Math.abs(dy) : Math.abs(dx);
+  const along = horizontal ? Math.abs(dx) : Math.abs(dy);
+  if (across < SKEW_MIN_PX || deg > SKEW_MAX_DEG) return null;
+  return `edge ${i} (from [${a.map((x) => Math.round(x * 10) / 10)}] to [${b.map((x) => Math.round(x * 10) / 10)}]) is ${deg.toFixed(2)} deg off ${horizontal ? 'level' : 'plumb'} (its ends differ by ${across.toFixed(1)} px in ${horizontal ? 'y' : 'x'} over ${along.toFixed(0)} px): a snap keeps its slope, so give both ends the same ${horizontal ? 'y' : 'x'}, or set "tilt": true for a scan tilted on the page`;
 };
 
 const lineThrough = (p, dir) => ({ p, dir });
@@ -199,9 +232,11 @@ const closestOn = (line, pt) => {
  * where `edges[i]` is `{edge, moved, flag, flags}`: `moved` is px along the
  * outward normal (positive = outward), `flag` the first of `flags`, and a flag
  * is 'no-band', 'reaches-end' (the band runs to the end of the search on the
- * side that decides the face), 'far' (moved more than 4 px) or 'ink-beyond'
- * (another band within 10 px past the face used). A vertex whose two edges are
- * nearly parallel slides along its next edge and is named in `warnings`.
+ * side that decides the face), 'far' (moved more than 4 px), 'ink-beyond'
+ * (a stroke along most of the edge within 10 px past the face used) or
+ * 'unstable' (read again from where it now lies, the face moves over 1 px more:
+ * `residual`). A vertex whose two edges are nearly parallel slides along its
+ * next edge and is named in `warnings`.
  */
 export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVertices = [] } = {}) => {
   const {
@@ -214,6 +249,7 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
   const lines = [];
   const edges = [];
   const warnings = [];
+  const leans = [];
   for (let i = 0; i < n; i += 1) {
     const a = v[i];
     const b = v[(i + 1) % n];
@@ -228,6 +264,10 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
       edges.push({ edge: i, moved: 0, flag: null, flags: [], fixed: true });
       continue;
     }
+    // A snap keeps an edge's slope, so a wall meant to be level that is drawn
+    // with its ends a pixel apart stays a pixel off at one end.
+    const skewed = skewOf(i, a, b);
+    if (skewed && !tilt && len >= 60) warnings.push(skewed);
     const skip = Math.min(12, 0.2 * len);
     const useInner = inside.has(i);
     const pick = (p) => (useInner ? p.inner : p.outer);
@@ -239,18 +279,27 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
     }
     let line;
     let moved = pick(whole);
-    if (tilt && len >= 180) {
+    // A long edge is read in its first and last thirds as well: a wall that
+    // leans on the page (a scan tilted a fraction of a degree) shows up as a
+    // difference, followed with `tilt`, else reported.
+    let thirds = null;
+    if (len >= 180) {
       const first = profileOf(image, dark, a, dir, normal, skip, len / 3, R, bridge);
       const last = profileOf(image, dark, a, dir, normal, (2 * len) / 3, len - skip, R, bridge);
-      if (first?.found && last?.found) {
-        const t1 = (skip + len / 3) / 2;
-        const t2 = ((2 * len) / 3 + len - skip) / 2;
-        const p1 = [a[0] + dir[0] * t1 + normal[0] * pick(first), a[1] + dir[1] * t1 + normal[1] * pick(first)];
-        const p2 = [a[0] + dir[0] * t2 + normal[0] * pick(last), a[1] + dir[1] * t2 + normal[1] * pick(last)];
-        const tl = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-        line = lineThrough(p1, [(p2[0] - p1[0]) / tl, (p2[1] - p1[1]) / tl]);
-        moved = (pick(first) + pick(last)) / 2;
-      }
+      if (first?.found && last?.found) thirds = { first, last };
+    }
+    if (thirds && tilt) {
+      const { first, last } = thirds;
+      const t1 = (skip + len / 3) / 2;
+      const t2 = ((2 * len) / 3 + len - skip) / 2;
+      const p1 = [a[0] + dir[0] * t1 + normal[0] * pick(first), a[1] + dir[1] * t1 + normal[1] * pick(first)];
+      const p2 = [a[0] + dir[0] * t2 + normal[0] * pick(last), a[1] + dir[1] * t2 + normal[1] * pick(last)];
+      const tl = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      line = lineThrough(p1, [(p2[0] - p1[0]) / tl, (p2[1] - p1[1]) / tl]);
+      moved = (pick(first) + pick(last)) / 2;
+    } else if (thirds) {
+      const lean = pick(thirds.last) - pick(thirds.first);
+      if (Math.abs(lean) >= LEAN_WARN_PX) leans.push(`edge ${i} ${lean > 0 ? '+' : '-'}${Math.abs(lean).toFixed(1)} px over ${len.toFixed(0)} px`);
     }
     line ??= lineThrough([a[0] + normal[0] * moved, a[1] + normal[1] * moved], dir);
     lines.push(line);
@@ -259,9 +308,27 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
     if (Math.abs(moved) > FAR_PX) flags.push('far');
     const beyond = useInner ? whole.beyondInner : whole.beyondOuter;
     if (beyond !== null) flags.push('ink-beyond');
+    // Read again from where it now lies: a face that moves once more depends on
+    // where the edge was drawn, as it does along a run of windows and doors,
+    // where the wall is less of the edge than the strokes drawn in it.
+    let residual = 0;
+    if (!(thirds && tilt)) {
+      const seated = [a[0] + normal[0] * moved, a[1] + normal[1] * moved];
+      const again = profileOf(image, dark, seated, dir, normal, skip, len - skip, R, bridge);
+      residual = again?.found ? pick(again) : 0;
+      if (Math.abs(residual) > UNSTABLE_PX) flags.push('unstable');
+    }
     edges.push({
-      edge: i, moved, flag: flags[0] ?? null, flags, ...(beyond !== null ? { beyond } : {}),
+      edge: i,
+      moved,
+      flag: flags[0] ?? null,
+      flags,
+      ...(beyond !== null ? { beyond } : {}),
+      ...(flags.includes('unstable') ? { residual } : {}),
     });
+  }
+  if (leans.length) {
+    warnings.push(`the wall faces are not parallel to the drawn edges: ${leans.join(', ')} (the face's offset at the end of an edge against its start, outward positive). A scan tilted on the page does this: set "tilt": true on the outline to follow the walls (if a wall jogs instead, draw the jog)`);
   }
   // Each vertex is where its two edges meet; two edges on one line meet
   // nowhere, so the vertex slides to the edge instead. So does one whose edges

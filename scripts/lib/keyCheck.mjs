@@ -90,7 +90,7 @@ export const checkKey = ({
       const { inter } = areasOf([outlines[i].v], [outlines[j].v]);
       const shared = sharedBoundaryLength([outlines[i].v], [outlines[j].v]);
       const allowed = Math.max(OVERLAP_PX * shared, OVERLAP_SHARE * Math.min(areaOf(outlines[i].v), areaOf(outlines[j].v)));
-      const detail = `${label(outlines[i], i)} and ${label(outlines[j], j)} overlap by ${inter.toFixed(0)} px2 (allowed ${allowed.toFixed(0)}: 2 px x ${shared.toFixed(0)} px shared boundary)`;
+      const detail = `${label(outlines[i], i)} and ${label(outlines[j], j)} overlap by ${inter.toFixed(0)} px2 (allowed ${allowed.toFixed(0)}, the larger of 2 px x the ${shared.toFixed(0)} px they share and 0.2% of the smaller outline)`;
       if (inter <= allowed) {
         overlapPasses += 1;
         continue;
@@ -115,7 +115,7 @@ export const checkKey = ({
     const allowedTypes = l.kind === 'room' ? ROOM_TYPES : NON_GLA_TYPES;
     const centre = [l.bbox.x + l.bbox.width / 2, l.bbox.y + l.bbox.height / 2];
     const holding = outlines.filter((o, k) => sound.has(k) && pointInRing(centre, o.v));
-    const what = `${l.id} ${l.kind} "${l.text}" at ${Math.round(centre[0])},${Math.round(centre[1])}`;
+    const what = `${l.kind} "${l.text}" at ${Math.round(centre[0])},${Math.round(centre[1])}`;
     if (holding.some((o) => allowedTypes.includes(o.type))) {
       labelPasses += 1;
       continue;
@@ -173,19 +173,20 @@ export const checkKey = ({
           else {
             good += 1;
             if (e.flags.includes('reaches-end')) add('warn', 'faces', at, 'the band runs to the end of the search: look at the edge at full zoom');
+            if (e.flags.includes('unstable')) add('warn', 'faces', at, `the face moves ${e.residual.toFixed(1)} px more when the edge is read again from where it lies (windows or doors along the edge?): probe the ink and fix the edge on the wall's face`);
             if (e.flags.includes('ink-beyond')) add('warn', 'faces', at, `another band begins ${e.beyond.toFixed(1)} px beyond the face used (hatched or double-line wall, or a dimension line?)`);
           }
         }
         for (const text of o.warnings ?? []) add('warn', 'faces', label(outlines[k], k), text);
-        if (own.length && good === own.length) add('pass', 'faces', label(outlines[k], k), `${good} edge(s) within ${FACE_TOLERANCE} px of a wall face`);
-        if (fixedEdges.length) {
-          const listed = new Set((specOutlines[k]?.fix ?? []));
-          const own2 = fixedEdges.filter((e) => listed.has(e.edge)).length;
-          const shared = fixedEdges.length - own2;
-          const text = `${own2} edge(s) in "fix" (${[...listed].sort((x, y) => x - y).join(', ') || '-'}), ${shared} shared by reference: not checked against the ink`;
-          if (own2 > FIXED_SHARE * (o.edges.length - shared) && own2 > 1) add('warn', 'faces', label(outlines[k], k), `${text}: more than half of its own edges are fixed`);
-          else add('pass', 'faces', label(outlines[k], k), text);
-        }
+        const listed = new Set(specOutlines[k]?.fix ?? []);
+        const own2 = fixedEdges.filter((e) => listed.has(e.edge)).length;
+        const shared = fixedEdges.length - own2;
+        const fixedText = fixedEdges.length
+          ? `; ${own2 ? `${own2} in "fix" (${[...listed].sort((x, y) => x - y).join(', ')})` : ''}${own2 && shared ? ', ' : ''}${shared ? `${shared} shared by reference` : ''}: not checked against the ink`
+          : '';
+        const half = own2 > FIXED_SHARE * (o.edges.length - shared) && own2 > 1;
+        if (half) add('warn', 'faces', label(outlines[k], k), `more than half of its own edges are fixed${fixedText}`);
+        else if (good === own.length) add('pass', 'faces', label(outlines[k], k), `${good ? `${good} edge(s) within ${FACE_TOLERANCE} px of a wall face` : 'no edge to snap'}${fixedText}`);
       });
     } else {
       add('warn', 'faces', 'all', 'skipped: an outline above is not a simple polygon');

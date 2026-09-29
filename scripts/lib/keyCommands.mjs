@@ -336,6 +336,7 @@ export const snap = async (argv, ctx) => {
         'reaches-end': 'the band runs to the end of the search: look at this edge at full zoom',
         far: 'moved far: check it is the wall you meant',
         'ink-beyond': `another band ${e.beyond?.toFixed(1)} px beyond the face used (hatched or double-line wall? a dimension line?): look at this edge at full zoom`,
+        unstable: `read again from where it now lies, the face moves ${e.residual?.toFixed(1)} px more (windows or doors along the edge?): look at it at full zoom, probe the ink, and fix it on the wall's face`,
       };
       if (e.flags.length) flagged.push({ outline: k, edge: e.edge, flags: e.flags, moved: round1(e.moved) });
       ctx.out(`  edge ${e.edge}: ${note}${e.flags.length ? `   <-- ${e.flags.join(', ')}: ${why[e.flags[0]]}` : ''}`);

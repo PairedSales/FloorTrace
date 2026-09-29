@@ -149,6 +149,158 @@ it, and a side over 4000 px is scaled to fit, as the app's loader scales it.
 The draft records its `source`: the image, the crop and the size they came
 out, which is the size its key will be drawn on.
 
+### Drawing and checking keys (`realKeyTool`)
+
+```
+node scripts/realKeyTool.mjs COMMAND ...      # --help prints the manual
+```
+
+An answer key is drawn from crops of the plan at full zoom, written down
+roughly, and snapped to the outer face of the wall band the ink shows. The
+picture tool that shows an agent an image shrinks a whole page and loses the
+wall faces, so coordinates are read only from `view` crops of 300 to 500 px with
+a grid of 10 to 25 px, and whole-page views are for seeing what the plan
+contains. The tool's header comment is its manual and is kept accurate; this is
+the map of it.
+
+**An annotator's round.** `blind NAME` writes the packet (below). `view` the
+packet's image in crops, corner by corner; `probe` the ink where a doubt about
+which line is the wall face remains; write a spec (below) in a scratch folder;
+`snap NAME --role a --spec FILE`; open every flagged edge at full zoom with the
+snapped outline drawn (`view IMAGE --crop … --poly <snapped file>`); `check
+NAME --role a`. Finish with the whole plan and its key, for the types and for
+anything missing: a second level, a wing, a detached garage. A second annotator
+does the same with `--role b`; `compare NAME` says whether the two agree; the
+adjudicator writes `--role final` from the disagreement regions; `check` runs on
+the final key; a reviewer who drew none of it records `review`; `apply` freezes it.
+
+| Command | What it does |
+|---|---|
+| `view IMAGE\|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels]` | A PNG of the page or the crop (long side ~1,400 px) with a grid labelled in image pixels on all four edges, a legend, and any outlines; prints the path and `crop x0,y0→x1,y1  scale N.NN px/px  grid S`. Each `--poly` file (a spec, a snapped file, or a bare ring) has its own line style and its vertices are numbered `outline.vertex`. A plan `NAME` is drawn bare. |
+| `view NAME --keys` / `--trace` | Also the plan's stored key (by type) and the app's own trace (dashed red). For the orchestrator, the app checker and engineers, **never for a role that draws or checks a key blind.** |
+| `blind NAME` | The annotator's packet, `keys-wip/packets/NAME/`: `image.<ext>` (the plan's exact bytes, so coordinates are the key's), `labels.json`, `meta.json {name, width, height}`. |
+| `labels NAME` | The packet's labels as a table, for an agent that cannot open the set folder. |
+| `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. |
+| `snap NAME --role a\|b\|final --spec FILE` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. |
+| `compare NAME` or `compare A B [--draw OUT.png --tag T --image IMAGE]` | Per-type IoU, the largest and 95th-percentile boundary distance, the protocol's verdict and the disagreement regions. |
+| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. |
+| `review NAME --approve\|--reject --agent ID [--region … --reason …]` | The final reviewer's decision, `keys-wip/NAME.review-<n>.json`. |
+| `apply NAME [--dispute ID]` | The freeze for one plan; the only command that writes into a plan. |
+| `sheet NAME... --out FILE [--per N]` | Review sheets: each plan whole with its stored key, its record and its notes. |
+
+**The blind packet** holds the image and what the scan read, and nothing else: a
+packet is built by naming the fields it takes, so nothing the tracer knows can
+leak into it. `labels.json` lists each label with an id (`d<i>` a room size,
+`e<i>` a garage, porch, patio… name, `a<i>` a level name; the number is its place
+in the plan's own list), its box in image px, its text and `kind`: `room`,
+`nonGla` (the words of garage, carport, porch, patio, deck, terrace, stoop,
+breezeway, balcony, screened space…; `labelKind` in `scripts/lib/keyPacket.mjs`,
+the one definition `blind` and `check` share) or `level`. A size printed directly
+under an exterior name is that space's own size: it is `nonGla` too, and says
+which name it is under (`nameLabel`). There is no trace, no rooms, no scale, no
+quality figure in it, and no other key.
+
+**A spec** is what an annotator writes:
+
+```json
+{"author": "a-colonial63-n16", "notes": "why each call was made, as the existing notes do",
+ "outlines": [
+   {"type": "gla", "name": "first floor", "v": [[546, 243], [1280, 243], [1280, 697], [546, 697]]},
+   {"type": "garage", "v": [["ref", 0, 0], [111, 243], [111, 663], [546, 663]], "in": [3], "fix": [2]}],
+ "waive": [{"label": "d3", "reason": "a storage room that opens into the garage, counted as garage"}],
+ "stated": [{"sqft": 1250, "of": "first floor", "explained": "the page's figure leaves out the walls"}]}
+```
+
+`type` is `gla`, `below-grade`, `garage`, `porch` or `unfinished`. Edge *i* runs
+from `v[i]` to `v[i+1]`. `fix` edges stay where they are drawn; `in` edges take
+the band's inner face (a garage or porch edge along the house wall, so the two
+outlines meet at the house's exterior face); a vertex `["ref", k, i]` is vertex
+*i* of outline *k* after it has snapped, so two outlines share a boundary
+exactly (an edge between two refs is the shared boundary and does not move); `R`
+is the search reach in px (default 14); `tilt: true` follows a wall a scan has
+tilted; `bridge` (default 2.5 px) is the gap a hatched or double-line wall may
+have without ending its band. A snap moves each edge along its normal and keeps
+its slope, so give the two ends of a level edge the same y. `waive` excuses a
+label from the label check with a reason the reviewer reads; `stated` gives areas
+the page prints. Everything is validated with the place and the reason.
+
+**What a snap flags.** `no-band`: no wall band within reach. `far`: the edge moved
+over 4 px. `reaches-end`: the band runs to the end of the search on the side that
+decides the face. `ink-beyond`: a stroke along most of the edge within 10 px past
+the face used, as a hatched or double-line wall or a dimension line has. `unstable`:
+read again from where it landed, the face moves over 1 px more, as along a run of
+windows and doors where the wall is less of the edge than the strokes drawn in it.
+It also warns of an edge drawn a hair off level or plumb, of a wall whose face
+leans over 2 px along an edge (a scan tilted on the page: say `tilt`), and of a
+vertex whose two edges are nearly parallel. Look at every flagged edge at full
+zoom; probe the ink where the doubt is; `fix` an edge you have read by hand.
+
+**Faces.** The face is the band's outer end, never its centre. Where a solid band
+sits inside a hatched one, it is the hatched band's outer line. Window sills and
+frames drawn proud of the wall are not wall. A thin line near a wall, such as a
+garage door between two thick piers, can capture a snap: `fix` there.
+
+**What `compare` calls agreement** (the protocol's step 3): the same outline
+types; the building outlines (gla and below-grade) at IoU 99% or better; garage
+and porch each at 97% or better; and no boundary point more than 3 px from the
+other key's boundary of the same class. IoU is the union of a type's outlines on
+a 0.5 px raster, filled as `bench:real` fills its truth mask. The 95th-percentile
+distance pools both directions, sampled about every pixel.
+
+**What `check` tests** (step 5), each `pass`, `warn`, `waived` or `fail`:
+
+- every outline is closed (at least 3 distinct vertices) and does not cross itself;
+- building and non-GLA outlines overlap no more than their shared boundary: the
+  larger of 2 px times the length they share and 0.2% of the smaller outline
+  (unfinished space over scored space, and two outlines of one class, only warn);
+- every `room` label (its box's centre) lies inside a gla, below-grade or
+  unfinished outline, and every `nonGla` label inside a garage, porch or unfinished
+  one: inside the wrong kind is a fail unless the spec's `waive` names it (then it
+  is `waived`, with its reason, for the reviewer), and inside none at all is a warn;
+- every edge not in `fix` (and not a shared boundary) moves no more than 2 px, and
+  finds a band, when snapped again; more than half an outline's edges in `fix` warns;
+- a stated area, from the spec's `stated` or a sq ft figure a level label carries,
+  against the key's area at the plan's scale (`--feet-per-pixel` overrides it): over
+  5% apart fails unless the entry says why (`explained`, then a warn). An `of` that
+  names an outline (by its `name`) or a type compares that; any other is compared
+  with total GLA, and the line says so.
+
+**Files.** The set folder is `datasets/real/` of the main checkout;
+`FLOORTRACE_REAL_DIR` points the tool at another folder of plans, so `apply` can be
+tried on a scratch copy. Work files live in `keys-wip/`: `NAME.<role>.json` (the
+spec) and `NAME.<role>.snapped.json` for each role `a`, `b`, `final`;
+`NAME.compare.json`; `NAME.review-<n>.json`; `NAME.record.json` (the orchestrator
+writes it: `{"annotators": [...], "adjudicator": null|"…", "verifiedBy": "blind
+double annotation"|"single annotation"}`); and `packets/NAME/`. Every write into
+the set retries while Google Drive holds a file and goes through a temporary file,
+so a plan is never left half written. An agent cannot write inside the set, so
+every command that writes there takes a file from the agent's own scratch folder
+(`datasets/zz-scratch/<tag>/` of its checkout) and does the copying. Views go to
+`datasets/zz-scratch/views/<TAG>/` of the checkout that runs the tool, so two agents
+on one plan never overwrite each other.
+
+**The record `apply` writes** into the plan's `answerKey`, in place of a draft's
+`by: "Claude (draft for review)"`:
+
+| Field | Meaning |
+|---|---|
+| `by` | `annotators: <ids>; adjudicator: <id or none>`, from `NAME.record.json`. |
+| `verifiedBy` | `"blind double annotation"` or `"single annotation"`. |
+| `checked` | `{by: "AI review", at, via: "final review"}`: the final reviewer's approval, `at` being when it was recorded. Only checked keys enter the manifest. |
+| `at` | When the key was written into the plan. |
+| `notes` | The final spec's notes: each judgment call and why. |
+| `disputeId` | Present when the key was changed after the freeze, through a dispute (`apply NAME --dispute ID`). |
+
+`apply` needs the final snapped key, a passing `check`, the record file, and a
+latest review that approved this very key (the review stores the key's hash, so a
+key changed after its approval needs a fresh review). A reviewer may not be one of
+the key's annotators or its adjudicator. A plan whose record already has `checked`
+is frozen: `apply` refuses it unless `--dispute ID` names the dispute that
+changes it. `apply` leaves the plan otherwise as it was (image, labels,
+calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
+command, which judges outlines against a key by the verdict code `bench:real` uses,
+arrives with the benchmark's shared library.
+
 ### Moving keys without their plans
 
 A plan is a megabyte of image; its key is a few hundred bytes. A session that

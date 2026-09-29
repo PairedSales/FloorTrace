@@ -199,6 +199,21 @@ describe('walls that are not one solid band', () => {
     near(v[0][1], 80);
   });
 
+  it('does not call a run of window boxes beside the wall ink-beyond, but does a dimension line along it', () => {
+    const image = house();
+    // Window boxes 8 px beyond the top face over 40% of the edge.
+    fillRect(image, 130, 70, 210, 72);
+    fillRect(image, 240, 70, 280, 72);
+    const boxes = snapOutline(image, { v: [[97, 77], [303, 77], [303, 223], [97, 223]], fix: [1, 2, 3] });
+    near(boxes.v[0][1], 80);
+    expect(boxes.edges[0].flags).toEqual([]);
+    // A dimension line along the whole edge, 8 px out.
+    fillRect(image, 100, 70, 300, 72);
+    const line = snapOutline(image, { v: [[97, 77], [303, 77], [303, 223], [97, 223]], fix: [1, 2, 3] });
+    near(line.v[0][1], 80);
+    expect(line.edges[0].flags).toContain('ink-beyond');
+  });
+
   it('bridges a hairline of paper inside one stroke without being asked', () => {
     const image = blank();
     fillRect(image, 100, 80, 300, 83);
@@ -233,6 +248,90 @@ describe('the flags on a snapped edge', () => {
     expect(warnings[0]).toMatch(/nearly parallel/);
     near(v[1][1], 80);
     near(v[1][0], 200, 5);
+  });
+});
+
+describe('an edge whose face depends on where it was drawn', () => {
+  // A wall face at y=100 that is thick along 40% of the edge (the rest is
+  // windows and doors) with a thin stroke all the way along at y=84: the thin
+  // stroke is a band, the wall is not, so the read jumps between them.
+  const windowed = () => {
+    const image = blank();
+    fillRect(image, 112, 90, 112 + Math.round(0.4 * 176), 100);
+    fillRect(image, 100, 84, 300, 86);
+    return image;
+  };
+
+  it('flags unstable when reading again from where the edge landed moves the face', () => {
+    const { edges } = snapOutline(windowed(), { v: [[100, 20], [300, 20], [300, 101], [100, 101]], fix: [0, 1, 3] });
+    expect(edges[2].flags).toContain('unstable');
+    expect(Math.abs(edges[2].residual)).toBeGreaterThan(10);
+  });
+
+  it('does not flag a solid wall, whichever side of it the edge is drawn', () => {
+    const image = house();
+    for (const off of [-5, -2, 0, 2, 5]) {
+      const { edges } = snapOutline(image, { v: [[100, 80 + off], [300, 80 + off], [300, 220], [100, 220]], fix: [1, 2, 3] });
+      expect(edges[0].flags, `drawn ${off}`).not.toContain('unstable');
+    }
+  });
+});
+
+describe('a wall that leans on the page', () => {
+  // The tilted wall of the "follows a wall a scan has tilted" case: 10 px over 400.
+  const tilted = () => {
+    const big = { width: 600, height: 300, data: new Uint8ClampedArray(600 * 300 * 4).fill(255) };
+    for (let x = 100; x < 500; x += 1) {
+      const top = Math.round(80 + (10 * (x - 100)) / 400);
+      for (let y = top; y < top + 8; y += 1) {
+        const i = (y * 600 + x) * 4;
+        big.data[i] = 0;
+        big.data[i + 1] = 0;
+        big.data[i + 2] = 0;
+      }
+    }
+    return big;
+  };
+
+  it('is reported when a long edge is not told to follow it, from what the ink shows at its two ends', () => {
+    const { warnings } = snapOutline(tilted(), { v: [[100, 84], [500, 84], [500, 200], [100, 200]], fix: [1, 2, 3] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/not parallel to the drawn edges: edge 0 [+-]\d\.\d px over 400 px.*"tilt": true/);
+  });
+
+  it('is not reported once the outline says tilt, and a level wall is never reported', () => {
+    expect(snapOutline(tilted(), { v: [[100, 84], [500, 84], [500, 200], [100, 200]], fix: [1, 2, 3], tilt: true }).warnings).toEqual([]);
+    const level = { width: 600, height: 300, data: new Uint8ClampedArray(600 * 300 * 4).fill(255) };
+    for (let y = 80; y < 88; y += 1) for (let x = 100; x < 500; x += 1) level.data.fill(0, (y * 600 + x) * 4, (y * 600 + x) * 4 + 3);
+    expect(snapOutline(level, { v: [[100, 84], [500, 84], [500, 200], [100, 200]], fix: [1, 2, 3] }).warnings).toEqual([]);
+  });
+});
+
+describe('an edge drawn a hair off level', () => {
+  it('is snapped parallel to itself, so it stays off: the tool says so', () => {
+    const image = house();
+    // The top edge's ends are 1 px apart in y over 200 px.
+    const { v, edges, warnings } = snapOutline(image, { v: [[97, 77], [303, 78], [303, 223], [97, 223]] });
+    expect(edges[0].moved).toBeCloseTo(-2.5, 0);
+    expect(v[1][1] - v[0][1]).toBeCloseTo(1, 1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/0\.28 deg off level.*1\.0 px in y over 206 px.*same y.*"tilt": true/);
+  });
+
+  it('says nothing for a level or plumb edge, a diagonal, or a scan tilted on purpose', () => {
+    const image = house();
+    expect(snapOutline(image, { v: [[97, 77], [303, 77], [303, 223], [97, 223]] }).warnings).toEqual([]);
+    expect(snapOutline(image, { v: [[97, 77], [303, 78], [303, 223], [97, 223]], tilt: true }).warnings).toEqual([]);
+    const diamond = snapOutline(image, { v: [[200, 80], [300, 150], [200, 220], [100, 150]] });
+    expect(diamond.warnings).toEqual([]);
+    // A short edge is not judged.
+    expect(snapOutline(image, { v: [[100, 80], [140, 81], [140, 200], [100, 200]] }).warnings).toEqual([]);
+  });
+
+  it('names a vertical edge by its x', () => {
+    const image = house();
+    const { warnings } = snapOutline(image, { v: [[97, 77], [303, 77], [304, 223], [97, 223]] });
+    expect(warnings.some((w) => /off plumb.*differ by 1\.0 px in x/.test(w))).toBe(true);
   });
 });
 

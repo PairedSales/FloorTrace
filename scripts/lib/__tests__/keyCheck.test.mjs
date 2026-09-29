@@ -101,7 +101,7 @@ describe('building and non-GLA outlines overlapping', () => {
     const result = run({ outlines: [HOUSE, { type: 'garage', v: rect(280, 80, 400, 220) }], spec: null });
     const fail = only(result, 'overlap', 'fail');
     expect(fail).toHaveLength(1);
-    expect(fail[0].detail).toMatch(/overlap by 28\d\d px2 \(allowed/);
+    expect(fail[0].detail).toMatch(/overlap by 28\d\d px2 \(allowed \d+, the larger of 2 px x the \d+ px they share and 0\.2% of the smaller outline\)/);
   });
 
   it('only warns of unfinished space over scored space, and of two building outlines on each other', () => {
