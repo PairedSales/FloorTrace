@@ -37,6 +37,7 @@ const shortcuts = [
   { keys: `${mod} + Y`, description: 'Redo' },
   { keys: 'Mouse Back / Forward', description: 'Undo / Redo' },
   { keys: 'Scroll Wheel', description: 'Zoom in / out' },
+  { keys: 'Ctrl + Scroll Wheel', description: 'Larger / smaller labels and vertices' },
   { keys: 'Click + Drag', description: 'Pan canvas' },
 ];
 

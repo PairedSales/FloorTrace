@@ -12,6 +12,7 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
+import useWorkspaceStore from '../store/workspaceStore';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
 import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
 import { useCornerEraser } from '../hooks/useEraserTool';
@@ -108,6 +109,7 @@ const CanvasStage = React.memo(({
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
   const focusedWarning = useAppStore((s) => s.focusedWarning);
   const errorAnchor = useAppStore((s) => s.errorAnchor);
+  const annotationSize = useWorkspaceStore((s) => s.annotationSize);
 
   // Shared refs to break mutual dependencies between hooks
   const cameraRef = useRef(null);
@@ -531,6 +533,12 @@ const CanvasStage = React.memo(({
     };
   }, [camera.imageObj, canvasRotation]);
 
+  // Every layer sizes its labels, handles and strokes as `N / scale` to hold
+  // them at N screen pixels. Handing the layers a scale divided by the user's
+  // annotation size (Ctrl+wheel) grows or shrinks all of them together without
+  // each layer knowing about it. The tool cursors below keep `camera.scale`.
+  const overlayScale = camera.scale / annotationSize;
+
   return (
     <>
       {camera.imageObj && (
@@ -572,7 +580,7 @@ const CanvasStage = React.memo(({
           <Layer ref={contentLayerRef} {...contentTransform}>
             <RoomOverlayLayer
               roomOverlay={router.activeRoomOverlay}
-              scale={camera.scale}
+              scale={overlayScale}
               onRoomMouseDown={router.handleRoomMouseDown}
               onRoomCornerMouseDown={router.handleRoomCornerMouseDown}
             />
@@ -580,7 +588,7 @@ const CanvasStage = React.memo(({
             <PerimeterLayer
               perimeterTraces={perimeterTraces}
               activeTraceId={activeTraceId}
-              scale={camera.scale}
+              scale={overlayScale}
               showSideLengths={showSideLengths}
               feetPerPixel={activeFeetPerPixel}
               detectedDimensions={detectedDimensions}
@@ -599,12 +607,12 @@ const CanvasStage = React.memo(({
               onHoleSelect={router.setSelectedHole}
             />
 
-            <WarningHighlightLayer anchor={warningAnchor} scale={camera.scale} />
+            <WarningHighlightLayer anchor={warningAnchor} scale={overlayScale} />
 
             <DimensionOverlay
               mode={mode}
               detectedDimensions={detectedDimensions}
-              scale={camera.scale}
+              scale={overlayScale}
               unit={unit}
               stageRef={stageRef}
               onDimensionSelect={onDimensionSelect}
@@ -617,7 +625,7 @@ const CanvasStage = React.memo(({
               currentMousePos={router.currentMousePos}
               lineToolActive={lineToolActive}
               drawAreaActive={drawAreaActive}
-              scale={camera.scale}
+              scale={overlayScale}
               isPreviewInvalid={perimeter.isPreviewInvalid}
             />
 
@@ -632,7 +640,7 @@ const CanvasStage = React.memo(({
               measurementLines={measurementLines}
               currentMeasurementLine={router.activeMeasurementLine}
               lineToolActive={lineToolActive}
-              scale={camera.scale}
+              scale={overlayScale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
               unitStyle={unitStyle}
@@ -647,7 +655,7 @@ const CanvasStage = React.memo(({
               currentScaleLine={router.activeScaleLine}
               scaleToolActive={scaleToolActive}
               calibrated={calibrated}
-              scale={camera.scale}
+              scale={overlayScale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
               unitStyle={unitStyle}
@@ -660,7 +668,7 @@ const CanvasStage = React.memo(({
               currentCustomShape={currentCustomShape}
               currentMousePos={router.currentMousePos}
               drawAreaActive={drawAreaActive}
-              scale={camera.scale}
+              scale={overlayScale}
               feetPerPixel={activeFeetPerPixel}
               unit={unit}
               selectedCustomShapeIndex={shape.selectedCustomShapeIndex}
@@ -675,7 +683,7 @@ const CanvasStage = React.memo(({
               <AngleOverlay
                 angleToolState={angleToolState}
                 onAngleToolStateChange={onAngleToolStateChange}
-                scale={camera.scale}
+                scale={overlayScale}
                 canvasRotation={canvasRotation}
                 perimeterTraces={perimeterTraces}
                 customShapes={customShapes}
