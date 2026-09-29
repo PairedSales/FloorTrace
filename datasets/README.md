@@ -284,6 +284,146 @@ it, and a side over 4000 px is scaled to fit, as the app's loader scales it.
 The draft records its `source`: the image, the crop and the size they came
 out, which is the size its key will be drawn on.
 
+### Sourcing plans (`realSource`)
+
+```
+node scripts/realSource.mjs COMMAND ...       # --help prints the manual
+```
+
+Finds the pages a set grows from, on archive.org only: house-plan books (vintage
+plans) and Wayback Machine captures of house-plan and builder sites (2020 to
+2022). A sourcer looks through a book with `meta`, `contact` and `grid`, drafts
+each plan with `realDrafts.mjs` from the page's URL, and records it with `log`.
+Every command that writes a file prints its absolute path.
+
+| Command | What it does |
+|---|---|
+| `search QUERY [--rows N] [--year FROM-TO] [--page N] [--sort "downloads desc"] [--raw]` | archive.org advanced search over texts. Plain words must all be in the title or subject (`house plans` is searched as `title:(house AND plans) OR subject:(house AND plans)`: typed as is, archive.org matches any word anywhere and the first hits are memos that mention a house). Lucene syntax (a quote, `field:`, parentheses, `AND`/`OR`/`NOT`) and `--raw` are sent as typed. Prints the query sent, then identifier, year, leaf count (blank where the search lacks it; `meta` counts), title, creator, and `[borrow-only]`. A query archive.org cannot parse (`title:(`) is answered with HTTP 200 and `{"error": ...}`: the command fails with that message and caches nothing, so it is never read as "no results". |
+| `meta ID` | Title, year, publisher, **leaf count**, collections, and whether **anyone can view the pages**: the `access-restricted-item` flag, the lending collections, and a test of one page image about 40% into the book (it says which leaf, the URL and what came back, and keeps the page). Prints the page URL pattern `https://archive.org/download/ID/page/n<leaf>`. **Exits 1 if the pages are not viewable**, with the reasons; a borrow-only item answers a page with 403. |
+| `leaf ID N [--ext jpg]` | Downloads leaf N (or takes it from the cache): prints its path, its pixel size (a full-resolution page is about 4,000 by 6,000) and the source URL to record. Leaves are numbered from 0. **A leaf past the end of a book is not an error to archive.org**: it answers `page/n<k>` for any k with HTTP 200 and the last page's image. So when the book's leaf count is in the cache (`meta ID` puts it there), `leaf`, `contact`, `grid ID:LEAF` and `screen --leaves` refuse or skip a leaf at or past it and fetch and cache nothing (`contact` skips those leaves with a `WARNING` and draws the rest); with no cached count they say so in a note, and `meta ID` fixes that. |
+| `contact ID FROM TO [--step S] [--cols C] [--rows R] [--tag T]` | A **contact sheet** PNG of leaves FROM to TO (every S-th), each shrunk to a cell and labelled with its leaf number: 12 to a sheet by default (4 across, 3 down, about 1,600 px each way), more sheets when more leaves are asked for, at most 96 leaves a call. It is how a plan page is found fast. A leaf that cannot be fetched is marked in its cell. Uses the cache, so a second call costs no requests. |
+| `grid IMAGE\|ID:LEAF [--crop X0,Y0,X1,Y1] [--grid STEP] [--tag T]` | The key tool's `view` (grid labelled in the page's own pixels on all four edges), for choosing a crop from a page or a cached leaf (`ID:LEAF` fetches the leaf if it is not cached). Read crop coordinates from views of 300 to 500 px with a grid of 10 to 25 px, never from a whole page. Prints the PNG's path, then `crop x0,y0→x1,y1  scale N px/px  grid S`. |
+| `screen ID [--samples 5] [--leaves n1,n2,...]` | Runs the app's own scan (`scanImage` of `realDraft.mjs`, the Tesseract path) on pages spread through the book, and prints the labels read per page and per book. |
+| `cdx URL_PREFIX [--from 2020] [--to 2022] [--mime image/] [--status 200] [--collapse urlkey] [--limit N] [--match prefix\|exact\|domain] [--min-length BYTES] [--pattern REGEX]` | Wayback CDX search. Prints each capture's timestamp, mime type, length and original URL, and under it the **original-bytes URL** `https://web.archive.org/web/<timestamp>id_/<original>`, which is what a modern plan records as its source. Defaults are the project's: captures of 2020 to 2022, status 200, images. `--collapse urlkey` keeps one capture per URL. `--pattern` is a regular expression on the original URL, host included. `--min-length` drops small rows (thumbnails); the index cuts at `--limit` before that filter, so the command reads 10 times the limit (`--scan N` changes it) and keeps what passes. |
+| `fetch URL [--name N]` | Downloads any archive.org URL (an `id_` capture URL, a page URL) into the cache; prints its path, mime type and pixel size. A response that is not an image (a login page, an error page, JSON) is refused and nothing is cached. `--name` also keeps a copy as `named/N.<ext>` (never over a different image). |
+| `log plan\|reject\|book ...` | Appends an event to the sourcing log (below). |
+| `report` | Rewrites `sources.md` from the log and prints the counts per book or site and per era, and every cap broken: a book, name stem or `--unit` over 12 plans (with the spellings it was typed as), a site over 60. |
+
+**`screen` is for finding, never for dropping.** The label count may help find
+books that print their room sizes in type. It must never be used to drop a page
+that qualifies: pages the app reads badly are the point (integrity rule 6: the
+dataset is chosen blind to the tracer). The command prints this warning before
+and after its result. It runs one scan at a time on the machine (a lock in the
+cache folder), because a scan that loses a CPU race drops labels silently: never
+run it beside a benchmark or a draft. Tesseract's own messages appear between
+its lines.
+
+**The rules of the road** are enforced by the code, not requested.
+
+- *Only archive.org.* Every fetch, and every redirect it follows, must be to
+  `archive.org` or a subdomain of it (`web.archive.org`, `ia801505.us.archive.org`).
+  Any other host, a URL with credentials or a port, or a redirect off the list is
+  refused with a message, and no request is made.
+- *One request at a time, machine-wide.* A lock file in the cache folder is held
+  for each request, so two agents running the tool at once cannot fire two
+  requests together. It waits 1,000 ms after the last request to
+  `web.archive.org` and 300 ms after one elsewhere. A 429, a 5xx, a timeout or a
+  body cut short backs off (`Retry-After` honoured, otherwise 2 s and doubling to
+  a minute); the wait is recorded beside the lock, so every process keeps it. After
+  four tries, or when the server asks for more than two minutes, the command fails
+  with a message. A lock whose process has died, or that is over five minutes old,
+  is taken over; a normal exit or a signal releases it. A process waiting for the
+  lock sleeps between looks (it never spins), and fails with a message after about
+  six minutes, or after 30 seconds of being unable to create the lock file or move
+  a stale one aside (Google Drive or an antivirus holding it: the cache folder is
+  on Drive). A trailing dot on the host (`web.archive.org.`) is the same host, with
+  the same gap and the same cache entry. `realDrafts.mjs` (and
+  `realKeys.mjs apply`) fetch an archive.org URL through the same client, so a
+  draft neither fires beside another request nor downloads a page `leaf` already
+  holds; a URL on any other host is fetched as it always was.
+- *Nothing is fetched twice.* Pages are cached under `datasets/archive-cache/`
+  of the main checkout, whatever worktree runs the tool (git ignores it):
+  `items/<id>/n<leaf>.jpg` for a page (`page/n12` and `page/n12.jpg` are one
+  entry), `urls/<hash>.<ext>` for any other URL, `named/`, and `api/` for search,
+  metadata and CDX answers, kept a day (`--refresh` asks again). An entry counts
+  only if its file is non-empty and starts with an image's magic bytes, so an HTML
+  error page is never cached as an image, and one found there is fetched again.
+  A process that waited for the lock looks in the cache again before it asks, so
+  two agents wanting one page at once download it once.
+- *What it writes.* The cache, `datasets/zz-scratch/views/<TAG>/` of the checkout
+  (`contact` and `grid`; use your own tag), and the set folder's `orchestration/`
+  (`log`, `report`). Writes retry while Google Drive holds a file. It never
+  deletes anything.
+
+`FLOORTRACE_ARCHIVE_CACHE` and `FLOORTRACE_REAL_DIR` point the cache and the set
+folder somewhere else (a scratch run of `log`). `FLOORTRACE_SOURCE_GAP_WAYBACK_MS`
+and `FLOORTRACE_SOURCE_GAP_MS` set the gaps; `FLOORTRACE_SOURCE_TRIES`,
+`_TIMEOUT_MS`, `_BACKOFF_MS`, `_BACKOFF_MAX_MS` and `_MAX_WAIT_MS` the retries;
+`FLOORTRACE_SOURCE_LOCK_WAIT_MS` and `_LOCK_FAULT_MS` how long a process waits for the lock;
+`FLOORTRACE_SOURCE_TRACE=1` prints when each request began and ended, to see that
+two processes never overlap.
+
+**The log.** `log` appends one JSON object per line to
+`datasets/real/orchestration/sources.jsonl` under a lock (sourcers log at once)
+and regenerates `sources.md` beside it: plans by book or site with their leaf or
+URL, crop, size, labels and builder line, then the rejected pages and their
+reasons, then totals. The three events:
+
+```
+node scripts/realSource.mjs log plan --name NAME --book BOOK --era vintage|2020-2022 --year YYYY --url URL \
+  --crop X,Y,W,H --line "<the builder line realDrafts printed>" [--publisher P] [--leaf L] [--size W,H] [--decade D] [--tag T] \
+  [--unit CODE] [--site NAME] [--replace] [--no-verify]
+node scripts/realSource.mjs log reject --book BOOK (--leaf L | --url URL) --reason REASON [--tag T]
+node scripts/realSource.mjs log book --book BOOK [--id ID] [--publisher P] [--year Y] [--leaves N] [--note "..."]
+```
+
+- A `plan` line is `{event, at, name, book, publisher, era, year, decade, leaf,
+  url, crop: [x,y,w,h], size: [w,h], unit, site, labels, scale, cutOff, line, tag}`; labels,
+  cut-off regions and scale are read from the builder line. It is refused
+  unless: the name is `<book><yy>-n<leaf>[a|b]` (vintage) or `<site><yy>-<plan id>`
+  (modern), with `yy` the year's and the leaf the `--leaf`; era and year agree
+  (a modern year is 2020 to 2022, and `--url` is the capture's
+  `https://web.archive.org/web/<timestamp>id_/...` in that year); `--crop` is four
+  whole numbers; `--url` is on archive.org; and the name is new. `--replace` logs
+  a plan again and marks the old line `superseded` (it stays in the file). When
+  the plan is in the set folder, its recorded source (URL, crop, size) must match
+  the log (`--no-verify` skips that); `--size` defaults to what the plan records.
+  A plan under about 1,000 px across, cut-off regions, no labels or no scale
+  print a `WARNING` and are still logged.
+- **One book, one spelling.** The 12-plan cap is only as good as the count, and
+  many sourcers log at once. So `--book` must look like the name's stem
+  (`pacific25` for "Pacific 1925": it holds the stem's letters, or they are its
+  initials) or name a `log book` entry (log the book first when the stem is an
+  abbreviation, `hpn21` for "houseplans.net"); and a stem already logged under one
+  spelling is refused under another. A vintage `--leaf` at or past the book's leaf
+  count (the cached metadata, else the latest `log book --leaves` for that item or
+  book) is refused: archive.org answers such a leaf with the last page, so the entry
+  would name a page that is not there.
+- **The caps.** At most 12 plans from one *unit* and no site above 60. The unit is
+  the book (the exact `--book` text), the name's stem, or `--unit`: the designer
+  code of a plan on an aggregator site such as houseplans.net (its designers draw
+  in different styles), scoped to its site, so 12 plans from designer 940 and 12
+  from designer 110 of one site are fine. A plan with a `--unit` does not count
+  toward its `--book`'s 12. `--site` (default: the book) groups a site's plans for
+  the cap of 60. `log plan` prints a `WARNING` when a plan takes its book, unit or
+  site over a cap (the lock makes the count exact, whoever else is logging), and
+  `report` prints every violation.
+- A `reject` needs one reason from a closed list: `3d`, `elevation`, `site-plan`,
+  `too-small`, `hand-lettered`, `not-us-home`, `duplicate-house`, `not-a-plan`, or
+  `other:<text>`. **How well the app traces a page is not on the list**, and an
+  `other:` text about the tracer, the scan or the labels is refused: a page
+  qualifies before it is drafted, never by how the app handles it (integrity rule
+  6). A `book` line names a book or site looked at, for the report's headings.
+- `report` lists every cap broken: a book, a name stem or a `--unit` over 12
+  plans (with the spellings it was typed as when there are several), a site over
+  60.
+
+**Exit status.** 0 on success; 1 for a well formed request that fails (the network,
+a refused URL, a book whose pages are not viewable, a log entry the validators
+refuse), with one line saying why; 2 for a command line that cannot be read: an
+unknown command or option, a missing argument, or a value of the wrong form
+(`cdx --from soon`, `--match banana`, `grid --crop 1,2,3`, a bad `--tag`).
+
 ### Drawing and checking keys (`realKeyTool`)
 
 ```
