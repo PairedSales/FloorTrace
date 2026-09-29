@@ -24,7 +24,7 @@
 // drafted, never by how the app handles it (the orchestrator's integrity rule 6).
 import fs from 'fs';
 import path from 'path';
-import { writeFileRetry, planFile, realDir } from './keyFiles.mjs';
+import { writeFileAtomic, planFile, realDir } from './keyFiles.mjs';
 import { checkUrl, acquireLock, realClock } from './sourceNet.mjs';
 import { parseWaybackUrl } from './sourceArchive.mjs';
 import { MAX_IMAGE_DIMENSION, MIN_TRACEABLE_DIMENSION } from '../../src/utils/imageLoader.js';
@@ -580,7 +580,7 @@ export const summaryLines = (events) => {
 const lockOptions = (clock) => ({ clock, staleMs: 60000, pollMs: 100 });
 
 const writeReport = async (files, events, clock) => {
-  await writeFileRetry(files.md, renderReport(events, { at: nowIso(clock) }));
+  await writeFileAtomic(files.md, renderReport(events, { at: nowIso(clock) }));
 };
 
 /**
@@ -618,7 +618,7 @@ export const logEvent = async (kind, input, {
         return JSON.stringify({ ...clean, superseded: event.at });
       });
       lines.push(JSON.stringify(event));
-      await writeFileRetry(files.jsonl, `${lines.join('\n')}\n`);
+      await writeFileAtomic(files.jsonl, `${lines.join('\n')}\n`);
     } else {
       await appendRetry(files.jsonl, `${JSON.stringify(event)}\n`, { clock });
     }

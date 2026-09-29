@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { renderView } from './keyView.mjs';
-import { writeFileRetry } from './keyFiles.mjs';
+import { writeFileAtomic } from './keyFiles.mjs';
 import {
   HttpError, acquireLock, createNet, realClock, sniffImage,
 } from './sourceNet.mjs';
@@ -321,7 +321,7 @@ export const contact = async (argv, ctx) => {
   for (const [i, sheet] of sheets.entries()) {
     const name = `contact-${id}-${from}-${to}${step > 1 ? `-s${step}` : ''}${sheets.length > 1 ? `-p${i + 1}` : ''}.png`;
     const out = path.join(viewsDir(ctx, tag), name);
-    await writeFileRetry(out, sheet.png);
+    await writeFileAtomic(out, sheet.png);
     paths.push(out);
     ctx.out(out);
     ctx.out(`leaves ${sheet.leaves.map((n) => `n${n}`).join(' ')}${sheet.failed.length ? `   (could not fetch: ${sheet.failed.map((n) => `n${n}`).join(' ')})` : ''}`);
@@ -372,7 +372,7 @@ export const grid = async (argv, ctx) => {
   if (crop) parts.push(`${Math.round(x0)}_${Math.round(y0)}_${Math.round(x1)}_${Math.round(y1)}`);
   if (step !== undefined) parts.push(`g${step}`);
   const out = path.join(viewsDir(ctx, tag), `${parts.join('-')}.png`);
-  await writeFileRetry(out, png);
+  await writeFileAtomic(out, png);
   ctx.out(out);
   ctx.out(summary.line);
   if (unknownIn) ctx.out(unknownCount(unknownIn));
@@ -518,7 +518,7 @@ export const fetchCommand = async (argv, ctx) => {
     const bytes = fs.readFileSync(got.file);
     if (fs.existsSync(named)) {
       if (!fs.readFileSync(named).equals(bytes)) throw new Error(`${named} already holds a different image: pick another --name`);
-    } else await writeFileRetry(named, bytes);
+    } else await writeFileAtomic(named, bytes);
   }
   ctx.out(got.file);
   if (named) ctx.out(named);

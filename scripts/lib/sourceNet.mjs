@@ -27,7 +27,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { DATASETS_DIR } from './cubicasa.mjs';
-import { writeFileRetry } from './keyFiles.mjs';
+import { writeFileAtomic } from './keyFiles.mjs';
 
 // ---- where things live -----------------------------------------------------
 
@@ -513,7 +513,7 @@ export const createNet = ({
           back.delayMs = back.asked === null || back.asked === undefined ? Math.min(cfg.maxBackoffMs, own) : back.asked;
           state.notBefore[cls] = end + Math.min(back.delayMs, cfg.maxWaitMs);
         }
-        await writeFileRetry(stateFile, JSON.stringify(state));
+        await writeFileAtomic(stateFile, JSON.stringify(state));
         return { res: response, retry: back };
       });
       if (hit) return { hit };
@@ -567,8 +567,8 @@ export const createNet = ({
       throw new Error(`${res.url} answered 200 ${res.contentType || 'with no content type'} but ${describeBody(res.bytes)}, not an image; nothing was cached`);
     }
     const file = `${stem}.${EXT_OF_MIME[mime]}`;
-    await writeFileRetry(file, res.bytes);
-    await writeFileRetry(`${stem}.json`, `${JSON.stringify({
+    await writeFileAtomic(file, res.bytes);
+    await writeFileAtomic(`${stem}.json`, `${JSON.stringify({
       url: url.href, finalUrl: res.url, mime, size: res.bytes.length, fetchedAt: new Date(clock.now()).toISOString(),
     }, null, 1)}\n`);
     return { file, mime, size: res.bytes.length, cached: false, url: url.href };
@@ -613,7 +613,7 @@ export const createNet = ({
     } catch (error) {
       throw new Error(`${res.url} answered 200 but ${error.message} (${describeBody(res.bytes)}); nothing was cached`);
     }
-    await writeFileRetry(apiFile(url), JSON.stringify({ url: url.href, at: clock.now(), text }));
+    await writeFileAtomic(apiFile(url), JSON.stringify({ url: url.href, at: clock.now(), text }));
     return { text, cached: false };
   };
 
