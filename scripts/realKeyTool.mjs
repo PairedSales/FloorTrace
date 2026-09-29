@@ -24,7 +24,7 @@
  *       overwrite each other). The grid is in IMAGE PIXELS, labelled on all four
  *       edges (a crop of 300-500 px reads well with --grid 10 to 25; the
  *       default grid is chosen from the zoom); the legend says what each line
- *       is. Prints the PNG's path, then `crop x0,y0->x1,y1  scale N px/px  grid S`.
+ *       is. Prints the PNG's path, then `crop x0,y0→x1,y1  scale N.NN px/px  grid S`.
  *         IMAGE  an image file (the blind packet's image.png, a cached page):
  *                the ink only, plus any --poly.
  *         NAME   a plan in the set: the bare image only, by default. This is
@@ -85,15 +85,22 @@
  *       inner face (a garage or porch edge along the house wall), `R` is the
  *       search reach in px, `tilt` follows a scan-tilted wall, `bridge` (px)
  *       is the gap a hatched or double-line wall may have without ending its
- *       band (default 2.5). A vertex written ["ref", k, i] is vertex i of outline
+ *       band (default 2.5; 0 reads the stroke nearest your line alone). A vertex written ["ref", k, i] is vertex i of outline
  *       k after it snapped, so two outlines share a boundary exactly.
  *       `waive` excuses a label from the label check with a reason the reviewer
  *       reads; `stated` gives areas the page prints, for the stated-area check.
  *       Flags: no-band, reaches-end, far (moved over 4 px), ink-beyond (another
- *       band within 10 px past the face used: hatched or double-line wall, or a
- *       dimension line), unstable (the face moves over 1 px more when read again
- *       from where the edge landed). Look at every flagged edge at full zoom.
- *       The flags are kept in the snapped file for `check`.
+ *       band within 10 px past the face used: hatched or double-line wall, a
+ *       dimension line, or a window frame or sill drawn proud of the wall that a
+ *       bridge was refused for covering too little of the edge), bridged (the face
+ *       is the end of a stroke joined across a gap, not of the stroke nearest your
+ *       line: it says by how many px), partial (the stroke the face is read from
+ *       covers under 60% as much of the edge as the strongest stroke on it: a
+ *       frame you drew on), unstable (the face moves over 1 px more when read
+ *       again from where the edge landed). A gap is bridged only between strokes
+ *       that are each at least 60% as continuous as the wall, so a window frame
+ *       is never joined to the wall silently. Look at every flagged edge at full
+ *       zoom. The flags are kept in the snapped file for `check`.
  *   compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png --tag T]
  *                [--image IMAGE|NAME] [--crop X0,Y0,X1,Y1]
  *       NAME compares keys-wip/NAME.a.snapped.json with NAME.b.snapped.json and
@@ -117,10 +124,11 @@
  *       box's centre; a spec `waive` reports it waived, a label in no outline
  *       warns); every edge not in `fix` within 2 px of a wall face on a fresh
  *       snap, and a warning for each such edge the first snap flagged far,
- *       reaches-end, ink-beyond or unstable (a snapped key lies on its band, so
- *       only those flags show that a thin line beside the wall captured an
- *       edge); stated areas within 5% of the key at the plan's scale unless
- *       `explained`. The labels are the blind packet's when there is one (the ids
+ *       reaches-end, ink-beyond, bridged, partial or unstable (a snapped key lies
+ *       on its band, so only those flags show that a thin line beside the wall
+ *       captured an edge); the page the key was snapped on is the plan's size (a
+ *       plan drafted again is another page: a fail); stated areas within 5% of
+ *       the key at the plan's scale unless `explained`. The labels are the blind packet's when there is one (the ids
  *       and kinds the annotators saw), else the plan's scan; a packet that no
  *       longer matches the scan is a warning. Prints a table, the areas in sq ft,
  *       then CHECK PASS or CHECK FAIL (n); exits non-zero on a fail.
@@ -139,8 +147,10 @@
  *       this very spec (the notes it records). Writes
  *       the key into the plan with the record {by, verifiedBy, checked: {by: "AI
  *       review", at, via: "final review"}, at, notes[, disputeId]}, and nothing
- *       else. A plan whose record is already checked is refused unless --dispute.
- *       Run `node scripts/realKeys.mjs export` afterwards.
+ *       else. A plan whose record is already checked is refused unless --dispute,
+ *       and a --dispute whose final key is the key the plan already holds is
+ *       refused too: a dispute id marks a change, so a dispute the key survived is
+ *       logged, not applied. Run `node scripts/realKeys.mjs export` afterwards.
  *   sheet NAME... --out FILE [--per N]
  *       Review sheets: each plan whole with its stored key, its record and its
  *       notes, N plans to an image (default 4). Shows the stored key, so it is

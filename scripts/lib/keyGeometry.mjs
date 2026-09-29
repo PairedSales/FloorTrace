@@ -38,16 +38,6 @@ export const bboxOf = (rings) => {
   return [x0, y0, x1, y1];
 };
 
-export const ringLength = (v) => {
-  let len = 0;
-  for (let i = 0; i < v.length; i += 1) {
-    const [x0, y0] = v[i];
-    const [x1, y1] = v[(i + 1) % v.length];
-    len += Math.hypot(x1 - x0, y1 - y0);
-  }
-  return len;
-};
-
 // Signed distance of p from the line through a and b (positive on the left of
 // a→b in y-down coordinates does not matter here: only near-zero does).
 const lineDistance = (a, b, p) => {
@@ -276,8 +266,6 @@ export const areasOf = (ringsA, ringsB) => {
   const union = a + b - inter;
   return { a, b, inter, union, iou: union > 0 ? inter / union : 1 };
 };
-
-export const unionArea = (rings) => areasOf(rings, []).a;
 
 /**
  * The length of `ringsA`'s boundary that lies within `tolerance` px of

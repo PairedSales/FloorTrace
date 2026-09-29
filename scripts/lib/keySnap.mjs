@@ -12,9 +12,20 @@
 // A band is a run of offsets where at least 0.45 of the samples along the edge
 // are dark, so a window sill drawn proud of the wall (a short stretch of the
 // edge) is not part of it. The run nearest the drawn line is the one snapped
-// to; a gap of `bridge` px (default 2.5) or less does not end a band, and
-// ink close beyond the face used flags the edge `ink-beyond` (a hatched or
-// double-line wall, or a dimension line): look at it at full zoom.
+// to. A gap of `bridge` px (default 2.5) or less does not end a band, provided
+// the strokes on both sides are as continuous along the edge as the wall
+// (their best dark fraction is at least 0.6 of the edge's peak): a window frame
+// drawn proud of the wall covers a part of the edge, and joined to the wall's
+// line it would carry the face out to it, where nothing would show it. What is
+// still joined, and what is refused, is said in flags, never left silent:
+//   ink-beyond  a stroke lies close beyond the face used, as continuous as it
+//               (a hatched or double-line wall, a dimension line) or one that
+//               was refused a join for being less so (a frame or sill);
+//   bridged     the face is the end of a stroke joined across a gap, other than
+//               the stroke nearest the drawn line;
+//   partial     the stroke the face is read from is under 0.6 of the peak: a
+//               frame the line was drawn on, beside a stronger wall.
+// Look at every flagged edge at full zoom.
 
 const EPS = 1e-9;
 const STEP = 0.25;
@@ -25,6 +36,8 @@ const MIN_FRACTION = 0.15;
 // A second band this close beyond the face used is worth a look, if its typical
 // dark fraction is this share of the face band's: a stroke as long as the wall.
 const LOOK_BEYOND = 10;
+// A stroke this share of the edge's peak dark fraction is continuous: as long
+// along the edge as the wall itself, not a frame or sill covering part of it.
 const CONTINUOUS_SHARE = 0.6;
 export const DEFAULT_R = 14;
 export const DEFAULT_BRIDGE = 2.5;
@@ -33,6 +46,9 @@ export const FAR_PX = 4;
 // An edge whose face reads this far from where it was just put, when read again
 // from there, is flagged 'unstable': the answer depends on where it was drawn.
 export const UNSTABLE_PX = 1;
+// A bridge across a gap that carried the face this far from the stroke nearest
+// the drawn line is flagged 'bridged'.
+export const BRIDGED_PX = 0.5;
 
 // The page's ink threshold: Otsu's split of a 256-bin luma histogram, taken as
 // the midpoint of the two classes' means. Otsu's own index is the last bin of
@@ -108,8 +124,8 @@ const windingOf = (v) => {
 // The band along one stretch of an edge: offsets (along the outward normal)
 // from -R to +R every 0.25 px, the fraction of samples darker than `dark` at
 // each, and the run of offsets at least max(0.15, 0.45 x peak) nearest the
-// drawn line, with runs less than `bridge` px apart taken as one. `t0`..`t1`
-// bound the stretch along the edge.
+// drawn line, with runs less than `bridge` px apart taken as one when both are
+// continuous (see the header). `t0`..`t1` bound the stretch along the edge.
 const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
   const steps = Math.round((2 * R) / STEP);
   const frac = new Float64Array(steps + 1);
@@ -131,7 +147,10 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
   }
   const threshold = Math.max(MIN_FRACTION, BAND_SHARE * peak);
   if (peak < MIN_FRACTION) return { found: false, peak };
-  let runs = [];
+  // A stroke's continuity is its best dark fraction (`top`): the share of the
+  // edge it covers at its densest offset. The edge's peak is the yardstick of
+  // "as continuous as the wall".
+  const strokes = [];
   let k = 0;
   while (k <= steps) {
     if (frac[k] < threshold) {
@@ -139,15 +158,30 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
       continue;
     }
     let e = k;
-    while (e + 1 <= steps && frac[e + 1] >= threshold) e += 1;
-    runs.push([k, e]);
+    let top = frac[k];
+    while (e + 1 <= steps && frac[e + 1] >= threshold) {
+      e += 1;
+      top = Math.max(top, frac[e]);
+    }
+    strokes.push({ s: k, e, top });
     k = e + 1;
   }
-  // Two strokes with a hairline of paper between them are one band.
-  runs = runs.reduce((merged, run) => {
+  const continuous = (st) => st.top >= CONTINUOUS_SHARE * peak;
+  // Two strokes with a hairline of paper between them are one band (a hatched
+  // strip and the solid band inside it, a double line), but only if both are as
+  // continuous as the wall: a window frame drawn proud of it covers a part of
+  // the edge, and joined to the wall's line it would carry the face out to it.
+  const runs = strokes.reduce((merged, st) => {
     const last = merged[merged.length - 1];
-    if (last && (run[0] - last[1] - 1) * STEP <= bridge) last[1] = run[1];
-    else merged.push([...run]);
+    const gap = last ? (st.s - last.e - 1) * STEP : Infinity;
+    if (last && gap <= bridge && continuous(st) && continuous(last.members[last.members.length - 1])) {
+      last.e = st.e;
+      last.members.push(st);
+    } else {
+      // A stroke close enough to join but not continuous enough stays apart,
+      // and is said to lie beyond the band it was refused.
+      merged.push({ s: st.s, e: st.e, members: [st], refused: gap <= bridge });
+    }
     return merged;
   }, []);
   const offsetOf = (idx) => -R + idx * STEP;
@@ -160,9 +194,9 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
     return offsetOf(inside) + (offsetOf(outside) - offsetOf(inside)) * u;
   };
   const centre = R / STEP;
-  const gap = ([s, e]) => (s <= centre && e >= centre ? 0 : Math.min(Math.abs(offsetOf(s)), Math.abs(offsetOf(e))));
-  const at = runs.reduce((best, run, idx) => (gap(run) < gap(runs[best]) ? idx : best), 0);
-  const [s, e] = runs[at];
+  const gapTo = ({ s, e }) => (s <= centre && e >= centre ? 0 : Math.min(Math.abs(offsetOf(s)), Math.abs(offsetOf(e))));
+  const at = runs.reduce((best, run, idx) => (gapTo(run) < gapTo(runs[best]) ? idx : best), 0);
+  const { s, e, members } = runs[at];
   const next = runs[at + 1];
   const prev = runs[at - 1];
   // Ink past the face counts only when it is as continuous along the edge as
@@ -170,13 +204,18 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
   // window sills and frames drawn proud of the wall cover a part of it.
   const level = (run) => {
     const values = [];
-    for (let q = run[0]; q <= run[1]; q += 1) values.push(frac[q]);
+    for (let q = run.s; q <= run.e; q += 1) values.push(frac[q]);
     values.sort((x, y) => x - y);
     return values[Math.floor(values.length / 2)];
   };
   const strong = (run) => level(run) >= CONTINUOUS_SHARE * level(runs[at]);
-  const beyondOuter = next && strong(next) ? (next[0] - e - 1) * STEP : null;
-  const beyondInner = prev && strong(prev) ? (s - prev[1] - 1) * STEP : null;
+  const beyondOuter = next && (strong(next) || next.refused) ? (next.s - e - 1) * STEP : null;
+  const beyondInner = prev && (strong(prev) || runs[at].refused) ? (s - prev.e - 1) * STEP : null;
+  // Where the face would lie if only the stroke nearest the drawn line were
+  // read: the distance a bridge carried it, at each end of the band.
+  const own = members.reduce((best, m) => (gapTo(m) < gapTo(best) ? m : best), members[0]);
+  const outerMember = members[members.length - 1];
+  const innerMember = members[0];
   return {
     found: true,
     peak,
@@ -187,6 +226,14 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
     // How far past the face a second band begins, when it is close.
     beyondOuter: beyondOuter !== null && beyondOuter <= LOOK_BEYOND ? beyondOuter : null,
     beyondInner: beyondInner !== null && beyondInner <= LOOK_BEYOND ? beyondInner : null,
+    // How far a bridge across a gap moved the face from the stroke nearest the
+    // drawn line (0 when the band is one stroke, or that stroke is its end).
+    bridgedOuter: Math.abs(crossing(outerMember.e, outerMember.e + 1) - crossing(own.e, own.e + 1)),
+    bridgedInner: Math.abs(crossing(innerMember.s, innerMember.s - 1) - crossing(own.s, own.s - 1)),
+    // How continuous the stroke the face is read from is, against the strongest
+    // stroke on the edge.
+    shareOuter: outerMember.top / peak,
+    shareInner: innerMember.top / peak,
   };
 };
 
@@ -235,10 +282,14 @@ const closestOn = (line, pt) => {
  * outward normal (positive = outward), `flag` the first of `flags`, and a flag
  * is 'no-band', 'reaches-end' (the band runs to the end of the search on the
  * side that decides the face), 'far' (moved more than 4 px), 'ink-beyond'
- * (a stroke along most of the edge within 10 px past the face used) or
- * 'unstable' (read again from where it now lies, the face moves over 1 px more:
- * `residual`). A vertex whose two edges are nearly parallel slides along its
- * next edge and is named in `warnings`.
+ * (a stroke within 10 px past the face used that is as continuous along the edge
+ * as it, or that was refused a join for being less so: `beyond` px),
+ * 'bridged' (the face is the end of a stroke joined across a gap, other than
+ * the one nearest the drawn line: `bridgedBy` px from it), 'partial' (the
+ * stroke the face is read from is under 0.6 of the peak dark fraction: `share`)
+ * or 'unstable' (read again from where it now lies, the face moves over 1 px
+ * more: `residual`). A vertex whose two edges are nearly parallel slides along
+ * its next edge and is named in `warnings`.
  */
 export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVertices = [] } = {}) => {
   const {
@@ -310,6 +361,10 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
     if (Math.abs(moved) > FAR_PX) flags.push('far');
     const beyond = useInner ? whole.beyondInner : whole.beyondOuter;
     if (beyond !== null) flags.push('ink-beyond');
+    const bridgedBy = useInner ? whole.bridgedInner : whole.bridgedOuter;
+    if (bridgedBy > BRIDGED_PX) flags.push('bridged');
+    const share = useInner ? whole.shareInner : whole.shareOuter;
+    if (share < CONTINUOUS_SHARE) flags.push('partial');
     // Read again from where it now lies: a face that moves once more depends on
     // where the edge was drawn, as it does along a run of windows and doors,
     // where the wall is less of the edge than the strokes drawn in it.
@@ -326,6 +381,8 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
       flag: flags[0] ?? null,
       flags,
       ...(beyond !== null ? { beyond } : {}),
+      ...(flags.includes('bridged') ? { bridgedBy } : {}),
+      ...(flags.includes('partial') ? { share } : {}),
       ...(flags.includes('unstable') ? { residual } : {}),
     });
   }

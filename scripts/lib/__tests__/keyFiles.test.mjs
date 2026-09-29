@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  checkName, flattenAlpha, imageOfPlan, imageOfTarget, labelOfTarget, mimeOfFile, packetDir, planImageBytes, readPacketLabels, realDir, writeFileRetry,
+  checkName, flattenAlpha, imageOfPlan, imageOfTarget, labelOfTarget, mimeOfFile, packetDir, planImageBytes, readPacketLabels, realDir, writeFileAtomic,
   writeNumbered,
 } from '../keyFiles.mjs';
 
@@ -33,12 +33,12 @@ const plan = (bytes) => ({
   floors: [{ state: { imageRef: 'img-1' } }],
 });
 
-describe('writeFileRetry', () => {
+describe('writeFileAtomic', () => {
   const busy = () => Object.assign(new Error('busy'), { code: 'EBUSY' });
 
   it('writes a file, making its folder, and leaves no temporary file behind', async () => {
     const file = path.join(dir, 'a', 'b', 'x.json');
-    await writeFileRetry(file, '{"a":1}');
+    await writeFileAtomic(file, '{"a":1}');
     expect(fs.readFileSync(file, 'utf8')).toBe('{"a":1}');
     expect(fs.readdirSync(path.dirname(file))).toEqual(['x.json']);
   });
@@ -46,7 +46,7 @@ describe('writeFileRetry', () => {
   it('replaces a file whole', async () => {
     const file = path.join(dir, 'x.json');
     fs.writeFileSync(file, 'old');
-    await writeFileRetry(file, 'new');
+    await writeFileAtomic(file, 'new');
     expect(fs.readFileSync(file, 'utf8')).toBe('new');
   });
 
@@ -67,7 +67,7 @@ describe('writeFileRetry', () => {
       },
     };
     const file = path.join(dir, 'x.json');
-    await writeFileRetry(file, 'ok', { fsImpl, delayMs: 1 });
+    await writeFileAtomic(file, 'ok', { fsImpl, delayMs: 1 });
     expect(fs.readFileSync(file, 'utf8')).toBe('ok');
     expect(writes).toBe(3);
     expect(renames).toBe(2);
@@ -77,7 +77,7 @@ describe('writeFileRetry', () => {
     const file = path.join(dir, 'x.json');
     fs.writeFileSync(file, 'precious');
     const fsImpl = { ...fs, renameSync: () => { throw busy(); } };
-    await expect(writeFileRetry(file, 'new', { fsImpl, retries: 2, delayMs: 1 })).rejects.toThrow('busy');
+    await expect(writeFileAtomic(file, 'new', { fsImpl, retries: 2, delayMs: 1 })).rejects.toThrow('busy');
     expect(fs.readFileSync(file, 'utf8')).toBe('precious');
     expect(fs.readdirSync(dir)).toEqual(['x.json']);
   });
@@ -85,7 +85,7 @@ describe('writeFileRetry', () => {
   it('does not retry an error that is not Drive holding a file', async () => {
     let writes = 0;
     const fsImpl = { ...fs, writeFileSync: () => { writes += 1; throw Object.assign(new Error('no space'), { code: 'ENOSPC' }); } };
-    await expect(writeFileRetry(path.join(dir, 'x'), 'a', { fsImpl, delayMs: 1 })).rejects.toThrow('no space');
+    await expect(writeFileAtomic(path.join(dir, 'x'), 'a', { fsImpl, delayMs: 1 })).rejects.toThrow('no space');
     expect(writes).toBe(1);
   });
 });

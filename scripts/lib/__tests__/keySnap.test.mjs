@@ -169,6 +169,12 @@ describe('walls that are not one solid band', () => {
     const bridged = snapOutline(image, rough(91, { bridge: 8 }));
     near(bridged.v[0][1], 80);
     expect(bridged.edges[0].flags).not.toContain('ink-beyond');
+    // A face that a bridge carried to another stroke than the one nearest the
+    // drawn line is said to be bridged, and by how far.
+    expect(bridged.edges[0].flags).toContain('bridged');
+    expect(bridged.edges[0].bridgedBy).toBeCloseTo(9, 0);
+    // Drawn on the outer line, the bridge changed nothing: nothing to say.
+    expect(snapOutline(image, rough(79, { bridge: 8 })).edges[0].flags).toEqual([]);
   });
 
   it('reads a double-line wall by its outer line, and its inner line for an `in` edge once bridged', () => {
@@ -187,6 +193,9 @@ describe('walls that are not one solid band', () => {
     expect(between.edges[0].beyond).toBeCloseTo(6, 0);
     const merged = snapOutline(image, rough(86, { bridge: 8 }));
     near(merged.v[0][1], 80);
+    expect(merged.edges[0].flags).toContain('bridged');
+    // Drawn outside the outer line, the merged band's nearest stroke is its end.
+    expect(snapOutline(image, rough(78, { bridge: 8 })).edges[0].flags).toEqual([]);
     const inner = snapOutline(image, rough(84, { bridge: 8, in: [0] }));
     near(inner.v[0][1], 90);
   });
@@ -220,6 +229,112 @@ describe('walls that are not one solid band', () => {
     fillRect(image, 100, 85, 300, 90);
     const { v } = snapOutline(image, rough(84));
     near(v[0][1], 80);
+  });
+});
+
+// Window frames and sills drawn proud of a wall, a few px off its line, along a
+// part of the edge. Joined to the wall by a bridge they would carry the face out
+// to themselves with nothing to show it (besthomes57-n26's first floor, top
+// wall: the frames were 3 px outside the face and two annotators agreed on it).
+describe('window frames drawn within the bridge distance of the wall', () => {
+  // The top edge from (100, y) to (300, y) samples 177 positions along it, so a
+  // frame `w` px long covers w / 177 of it.
+  const rough = (y, extra = {}) => ({
+    v: [[100, y], [300, y], [300, 220], [100, 220]], fix: [1, 2, 3], ...extra,
+  });
+  // A frame 4 px thick, its lower line 2 px above the wall's outer face (y=80).
+  const framed = (w, base = house()) => {
+    fillRect(base, 130, 74, 130 + w, 78);
+    return base;
+  };
+
+  it('does not carry the face out to a frame that covers 47 to 58% of a solid wall, and says the frame is there', () => {
+    for (const w of [84, 88, 103]) {
+      const image = framed(w);
+      for (const y of [79, 81, 84]) {
+        const { v, edges } = snapOutline(image, rough(y));
+        near(v[0][1], 80);
+        expect(edges[0].flags, `w ${w} drawn ${y}`).toContain('ink-beyond');
+        expect(edges[0].flags, `w ${w} drawn ${y}`).not.toContain('bridged');
+        expect(edges[0].flags, `w ${w} drawn ${y}`).not.toContain('far');
+      }
+      // No bridge at all reads the same face.
+      near(snapOutline(image, rough(81, { bridge: 0 })).v[0][1], 80);
+    }
+  });
+
+  it('says so when the edge is drawn on such a frame: the face is the frame\'s, which is a part of the wall only', () => {
+    const { v, edges } = snapOutline(framed(88), rough(76));
+    near(v[0][1], 74);
+    expect(edges[0].flags).toContain('partial');
+    expect(edges[0].share).toBeCloseTo(0.5, 1);
+  });
+
+  it('joins a frame that is as continuous as the wall, and says the face is bridged, and by how far', () => {
+    // 70% of the edge: as long as the wall for the purpose of the profile.
+    const image = framed(124);
+    const bridged = snapOutline(image, rough(81));
+    near(bridged.v[0][1], 74);
+    expect(bridged.edges[0].flags).toContain('bridged');
+    expect(bridged.edges[0].flags).toContain('far');
+    expect(bridged.edges[0].bridgedBy).toBeCloseTo(6, 0);
+    // The annotator who reads the frame as not the wall says bridge 0 and is heard.
+    const apart = snapOutline(image, rough(81, { bridge: 0 }));
+    near(apart.v[0][1], 80);
+    expect(apart.edges[0].flags).not.toContain('bridged');
+  });
+
+  it('keeps a frame out of a hatched wall\'s band too, joined to its solid band with a wide bridge', () => {
+    // Outer line y=80..82, hatching, solid band 89..97 (the hatched wall above),
+    // and a frame 74..78 over 50% of the edge, 2 px off the outer line.
+    const image = blank();
+    fillRect(image, 100, 80, 300, 82);
+    for (let y = 82; y < 89; y += 1) {
+      for (let x = 100; x < 300; x += 1) if ((((x - y) % 12) + 12) % 12 < 2) fillRect(image, x, y, x + 1, y + 1);
+    }
+    fillRect(image, 100, 89, 300, 97);
+    framed(88, image);
+    for (const y of [79, 84, 91]) {
+      const { v, edges } = snapOutline(image, rough(y, { bridge: 8 }));
+      near(v[0][1], 80);
+      expect(edges[0].flags, `drawn ${y}`).toContain('ink-beyond');
+    }
+    // Drawn on the solid band, the bridge carried the face to the outer line.
+    expect(snapOutline(image, rough(91, { bridge: 8 })).edges[0].flags).toContain('bridged');
+  });
+
+  it('reads a wall whose own line is broken by windows, with frames beside it, as the plan does', () => {
+    // The shape of besthomes57-n26's first floor, top wall: a solid band (dark
+    // fraction 1), the wall's line 5 px outside it along 64% of the edge (windows
+    // interrupt it), a bridge of 6 joining the two, and frames 2 px beyond the
+    // line along 50% of the edge. The face is the wall's line, at y=80.
+    const image = blank();
+    fillRect(image, 100, 88, 300, 96);
+    fillRect(image, 100, 80, 225, 83);
+    fillRect(image, 130, 74, 218, 78);
+    for (const y of [81, 84]) {
+      const { v, edges } = snapOutline(image, rough(y, { bridge: 6 }));
+      near(v[0][1], 80);
+      expect(edges[0].flags, `drawn ${y}`).not.toContain('far');
+    }
+    // Drawn on the solid band, the bridge carries the face to the wall's line.
+    const onBand = snapOutline(image, rough(90, { bridge: 6 }));
+    near(onBand.v[0][1], 80);
+    expect(onBand.edges[0].flags).toContain('bridged');
+    // The same at the default bridge, which does not join the line to the band.
+    near(snapOutline(image, rough(81)).v[0][1], 80);
+    // Drawn on a frame it is the frame, and says it is only part of the wall.
+    const onFrame = snapOutline(image, rough(76, { bridge: 6 }));
+    near(onFrame.v[0][1], 74);
+    expect(onFrame.edges[0].flags).toContain('partial');
+  });
+
+  it('leaves a frame beyond the bridge alone, as it leaves window boxes: nothing joins it', () => {
+    const image = house();
+    fillRect(image, 130, 66, 218, 70);
+    const { v, edges } = snapOutline(image, rough(81));
+    near(v[0][1], 80);
+    expect(edges[0].flags).toEqual([]);
   });
 });
 

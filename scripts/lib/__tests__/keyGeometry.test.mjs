@@ -2,8 +2,8 @@
 // against shapes whose areas are worked out by hand.
 import { describe, expect, it } from 'vitest';
 import {
-  areaOf, areasOf, bboxOf, distanceToSegments, pointInRing, ringLength, ringProblem, sampleRing,
-  segmentContact, segmentsOf, sharedBoundaryLength, unionArea,
+  areaOf, areasOf, bboxOf, distanceToSegments, pointInRing, ringProblem, sampleRing,
+  segmentContact, segmentsOf, sharedBoundaryLength,
 } from '../keyGeometry.mjs';
 
 const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
@@ -17,9 +17,8 @@ describe('areas and boxes', () => {
     expect(areaOf([...rect(0, 0, 200, 100)].reverse())).toBe(20000);
   });
 
-  it('finds the box and the perimeter', () => {
+  it('finds the box', () => {
     expect(bboxOf([ell])).toEqual([0, 0, 200, 200]);
-    expect(ringLength(rect(0, 0, 200, 100))).toBe(600);
   });
 });
 
@@ -185,7 +184,7 @@ describe('areas of unions, worked out by hand', () => {
 
   it('counts the union of several outlines once', () => {
     // Two overlapping 100 x 100 squares offset by 50: 100 x 150 in all.
-    expect(unionArea([rect(0, 0, 100, 100), rect(0, 50, 100, 150)])).toBe(15000);
+    expect(areasOf([rect(0, 0, 100, 100), rect(0, 50, 100, 150)], []).a).toBe(15000);
   });
 
   it('a fractional edge is exact', () => {

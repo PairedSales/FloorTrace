@@ -510,7 +510,19 @@ over 4 px. `reaches-end`: the band runs to the end of the search on the side tha
 decides the face. `ink-beyond`: another band within 10 px past the face used that
 is nearly as continuous along the edge as the face band itself, as the second
 stroke of a hatched or double-line wall and a dimension line are (window boxes
-drawn proud of a long wall can do it too: look, and move on). `unstable`:
+drawn proud of a long wall can do it too: look, and move on), or a stroke that was
+refused a join for covering too little of the edge (below). `bridged`: the face
+is the end of a stroke joined across a gap (the `bridge`, default 2.5 px), and not of
+the stroke nearest the line you drew: it says by how many px. `partial`: the stroke
+the face is read from covers under 60% as much of the edge as the strongest stroke
+on it, as a window frame does when the line was drawn on it. A gap is bridged only
+between strokes that are each at least 60% as continuous along the edge as the
+wall (their best dark fraction against the edge's peak): a window frame drawn proud
+of the wall covers a part of the edge, and joined to the wall's line it would carry
+the face out to it with nothing to show it. A frame that covers most of an edge is
+indistinguishable from a wall line by ink alone: that is what `bridged` and the
+probe are for, and `"bridge": 0` on the outline (or `fix` on the edge) is the
+answer when the nearer stroke is the face. `unstable`:
 read again from where it landed, the face moves over 1 px more, as along a run of
 windows and doors where the wall is less of the edge than the strokes drawn in it.
 It also warns of an edge drawn a hair off level or plumb, of a wall whose face
@@ -521,8 +533,8 @@ zoom; probe the ink where the doubt is; `fix` an edge you have read by hand.
 cannot tell the wall from a thin line beside it (a garage door) that captured the
 edge, and only the first snap's flags say so. They are kept in the snapped file
 (`flagged`), and `check` warns of every edge not in `fix` that was flagged `far`,
-`reaches-end`, `ink-beyond` or `unstable`, until the edge is drawn on the face or
-listed in `fix`.
+`reaches-end`, `ink-beyond`, `bridged`, `partial` or `unstable`, until the edge is
+drawn on the face or listed in `fix`.
 
 **Faces.** The face is the band's outer end, never its centre. Where a solid band
 sits inside a hatched one, it is the hatched band's outer line. Window sills and
@@ -554,6 +566,9 @@ pixel.
 - every edge not in `fix` (and not a shared boundary) moves no more than 2 px, and
   finds a band, when snapped again; more than half an outline's edges in `fix` warns;
   an edge the first snap flagged (above) warns;
+- the page the key was snapped on (the snapped file records its size) is the size
+  of the plan's image: a plan drafted again is another page, and a key drawn on the
+  old one is a fail;
 - a stated area, from the spec's `stated` or a sq ft figure a level label carries,
   against the key's area at the plan's scale (`--feet-per-pixel` overrides it): over
   5% apart fails unless the entry says why (`explained`, then a warn). An `of` that
@@ -594,10 +609,11 @@ reviewer may not be one of the key's annotators or its adjudicator. Reviews are
 created exclusively, so two reviewers who run `review` at once get two numbers and
 neither replaces the other. A plan whose record already has `checked`
 is frozen: `apply` refuses it unless `--dispute ID` names the dispute that
-changes it. `apply` leaves the plan otherwise as it was (image, labels,
-calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
-command, which judges outlines against a key by the verdict code `bench:real` uses,
-arrives with the benchmark's shared library.
+changes it, and refuses a dispute whose final key is the key the plan already holds
+(a dispute id marks a change; a dispute the key survived is logged, not applied).
+`apply` leaves the plan otherwise as it was (image, labels, calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
+command, which would judge outlines against a key by the verdict code `bench:real`
+uses (`scripts/lib/realScore.mjs`), is not part of this tool yet: a follow-up adds it.
 
 ### Moving keys without their plans
 

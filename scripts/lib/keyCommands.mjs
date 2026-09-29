@@ -9,7 +9,7 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { applyPlan, keyOf } from './realKeys.mjs';
 import {
   checkName, decodeBytes, imageOfPlan, imageOfTarget, labelOfTarget, packetDir, planFile, planImageBytes,
-  readJson, readPacketLabels, wipDir, wipFile, writeFileRetry, writeJson, writeNumbered,
+  readJson, readPacketLabels, wipDir, wipFile, writeFileAtomic, writeJson, writeNumbered,
 } from './keyFiles.mjs';
 import { compareKeys } from './keyCompare.mjs';
 import { checkKey } from './keyCheck.mjs';
@@ -187,7 +187,7 @@ export const view = async (argv, ctx) => {
   if (opts.grid !== undefined) parts.push(`g${grid}`);
   if (hashInput.length) parts.push(sha256(hashInput.join('\n')).slice(0, 8));
   const out = path.join(viewsDir(ctx, tag), `${parts.join('-')}.png`);
-  await writeFileRetry(out, png);
+  await writeFileAtomic(out, png);
   ctx.out(out);
   ctx.out(summary.line);
   return 0;
@@ -227,7 +227,7 @@ export const blind = async (argv, ctx) => {
     }
   }
   const imageFile = path.join(dir, `image.${packet.image.ext}`);
-  await writeFileRetry(imageFile, packet.image.bytes);
+  await writeFileAtomic(imageFile, packet.image.bytes);
   await writeJson(path.join(dir, 'labels.json'), packet.labels);
   await writeJson(path.join(dir, 'meta.json'), packet.meta);
   const kinds = { room: 0, nonGla: 0, level: 0 };
@@ -369,28 +369,32 @@ export const snap = async (argv, ctx) => {
         'no-band': 'no wall band within reach: fix the edge, or redraw nearer the wall',
         'reaches-end': 'the band runs to the end of the search: look at this edge at full zoom',
         far: 'moved far: check it is the wall you meant',
-        'ink-beyond': `another band ${e.beyond?.toFixed(1)} px beyond the face used (hatched or double-line wall? a dimension line?): look at this edge at full zoom`,
+        'ink-beyond': `another band ${e.beyond?.toFixed(1)} px beyond the face used (hatched or double-line wall? a dimension line? a window frame or sill drawn proud of the wall?): look at this edge at full zoom`,
         unstable: `read again from where it now lies, the face moves ${e.residual?.toFixed(1)} px more (windows or doors along the edge?): look at it at full zoom, probe the ink, and fix it on the wall's face`,
+        bridged: `the face is the end of a stroke joined across a gap, ${e.bridgedBy?.toFixed(1)} px from the stroke nearest your line (a window frame drawn proud of the wall?): probe the ink; if the nearer stroke is the face, draw on it and set "bridge": 0 on the outline, or list the edge in "fix"`,
+        partial: `the stroke the face is read from is only ${Math.round((e.share ?? 0) * 100)}% as continuous along the edge as the strongest stroke on it (a window frame or sill drawn proud of the wall?): probe the ink, and fix the edge on the wall's face`,
       };
       if (e.flags.length) {
-        // `beyond` and `residual` are what `check` needs to word a flag it reads back.
+        // What `check` needs to word a flag it reads back.
         flagged.push({
           outline: k,
           edge: e.edge,
           flags: e.flags,
           moved: round1(e.moved),
           ...(e.flags.includes('ink-beyond') ? { beyond: round1(e.beyond) } : {}),
+          ...(e.flags.includes('bridged') ? { bridgedBy: round1(e.bridgedBy) } : {}),
+          ...(e.flags.includes('partial') ? { share: Math.round(e.share * 100) / 100 } : {}),
           ...(e.flags.includes('unstable') ? { residual: round1(e.residual) } : {}),
         });
       }
-      ctx.out(`  edge ${e.edge}: ${note}${e.flags.length ? `   <-- ${e.flags.join(', ')}: ${why[e.flags[0]]}` : ''}`);
+      ctx.out(`  edge ${e.edge}: ${note}${e.flags.length ? `   <-- ${e.flags.join(', ')}: ${e.flags.map((f) => why[f]).join('; ')}` : ''}`);
     }
     for (const w of o.warnings) ctx.out(`  warning: ${w}`);
     ctx.out(`  vertices: ${o.v.map((p) => `[${round1(p[0])},${round1(p[1])}]`).join(' ')}`);
   });
   const outlines = snapped.map((o) => ({ type: o.type, v: o.v.map((p) => [round1(p[0]), round1(p[1])]) }));
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
-  await writeFileRetry(specFile, text);
+  await writeFileAtomic(specFile, text);
   await writeJson(snappedFile, {
     name,
     role,
@@ -492,7 +496,7 @@ export const compare = async (argv, ctx) => {
     const file = /[\\/]/.test(opts.draw)
       ? path.resolve(opts.draw)
       : path.join(viewsDir(ctx, tagOf(opts)), opts.draw);
-    await writeFileRetry(file, png);
+    await writeFileAtomic(file, png);
     drawn = { file, line: summary.line };
   }
   const record = {
@@ -546,6 +550,7 @@ export const runCheck = async (name, role, ctx, { feetPerPixel = null } = {}) =>
     spec,
     labels: packet ?? live,
     image,
+    snappedSize: snapped?.image ?? null,
     scale,
     flagged,
     drift: packet ? labelDrift(packet, live) : [],
@@ -714,6 +719,12 @@ export const apply = async (argv, ctx) => {
   if (existing?.checked && !opts.dispute) {
     throw new Error(`${name}'s key was checked (${existing.checked.by}, ${existing.checked.at}) and is frozen: a change comes only through a dispute (apply ${name} --dispute ID)`);
   }
+  const outlines = result.outlines.map((o) => ({ type: o.type, points: o.v.map((p) => [round1(p[0]), round1(p[1])]) }));
+  // A dispute id marks a key that changed: the tally of changed keys reads it
+  // from the plans, so a dispute the key survived is logged, not applied.
+  if (opts.dispute && JSON.stringify(keyOf(project.floors[0].state)) === JSON.stringify(outlines)) {
+    throw new Error(`--dispute ${opts.dispute}: the final key is the key ${name} already holds, so nothing would change and the plan would still be marked as changed by a dispute; leave the plan as it is and log that the key stands`);
+  }
   const at = new Date().toISOString();
   const about = {
     by: `annotators: ${record.annotators.join(', ')}; adjudicator: ${record.adjudicator ?? 'none'}`,
@@ -723,12 +734,11 @@ export const apply = async (argv, ctx) => {
     notes,
     ...(opts.dispute ? { disputeId: opts.dispute } : {}),
   };
-  const outlines = result.outlines.map((o) => ({ type: o.type, points: o.v.map((p) => [round1(p[0]), round1(p[1])]) }));
   const applied = applyPlan(project, outlines, about, { force: true });
   // The same key with a new record (a re-review): the record still changes.
   if (applied.outcome === 'unchanged') project.answerKey = about;
   project.metadata = { ...project.metadata, updatedAt: at };
-  await writeFileRetry(planFile(name, ctx.dir), JSON.stringify(project));
+  await writeFileAtomic(planFile(name, ctx.dir), JSON.stringify(project));
   ctx.out(`${name}: key ${applied.outcome}; record by ${about.by}; ${about.verifiedBy}; checked ${about.checked.at}${about.disputeId ? `; dispute ${about.disputeId}` : ''}`);
   ctx.out('Run `node scripts/realKeys.mjs export` to refresh answer-keys.json.');
   return 0;
@@ -821,7 +831,7 @@ export const sheet = async (argv, ctx) => {
     }
     const base = opts.out.replace(/\.png$/i, '');
     const file = pages.length > 1 ? `${base}-${p + 1}.png` : `${base}.png`;
-    await writeFileRetry(path.resolve(file), canvas.toBuffer('image/png'));
+    await writeFileAtomic(path.resolve(file), canvas.toBuffer('image/png'));
     written.push(file);
   }
   for (const file of written) ctx.out(file);
