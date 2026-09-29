@@ -199,11 +199,11 @@ describe('walls that are not one solid band', () => {
     near(v[0][1], 80);
   });
 
-  it('does not call a run of window boxes beside the wall ink-beyond, but does a dimension line along it', () => {
+  it('does not call a few window boxes beside the wall ink-beyond, but does a stroke as long as the wall', () => {
     const image = house();
     // Window boxes 8 px beyond the top face over 40% of the edge.
-    fillRect(image, 130, 70, 210, 72);
-    fillRect(image, 240, 70, 280, 72);
+    fillRect(image, 130, 70, 175, 72);
+    fillRect(image, 240, 70, 270, 72);
     const boxes = snapOutline(image, { v: [[97, 77], [303, 77], [303, 223], [97, 223]], fix: [1, 2, 3] });
     near(boxes.v[0][1], 80);
     expect(boxes.edges[0].flags).toEqual([]);

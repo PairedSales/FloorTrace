@@ -115,12 +115,26 @@ describe('the image a key is drawn on', () => {
   });
 
   it('is the blind packet\'s when there is one', async () => {
+    const bytes = png(12, 9);
+    fs.writeFileSync(path.join(dir, 'p.floorplan'), JSON.stringify(plan(bytes)));
+    fs.mkdirSync(packetDir('p', dir), { recursive: true });
+    fs.writeFileSync(path.join(packetDir('p', dir), 'image.png'), bytes);
+    const got = await imageOfPlan('p', dir);
+    expect(got.image.width).toBe(12);
+    expect(got.from).toMatch(/packets/);
+  });
+
+  it('refuses a packet whose image is not the plan\'s, as a plan drafted again leaves it', async () => {
     fs.writeFileSync(path.join(dir, 'p.floorplan'), JSON.stringify(plan(png(12, 9))));
     fs.mkdirSync(packetDir('p', dir), { recursive: true });
     fs.writeFileSync(path.join(packetDir('p', dir), 'image.png'), png(20, 10));
-    const got = await imageOfPlan('p', dir);
-    expect(got.image.width).toBe(20);
-    expect(got.from).toMatch(/packets/);
+    await expect(imageOfPlan('p', dir)).rejects.toThrow(/holds a different image from the plan's.*run blind p again/);
+  });
+
+  it('takes a packet with no plan beside it as it is', async () => {
+    fs.mkdirSync(packetDir('solo', dir), { recursive: true });
+    fs.writeFileSync(path.join(packetDir('solo', dir), 'image.png'), png(7, 5));
+    expect((await imageOfPlan('solo', dir)).image.width).toBe(7);
   });
 
   it('says so when there is no such plan, and refuses a plan with no image', async () => {

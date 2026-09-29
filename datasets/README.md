@@ -226,8 +226,10 @@ the page prints. Everything is validated with the place and the reason.
 
 **What a snap flags.** `no-band`: no wall band within reach. `far`: the edge moved
 over 4 px. `reaches-end`: the band runs to the end of the search on the side that
-decides the face. `ink-beyond`: a stroke along most of the edge within 10 px past
-the face used, as a hatched or double-line wall or a dimension line has. `unstable`:
+decides the face. `ink-beyond`: another band within 10 px past the face used that
+is nearly as continuous along the edge as the face band itself, as the second
+stroke of a hatched or double-line wall and a dimension line are (window boxes
+drawn proud of a long wall can do it too: look, and move on). `unstable`:
 read again from where it landed, the face moves over 1 px more, as along a run of
 windows and doors where the wall is less of the edge than the strokes drawn in it.
 It also warns of an edge drawn a hair off level or plumb, of a wall whose face

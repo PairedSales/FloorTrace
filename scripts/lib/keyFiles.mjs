@@ -137,6 +137,12 @@ export const imageOfPlan = async (name, dir = realDir()) => {
     if (file) {
       const bytes = fs.readFileSync(path.join(pdir, file));
       const mime = mimeOfFile(file) ?? 'image/png';
+      // A plan drafted again (another crop) leaves its old packet behind, and a
+      // key snapped to the old pixels would look right and be wrong.
+      const planPath = planFile(name, dir);
+      if (fs.existsSync(planPath) && !planImageBytes(readJson(planPath)).bytes.equals(bytes)) {
+        throw new Error(`the blind packet of ${name} holds a different image from the plan's (was the plan drafted again?): run blind ${name} again`);
+      }
       return { bytes, mime, image: await decodeBytes(bytes, mime), from: path.join(pdir, file) };
     }
   }

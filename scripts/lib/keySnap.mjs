@@ -22,10 +22,10 @@ const STEP = 0.25;
 // MIN_FRACTION of the samples along the edge.
 const BAND_SHARE = 0.45;
 const MIN_FRACTION = 0.15;
-// A second band this close beyond the face used is worth a look, if it holds
-// this share of the darkest offset's fraction: a stroke along the whole edge.
+// A second band this close beyond the face used is worth a look, if its typical
+// dark fraction is this share of the face band's: a stroke as long as the wall.
 const LOOK_BEYOND = 10;
-const CONTINUOUS_SHARE = 0.75;
+const CONTINUOUS_SHARE = 0.6;
 export const DEFAULT_R = 14;
 export const DEFAULT_BRIDGE = 2.5;
 // An edge that moved more than this is flagged 'far'.
@@ -165,14 +165,16 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
   const [s, e] = runs[at];
   const next = runs[at + 1];
   const prev = runs[at - 1];
-  // Ink past the face counts only when it runs along most of the edge, as a
-  // second stroke of a wall or a dimension line does: window sills and frames
-  // drawn proud of the wall cover a part of it.
-  const strong = (run) => {
-    let top = 0;
-    for (let q = run[0]; q <= run[1]; q += 1) if (frac[q] > top) top = frac[q];
-    return top >= CONTINUOUS_SHARE * peak;
+  // Ink past the face counts only when it is as continuous along the edge as
+  // the band itself, as a second stroke of a wall or a dimension line is:
+  // window sills and frames drawn proud of the wall cover a part of it.
+  const level = (run) => {
+    const values = [];
+    for (let q = run[0]; q <= run[1]; q += 1) values.push(frac[q]);
+    values.sort((x, y) => x - y);
+    return values[Math.floor(values.length / 2)];
   };
+  const strong = (run) => level(run) >= CONTINUOUS_SHARE * level(runs[at]);
   const beyondOuter = next && strong(next) ? (next[0] - e - 1) * STEP : null;
   const beyondInner = prev && strong(prev) ? (s - prev[1] - 1) * STEP : null;
   return {
