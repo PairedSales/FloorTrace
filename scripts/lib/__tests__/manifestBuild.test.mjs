@@ -6,7 +6,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import {
+  afterAll, afterEach, describe, expect, it, vi,
+} from 'vitest';
 import {
   buildManifest, commitManifest, countsText, countsOf, entryFor, amendedManifest, logVersions, looksLikeAddress, verifyManifest,
 } from '../manifestBuild.mjs';
@@ -110,7 +112,12 @@ describe('the manifest of a set', () => {
     set.addPlan('logged60-n2', frozenPlan('logged60-n2'));
     set.addPlan('embedded60-n3', frozenPlan('embedded60-n3'));
     set.addPlan('file60-n4', frozenPlan('file60-n4', { source: { file: 'inbox/listing.png', crop: [0, 0, 10, 10], size: [10, 10] } }));
-    writeLog(set, [planEvent('logged60-n2', { url: 'https://archive.org/download/y/page/n2', crop: [5, 6, 700, 500], size: [700, 500] })]);
+    // A plan with a source of its own is logged too (the log says what it is); only the original 75 are in neither.
+    writeLog(set, [
+      planEvent('own60-n1', { url: 'https://archive.org/download/x/page/n1', crop: [1, 2, 300, 200], size: [300, 200] }),
+      planEvent('logged60-n2', { url: 'https://archive.org/download/y/page/n2', crop: [5, 6, 700, 500], size: [700, 500] }),
+      planEvent('file60-n4', { url: 'https://archive.org/download/w/page/n4', crop: [0, 0, 10, 10], size: [10, 10] }),
+    ]);
     splitsFile(set, {
       own60: 'dev', logged60: 'dev', embedded60: 'dev', file60: 'dev',
     });
@@ -196,11 +203,33 @@ describe('the manifest of a set', () => {
       'alpha60-n5: its record names no annotators (by "odd", and no usable record file)',
       'alpha60-n5: its record does not say how it was verified (verifiedBy)',
       'listing-004: its book listing-004 is not in splits.json',
-      'listing-004: its era is unknown (it is not in sources.jsonl and not named like a plan-book page)',
+      'listing-004: its era is unknown (it is not in sources.jsonl and not named like a plan-book page of the original set)',
       'listing-004: its decade is unknown',
       'nobook60-n2: its book nobook60 is not in splits.json',
     ]);
     expect(Object.keys(manifest.plans)).toEqual(['alpha60-n1']);
+  });
+
+  it('does not enter a plan with a source of its own that the log has no line for as a vintage plan named for its digits', () => {
+    // hpn21-24360 is a 2021 capture. Read by its name it would be a 1921 plan in a
+    // book of its own; it has to wait for its log line, and the build says so.
+    const set = track(makeSet());
+    const url = 'https://web.archive.org/web/20210101000000id_/https://x.example/24360.png';
+    set.addPlan('hpn21-24360', frozenPlan('hpn21-24360', { source: { url, crop: [0, 0, 460, 300], size: [460, 300] } }));
+    set.addPlan('alpha60-n1', frozenPlan('alpha60-n1'));
+    splitsFile(set, { alpha60: 'dev', hpn21: 'dev' });
+    const { problems, manifest } = buildManifest(set.dir);
+    expect(problems.map((p) => `${p.name}: ${p.text}`)).toEqual([
+      'hpn21-24360: its era is unknown: the plan has a source of its own but sources.jsonl has no line for it (realSource log plan writes one)',
+      'hpn21-24360: its decade is unknown',
+    ]);
+    expect(Object.keys(manifest.plans)).toEqual(['alpha60-n1']);
+    // Logged, it is what the log says.
+    writeLog(set, [planEvent('hpn21-24360', { book: 'HPN 963', era: '2020-2022', year: 2021, decade: 2020, unit: '963', site: 'hpn.example', url })]);
+    splitsFile(set, { alpha60: 'dev', 963: 'test' });
+    const logged = buildManifest(set.dir);
+    expect(logged.problems).toEqual([]);
+    expect(logged.manifest.plans['hpn21-24360']).toMatchObject({ book: '963', era: '2020-2022', decade: 2020, year: 2021, split: 'test' });
   });
 
   it('needs splits.json, and says so', () => {
@@ -227,7 +256,9 @@ describe('the file, its archive and its log', () => {
     const set = smallSet();
     const built = buildManifest(set.dir);
     const result = await commitManifest(set.dir, built, { reason: 'first build', now: new Date('2026-09-29T12:00:00Z') });
-    expect(result).toEqual({ changed: true, hash: built.hash, version: 1 });
+    expect(result).toEqual({
+      changed: true, logged: true, hash: built.hash, version: 1,
+    });
     expect(fs.readFileSync(manifestFileFor(set.dir), 'utf8')).toBe(built.text);
     expect(loadManifest(manifestFileFor(set.dir)).hash).toBe(built.hash);
     expect(fs.readFileSync(path.join(set.dir, 'orchestration', 'manifest-versions', `manifest-${built.hash.slice(0, 12)}.json`), 'utf8')).toBe(built.text);
@@ -243,7 +274,7 @@ describe('the file, its archive and its log', () => {
     await commitManifest(set.dir, buildManifest(set.dir), { reason: 'first' });
     const stamp = fs.statSync(manifestFileFor(set.dir)).mtimeMs;
     const same = await commitManifest(set.dir, buildManifest(set.dir), { reason: 'again' });
-    expect(same).toMatchObject({ changed: false, version: 1 });
+    expect(same).toMatchObject({ changed: false, logged: false, version: 1 });
     expect(fs.statSync(manifestFileFor(set.dir)).mtimeMs).toBe(stamp);
     expect(logVersions(set.dir)).toEqual([1]);
     // An archive that went missing is put back.
@@ -258,6 +289,57 @@ describe('the file, its archive and its log', () => {
     const rows = fs.readFileSync(set.orch('manifest-log.md'), 'utf8').trim().split('\n').filter((l) => /^\| \d+ \|/.test(l));
     expect(rows).toHaveLength(2);
     expect(rows[1]).toContain('resplit \\| with a pipe and a line');
+  });
+
+  it('never leaves a manifest in use that the log does not name: a run cut short is finished by the next', async () => {
+    const set = smallSet();
+    await commitManifest(set.dir, buildManifest(set.dir), { reason: 'first' });
+    const v1 = loadManifest(manifestFileFor(set.dir)).hash;
+    splitsFile(set, { alpha60: 'test', beta61: 'test', gamma62: 'dev' });
+    const next = buildManifest(set.dir);
+    // The write of manifest.json itself fails: the archive and the log row are already down.
+    const real = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to).endsWith('manifest.json')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      real(from, to);
+    });
+    try {
+      await expect(commitManifest(set.dir, next, { reason: 'resplit' })).rejects.toThrow(/disk full/);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(loadManifest(manifestFileFor(set.dir)).hash).toBe(v1);
+    expect(logVersions(set.dir)).toEqual([1, 2]);
+    expect(fs.existsSync(path.join(set.dir, 'orchestration', 'manifest-versions', `manifest-${next.hash.slice(0, 12)}.json`))).toBe(true);
+    // Run again: the manifest is written, and the version the log already holds is not logged twice.
+    const done = await commitManifest(set.dir, next, { reason: 'resplit' });
+    expect(done).toEqual({
+      changed: true, logged: false, hash: next.hash, version: 2,
+    });
+    expect(loadManifest(manifestFileFor(set.dir)).hash).toBe(next.hash);
+    expect(logVersions(set.dir)).toEqual([1, 2]);
+  });
+
+  it('logs a manifest already in use that the log does not name (a lost last row), once, and says it was late', async () => {
+    const set = smallSet();
+    await commitManifest(set.dir, buildManifest(set.dir), { reason: 'first' });
+    splitsFile(set, { alpha60: 'test', beta61: 'test', gamma62: 'dev' });
+    const built = buildManifest(set.dir);
+    await commitManifest(set.dir, built, { reason: 'resplit' });
+    // The log loses its last row (an interrupted write of an older version of this tool, an edit).
+    const file = set.orch('manifest-log.md');
+    const kept = fs.readFileSync(file, 'utf8').trimEnd().split('\n').slice(0, -1).join('\n');
+    fs.writeFileSync(file, `${kept}\n`);
+    expect(logVersions(set.dir)).toEqual([1]);
+    const again = await commitManifest(set.dir, built, { reason: 'rebuild' });
+    expect(again).toEqual({
+      changed: false, logged: true, hash: built.hash, version: 2,
+    });
+    expect(logVersions(set.dir)).toEqual([1, 2]);
+    expect(fs.readFileSync(file, 'utf8')).toContain('| rebuild; logged late, the manifest already was this |');
+    const third = await commitManifest(set.dir, built, { reason: 'rebuild' });
+    expect(third).toMatchObject({ changed: false, logged: false, version: 2 });
+    expect(logVersions(set.dir)).toEqual([1, 2]);
   });
 });
 
@@ -335,9 +417,31 @@ describe('verify', () => {
     const { rules, pass } = verify(set);
     expect(pass).toBe(true);
     expect(rules.map((r) => `${r.status} ${r.id}`)).toEqual([
-      'PASS manifest', 'PASS plans', 'PASS keys', 'PASS checked', 'PASS strays', 'PASS splits', 'PASS no book spans splits',
+      'PASS manifest', 'PASS log', 'PASS plans', 'PASS keys', 'PASS checked', 'PASS strays', 'PASS splits', 'PASS no book spans splits',
     ]);
-    expect(status(rules, 'manifest').text).toMatch(/^version 1, 4 plans, hash [0-9a-f]{12}$/);
+    // The schema version is the file's; the version of the manifest is the log's.
+    expect(status(rules, 'manifest').text).toMatch(/^4 plans, hash [0-9a-f]{12}, schema 1, log version 1$/);
+    expect(status(rules, 'log').text).toBe('the log\'s last row (version 1) is this manifest');
+  });
+
+  it('fails a manifest in use that the log does not name last, and says when there is no log at all', async () => {
+    const set = await fullyFrozen();
+    const log = set.orch('manifest-log.md');
+    // A hand edit of manifest.json is a manifest nobody logged.
+    const json = JSON.parse(fs.readFileSync(manifestFileFor(set.dir), 'utf8'));
+    json.plans['alpha60-n1'].publisher = 'edited by hand';
+    fs.writeFileSync(manifestFileFor(set.dir), JSON.stringify(json));
+    expect(status(verify(set).rules, 'log')).toMatchObject({ status: 'FAIL', text: expect.stringMatching(/is not the one the log names last \(version 1, [0-9a-f]{12}\): run realManifest build to log it/) });
+    expect(verify(set).pass).toBe(false);
+    fs.rmSync(log);
+    expect(status(verify(set).rules, 'log')).toMatchObject({ status: 'INFO', text: expect.stringMatching(/manifest-log\.md has no rows: this manifest was not written by realManifest build or amend/) });
+    expect(status(verify(set).rules, 'manifest').text).toMatch(/schema 1, no log$/);
+  });
+
+  it('says so, and fails, when splits.json cannot be read, rather than leaving the rule out', async () => {
+    const set = await fullyFrozen();
+    set.write('orchestration/splits.json', '{ nope');
+    expect(status(verify(set).rules, 'splits')).toMatchObject({ status: 'FAIL', text: expect.stringMatching(/not valid JSON/) });
   });
 
   it('fails without a manifest, or with one that is not one', async () => {
@@ -415,12 +519,19 @@ describe('verify', () => {
 });
 
 describe('verify --final: the finished set\'s rules', () => {
-  // Each rule is tried on a set of its own: building 400 plans is a second or two.
+  // Each rule is tried on a set of its own, copied from one finished set built once:
+  // building 400 plans, their splits and their manifest takes a few seconds, and
+  // a dozen of them made this file the slowest of the suite.
+  let template = null;
+  afterAll(() => template?.cleanup());
   const finished = async () => {
-    const { set } = finishedSet();
-    track(set);
-    await assignSplitsCommand(['--seed', '20260929', '--pin-existing', '--write'], { ...set.ctx, out: () => {} });
-    await commitManifest(set.dir, buildManifest(set.dir), { reason: 'final' });
+    if (!template) {
+      ({ set: template } = finishedSet());
+      await assignSplitsCommand(['--seed', '20260929', '--pin-existing', '--write'], { ...template.ctx, out: () => {} });
+      await commitManifest(template.dir, buildManifest(template.dir), { reason: 'final' });
+    }
+    const set = track(makeSet());
+    fs.cpSync(template.dir, set.dir, { recursive: true });
     return set;
   };
   const final = (set) => verifyManifest(set.dir, { final: true });
@@ -511,6 +622,17 @@ describe('verify --final: the finished set\'s rules', () => {
       for (const n of Object.keys(json.plans).filter((x) => x.startsWith('modaa21')).slice(0, 3)) json.plans[n].source = { embedded: true };
     });
     expect(status(final(set).rules, 'sources').text).toMatch(/78 plans have an embedded image and no source, but only the original 75 may/);
+  });
+
+  it('fails a plan with a source that the sourcing log has no line for: its era, decade and book come from the log', async () => {
+    const set = await finished();
+    expect(status(final(set).rules, 'sources logged').status).toBe('PASS');
+    // The log loses the line of one modern plan (it had not been appended yet).
+    const log = set.orch('sources.jsonl');
+    const lines = fs.readFileSync(log, 'utf8').split('\n').filter((l) => l && !l.includes('"name":"modaa21-1003"'));
+    fs.writeFileSync(log, `${lines.join('\n')}\n`);
+    expect(status(final(set).rules, 'sources logged')).toMatchObject({ status: 'FAIL', text: '1 plans have a source but no line in sources.jsonl: modaa21-1003' });
+    expect(final(set).pass).toBe(false);
   });
 
   it('reports the modern count, and the base rules still run without --final', async () => {

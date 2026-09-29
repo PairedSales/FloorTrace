@@ -41,6 +41,30 @@ describe('the catalog', () => {
     expect(catalog.infoOf('listing-004')).toMatchObject({ book: 'listing-004', era: null, decade: null, year: null });
   });
 
+  it('does not take a plan with a source of its own for one of the original 75 because its name ends in two digits', () => {
+    // hpn21-24360 is a 2021 web capture the sourcing log has no line for yet; the
+    // name looks like `aladdin62-n15`, and read that way it would be a vintage plan
+    // of 1921 in a book of its own.
+    const source = { url: 'https://web.archive.org/web/20210101000000id_/https://x.example/24360.png', crop: [0, 0, 460, 300], size: [460, 300] };
+    set.addPlan('hpn21-24360', newPlan('hpn21-24360', { source }));
+    set.addPlan('aladdin62-n15', newPlan('aladdin62-n15'));
+    set.addPlan('hpn22-31000', newPlan('hpn22-31000', { source }));
+    writeLog(set, [planEvent('hpn22-31000', { book: 'HPN 963', era: '2020-2022', year: 2022, decade: 2020, unit: '963', site: 'hpn.example', url: source.url })]);
+    const c = loadCatalog(set.dir);
+    expect(c.infoOf('hpn21-24360')).toMatchObject({ era: null, decade: null, year: null, logged: false });
+    expect(c.isLegacy('hpn21-24360')).toBe(false);
+    expect(c.hasOwnSource('hpn21-24360')).toBe(true);
+    // The original 75 are still found by name, and a logged plan by its line.
+    expect(c.isLegacy('aladdin62-n15')).toBe(true);
+    expect(c.infoOf('aladdin62-n15')).toMatchObject({ era: 'vintage', decade: 1960, year: 1962 });
+    expect(c.isLegacy('hpn22-31000')).toBe(false);
+    expect(c.infoOf('hpn22-31000')).toMatchObject({ book: '963', era: '2020-2022', decade: 2020 });
+    // A plan file that cannot be read is not vouched for as one of the 75.
+    fs.writeFileSync(set.planFile('torn60-n1'), '{ not json');
+    expect(loadCatalog(set.dir).isLegacy('torn60-n1')).toBe(false);
+    expect(loadCatalog(set.dir).infoOf('torn60-n1').era).toBeNull();
+  });
+
   it('takes a logged plan\'s facts from the log: the designer code is its book, the site and publisher come along', () => {
     writeLog(set, [
       planEvent('pacific25-n41', { book: 'Pacific 1925', publisher: 'Pacific Ready-Cut', year: 1925, decade: 1920 }),

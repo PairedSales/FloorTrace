@@ -149,9 +149,10 @@ const firstFailure = (items) => {
  * The check of a plan's final key: `{pass, failures, warnings, waived, firstFail,
  * cached}`, null when there is no final key. `fresh` ignores the cache; `run:
  * false` never runs a check (`{unknown: true}` when none is cached, `stale: true`
- * when the cached one is of another key).
+ * when the cached one is of another key); `write: false` leaves the cache file
+ * alone (a dry run writes nothing).
  */
-export const checkFinal = async (name, ctx, { fresh = false, run = true } = {}) => {
+export const checkFinal = async (name, ctx, { fresh = false, run = true, write = true } = {}) => {
   const fingerprint = checkFingerprint(ctx.dir, name);
   if (!fingerprint) return null;
   const file = wipFile(name, '.check.json', ctx.dir);
@@ -173,7 +174,7 @@ export const checkFinal = async (name, ctx, { fresh = false, run = true } = {}) 
     firstFail: firstFailure(result.items),
     at: new Date().toISOString(),
   };
-  await writeJson(file, record);
+  if (write) await writeJson(file, record);
   return { ...record, cached: false };
 };
 
@@ -207,6 +208,20 @@ export const reviewView = (dir, name, index) => {
   return {
     state, rounds: numbers.length, rejections, latest: numbers.at(-1), by: latest.agent ?? null, current, reason: latest.reason ?? null,
   };
+};
+
+/** The agents that have reviewed a plan's final key, whatever they decided (sorted, once each). */
+export const reviewersOf = (dir, name, index) => {
+  const agents = new Set();
+  for (const n of index.reviews.get(name) ?? []) {
+    try {
+      const agent = readJson(wipFile(name, `.review-${n}.json`, dir)).agent;
+      if (agent) agents.add(String(agent));
+    } catch {
+      // A review that will not parse names nobody.
+    }
+  }
+  return [...agents].sort();
 };
 
 // ---- the plan -----------------------------------------------------------------

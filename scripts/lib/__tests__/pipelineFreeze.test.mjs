@@ -62,12 +62,22 @@ describe('freeze', () => {
     await finalized('alpha60-n1');
     await approve('alpha60-n1');
     const before = sha(set.planFile('alpha60-n1'));
+    // Every file of the set folder, by path, size and digest: nothing may be added, changed or removed.
+    const snapshot = () => fs.readdirSync(set.dir, { recursive: true })
+      .filter((f) => fs.statSync(path.join(set.dir, f)).isFile())
+      .map((f) => `${f} ${sha(path.join(set.dir, f))}`).sort();
+    // Finalizing checked the key and cached the result; without the cache the dry run has a check to run and a file to be tempted to write.
+    fs.rmSync(set.wip('alpha60-n1', '.check.json'));
+    const files = snapshot();
+    expect(files.some((f) => f.includes('check.json'))).toBe(false);
     const r = await set.run(freeze, '--all', '--dry');
     expect(r.code).toBe(0);
     expect(rowOf(r.out, 'alpha60-n1')).toMatch(/would freeze +check PASS/);
     expect(r.out).toMatch(/1 would be frozen \(dry run: nothing written\)/);
     expect(sha(set.planFile('alpha60-n1'))).toBe(before);
     expect(fs.existsSync(path.join(set.dir, 'answer-keys.json'))).toBe(false);
+    // Not even the cache of the check (keys-wip/NAME.check.json) `status` keeps.
+    expect(snapshot()).toEqual(files);
     await expect(set.run(freeze, '--all', '--dry', '--backup')).rejects.toThrow(UsageError);
   });
 
@@ -76,8 +86,16 @@ describe('freeze', () => {
     await finalized('alpha60-n2');
     await approve('alpha60-n1');
     await approve('alpha60-n2');
-    // n1's notes change after review-1 approved them: the snapped key is byte for byte the same.
-    await set.run(snap, 'alpha60-n1', '--role', 'final', '--spec', set.writeSpec('n.json', specOf('a-1', 0, { notes: 'Changed after the approval.' })));
+    // n1's notes change after review-1 approved them, and nothing else does: the
+    // snapped key stays byte for byte what the review hashed (a re-snap would drop
+    // its `copiedFrom` and change the key's hash by itself), so only the spec's hash differs.
+    const snappedFile = set.wip('alpha60-n1', '.final.snapped.json');
+    const keyBytes = fs.readFileSync(snappedFile);
+    const specFile = set.wip('alpha60-n1', '.final.json');
+    const spec = set.readJson(specFile);
+    fs.writeFileSync(specFile, JSON.stringify({ ...spec, notes: 'Changed after the approval.' }));
+    expect(fs.readFileSync(snappedFile).equals(keyBytes)).toBe(true);
+    expect(sha(snappedFile)).toBe(set.readJson(set.wip('alpha60-n1', '.review-1.json')).keySha256);
     const r = await set.run(freeze, '--all');
     expect(r.code).toBe(1);
     expect(rowOf(r.out, 'alpha60-n1')).toMatch(/alpha60-n1 +REFUSED +STALE approval: the final key or its notes changed after review-1 approved them/);
@@ -90,6 +108,37 @@ describe('freeze', () => {
     expect(again.code).toBe(0);
     expect(rowOf(again.out, 'alpha60-n1')).toMatch(/frozen/);
     expect(set.readPlan('alpha60-n1').answerKey.notes).toBe('Changed after the approval.');
+  });
+
+  it('refuses an approval by an agent who drew or adjudicated the key, however the record came to name them after the review', async () => {
+    await finalized('alpha60-n1');
+    await finalized('alpha60-n2');
+    await finalized('alpha60-n3');
+    for (const n of ['alpha60-n1', 'alpha60-n2', 'alpha60-n3']) await approve(n, 'rev-1');
+    // `review` refused nobody: the record then named rev-1 as the adjudicator (n1),
+    // an annotator (n2, the record edited by hand), and n3's spec was drawn by rev-1.
+    const recordFile = (n) => set.wip(n, '.record.json');
+    fs.writeFileSync(recordFile('alpha60-n1'), JSON.stringify({ ...set.readJson(recordFile('alpha60-n1')), adjudicator: 'rev-1', adjudicated: true }));
+    fs.writeFileSync(recordFile('alpha60-n2'), JSON.stringify({ ...set.readJson(recordFile('alpha60-n2')), annotators: ['a-1', 'rev-1'] }));
+    fs.writeFileSync(set.wip('alpha60-n3', '.b.json'), JSON.stringify({ ...set.readJson(set.wip('alpha60-n3', '.b.json')), author: 'rev-1' }));
+    for (const argv of [['--all', '--dry'], ['--all']]) {
+      const r = await set.run(freeze, ...argv);
+      expect(r.code).toBe(1);
+      for (const n of ['alpha60-n1', 'alpha60-n2', 'alpha60-n3']) {
+        expect(rowOf(r.out, n), n).toMatch(new RegExp(`${n} +REFUSED +review-1 is by rev-1, who also drew or adjudicated ${n} \\(.*rev-1.*\\): the final review is by a fresh agent`));
+      }
+      expect(r.out).toMatch(/0 frozen|0 would be frozen/);
+    }
+    for (const n of ['alpha60-n1', 'alpha60-n2', 'alpha60-n3']) expect(set.readPlan(n).answerKey).toBeUndefined();
+    // A review by another agent stands; a review that names no agent cannot show it was independent.
+    await approve('alpha60-n1', 'rev-2');
+    const rec = set.readJson(set.wip('alpha60-n2', '.review-1.json'));
+    delete rec.agent;
+    fs.writeFileSync(set.wip('alpha60-n2', '.review-1.json'), JSON.stringify(rec));
+    const r = await set.run(freeze, '--all');
+    expect(rowOf(r.out, 'alpha60-n1')).toMatch(/frozen/);
+    expect(rowOf(r.out, 'alpha60-n2')).toMatch(/REFUSED +review-1 names no agent/);
+    expect(set.readPlan('alpha60-n1').answerKey.by).toBe('annotators: a-1, b-1; adjudicator: rev-1');
   });
 
   it('says why the rest are not ready, and is not an error for them', async () => {
@@ -147,7 +196,7 @@ describe('freeze', () => {
     const r = await set.run(freeze, '--all', '--backup-name', 'real-backup-test');
     expect(r.code).toBe(0);
     expect(r.out).toMatch(/backup -> .*real-backup-test/);
-    expect(r.out).toMatch(/verified: file count matches, answer-keys\.json SHA-256 [0-9a-f]{12}/);
+    expect(r.out).toMatch(/verified: file count, and size and SHA-256 of every file, match; answer-keys\.json SHA-256 [0-9a-f]{12}/);
     expect(fs.existsSync(path.join(set.root, 'real-backup-test', 'alpha60-n1.floorplan'))).toBe(true);
     expect(r.out).not.toMatch(/not backed up/);
     const nothing = await set.run(freeze, '--all', '--backup');
@@ -176,7 +225,7 @@ describe('backup', () => {
     expect(r.code).toBe(0);
     const dest = path.join(set.root, 'real-backup-2026-09-29');
     expect(r.lines[0]).toBe(`backup -> ${dest}`);
-    expect(r.lines[1]).toMatch(/^6 files, \d\.\d MB; verified: file count matches, answer-keys\.json SHA-256 [0-9a-f]{12}, manifest SHA-256 [0-9a-f]{12}$/);
+    expect(r.lines[1]).toMatch(/^6 files, \d\.\d MB; verified: file count, and size and SHA-256 of every file, match; answer-keys\.json SHA-256 [0-9a-f]{12}, manifest SHA-256 [0-9a-f]{12}$/);
     const listing = (root) => fs.readdirSync(root, { recursive: true }).filter((f) => fs.statSync(path.join(root, f)).isFile()).sort();
     expect(listing(dest)).toEqual([
       'a60-n1.floorplan', 'a60-n2.floorplan', 'answer-keys.json', path.join('keys-wip', 'a60-n1.a.json'), path.join('orchestration', 'briefs', 'x.md'), path.join('orchestration', 'manifest.json'),
@@ -236,6 +285,31 @@ describe('backup', () => {
       await expect(backupSet(set.dir, { name: 'real-backup-count' })).rejects.toThrow(/holds \d+ files, and .* held 6/);
     } finally {
       stray.mockRestore();
+    }
+  });
+
+  it('checks every file, not only the keys file: a plan cut short, or changed in the copy, is caught by size and by digest', async () => {
+    seed();
+    const real = fs.copyFileSync;
+    // A copy that stops half way through a plan (a full disk, a half-synced file).
+    const cut = vi.spyOn(fs, 'copyFileSync').mockImplementation((from, to) => {
+      real(from, to);
+      if (String(from).endsWith('a60-n2.floorplan')) fs.writeFileSync(to, fs.readFileSync(from).subarray(0, 100));
+    });
+    try {
+      await expect(backupSet(set.dir, { name: 'real-backup-cut' })).rejects.toThrow(/does not match .* in a60-n2\.floorplan \(\d+ bytes against 100 bytes\): it was left as it is, not to be trusted/);
+    } finally {
+      cut.mockRestore();
+    }
+    // The same size and other content: the digest says so.
+    const flip = vi.spyOn(fs, 'copyFileSync').mockImplementation((from, to) => {
+      real(from, to);
+      if (String(from).endsWith('a60-n1.a.json')) fs.writeFileSync(to, 'X'.repeat(fs.statSync(from).size));
+    });
+    try {
+      await expect(backupSet(set.dir, { name: 'real-backup-flip' })).rejects.toThrow(/does not match .* in .*a60-n1\.a\.json \(SHA-256 [0-9a-f]{12} against [0-9a-f]{12}\)/);
+    } finally {
+      flip.mockRestore();
     }
   });
 

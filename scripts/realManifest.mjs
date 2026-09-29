@@ -13,7 +13,8 @@
  *       designer code on an aggregator site) to dev or test, with a fixed seed,
  *       stratified by era x decade. Books named in --pin-dev are dev first, and
  *       their plans count toward dev (--pin-existing pins every book none of
- *       whose plans is in sources.jsonl: the 17 that predate it). In each stratum
+ *       whose plans is a plan that predates the sourcing log, meaning one with no
+ *       line in sources.jsonl and no source of its own: the 17 that predate it). In each stratum
  *       the other books are sorted by name and shuffled by a stream seeded from
  *       --seed and the stratum; a book goes to test when that brings the running
  *       count of test plans closer to the running share --target-test/--total of
@@ -44,20 +45,26 @@
  *       same inputs are the same bytes and hash (nothing in it says when it was
  *       built). A new manifest is archived as manifest-versions/manifest-<first 12
  *       digits of the hash>.json and a row {version, hash, date, reason, counts} is
- *       appended to manifest-log.md; one that would not change the file logs
- *       nothing. Prints the SHA-256, the manifest hash every run of bench:real
- *       names.
+ *       appended to manifest-log.md. The writes go archive, log row, then
+ *       manifest.json, so a run cut short is finished by the next and no
+ *       manifest is ever in use that the log does not name; a row is appended
+ *       only when the log's last row is not this hash (a rebuild that changes
+ *       nothing logs nothing; one that finds the manifest in use unlogged says so
+ *       and logs it). Prints the SHA-256, the manifest hash every run of
+ *       bench:real names.
  *   verify [--final] [--allow-partial]
  *       Checks the manifest against the folder, each rule PASS, FAIL or INFO:
  *       every manifest plan has its file and its key still hashes to its
  *       keySha256; every plan file is in the manifest (--allow-partial: INFO);
- *       every record is checked; each plan sits in the split splits.json gives its
- *       book; no book is in both splits. --final adds the finished set's rules:
+ *       every record is checked; the log's last row is this manifest's hash (the
+ *       line says the schema version and the log's version: two numbers); each
+ *       plan sits in the split splits.json gives its book; no book is in both
+ *       splits. --final adds the finished set's rules:
  *       exactly 400 plans; at most 12 per book (unit) and 60 per site; at least 34
  *       books; test and dev sizes (INFO, aimed at 150 / 250); both splits hold
  *       both eras; at least 90% of the plans have a detected room size; no plan
  *       name looks like an address (three or more digits, then a street word);
- *       every new plan has a source; the 2020-2022 count (INFO, aimed at about 160
+ *       every new plan has a source and a line in sources.jsonl; the 2020-2022 count (INFO, aimed at about 160
  *       of the 325 new). Exit 1 on any FAIL.
  *   hash
  *       Prints the SHA-256 of orchestration/manifest.json.

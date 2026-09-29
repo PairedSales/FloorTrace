@@ -8,7 +8,9 @@ import {
 } from './manifest.mjs';
 import { UsageError, parseArgs } from './keyCommands.mjs';
 import { readJson, writeFileAtomic } from './keyFiles.mjs';
-import { loadCatalog, manifestLogFor, manifestVersionsFor, splitsFileFor } from './pipelineCatalog.mjs';
+import {
+  listPlans, loadCatalog, manifestLogFor, manifestVersionsFor, splitsFileFor,
+} from './pipelineCatalog.mjs';
 import { plural } from './pipelineTable.mjs';
 import {
   DEFAULT_TARGET_TEST, DEFAULT_TOTAL, assignSplits, assignmentLines, rosterFromSet, splitsText, validateRoster,
@@ -69,9 +71,11 @@ export const assignSplitsCommand = async (argv, ctx) => {
   }
   const pinDev = (opts['pin-dev'] ?? []).flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
   if (opts['pin-existing']) {
-    // A book with no plan in the sourcing log is one of the set that predates it.
-    const logged = new Set([...catalog.logged.keys()].map((n) => catalog.unitOf(n)));
-    for (const r of roster) if (!logged.has(r.book) && !pinDev.includes(r.book)) pinDev.push(r.book);
+    // A book holding a plan of the set that predates the sourcing log (no line in
+    // it, no source in the plan: the plan-book pages every earlier analysis saw)
+    // is not blind. A plan the log has not caught up with is not one of them.
+    const seen = new Set(listPlans(ctx.dir).filter((n) => catalog.isLegacy(n)).map((n) => catalog.unitOf(n)));
+    for (const r of roster) if (seen.has(r.book) && !pinDev.includes(r.book)) pinDev.push(r.book);
   }
   const result = assignSplits(roster, {
     seed, targetTest, total, pinDev,
@@ -128,7 +132,8 @@ export const build = async (argv, ctx) => {
   if (result.changed) {
     ctx.out(`manifest version ${result.version} written (${reason}) -> ${manifestFileFor(ctx.dir)}`);
     ctx.out(`archived -> ${path.join(manifestVersionsFor(ctx.dir), `manifest-${result.hash.slice(0, 12)}.json`)}; logged -> ${manifestLogFor(ctx.dir)}`);
-  } else ctx.out(`manifest unchanged: the file already is this manifest (version ${result.version ?? 'not logged'})`);
+  } else if (result.logged) ctx.out(`manifest unchanged: the file already is this manifest, but the log did not name it: version ${result.version} logged now -> ${manifestLogFor(ctx.dir)}`);
+  else ctx.out(`manifest unchanged: the file already is this manifest (version ${result.version})`);
   ctx.out(`manifest hash ${result.hash}`);
   return 0;
 };
@@ -167,7 +172,9 @@ export const amend = async (argv, ctx) => {
   for (const w of built.warnings) ctx.out(`WARNING: ${name}: ${w}`);
   const result = await commitManifest(ctx.dir, built, { reason: `${reason} (dispute ${built.disputeId}, ${name})` });
   ctx.out(`amend ${name}: dispute ${built.disputeId}; key ${built.before?.slice(0, 8) ?? 'none'} -> ${built.after.slice(0, 8)}`);
-  ctx.out(result.changed ? `manifest version ${result.version} written` : `manifest unchanged: it already holds ${name}'s current key and record (version ${result.version ?? 'not logged'})`);
+  if (result.changed) ctx.out(`manifest version ${result.version} written`);
+  else if (result.logged) ctx.out(`manifest unchanged: it already holds ${name}'s current key and record, but the log did not name it: version ${result.version} logged now`);
+  else ctx.out(`manifest unchanged: it already holds ${name}'s current key and record (version ${result.version})`);
   ctx.out(`manifest hash ${result.hash}`);
   return 0;
 };

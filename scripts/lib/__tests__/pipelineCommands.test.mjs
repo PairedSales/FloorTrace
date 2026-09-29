@@ -447,8 +447,29 @@ describe('finalize-agreed', () => {
     expect(rowOf(r.out, 'alpha60-n1')).toMatch(/DISAGREE +needs the adjudicator +needs adjudication/);
     expect(r.out).toMatch(/0 finalized from A .*, 1 need the adjudicator/);
     expect(r.out).toMatch(/skipped: 1 not compared yet \(run compare-all\); 2 without both A and B/);
-    expect(r.code).toBe(1);
+    // A pair that disagreed is the protocol working, not a failure: compare-all exits 0 on it too.
+    expect(r.code).toBe(0);
     expect(fs.existsSync(set.wip('alpha60-n1', '.final.snapped.json'))).toBe(false);
+  });
+
+  it('exits 0 when some pairs agree and some disagree, and 1 only for a plan it could not finalize or a final that fails its check', async () => {
+    addNew('alpha60-n1', 'alpha60-n2', 'alpha60-n3', 'beta61-n4', 'beta61-n5');
+    for (const n of ['alpha60-n1', 'alpha60-n2', 'alpha60-n3']) await bothAgree(n);
+    await annotate('beta61-n4', 'a', 'a-4');
+    const b = specOf('b-4');
+    b.outlines[1].type = 'porch';
+    await set.run(snap, 'beta61-n4', '--role', 'b', '--spec', set.writeSpec('b4.json', b));
+    await set.run(compareAll, '--all');
+    const compared = await set.run(compareAll, '--all');
+    expect(compared.code).toBe(0);
+    const r = await set.run(finalizeAgreed, '--all');
+    expect(r.out).toMatch(/3 finalized from A \(3 PASS\), 1 need the adjudicator, 0 refused or failed/);
+    expect(rowOf(r.out, 'beta61-n4')).toMatch(/DISAGREE +needs the adjudicator/);
+    expect(r.code).toBe(0);
+    // A refusal is the command's own failure, and stops a chain.
+    addNew('gamma62-n6');
+    await bothAgree('gamma62-n6', 'same', 'same');
+    expect((await set.run(finalizeAgreed, '--all')).code).toBe(1);
   });
 
   it('refuses one annotator posing as two, and a spec that names no author', async () => {
@@ -507,13 +528,74 @@ describe('finalize-single', () => {
     addNew('alpha60-n1');
     splits({ alpha60: 'dev' });
     await annotate('alpha60-n1', 'a', 'a-1');
-    const r = await set.run(finalizeSingle, '--all');
+    const r = await set.run(finalizeSingle, '--all', '--no-sample');
     expect(r.code).toBe(0);
     expect(rowOf(r.out, 'alpha60-n1')).toMatch(/written +PASS/);
     expect(set.readJson(set.wip('alpha60-n1', '.record.json'))).toEqual({ annotators: ['a-1'], adjudicator: null, verifiedBy: 'single annotation' });
     expect(set.readJson(set.wip('alpha60-n1', '.final.snapped.json')).role).toBe('final');
-    const again = await set.run(finalizeSingle, '--all');
+    const again = await set.run(finalizeSingle, '--all', '--no-sample');
     expect(again.out).toMatch(/skipped: 1 already have a final/);
+  });
+
+  describe('the plans of the B sample, which have an A and no B yet', () => {
+    // Six dev plans, all with an A; `sample` would name some of them for a B.
+    const six = async () => {
+      const names = [1, 2, 3, 4, 5, 6].map((i) => `alpha60-n${i}`);
+      addNew(...names);
+      splits({ alpha60: 'dev' });
+      for (const n of names) await annotate(n, 'a', 'a-1');
+      return names;
+    };
+    const finalOf = (n) => fs.existsSync(set.wip(n, '.final.snapped.json'));
+
+    it('cannot tell them from the rest, so a selection that is not a list of names says which to leave out', async () => {
+      await six();
+      await expect(set.run(finalizeSingle, '--split', 'dev')).rejects.toThrow(UsageError);
+      await expect(set.run(finalizeSingle, '--split', 'dev')).rejects.toThrow(/cannot tell which of them are the sample still awaiting their B .*--except A,B or --except-file FILE.*--no-sample/);
+      await expect(set.run(finalizeSingle, '--book', 'alpha60')).rejects.toThrow(UsageError);
+      // Nothing was finalized by the refusals.
+      expect([1, 2, 3, 4, 5, 6].some((i) => finalOf(`alpha60-n${i}`))).toBe(false);
+      // Named plans are the caller's own list: no further word needed.
+      const named = await set.run(finalizeSingle, '--names', 'alpha60-n1,alpha60-n2');
+      expect(named.code).toBe(0);
+      expect(finalOf('alpha60-n1') && finalOf('alpha60-n2')).toBe(true);
+    });
+
+    it('leaves out the plans of --except, and says they were left out', async () => {
+      await six();
+      const r = await set.run(finalizeSingle, '--split', 'dev', '--except', 'alpha60-n2,alpha60-n5', '--except', 'alpha60-n6');
+      expect(r.code).toBe(0);
+      expect(r.out).toMatch(/3 finalized from A alone \(3 PASS\), 0 need attention/);
+      expect(r.out).toMatch(/skipped: 3 left out by --except \(awaiting their B\)/);
+      expect([1, 2, 3, 4, 5, 6].filter((i) => finalOf(`alpha60-n${i}`))).toEqual([1, 3, 4]);
+      // Their B arrives, and finalize-agreed takes them: they were never made single annotations.
+      for (const n of ['alpha60-n2', 'alpha60-n5', 'alpha60-n6']) await annotate(n, 'b', 'b-1', 2);
+      await set.run(compareAll, '--all');
+      const agreed = await set.run(finalizeAgreed, '--all');
+      expect(agreed.out).toMatch(/3 finalized from A \(3 PASS\)/);
+      expect(set.readJson(set.wip('alpha60-n2', '.record.json')).verifiedBy).toBe('blind double annotation');
+    });
+
+    it('takes the sample from a file, the output of `sample` as it is, and refuses a name that is not a plan', async () => {
+      const names = await six();
+      const drawn = await set.run(sample, '--split', 'dev', '--fraction', '0.5', '--seed', '4');
+      const list = drawn.lines[1].split(',');
+      const file = set.write('zz-scratch/b-sample.txt', `${drawn.out}\n`);
+      const r = await set.run(finalizeSingle, '--split', 'dev', '--except-file', file);
+      expect(r.code).toBe(0);
+      expect(names.filter((n) => !finalOf(n))).toEqual(list);
+      expect(r.out).toMatch(new RegExp(`skipped: ${list.length} left out by --except`));
+      // A misspelt exception would finalize the plan it meant to spare.
+      await expect(set.run(finalizeSingle, '--split', 'dev', '--except', 'alpha60-n1,alpha60-n77')).rejects.toThrow(/--except names alpha60-n77, which is not in .*: a misspelt exception would finalize the plan it was meant to spare/);
+      await expect(set.run(finalizeSingle, '--split', 'dev', '--except-file', path.join(set.dir, 'nothing.txt'))).rejects.toThrow(/cannot read --except-file .*ENOENT/);
+    });
+
+    it('--no-sample says there is none, and does not go with --except', async () => {
+      await six();
+      await expect(set.run(finalizeSingle, '--split', 'dev', '--no-sample', '--except', 'alpha60-n1')).rejects.toThrow(/--no-sample says there is no B sample/);
+      const r = await set.run(finalizeSingle, '--split', 'dev', '--no-sample');
+      expect(r.out).toMatch(/6 finalized from A alone/);
+    });
   });
 
   it('refuses a test plan, a plan with no split, and the existing draft as A', async () => {
@@ -522,7 +604,7 @@ describe('finalize-single', () => {
     splits({ alpha60: 'test', delta63: 'dev' });
     for (const n of ['alpha60-n1', 'beta61-n3', 'gamma62-n5']) await annotate(n, 'a', 'a-1');
     await set.run(importExisting, '--names', 'delta63-n7');
-    const r = await set.run(finalizeSingle, '--all');
+    const r = await set.run(finalizeSingle, '--all', '--no-sample');
     expect(rowOf(r.out, 'alpha60-n1')).toMatch(/REFUSED +single annotation is for the dev split; this plan's split is test \(every test plan gets a B\)/);
     expect(rowOf(r.out, 'beta61-n3')).toMatch(/REFUSED .*split is not assigned/);
     expect(rowOf(r.out, 'delta63-n7')).toMatch(/REFUSED +annotation A is the existing draft/);
@@ -535,7 +617,7 @@ describe('finalize-single', () => {
     splits({ alpha60: 'dev' });
     await annotate('alpha60-n1', 'a', 'a-1');
     await annotate('alpha60-n1', 'b', 'b-1');
-    const r = await set.run(finalizeSingle, '--all');
+    const r = await set.run(finalizeSingle, '--all', '--no-sample');
     expect(r.out).toMatch(/skipped: 1 with a B/);
     expect(fs.existsSync(set.wip('alpha60-n1', '.final.snapped.json'))).toBe(false);
   });
@@ -573,6 +655,18 @@ describe('adjudicated', () => {
     addNew('beta61-n3');
     await expect(set.run(adjudicated, 'beta61-n3', '--adjudicator', 'adj-1')).rejects.toThrow(/beta61-n3\.final\.snapped\.json does not exist/);
     expect(fs.existsSync(set.wip('alpha60-n1', '.record.json'))).toBe(false);
+  });
+
+  it('refuses an adjudicator who has reviewed the plan: a reviewer named the adjudicator afterwards would have approved their own key', async () => {
+    await disagree();
+    // `review` cannot refuse rev-9 yet: nobody has named an adjudicator.
+    await set.run(review, 'alpha60-n1', '--approve', '--agent', 'rev-9');
+    await expect(set.run(adjudicated, 'alpha60-n1', '--adjudicator', 'rev-9')).rejects.toThrow(/rev-9 has reviewed alpha60-n1's final key: a reviewer is not its adjudicator/);
+    expect(fs.existsSync(set.wip('alpha60-n1', '.record.json'))).toBe(false);
+    // The review of a rejection counts too: it is a review.
+    await set.run(review, 'alpha60-n1', '--reject', '--agent', 'rev-8', '--reason', 'the porch');
+    await expect(set.run(adjudicated, 'alpha60-n1', '--adjudicator', 'rev-8')).rejects.toThrow(/rev-8 has reviewed/);
+    expect((await set.run(adjudicated, 'alpha60-n1', '--adjudicator', 'adj-1')).code).toBe(0);
   });
 
   it('needs both annotators\' authors, and says when the final spec is by someone else', async () => {

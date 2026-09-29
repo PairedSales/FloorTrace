@@ -89,7 +89,13 @@ export const entryFor = ({
       book: info.book, site: info.site, publisher: info.publisher, era: info.era, decade: info.decade, year: info.year, split: info.split,
     };
   if (!SPLITS.includes(base.split)) problems.push(`its book ${base.book} is not in splits.json`);
-  if (!ERAS.includes(base.era)) problems.push('its era is unknown (it is not in sources.jsonl and not named like a plan-book page)');
+  if (!ERAS.includes(base.era)) {
+    // A plan with a source of its own is not one of the original 75, whatever its
+    // name looks like: the log has to say what it is.
+    problems.push(facts.source && !logged
+      ? 'its era is unknown: the plan has a source of its own but sources.jsonl has no line for it (realSource log plan writes one)'
+      : 'its era is unknown (it is not in sources.jsonl and not named like a plan-book page of the original set)');
+  }
   if (!Number.isInteger(base.decade)) problems.push('its decade is unknown');
 
   const by = parseBy(answerKey?.by);
@@ -207,31 +213,45 @@ export const readLogText = (dir) => {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 };
 
+/** The log's rows in the order written: `[{version, hash}]`. */
+export const logRows = (dir) => [...readLogText(dir).matchAll(/^\|\s*(\d+)\s*\|\s*([0-9a-f]{64})\s*\|/gm)]
+  .map((m) => ({ version: Number(m[1]), hash: m[2] }));
+
 /** The version numbers the log holds, ascending. */
-export const logVersions = (dir) => [...readLogText(dir).matchAll(/^\|\s*(\d+)\s*\|/gm)].map((m) => Number(m[1])).sort((a, b) => a - b);
+export const logVersions = (dir) => logRows(dir).map((r) => r.version).sort((a, b) => a - b);
 
 /**
- * Writes `text` as manifest.json (when it is not already there byte for byte),
- * keeps a copy under manifest-versions/, and appends a row to the log. Returns
- * `{changed, hash, version}`: `changed: false` when the file already was this
- * manifest, in which case nothing is logged.
+ * Puts `text` in place as manifest.json, keeps a copy under manifest-versions/,
+ * and appends a row to the log. Returns `{changed, logged, hash, version}`:
+ * `changed` when manifest.json was written, `logged` when a row was appended.
+ *
+ * The three writes go in the order that leaves a state a second run finishes:
+ * the archive (nothing refers to it yet), then the log row (a version that is
+ * not in use yet), and the manifest itself last. A run cut short between any two
+ * of them is completed by the next one, and never leaves a manifest in use that
+ * the log does not name: a row is appended only when the log's last row is not
+ * this hash, and the file written only when it is not already this text.
  */
 export const commitManifest = async (dir, { text, hash, manifest }, { reason, now = new Date() }) => {
   const file = manifestFileFor(dir);
   const archive = path.join(manifestVersionsFor(dir), `manifest-${hash.slice(0, 12)}.json`);
-  const versions = logVersions(dir);
-  const current = fs.existsSync(file) ? sha256(fs.readFileSync(file)) : null;
-  if (current === hash) {
-    if (!fs.existsSync(archive)) await writeFileAtomic(archive, text);
-    return { changed: false, hash, version: versions.at(-1) ?? null };
+  const rows = logRows(dir);
+  const last = rows.at(-1) ?? null;
+  const inUse = fs.existsSync(file) && sha256(fs.readFileSync(file)) === hash;
+  const named = last?.hash === hash;
+  if (!fs.existsSync(archive) || sha256(fs.readFileSync(archive)) !== hash) await writeFileAtomic(archive, text);
+  let version = last?.version ?? null;
+  if (!named) {
+    version = Math.max(0, ...rows.map((r) => r.version)) + 1;
+    const why = inUse ? `${reason}; logged late, the manifest already was this` : reason;
+    const prior = readLogText(dir) || LOG_HEADER;
+    const row = `| ${version} | ${hash} | ${now.toISOString()} | ${cell(why)} | ${cell(countsText(countsOf(manifest)))} |`;
+    await writeFileAtomic(manifestLogFor(dir), `${prior.replace(/\n*$/, '\n')}${row}\n`);
   }
-  await writeFileAtomic(file, text);
-  await writeFileAtomic(archive, text);
-  const version = (versions.at(-1) ?? 0) + 1;
-  const prior = readLogText(dir) || LOG_HEADER;
-  const row = `| ${version} | ${hash} | ${now.toISOString()} | ${cell(reason)} | ${cell(countsText(countsOf(manifest)))} |`;
-  await writeFileAtomic(manifestLogFor(dir), `${prior.replace(/\n*$/, '\n')}${row}\n`);
-  return { changed: true, hash, version };
+  if (!inUse) await writeFileAtomic(file, text);
+  return {
+    changed: !inUse, logged: !named, hash, version,
+  };
 };
 
 /**
@@ -307,7 +327,13 @@ export const verifyManifest = (dir, { final = false, allowPartial = false } = {}
   }
   const { manifest, hash } = loaded;
   const names = Object.keys(manifest.plans).sort();
-  add('PASS', 'manifest', `version ${manifest.version}, ${plural(names.length, 'plan')}, hash ${hash.slice(0, 12)}`);
+  // The schema version is the file's own; the version of the manifest is the log's.
+  const rows = logRows(dir);
+  const logVersion = rows.length ? Math.max(...rows.map((r) => r.version)) : null;
+  add('PASS', 'manifest', `${plural(names.length, 'plan')}, hash ${hash.slice(0, 12)}, schema ${manifest.version}, ${logVersion === null ? 'no log' : `log version ${logVersion}`}`);
+  if (!rows.length) add('INFO', 'log', `${path.relative(dir, manifestLogFor(dir))} has no rows: this manifest was not written by realManifest build or amend`);
+  else if (rows.at(-1).hash !== hash) add('FAIL', 'log', `the manifest in use (${hash.slice(0, 12)}) is not the one the log names last (version ${rows.at(-1).version}, ${rows.at(-1).hash.slice(0, 12)}): run realManifest build to log it`);
+  else add('PASS', 'log', `the log's last row (version ${rows.at(-1).version}) is this manifest`);
 
   const files = new Set(listPlans(dir));
   const missing = names.filter((n) => !files.has(n));
@@ -333,13 +359,11 @@ export const verifyManifest = (dir, { final = false, allowPartial = false } = {}
   if (strays.length) add(allowPartial ? 'INFO' : 'FAIL', 'strays', `${strays.length} plan files are not in the manifest: ${some(strays, 8)}`);
   else add('PASS', 'strays', 'every plan file is in the manifest');
 
-  let splits = null;
-  try {
-    splits = loadCatalog(dir, { manifest: false }).splits;
-  } catch (error) {
-    add('FAIL', 'splits', error.message);
-  }
-  if (splits) {
+  const catalog = loadCatalog(dir, { manifest: false });
+  const { splits } = catalog;
+  // loadCatalog keeps a splits file it cannot read as an error, not a throw: said here, never silent.
+  if (catalog.errors.splits) add('FAIL', 'splits', catalog.errors.splits.message);
+  else if (splits) {
     const drift = names.filter((n) => splits.books?.[manifest.plans[n].book]?.split !== manifest.plans[n].split);
     add(drift.length ? 'FAIL' : 'PASS', 'splits', drift.length ? `${drift.length} plans sit in another split than splits.json gives their book: ${some(drift)}` : 'every plan sits in the split splits.json gives its book');
   } else if (!fs.existsSync(splitsFileFor(dir))) add('INFO', 'splits', 'no splits.json to compare the manifest with');
@@ -382,6 +406,11 @@ export const verifyManifest = (dir, { final = false, allowPartial = false } = {}
     if (unsourced.length) sourceProblems.push(`${unsourced.length} plans have no source: ${some(unsourced)}`);
     if (embedded > ORIGINAL_SET) sourceProblems.push(`${embedded} plans have an embedded image and no source, but only the original ${ORIGINAL_SET} may`);
     add(sourceProblems.length ? 'FAIL' : 'PASS', 'sources', sourceProblems.length ? sourceProblems.join('; ') : `every new plan has a source (${embedded} embedded from the original set)`);
+    // Every plan that is not one of the original 75 has its line in the sourcing
+    // log: its era, decade and book are read from it, and a plan the log has not
+    // caught up with would be taken for a vintage plan by its name.
+    const unlogged = names.filter((n) => manifest.plans[n].source?.embedded !== true && !catalog.logged.has(n));
+    add(unlogged.length ? 'FAIL' : 'PASS', 'sources logged', unlogged.length ? `${unlogged.length} plans have a source but no line in sources.jsonl: ${some(unlogged)}` : 'every plan with a source has its line in sources.jsonl');
     const modern = entries.filter((e) => e.era === '2020-2022').length;
     add('INFO', '2020-2022', `${modern} plans of the ${names.length - embedded} new ones (the aim is about 160 of 325)`);
   }

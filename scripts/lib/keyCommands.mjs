@@ -696,8 +696,10 @@ const reviewFiles = (name, ctx) => {
     .sort((x, y) => x.n - y.n);
 };
 
-// Who drew or settled a plan's key: the reviewer may not be one of them.
-const involved = (name, ctx) => {
+// Who drew or settled a plan's key: the reviewer may not be one of them. Exported
+// for the pipeline's `freeze` and `adjudicated`, which enforce the same rule on
+// the other side of a review (the record can change after it).
+export const involved = (name, ctx) => {
   const people = new Set();
   const record = readRecord(name, ctx);
   for (const p of [...(record?.annotators ?? []), record?.adjudicator]) if (p) people.add(String(p));

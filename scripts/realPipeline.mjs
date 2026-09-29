@@ -5,8 +5,10 @@
  * and the numbers a milestone report needs. Each command works on a set of
  * plans, prints one line per plan and a summary, exits non-zero when any plan
  * ended in an error or a failed check, and can be run again: it does what is
- * still to do and never deletes anything. It reads the plans, so it is for the
- * orchestrator; a role that draws or checks a key blind uses realKeyTool.
+ * still to do and deletes no plan, key, record or log (`packets` replaces a
+ * packet's image when the plan's is of another type, as `realKeyTool blind` does).
+ * It reads the plans, so it is for the orchestrator; a role that draws or checks
+ * a key blind uses realKeyTool.
  *
  * Usage:  node scripts/realPipeline.mjs COMMAND [selector] [options]   (--help prints this)
  *
@@ -64,19 +66,28 @@
  *       NAME.record.json {annotators [A's author, B's], adjudicator null,
  *       verifiedBy "blind double annotation", agreement {the compare figures}},
  *       then `check` on the final key. A plan whose check FAILs is marked "needs
- *       adjudication" (its final is kept). Refuses when A and B name one author,
- *       or either names none: the reviewer's independence rests on it.
- *   finalize-single [selector]
+ *       adjudication" (its final is kept). A pair that DISAGREEs is listed the same
+ *       way and is not a failure (exit 0, as compare-all): 1 is for a refusal, an
+ *       error, or a final that fails its check. Refuses when A and B name one
+ *       author, or either names none: the reviewer's independence rests on it.
+ *   finalize-single [selector] [--except A,B] [--except-file FILE] [--no-sample]
  *       For dev plans that have A and no B: the same, with verifiedBy "single
  *       annotation" and annotators [A's author]. Refuses a plan whose split is
  *       not dev (every test plan gets a B) and one whose A is the existing draft
- *       (every existing plan needs an independent B).
+ *       (every existing plan needs an independent B). The plans of the 30% B
+ *       sample have an A and no B until their B arrives, and `sample` writes
+ *       nothing this command could read: so a selection that is not a list of
+ *       names must say which to leave out (--except, a comma list, repeatable;
+ *       --except-file, names at commas and white space, the output of `sample`
+ *       will do; each name must be a plan of the set) or that there is no sample
+ *       (--no-sample), else the command refuses (exit 2). A plan finalized as a
+ *       single annotation is skipped by finalize-agreed for good.
  *   adjudicated NAME --adjudicator TAG
  *       After an adjudicator wrote the final key with `snap --role final`:
  *       NAME.record.json {annotators (the A and B specs' authors), adjudicator
  *       TAG, verifiedBy "blind double annotation", agreement (from
  *       NAME.compare.json), adjudicated true}, then `check`. Refuses an
- *       adjudicator who drew A or B.
+ *       adjudicator who drew A or B, and one who has reviewed the plan.
  *   sample selector --fraction F --seed N [--exclude-existing]
  *       A deterministic random sample of the selected plans (sorted, then a
  *       seeded shuffle: the same plans and seed give the same sample). Prints the
@@ -93,21 +104,27 @@
  *       machine-readable line is
  *           DISPUTE <id> plan=NAME status=decided|open outcome=changed|kept direction=toward-tracer|away|neutral
  *       (latest line per id wins; outcome only when decided; direction for a
- *       changed key; a line that starts DISPUTE and is not that is reported and
- *       exits 1). Warns when every changed key moved toward the tracer.
+ *       changed key; the line may be wrapped in a bullet, quote, backticks or
+ *       bold/italics; a line that starts DISPUTE and is not that, or carries
+ *       `DISPUTE <id> plan=` without starting with it, is reported and exits 1).
+ *       Warns when every changed key moved toward the tracer.
  *   freeze selector [--dry] [--backup | --backup-name NAME]
  *       For plans whose latest review approved this very final key and spec, that
  *       pass `check`, and are not yet frozen: the key tool's `apply` (which writes
  *       the key and the record into the plan). Refuses, by name, a plan whose
- *       approval is stale (the final key or its notes changed after it) or that
- *       has no record; says why the rest are not ready. After the batch it runs
- *       `realKeys export` and, with --backup, `backup`. --dry says what would be
- *       frozen and writes nothing. Then: node scripts/realManifest.mjs build.
+ *       approval is stale (the final key or its notes changed after it), that has
+ *       no record, or whose approving reviewer is among the record's annotators
+ *       and adjudicator or the specs' authors (`review` checks that when it
+ *       writes the review; the record can name someone later); says why the rest
+ *       are not ready. After the batch it runs `realKeys export` and, with
+ *       --backup, `backup`. --dry says what would be frozen and writes nothing
+ *       (not even the check's cache file). Then: node scripts/realManifest.mjs build.
  *   backup [--name real-backup-YYYY-MM-DD]
  *       Copies the set folder to <set folder>/../<name>/ (everything but folders
  *       named zz-*), never over an existing folder (the name becomes NAME-2, ...),
- *       and verifies the copy: file count, bytes, and the SHA-256 of
- *       answer-keys.json and of orchestration/manifest.json.
+ *       and verifies the copy from disk: the file count, then the size and
+ *       SHA-256 of every file. Prints the SHA-256 of answer-keys.json and of
+ *       orchestration/manifest.json.
  *
  * Where things live: the set folder is datasets/real/ of the main checkout
  * (FLOORTRACE_REAL_DIR overrides it: point it at a scratch copy to try a

@@ -1,11 +1,8 @@
 // The commands of scripts/realManifest.mjs (scripts/lib/manifestCommands.mjs) on
-// scratch sets, and both scripts as a person runs them: the exit statuses, and
-// one line saying why on stderr.
-import { spawnSync } from 'child_process';
+// scratch sets.
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { UsageError } from '../keyCommands.mjs';
 import {
@@ -107,6 +104,25 @@ describe('assign-splits', () => {
     });
   });
 
+  it('does not take a plan with a source of its own that the log has no line for as one of the original 75: it is left out with a warning, and --pin-existing does not pin it', async () => {
+    const url = (n) => `https://web.archive.org/web/20210101000000id_/https://x.example/${n}.png`;
+    const own = (n) => newPlan(n, { source: { url: url(n), crop: [0, 0, 460, 300], size: [460, 300] } });
+    for (const n of ['old50-n1', 'old50-n2']) set.addPlan(n, newPlan(n));
+    // hpn21-* are 2021 captures the log has no line for yet; hpn22-31000 is logged.
+    for (const n of ['hpn21-24360', 'hpn21-24361', 'hpn22-31000']) set.addPlan(n, own(n));
+    writeLog(set, [planEvent('hpn22-31000', {
+      book: 'HPN 963', era: '2020-2022', year: 2022, decade: 2020, unit: '963', site: 'hpn.example', url: url('hpn22-31000'),
+    })]);
+    const r = await assign('--seed', '3', '--target-test', '1', '--total', '3', '--pin-existing', '--write');
+    expect(r.out).toContain('pinned to dev: old50');
+    expect(r.out).toContain('WARNING: hpn21-24360: no era or decade (it has a source of its own but no line in sources.jsonl: log it with realSource log plan): left out of the roster');
+    expect(r.out).toContain('WARNING: hpn21-24361: no era or decade');
+    expect(r.out).not.toMatch(/hpn21 /);
+    expect(Object.keys(splitsOf().books)).toEqual(['963', 'old50']);
+    expect(splitsOf().books.old50).toMatchObject({ split: 'dev', pinned: true, plans: 2, era: 'vintage', decade: 1950 });
+    expect(splitsOf().books['963']).toMatchObject({ era: '2020-2022', decade: 2020, plans: 1 });
+  });
+
   it('refuses what it cannot use: no seed, a bad number, a pin nobody has, a roster of nonsense, --pin-existing with a roster', async () => {
     const file = roster(ROSTER);
     await expect(assign('--roster', file)).rejects.toThrow(UsageError);
@@ -166,6 +182,19 @@ describe('build, hash, verify', () => {
     expect(fs.readFileSync(set.orch('manifest-log.md'), 'utf8').match(/^\| \d+ \|/gm)).toHaveLength(1);
   });
 
+  it('logs the manifest when the log lost its row, and says so instead of calling it unchanged', async () => {
+    frozenSet();
+    const first = await set.run(build, '--allow-partial');
+    fs.writeFileSync(set.orch('manifest-log.md'), fs.readFileSync(set.orch('manifest-log.md'), 'utf8').split('\n').filter((l) => !/^\| \d+ \|/.test(l)).join('\n'));
+    expect((await set.run(verify, '--allow-partial')).out).toMatch(/^INFO +log +.*has no rows/m);
+    const again = await set.run(build, '--allow-partial');
+    expect(again.out).toMatch(/^manifest unchanged: the file already is this manifest, but the log did not name it: version 1 logged now -> /m);
+    expect(again.lines.at(-1)).toBe(first.lines.at(-1));
+    expect(fs.readFileSync(set.orch('manifest-log.md'), 'utf8').match(/^\| \d+ \|/gm)).toHaveLength(1);
+    const third = await set.run(build, '--allow-partial');
+    expect(third.out).toMatch(/^manifest unchanged: the file already is this manifest \(version 1\)$/m);
+  });
+
   it('builds the whole manifest when every plan is checked', async () => {
     frozenSet();
     set.addPlan('gamma62-n4', frozenPlan('gamma62-n4'));
@@ -191,7 +220,7 @@ describe('build, hash, verify', () => {
     await set.run(build, '--allow-partial');
     const partial = await set.run(verify, '--allow-partial');
     expect(partial.code).toBe(0);
-    expect(partial.out).toMatch(/^PASS +manifest +version 1, 3 plans, hash [0-9a-f]{12}$/m);
+    expect(partial.out).toMatch(/^PASS +manifest +3 plans, hash [0-9a-f]{12}, schema 1, log version 1$/m);
     expect(partial.out).toMatch(/^INFO +strays +1 plan files are not in the manifest: gamma62-n4$/m);
     expect(partial.lines.at(-1)).toBe('VERIFY PASS');
     const strict = await set.run(verify);
@@ -242,62 +271,7 @@ describe('amend', () => {
   });
 });
 
-describe('the scripts as they are run', () => {
-  const script = (name) => fileURLToPath(new URL(`../../${name}`, import.meta.url));
-  const exec = (name, ...argv) => spawnSync(process.execPath, [script(name), ...argv], {
-    encoding: 'utf8', env: { ...process.env, FLOORTRACE_REAL_DIR: set.dir },
-  });
-
-  it('realManifest: help, usage errors (2), failures (1) with one line on stderr, and success (0)', () => {
-    const help = exec('realManifest.mjs', '--help');
-    expect(help.status).toBe(0);
-    expect(help.stdout).toMatch(/assign-splits --seed N/);
-    expect(help.stdout).toMatch(/amend PLAN --reason TEXT/);
-    expect(exec('realManifest.mjs').status).toBe(2);
-    expect(exec('realManifest.mjs', 'nonsense').status).toBe(2);
-    const noSeed = exec('realManifest.mjs', 'assign-splits');
-    expect([noSeed.status, noSeed.stderr.trim()]).toEqual([2, 'assign-splits: assign-splits needs --seed N, a whole number: the split must be reproducible']);
-    expect(exec('realManifest.mjs', 'assign-splits', '--seed', '1', '--nonsense').status).toBe(2);
-    const noHash = exec('realManifest.mjs', 'hash');
-    expect(noHash.status).toBe(1);
-    expect(noHash.stderr.trim().split('\n')).toHaveLength(1);
-    expect(noHash.stderr).toMatch(/^hash: there is no manifest .*manifest\.json$/m);
-    const file = roster(ROSTER);
-    const ok = exec('realManifest.mjs', 'assign-splits', '--roster', file, '--seed', '5', '--target-test', '30', '--total', '74');
-    expect(ok.status).toBe(0);
-    expect(ok.stdout).toMatch(/^assign-splits seed 5: 9 books, 74 plans/);
-    const written = exec('realManifest.mjs', 'assign-splits', '--roster', file, '--seed', '5', '--write');
-    expect(written.status).toBe(0);
-    expect(fs.existsSync(splitsPath())).toBe(true);
-    const verified = exec('realManifest.mjs', 'verify');
-    expect(verified.status).toBe(1);
-    expect(verified.stdout).toMatch(/^FAIL +manifest /m);
-  }, 60000);
-
-  it('realPipeline: help, usage errors (2), failures (1), and a status of a set', () => {
-    const help = exec('realPipeline.mjs', '--help');
-    expect(help.status).toBe(0);
-    expect(help.stdout).toMatch(/finalize-agreed \[selector\]/);
-    expect(exec('realPipeline.mjs').status).toBe(2);
-    expect(exec('realPipeline.mjs', 'nonsense').status).toBe(2);
-    const bare = exec('realPipeline.mjs', 'status');
-    expect([bare.status, bare.stderr.trim()]).toEqual([2, 'status: select plans with --names A,B (or plan names), --book X, --split dev|test, or --all']);
-    set.addPlan('alpha60-n1', newPlan('alpha60-n1'));
-    set.addPlan('alpha60-n2', frozenPlan('alpha60-n2'));
-    const ok = exec('realPipeline.mjs', 'status', '--all');
-    expect(ok.status).toBe(0);
-    expect(ok.stdout).toMatch(/^alpha60-n1 +- +- +- +- +- +- +- +- +- +-$/m);
-    expect(ok.stdout).toMatch(/^alpha60-n2 .* yes$/m);
-    const missing = exec('realPipeline.mjs', 'status', '--names', 'nosuch1-n1');
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toMatch(/^status: no plan named nosuch1-n1/);
-    const sampled = exec('realPipeline.mjs', 'sample', '--all', '--fraction', '0.5', '--seed', '1');
-    expect(sampled.status).toBe(0);
-    expect(sampled.stdout.split('\n')[0]).toBe('seed 1: 1 plan of 2 (50.0%, fraction 0.5)');
-    // The freeze exports through the script `realKeys export`, and a backup lands beside the set folder.
-    const backedUp = exec('realPipeline.mjs', 'backup', '--name', 'real-backup-cli');
-    expect(backedUp.status).toBe(0);
-    expect(fs.existsSync(path.join(set.root, 'real-backup-cli', 'alpha60-n1.floorplan'))).toBe(true);
-    expect(exec('realPipeline.mjs', 'backup', '--name', '../x').status).toBe(1);
-  }, 60000);
-});
+// The scripts as a person runs them (exit statuses, one line on stderr) are in
+// realManifestScript.test.mjs and realPipelineScript.test.mjs, a file each: every
+// case starts node processes, and one file holding both took 43 s inside a full
+// `npm test` (CLAUDE.md asks for each file to stay well under 60 s).

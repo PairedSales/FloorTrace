@@ -73,7 +73,12 @@ export const rosterFromSet = (dir, catalog) => {
   for (const name of present) {
     const info = catalog.infoOf(name);
     if (!info.era || info.decade === null) {
-      warnings.push(`${name}: no era or decade (it is neither in sources.jsonl nor named like a plan-book page): left out of the roster`);
+      // A plan with a source of its own and no log line is not one of the original
+      // 75, so its name says nothing: the log has to (realSource log plan).
+      const why = !info.logged && catalog.hasOwnSource(name)
+        ? 'it has a source of its own but no line in sources.jsonl: log it with realSource log plan'
+        : 'it is neither in sources.jsonl nor named like a plan-book page of the original set';
+      warnings.push(`${name}: no era or decade (${why}): left out of the roster`);
       continue;
     }
     const g = groups.get(info.book) ?? groups.set(info.book, {

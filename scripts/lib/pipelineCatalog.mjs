@@ -2,7 +2,11 @@
 // book, era, decade, publisher and split, read from the places they are kept
 // (orchestration/manifest.json once frozen, splits.json before that,
 // sources.jsonl for plans drafted by the sourcing tool) and, for the 75 plans
-// that were in the set before the sourcing log existed, from their names.
+// that were in the set before the sourcing log existed, from their names. A plan
+// counts as one of those 75 only when it has no line in the log AND no source of
+// its own (`isLegacy`): a plan the sourcing tool drafted whose log line has not
+// been written yet is not a vintage plan of 19yy because its name ends in two
+// digits, and stays without an era until the log says what it is.
 //
 // The book of a plan is its cap UNIT (the sourcing log's own word): the name's
 // stem for a plan-book page (`pacific25` of `pacific25-n41`), the designer code
@@ -13,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { isActivePlan, nameStem, readLog, sourcesFiles } from './sourceLog.mjs';
 import { loadManifest, manifestFileFor, hasPlan, SPLITS } from './manifest.mjs';
-import { readJson } from './keyFiles.mjs';
+import { planFile, readJson } from './keyFiles.mjs';
 
 // How the log compares book names (its own `keyOf`, which it does not export).
 const textKey = (text) => String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -53,7 +57,8 @@ export const readSplits = (dir) => {
 // The year of a plan the log knows nothing of, from the two digits in its name
 // (`aladdin62-n15`, `dwellings14-p101`): the 75 plans that predate the log are
 // all from 1914 to 1963, so a name with a year is a vintage plan of 19yy. A plan
-// with no such digits (`listing-004`) has no year until something says.
+// with no such digits (`listing-004`) has no year until something says. Only for
+// a plan `isLegacy` vouches for: 2021 web captures are named the same way.
 const legacyYear = (name) => {
   const stem = nameStem(name);
   return stem ? 1900 + Number(stem.slice(-2)) : null;
@@ -68,6 +73,9 @@ const legacyYear = (name) => {
  * and the name. A manifest or splits file that cannot be read is kept as an
  * error and thrown only by what needs it. `manifest: false` reads no manifest:
  * `realManifest build` derives the manifest and must not derive it from itself.
+ * `isLegacy(name)`: no line in the log and no source in the plan itself, so one
+ * of the 75 that predate the log; `hasOwnSource(name)` reads the plan (once, and
+ * only for a plan nothing else describes).
  */
 export const loadCatalog = (dir, { manifest: useManifest = true } = {}) => {
   const { events } = readLog(sourcesFiles(dir).jsonl);
@@ -93,6 +101,23 @@ export const loadCatalog = (dir, { manifest: useManifest = true } = {}) => {
     errors.splits = error;
   }
 
+  // A plan file that cannot be read counts as sourced: it is not one of the 75
+  // until somebody can say so, and the command that needs the plan reports it.
+  const sourced = new Map();
+  const hasOwnSource = (name) => {
+    if (!sourced.has(name)) {
+      let own = true;
+      try {
+        own = Boolean(readJson(planFile(name, dir))?.source);
+      } catch {
+        // Unreadable: kept as sourced.
+      }
+      sourced.set(name, own);
+    }
+    return sourced.get(name);
+  };
+  const isLegacy = (name) => !logged.has(name) && !hasOwnSource(name);
+
   const unitOf = (name) => {
     const e = logged.get(name);
     if (e?.unit) return String(e.unit);
@@ -103,7 +128,9 @@ export const loadCatalog = (dir, { manifest: useManifest = true } = {}) => {
     const e = logged.get(name);
     const entry = hasPlan(manifest, name) ? manifest.plans[name] : null;
     const book = entry?.book ?? unitOf(name);
-    const year = e?.year ?? entry?.year ?? legacyYear(name);
+    // A plan in the manifest or the log is described by them; only a plan neither
+    // knows takes a year from its name, and only when it is one of the 75.
+    const year = e?.year ?? entry?.year ?? (e || entry || !isLegacy(name) ? null : legacyYear(name));
     const info = bookEvents.get(textKey(book)) ?? (e ? bookEvents.get(textKey(e.book)) : null);
     return {
       name,
@@ -137,7 +164,7 @@ export const loadCatalog = (dir, { manifest: useManifest = true } = {}) => {
   };
 
   return {
-    dir, logged, manifest, splits, errors, unitOf, infoOf, matchesBook, unitClashes,
+    dir, logged, manifest, splits, errors, unitOf, infoOf, matchesBook, unitClashes, isLegacy, hasOwnSource,
     // Whether anything says which split a plan is in.
     hasSplitSource: () => Boolean(manifest || splits),
     books: (names) => [...new Set(names.map((n) => infoOf(n).book))].sort(),

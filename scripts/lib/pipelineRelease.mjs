@@ -4,13 +4,15 @@
 // the key tool would apply (an approved review of this very key and spec, a
 // passing check, a record), says why it did not apply the rest, and refuses a
 // stale approval by name: an approval of a key that has since changed is the
-// quietest way for an unchecked key to enter the set. After the batch it runs
-// `realKeys export` (so answer-keys.json holds the new keys) and, on request,
+// quietest way for an unchecked key to enter the set. It also refuses an approval
+// by an agent the plan's record or specs name as annotator or adjudicator (`review`
+// checked who reviewed when it wrote the review, and could not know what the record
+// would come to say). After the batch it runs `realKeys export` (so answer-keys.json holds the new keys) and, on request,
 // backs the set folder up.
 import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { apply } from './keyCommands.mjs';
+import { apply, involved } from './keyCommands.mjs';
 import { wipFile } from './keyFiles.mjs';
 import { loadCatalog } from './pipelineCatalog.mjs';
 import { byName } from './prng.mjs';
@@ -40,6 +42,14 @@ const readiness = (dir, name, index, facts) => {
   }
   if (review.state !== 'approved') return { refuse: `the latest review cannot be read (${review.state})` };
   if (!exists(wipFile(name, '.record.json', dir))) return { refuse: `${name}.record.json does not exist (finalize-agreed, finalize-single or adjudicated writes it)` };
+  // `review` checks who reviews when the review is written, but the record and the
+  // specs can change after it (`adjudicated` names an adjudicator later): the
+  // reviewer must be a fresh agent as the plan stands when it is frozen.
+  if (!review.by) return { refuse: `review-${review.latest} names no agent, so its independence from the annotators and the adjudicator cannot be shown; it needs a fresh review` };
+  const people = involved(name, { dir });
+  if (people.has(review.by)) {
+    return { refuse: `review-${review.latest} is by ${review.by}, who also drew or adjudicated ${name} (${[...people].sort().join(', ')}): the final review is by a fresh agent, so it needs a new review by another` };
+  }
   return null;
 };
 
@@ -56,7 +66,7 @@ const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 export const backupLines = (r) => [
   `backup -> ${r.dest}`,
-  `${plural(r.files, 'file')}, ${mb(r.bytes)}; verified: file count matches, answer-keys.json SHA-256 ${r.hashes['answer-keys.json']?.slice(0, 12) ?? 'absent (none in the set)'}, manifest SHA-256 ${r.hashes[path.join('orchestration', 'manifest.json')]?.slice(0, 12) ?? 'absent (none yet)'}`,
+  `${plural(r.files, 'file')}, ${mb(r.bytes)}; verified: file count, and size and SHA-256 of every file, match; answer-keys.json SHA-256 ${r.hashes['answer-keys.json']?.slice(0, 12) ?? 'absent (none in the set)'}, manifest SHA-256 ${r.hashes[path.join('orchestration', 'manifest.json')]?.slice(0, 12) ?? 'absent (none yet)'}`,
 ];
 
 export const backup = async (argv, ctx) => {
@@ -83,7 +93,7 @@ export const freeze = async (argv, ctx) => {
       } else if (why?.refuse) rows.push({ name, action: 'REFUSED', note: why.refuse });
       else if (opts.dry) {
         // The check is what `apply` would run first; a dry run says how it would go.
-        const c = await checkFinal(name, ctx, { fresh: true });
+        const c = await checkFinal(name, ctx, { fresh: true, write: false });
         rows.push(c.pass
           ? { name, action: 'would freeze', note: `check PASS (${c.warnings} warning(s), ${c.waived} waived)` }
           : { name, action: 'REFUSED', note: `check FAIL: ${c.firstFail ?? `${c.failures} failure(s)`}` });

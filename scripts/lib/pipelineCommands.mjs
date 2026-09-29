@@ -5,7 +5,9 @@
 //
 // These are the mechanical steps between the agents' steps of the key protocol:
 // they run over hundreds of plans, print one line per plan, exit 1 when any plan
-// ended in an error or a failed check, and never delete anything. They read the
+// ended in an error, a refusal or a failed check (a pair that merely disagrees
+// is not one), and delete no plan, key, record or log (`packets` replaces a
+// packet's image of another type, as the key tool's `blind` does). They read the
 // plans, so they are for the orchestrator and never for a role that draws or
 // checks a key blind.
 import fs from 'fs';
@@ -15,12 +17,12 @@ import {
   checkName, decodeBytes, planImageBytes, readJson, wipDir, wipFile, writeFileAtomic, writeJson,
 } from './keyFiles.mjs';
 import { mulberry32, byName, shuffled } from './prng.mjs';
-import { loadCatalog } from './pipelineCatalog.mjs';
+import { listPlans, loadCatalog } from './pipelineCatalog.mjs';
 import {
   isExplicit, parseArgs, quiet, selectPlans, withSelect,
 } from './pipelineSelect.mjs';
 import {
-  agreementOf, checkFinal, compareIsFresh, compareView, planFacts, readCompare, isUncheckedDraft, statusOf, wipIndex,
+  agreementOf, checkFinal, compareIsFresh, compareView, planFacts, readCompare, isUncheckedDraft, reviewersOf, statusOf, wipIndex,
 } from './pipelineStages.mjs';
 import { pct, plural, table } from './pipelineTable.mjs';
 import { freeze, backup } from './pipelineRelease.mjs';
@@ -403,14 +405,51 @@ export const finalizeAgreed = async (argv, ctx) => {
   finalizeTable(rows, ctx);
   const done = rows.filter((r) => r.action === 'written');
   const needs = rows.filter((r) => r.needsAdjudication);
-  ctx.out(`${done.length} finalized from A (${done.filter((r) => !r.needsAdjudication).length} PASS), ${needs.length} need the adjudicator, ${rows.filter((r) => ['REFUSED', 'ERROR'].includes(r.action)).length} refused or failed`);
+  const refused = rows.filter((r) => ['REFUSED', 'ERROR'].includes(r.action));
+  ctx.out(`${done.length} finalized from A (${done.filter((r) => !r.needsAdjudication).length} PASS), ${needs.length} need the adjudicator, ${refused.length} refused or failed`);
   const line = skippedLine(skipped);
   if (line) ctx.out(line);
-  return codeOf(needs.length + rows.filter((r) => ['REFUSED', 'ERROR'].includes(r.action)).length);
+  // A pair that disagreed is the protocol working (the adjudicator is next), and
+  // `compare-all` exits 0 on it: a chained run must not stop there. 1 is for a plan
+  // the command could not finalize, and for a final key that fails its check.
+  return codeOf(refused.length + done.filter((r) => r.needsAdjudication).length);
+};
+
+// The plans a finalizing command is told to leave alone: `--except A,B` (repeatable)
+// and `--except-file FILE` (names split at commas and white space; the summary line
+// `sample` prints first is skipped, so its output can be saved as it is). Every name
+// must be a plan of the set: a misspelt exception would finalize the plan it meant to spare.
+const exceptedPlans = (opts, ctx) => {
+  if (opts.except === undefined && opts['except-file'] === undefined) return null;
+  const words = (opts.except ?? []).flatMap((s) => s.split(','));
+  if (opts['except-file'] !== undefined) {
+    let text;
+    try {
+      text = fs.readFileSync(path.resolve(opts['except-file']), 'utf8');
+    } catch (error) {
+      throw new Error(`cannot read --except-file ${opts['except-file']}: ${error.code ?? error.message}`);
+    }
+    for (const line of text.split(/\r?\n/)) if (!/^seed \d+:/.test(line)) words.push(...line.split(/[\s,]+/));
+  }
+  const names = [...new Set(words.map((s) => s.trim()).filter(Boolean))];
+  names.forEach(checkName);
+  const all = new Set(listPlans(ctx.dir));
+  const missing = names.filter((n) => !all.has(n));
+  if (missing.length) throw new Error(`--except names ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ` and ${missing.length - 8} more` : ''}, which ${missing.length === 1 ? 'is' : 'are'} not in ${ctx.dir}: a misspelt exception would finalize the plan it was meant to spare`);
+  return new Set(names);
 };
 
 export const finalizeSingle = async (argv, ctx) => {
-  const { positional, opts } = parseArgs(argv, withSelect(), 'finalize-single');
+  const parsed = parseArgs(argv, withSelect({ values: ['except-file'], repeat: ['except'], flags: ['no-sample'] }), 'finalize-single');
+  const { positional, opts } = parsed;
+  if (opts['no-sample'] && (opts.except !== undefined || opts['except-file'] !== undefined)) throw new UsageError('--no-sample says there is no B sample to leave out, so it cannot be given with --except or --except-file');
+  const excepted = exceptedPlans(opts, ctx);
+  // The 30% of dev that get a B are plans with an A and no B yet, exactly what this
+  // command finalizes, and `sample` writes nothing the command could read: so a
+  // selection that is not a list of names must say which plans still await a B.
+  if (!isExplicit(parsed) && !excepted && !opts['no-sample']) {
+    throw new UsageError('finalize-single finalizes every selected plan that has an A and no B, and cannot tell which of them are the sample still awaiting their B (sample writes nothing): leave those out with --except A,B or --except-file FILE (the output of `sample`), name the plans to finalize with --names, or say there is no sample with --no-sample');
+  }
   const catalog = loadCatalog(ctx.dir);
   const names = selectPlans({ positional, opts }, ctx, catalog);
   const index = wipIndex(ctx.dir);
@@ -418,7 +457,8 @@ export const finalizeSingle = async (argv, ctx) => {
   const skip = (why) => skipped.set(why, (skipped.get(why) ?? 0) + 1);
   const rows = [];
   for (const name of names) {
-    if (!index.has(name, '.a.snapped.json')) skip('without A');
+    if (excepted?.has(name)) skip('left out by --except (awaiting their B)');
+    else if (!index.has(name, '.a.snapped.json')) skip('without A');
     else if (index.has(name, '.final.snapped.json')) skip('already have a final');
     else if (index.has(name, '.b.json') || index.has(name, '.b.snapped.json')) skip('with a B (compare-all, not a single annotation)');
     else {
@@ -469,6 +509,10 @@ export const adjudicated = async (argv, ctx) => {
     throw new Error(`${name}: ${annotators[0] ? 'B' : 'A'}'s spec is missing or names no author, and the record names the annotators from the specs' authors`);
   }
   if (annotators.includes(tag)) throw new Error(`the adjudicator ${tag} drew ${name}'s annotation ${annotators[0] === tag ? 'A' : 'B'}: an adjudicator is a fresh agent`);
+  // The other direction of the reviewer's independence: `review` refuses an
+  // adjudicator, and this refuses a reviewer being named the adjudicator after the
+  // fact (which would make an approval by the very agent that settled the key).
+  if (reviewersOf(ctx.dir, name, wipIndex(ctx.dir)).includes(tag)) throw new Error(`${tag} has reviewed ${name}'s final key: a reviewer is not its adjudicator, and the adjudicator is a fresh agent`);
   const finalAuthor = authorOf(ctx.dir, name, 'final');
   const compareRecord = exists(wipFile(name, '.compare.json', ctx.dir)) ? readCompare(ctx.dir, name) : null;
   await writeRecord(ctx.dir, name, {
@@ -486,8 +530,8 @@ export const adjudicated = async (argv, ctx) => {
 
 // ---- sample -----------------------------------------------------------------------
 
-// A plan that was in the set before the sourcing log: no source of its own and
-// no line in the log, or one whose A is the existing draft.
+// A plan that was in the set before the sourcing log (`catalog.isLegacy`: no
+// source of its own and no line in the log), or one whose A is the existing draft.
 const isExistingPlan = (dir, name, catalog) => {
   const aFile = wipFile(name, '.a.json', dir);
   if (exists(aFile)) {
@@ -497,7 +541,7 @@ const isExistingPlan = (dir, name, catalog) => {
       // Unreadable: judged by the plan below.
     }
   }
-  return !catalog.logged.has(name) && !planFacts(dir, name).source;
+  return catalog.isLegacy(name);
 };
 
 export const sample = async (argv, ctx) => {

@@ -45,6 +45,29 @@ describe('the dispute line', () => {
     ]);
   });
 
+  it('reads a line wrapped in bold or italics, and reports, rather than skips, one that carries a dispute without starting as one', () => {
+    const text = [
+      '**DISPUTE D-4 plan=beta61-n5 status=decided outcome=changed direction=away **',
+      '- **DISPUTE D-5 plan=beta61-n6 status=open**',
+      '__DISPUTE D-6 plan=beta61-n7 status=open__',
+      '*DISPUTE D-7 plan=beta61-n8 status=decided outcome=kept*',
+      '**DISPUTE** D-8 plan=beta61-n9 status=open',
+      '**Filed:** DISPUTE D-9 plan=beta61-n10 status=open',
+      'Dispute D-10 plan=beta61-n11 status=open',
+      'The format is described as DISPUTE <id> plan=NAME status=open in the manual.',
+      'Some prose that mentions a DISPUTE in passing, or the plan= field, is not a dispute line.',
+    ].join('\n');
+    const { disputes, malformed } = parseDisputes(text);
+    expect(disputes.map((d) => d.id)).toEqual(['D-4', 'D-5', 'D-6', 'D-7', 'D-8']);
+    expect(disputes[0]).toMatchObject({ plan: 'beta61-n5', direction: 'away' });
+    // Every line that has the id and plan= of a dispute and is not one is named, with its number.
+    // (A sentence that describes the format with a placeholder id, line 8, is prose.)
+    expect(malformed.map((m) => m.line)).toEqual([6, 7]);
+    expect(malformed[0].why).toMatch(/starts with DISPUTE, in capitals/);
+    // The tally over these counts what it read and the command exits 1 on what it could not (stats returns 1 for any malformed line).
+    expect(tallyDisputes(disputes).total).toBe(5);
+  });
+
   it('takes the latest line of an id: a dispute filed open and decided later is one dispute', () => {
     const { disputes } = parseDisputes(['DISPUTE D-9 plan=alpha60-n1 status=open', 'more prose', 'DISPUTE D-9 plan=alpha60-n1 status=decided outcome=kept'].join('\n'));
     expect(disputes).toHaveLength(1);

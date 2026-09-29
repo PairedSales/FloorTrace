@@ -1,8 +1,8 @@
 // A copy of the set folder beside it (`realPipeline backup`, and `freeze
 // --backup`). The set folder holds the only copy of every plan, and a freeze
 // rewrites hundreds of them, so the orchestrator backs it up first or after; the
-// copy is checked (file count, bytes, and the SHA-256 of the two files everything
-// else is derived from) because a backup nobody verified is a hope.
+// copy is checked (the file count, then the size and SHA-256 of every file, read
+// back from disk) because a backup nobody verified is a hope.
 //
 // It never overwrites: an existing folder makes the name `-2`, `-3`, ... Folders
 // called `zz-*` (scratch) are not copied. Files are copied one at a time with a
@@ -81,12 +81,21 @@ export const backupSet = async (dir, { name = defaultBackupName(), retryDelayMs 
   // Verify from what is on disk now, not from what the loop believes it did.
   const copied = filesUnder(dest);
   if (copied.length !== files.length) throw new Error(`the backup ${dest} holds ${copied.length} files, and ${src} held ${files.length}: it was left as it is, not to be trusted`);
+  // Every file, by size and by SHA-256 (the set is a few hundred MB, so this is seconds):
+  // a plan cut short by a full disk or a half-synced file is the case a backup exists for.
   const hashes = {};
-  for (const rel of KEY_FILES) {
-    const a = sha256Of(path.join(src, rel));
-    const b = sha256Of(path.join(dest, rel));
-    if (a !== b) throw new Error(`the backup ${dest} does not match ${src} in ${rel} (SHA-256 ${a?.slice(0, 12) ?? 'absent'} against ${b?.slice(0, 12) ?? 'absent'}): it was left as it is, not to be trusted`);
-    hashes[rel] = a;
+  for (const rel of [...KEY_FILES, ...files.filter((f) => !KEY_FILES.includes(f))]) {
+    const [from, to] = [path.join(src, rel), path.join(dest, rel)];
+    const sizes = [fs.existsSync(from) ? fs.statSync(from).size : null, fs.existsSync(to) ? fs.statSync(to).size : null];
+    const digests = sizes[0] === sizes[1] ? [sha256Of(from), sha256Of(to)] : [null, null];
+    if (sizes[0] !== sizes[1] || digests[0] !== digests[1]) {
+      const bytes = (n) => (n === null ? 'absent' : `${n} bytes`);
+      const why = sizes[0] !== sizes[1]
+        ? `${bytes(sizes[0])} against ${bytes(sizes[1])}`
+        : `SHA-256 ${digests[0]?.slice(0, 12) ?? 'absent'} against ${digests[1]?.slice(0, 12) ?? 'absent'}`;
+      throw new Error(`the backup ${dest} does not match ${src} in ${rel} (${why}): it was left as it is, not to be trusted`);
+    }
+    if (KEY_FILES.includes(rel)) hashes[rel] = digests[0];
   }
   return {
     dest, files: files.length, bytes, hashes,

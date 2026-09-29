@@ -18,9 +18,10 @@
 //              for a key that changed: whether the change moved the key toward the
 //              app's trace, away from it, or neither. Optional when the key was kept.
 //
-// The line may sit in a list item, a quote or backticks. A line that starts with
-// DISPUTE and is not that is reported and counted as malformed, since a tally
-// that skips lines it cannot read overstates whatever it can.
+// The line may sit in a list item, a quote, backticks or bold/italic marks. A line
+// that starts with DISPUTE and is not that, and one that carries `DISPUTE <id>
+// plan=` without starting with it, is reported and counted as malformed, since a
+// tally that skips lines it cannot read overstates whatever it can.
 import fs from 'fs';
 import { readJson, wipFile } from './keyFiles.mjs';
 import { disputesFileFor, listPlans, loadCatalog } from './pipelineCatalog.mjs';
@@ -34,8 +35,20 @@ export const DISPUTE_STATUS = ['open', 'decided'];
 export const DISPUTE_OUTCOME = ['changed', 'kept'];
 export const DISPUTE_DIRECTION = ['toward-tracer', 'away', 'neutral'];
 
-// Bullets, quotes and backticks a person may wrap the line in.
-const stripMarkup = (line) => line.trim().replace(/^(?:[-*+>]\s+)+/, '').replace(/^`+|`+$/g, '').trim();
+// Bullets, quotes, backticks and bold or italic marks a person may wrap the line
+// in. `*` and backticks are dropped wherever they sit (no id, plan name or value
+// holds one), so `**DISPUTE D-4 plan=x status=open**` reads as it was meant; `_`
+// only at the ends of the line, where a plan name's own underscores are not.
+const stripMarkup = (line) => line.trim()
+  .replace(/^(?:[-*+>]\s+)+/, '')
+  .replace(/[*`]/g, '')
+  .replace(/^_+|_+$/g, '')
+  .trim();
+
+// A line that carries a dispute but does not start as one (a label before it, a
+// lower-case word): reported, never skipped. A placeholder id (`<id>`, as prose
+// describing the format writes it) is not a dispute.
+const CARRIES_DISPUTE = /\bdispute\s+[^\s=<][^\s=]*\s+plan=/i;
 
 /**
  * The disputes in `text`: `{disputes: [{id, plan, status, outcome, direction,
@@ -46,8 +59,11 @@ export const parseDisputes = (text) => {
   const malformed = [];
   String(text ?? '').split(/\r?\n/).forEach((raw, i) => {
     const line = stripMarkup(raw);
-    if (!/^DISPUTE(\s|$)/.test(line)) return;
     const bad = (why) => malformed.push({ line: i + 1, text: line.slice(0, 120), why });
+    if (!/^DISPUTE(\s|$)/.test(line)) {
+      if (CARRIES_DISPUTE.test(line)) bad('a dispute line starts with DISPUTE, in capitals (after a bullet, quote, backticks or bold marks only)');
+      return;
+    }
     const tokens = line.split(/\s+/).slice(1);
     const id = tokens.shift();
     if (!id || id.includes('=')) return bad('no id after DISPUTE');
