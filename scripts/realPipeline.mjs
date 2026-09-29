@@ -53,8 +53,9 @@
  *   compare-all [selector] [--redo]
  *       `realKeyTool compare NAME` for every plan with A and B snapped: writes
  *       NAME.compare.json and prints one line per plan (agree or DISAGREE, the
- *       smallest per-type IoU, the worst boundary distance, the criteria that
- *       failed), then the tally: how many were compared, the agreement rate, and
+ *       smallest per-type IoU of the scored types, the worst boundary distance,
+ *       the criteria that failed), then the tally: how many were compared, the
+ *       agreement rate, and
  *       how many failed types, building IoU, non-GLA IoU and distance. A
  *       comparison newer than both keys is kept ("(kept)"); --redo recomputes.
  *   finalize-agreed [selector]

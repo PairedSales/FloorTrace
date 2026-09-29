@@ -241,6 +241,21 @@ describe('compare-all', () => {
     expect((await set.run(compareAll, '--all', '--redo')).out).not.toMatch(/\(kept\)/);
   });
 
+  it('does not let a small unfinished outline decide anything: not the smallest IoU it shows, and it is noted in the agreement record', async () => {
+    addNew('alpha60-n1');
+    await annotate('alpha60-n1', 'a', 'a-1');
+    // B also drew a 10 x 10 px chimney mass in the house; A did not. The key tool sets it aside.
+    const b = specOf('b-1', 2);
+    b.outlines.push({ type: 'unfinished', v: [[150, 100], [160, 100], [160, 110], [150, 110]], fix: [0, 1, 2, 3] });
+    await set.run(snap, 'alpha60-n1', '--role', 'b', '--spec', set.writeSpec('b.json', b));
+    const r = await set.run(compareAll, '--all');
+    expect(rowOf(r.out, 'alpha60-n1')).toMatch(/alpha60-n1 +agree +99\.\d\d% /);
+    expect(r.out).toMatch(/1 compared, 1 agree \(100\.0%\), 0 DISAGREE/);
+    await set.run(finalizeAgreed, '--all');
+    expect(set.readJson(set.wip('alpha60-n1', '.record.json')).agreement).toMatchObject({ agree: true, unfinishedSetAside: 1 });
+    expect(set.readJson(set.wip('alpha60-n1', '.final.snapped.json')).outlines.map((o) => o.type)).toEqual(['gla', 'garage']);
+  });
+
   it('says so when nothing has both keys', async () => {
     addNew('alpha60-n1');
     const r = await set.run(compareAll, '--all');

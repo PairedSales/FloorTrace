@@ -70,7 +70,9 @@ const FAILED_WORDS = {
 /** A compare record as the table shows it: `{agree, failed: [words], minIou, maxDistance}`. */
 export const compareView = (record) => {
   const failed = [...new Set((Array.isArray(record?.criteria) ? record.criteria : []).filter((c) => !c.ok).map((c) => c.id))].sort();
-  const ious = Object.values(record?.iou?.byType ?? {}).map((v) => v?.iou).filter(Number.isFinite);
+  // The scored types: unfinished space is in no criterion, so its IoU (a chimney
+  // one key drew and the other did not is 0%) is not the figure to glance at.
+  const ious = Object.entries(record?.iou?.byType ?? {}).filter(([type]) => type !== 'unfinished').map(([, v]) => v?.iou).filter(Number.isFinite);
   const agree = record?.agree === true;
   return {
     agree,
@@ -97,6 +99,9 @@ export const agreementOf = (record) => {
     boundary: { max: round(record?.boundary?.max, 2), p95: round(record?.boundary?.p95, 2) },
     types: record?.counts?.a ?? null,
     comparedAt: record?.at ?? null,
+    // Small unfinished outlines the comparison set aside (they are in no criterion):
+    // a reviewer may want to know that the keys differed on one.
+    ...(record?.informational?.length ? { unfinishedSetAside: record.informational.length } : {}),
   };
 };
 
