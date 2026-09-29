@@ -101,7 +101,8 @@ person checked. To add one:
 3. Save the project (`.floorplan`) into `datasets/real/`.
 
 `npm run bench:real` replays the app's own trace on each saved plan, with the
-labels its scan read, and judges it against your outlines; `--draw` writes an
+labels its scan read, and judges it against your outlines (a plan still
+holding the app's untouched trace has no key yet and is listed, not scored); `--draw` writes an
 overlay per plan and `--compare` shows verdict moves. `--fixtures` adds the
 plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
@@ -132,6 +133,22 @@ on the judgment calls). Check a plan by opening it in FloorTrace, correcting it
 and saving it: the app does not write that record, so a plan saved from the app
 no longer claims to be a draft.
 
+### Drafts from images
+
+```
+node scripts/realDrafts.mjs PLAN.jpg [--name NAME] [--crop X,Y,W,H]
+```
+
+writes the `.floorplan` the app would save after scanning the image: the labels
+it reads, the rooms that set the scale, the scale, and the app's own trace,
+ready for its outlines to be corrected. Each step is the app's own code; the
+scan is the Tesseract path, without the browser's PaddleOCR rescue. It makes
+the set's first drafts exactly as they were made. The image is held as the app
+would hold it: a crop (in the page's pixels) is cut as the app's crop tool cuts
+it, and a side over 4000 px is scaled to fit, as the app's loader scales it.
+The draft records its `source`: the image, the crop and the size they came
+out, which is the size its key will be drawn on.
+
 ### Moving keys without their plans
 
 A plan is a megabyte of image; its key is a few hundred bytes. A session that
@@ -147,3 +164,9 @@ node scripts/realKeys.mjs apply    # that file into the plans in datasets/real/
 A plan whose outlines a person corrected differently is kept and listed;
 `--force` replaces it. It also repairs the first drafts, which the app refused
 to open for their trace record (`lastTraceOutcome.level: null`).
+
+The keys file also carries each plan's `source`: a URL, or a file under the
+folder, with its crop and its size. `apply` makes a plan the folder does not
+have yet from its source before writing its key, so the set grows by that file
+rather than by its images. An image of any other size is refused, since the
+key is coordinates on it.

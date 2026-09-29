@@ -7,7 +7,10 @@
  * files where the set is kept — a cloud session that reaches it through a
  * connector able to upload only small files — hands its keys over in this file,
  * and `apply` writes them into the plans where they are. Each key travels with
- * the plan's record of who drew it (`answerKey`: by, at, notes).
+ * the plan's record of who drew it (`answerKey`: by, at, notes), and with where
+ * its image came from (`source`), when the plan was made from one: `apply`
+ * makes a plan the folder does not have yet from its source, the way
+ * scripts/realDrafts.mjs does, so a set grows by this file and not its images.
  *
  * Usage:  node scripts/realKeys.mjs export|apply [options]
  *   export        the keys file, from every plan whose outlines someone has
@@ -15,7 +18,8 @@
  *                 trace has no key yet and is left out
  *   apply         the keys file into its plans. A plan still holding the app's
  *                 untouched trace takes its key; one someone has corrected
- *                 differently is left alone and listed. Also repairs the
+ *                 differently is left alone and listed. A plan the folder does
+ *                 not have is made from its source first. Also repairs the
  *                 first drafts' trace record, which kept them from opening
  *   --dir PATH    the .floorplan files (default datasets/real/, beside CubiCasa)
  *   --keys FILE   the keys file (default answer-keys.json in --dir)
@@ -51,13 +55,15 @@ const readPlan = (dir, name) => {
 // One plan to a line: the file stays readable, and a change to one key is a
 // one-line diff.
 const lines = (map) => Object.entries(map).map(([name, value]) => `${JSON.stringify(name)}:${JSON.stringify(value)}`).join(',\n');
-const writeKeys = (file, plans, about) => {
-  fs.writeFileSync(file, `{"version":${KEYS_VERSION},"plans":{\n${lines(plans)}\n},"about":{\n${lines(about)}\n}}\n`);
+const writeKeys = (file, plans, about, sources) => {
+  const sourced = Object.keys(sources).length ? `,"sources":{\n${lines(sources)}\n}` : '';
+  fs.writeFileSync(file, `{"version":${KEYS_VERSION},"plans":{\n${lines(plans)}\n},"about":{\n${lines(about)}\n}${sourced}}\n`);
 };
 
 const exportKeys = (args) => {
   const plans = {};
   const about = {};
+  const sources = {};
   const drafts = [];
   for (const name of planNames(args.dir)) {
     const project = readPlan(args.dir, name);
@@ -68,20 +74,32 @@ const exportKeys = (args) => {
     }
     plans[name] = key;
     if (project.answerKey) about[name] = project.answerKey;
+    if (project.source) sources[name] = project.source;
   }
-  writeKeys(args.keys, plans, about);
+  writeKeys(args.keys, plans, about, sources);
   console.log(`${Object.keys(plans).length} answer keys -> ${args.keys}`);
   if (drafts.length) console.log(`no key yet, still the app's own trace: ${drafts.join(', ')}`);
 };
 
-const applyKeys = (args) => {
+const applyKeys = async (args) => {
   const keys = JSON.parse(fs.readFileSync(args.keys, 'utf8'));
   if (keys.version !== KEYS_VERSION) {
     throw new Error(`${args.keys} is version ${keys.version}; this script reads version ${KEYS_VERSION}`);
   }
-  const report = { applied: [], unchanged: [], kept: [], missing: [], repaired: [] };
+  const report = { applied: [], unchanged: [], kept: [], missing: [], repaired: [], made: [], unmade: [] };
+  // Loaded only when a plan has to be made: it is the whole OCR graph.
+  let drafting = null;
   for (const [name, outlines] of Object.entries(keys.plans)) {
-    const project = readPlan(args.dir, name);
+    let project = readPlan(args.dir, name);
+    if (!project && keys.sources?.[name]) {
+      drafting ??= await import('./lib/realDraft.mjs');
+      try {
+        ({ project } = await drafting.draftFromSource(name, keys.sources[name], args.dir));
+        report.made.push(name);
+      } catch (error) {
+        report.unmade.push(`${name} (${error.message})`);
+      }
+    }
     const { outcome, repaired, write } = applyPlan(project, outlines, keys.about?.[name], { force: args.force });
     report[outcome].push(name);
     if (repaired) report.repaired.push(name);
@@ -89,6 +107,9 @@ const applyKeys = (args) => {
     project.metadata = { ...project.metadata, updatedAt: new Date().toISOString() };
     fs.writeFileSync(path.join(args.dir, `${name}.floorplan`), JSON.stringify(project));
   }
+  await drafting?.terminateOcrWorker();
+  if (report.made.length) console.log(`made ${report.made.length} from their sources: ${report.made.join(', ')}`);
+  if (report.unmade.length) console.log(`could not make: ${report.unmade.join('; ')}`);
   console.log(`applied ${report.applied.length}, already there ${report.unchanged.length}`);
   if (report.repaired.length) {
     console.log(`repaired ${report.repaired.length} the app refused to open (a trace level that was not a string)`);
@@ -101,7 +122,7 @@ const applyKeys = (args) => {
 
 const args = parseArgs(process.argv.slice(2));
 if (args.command === 'export') exportKeys(args);
-else if (args.command === 'apply') applyKeys(args);
+else if (args.command === 'apply') await applyKeys(args);
 else {
   console.error('usage: node scripts/realKeys.mjs export|apply [--dir PATH] [--keys FILE] [--force]');
   process.exitCode = 2;

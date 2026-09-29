@@ -22,7 +22,9 @@
  * Answer key: GLA and below-grade outlines are the building (a basement is
  * still traced; its type decides the total, not the tracer), garage and
  * porch/patio outlines are non-GLA, unfinished outlines are not scored. A hole
- * is subtracted unless it is stale.
+ * is subtracted unless it is stale. A plan whose outlines are still the app's
+ * untouched trace (a draft, `realDrafts.mjs`) has no key yet and is not scored:
+ * held against its own trace, it would count as perfect.
  */
 import fs from 'fs';
 import path from 'path';
@@ -30,8 +32,9 @@ import { fileURLToPath } from 'url';
 import { PNG } from 'pngjs';
 import { traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
 import { boundaryConstraints, nonGlaExcludeRegions } from '../src/utils/traceInputs.js';
-import { loadPng } from './lib/benchUtils.mjs';
+import { decodeImage, loadPng } from './lib/benchUtils.mjs';
 import { DATASETS_DIR, fillPolygon } from './lib/cubicasa.mjs';
+import { keyOf } from './lib/realKeys.mjs';
 import {
   VERDICTS, pct, scoreMask, scoreboardLines,
 } from './lib/verdict.mjs';
@@ -56,28 +59,11 @@ const parseArgs = (argv) => {
   return args;
 };
 
-// The saved image as `{width, height, data}`. PNG decodes in pure JS; a JPEG
-// or WebP upload is decoded by the canvas pdf.js already brings in.
-const decodeImage = async (dataUrl) => {
+// The saved image as `{width, height, data}`.
+const decodeDataUrl = (dataUrl) => {
   const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl ?? '');
   if (!match) throw new Error('the project holds no image');
-  const bytes = Buffer.from(match[3], match[2] ? 'base64' : 'utf8');
-  if (match[1] === 'image/png') {
-    const png = PNG.sync.read(bytes);
-    return { width: png.width, height: png.height, data: new Uint8ClampedArray(png.data) };
-  }
-  let canvas;
-  try {
-    canvas = await import('@napi-rs/canvas');
-  } catch {
-    throw new Error(`cannot decode ${match[1]} without @napi-rs/canvas; save the plan as a PNG`);
-  }
-  const image = await canvas.loadImage(bytes);
-  const surface = canvas.createCanvas(image.width, image.height);
-  const ctx = surface.getContext('2d');
-  ctx.drawImage(image, 0, 0);
-  const { data } = ctx.getImageData(0, 0, image.width, image.height);
-  return { width: image.width, height: image.height, data: new Uint8ClampedArray(data) };
+  return decodeImage(Buffer.from(match[3], match[2] ? 'base64' : 'utf8'), match[1]);
 };
 
 const holeRing = (hole) => (Array.isArray(hole) ? hole : hole?.ring);
@@ -180,8 +166,9 @@ const loadProject = async (file) => {
   const project = JSON.parse(fs.readFileSync(file, 'utf8'));
   const state = project.floors?.[0]?.state;
   if (!state) return { skipped: 'no plan in the file' };
+  if (!keyOf(state)) return { skipped: "no answer key yet: the outlines are the app's own trace" };
   return {
-    image: await decodeImage(project.images?.[state.imageRef]),
+    image: await decodeDataUrl(project.images?.[state.imageRef]),
     outlines: (state.perimeterTraces ?? []).filter((t) => t.closed && t.vertices?.length >= 3),
     bareInputs: {},
     appInputs: { excludeRegions: nonGlaExcludeRegions(state), constraints: boundaryConstraints(state) },

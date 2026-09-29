@@ -1,5 +1,5 @@
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
-const MAX_IMAGE_DIMENSION = 4000; // px
+export const MAX_IMAGE_DIMENSION = 4000; // px
 
 // Below this the plan has no room for a wall. The tracer works at 1400 px and
 // calls anything under 3 px of stroke untraceable, so a sheet whose long edge is
