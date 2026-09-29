@@ -39,9 +39,11 @@ Benchmark results (`datasets/real_runs/`, `datasets/cubicasa5k_runs/`), `answer-
 
 Vintage: `<book><yy>-n<leaf>` — a short lowercase book name, the year's last two digits, `-n` and the leaf number; add a suffix `a` or `b` when a leaf holds two houses (`popular63-n44a`). Modern: `<site><yy>-<plan id>` (e.g. `dongardner21-1234`). Never an address. Check the name is not already in the set folder.
 
+**Modern plans: the cap unit.** On the two aggregator sites (houseplans.net, The House Designers) the diversity unit is the **designer code** (the plan-id prefix): at most 12 plans per designer, and **no site more than 60 plans** in all; standalone builders and sites are one unit each (12). Log every modern plan with `--unit <designer code or site>` and `--site <site>` so the tool can count both caps. Look at the first few plans of each designer to confirm the designers really draw differently before you take 12 from one.
+
 ## Commands (see `datasets/README.md` for each)
 
-- `node scripts/realSource.mjs search|meta|leaf|contact|screen|cdx|fetch|log …` — find, cache and log (run `node scripts/realSource.mjs --help`).
+- `node scripts/realSource.mjs search|meta|leaf|contact|grid|screen|cdx|fetch|log|report …` — find, cache and log (run `node scripts/realSource.mjs --help`). **Run `log book --book <stem> --id <identifier> --publisher … --year … --leaves N` first for each source, and `meta <identifier>` before `leaf`/`contact`** (`meta` puts the leaf count in the cache, so a mistyped leaf past the end of the book is refused instead of returning the last page). One request at a time is enforced across processes; do not try to go around it.
 - `node scripts/realKeyTool.mjs view <image> --crop X0,Y0,X1,Y1 --grid 50 --tag <tag>` — to choose a crop from a cached page (open the PNG with the Read tool; read crop coordinates off the grid; a whole page only to see what it holds).
 - `node scripts/realDrafts.mjs "<URL>" --name <name> --crop X,Y,W,H` — drafts the plan from its URL (crop is `x,y,width,height` in the page's pixels); it records URL, crop and size as the plan's source. `--force` drafts it again.
 
@@ -51,7 +53,7 @@ The scan uses OCR, and an OCR scan that loses a CPU race drops labels **without 
 
 ## Logging
 
-Every plan you draft and every page you reject goes into the log **as you go**, with `node scripts/realSource.mjs log plan --name … --book … --era vintage|2020-2022 --year … --publisher … --leaf … --url … --crop … --size … --line "<builder line>"` and `log reject --book … --leaf|--url … --reason "…"` (the tool appends to `orchestration/sources.md` and `sources.jsonl`; you cannot write there with the file-writing tool). Reject reasons are inclusion rules only (3D, elevation, site plan, too small, hand-lettered, not a US home, duplicate house, not a plan).
+Every plan you draft and every page you reject goes into the log **as you go**, with `node scripts/realSource.mjs log plan --name … --book … --era vintage|2020-2022 --year … --publisher … --leaf … --url … --crop X,Y,W,H --size W,H --line "<the builder line, whole>" [--unit CODE --site NAME] --tag <your tag>` and `log reject --book … (--leaf L | --url U) --reason <3d|elevation|site-plan|too-small|hand-lettered|not-us-home|duplicate-house|not-a-plan|other:text> --tag <your tag>` (the tool appends to `orchestration/sources.jsonl`, regenerates `sources.md`, and checks the entry; you cannot write there with the file-writing tool). Reject reasons are inclusion rules only, and a reason about how the app traces or scans the page is refused: a page qualifies before it is drafted. The tool warns on a plan under ~1,000 px, with cut-off regions, or with no labels, and on a book, unit or site over its cap: read those warnings. `node scripts/realSource.mjs report` prints the counts and any cap broken.
 
 ## Done when
 
