@@ -813,12 +813,13 @@ what a call names (paths are read with quotes removed and `..` resolved):
   and `<plan>.compare.json`; the reviewer `<plan>.final.*` and `<plan>.review-<n>.json`;
   the sourcer only `inbox/`. An annotator's own key files are allowed by the audit
   (it knows the letter) but not by the live guard, which does not: an annotator
-  draws its own snapped key from the copy the key tool writes to its scratch
-  folder, not from `keys-wip/`;
-- the key tool's subcommands, per role: annotator `view probe snap check labels`
+  draws its own snapped key from the copy `snap --tag T` writes to
+  `datasets/zz-scratch/T/`, not from `keys-wip/`;
+- the key tool's subcommands, per role: annotator `view probe snap check labels blind`
   (`snap` and `check` need `--role a|b`), adjudicator those and `compare` (`snap`
-  needs `--role final`), reviewer `view probe check labels review` (`check` on the
-  final key), sourcer `view probe`; `realDrafts` is the sourcer's alone.
+  needs `--role final`), reviewer `view probe check labels blind review` (`check` on the
+  final key), sourcer `view probe`; `sheet`, `score` and `apply` are for no blind
+  role, and `realDrafts` is the sourcer's alone.
 
 It is a speed bump for an honest agent about to open the wrong file, not a
 sandbox: it reads the text of a call, so a path built in a variable gets past it.

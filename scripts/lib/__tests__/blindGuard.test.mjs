@@ -311,9 +311,13 @@ describe('the key tool and the other scripts, per role', () => {
       probeAcross: bash(`${KEYTOOL} probe "${PACKET}\\image.jpg" --across 10,20,90 --half 12`),
       snap: bash(`${KEYTOOL} snap aladdin62-n15 --role a --spec datasets/zz-scratch/a-x/spec.json --dry`),
       snapB: bash(`${KEYTOOL} snap aladdin62-n15 --role b --spec datasets/zz-scratch/b-x/spec.json`),
+      snapTag: bash(`${KEYTOOL} snap aladdin62-n15 --role a --spec datasets/zz-scratch/a-x/spec.json --tag a-x`),
+      checkTag: bash(`${KEYTOOL} check aladdin62-n15 --role a --tag a-x`),
+      viewScratchCopy: bash(`${KEYTOOL} view "${PACKET}\\image.jpg" --poly datasets/zz-scratch/a-x/aladdin62-n15.a.snapped.json --crop 0,0,300,300`),
       check: bash(`${KEYTOOL} check aladdin62-n15 --role a`),
       checkScale: bash(`${KEYTOOL} check aladdin62-n15 --role b --feet-per-pixel 0.0501`),
       labels: bash(`${KEYTOOL} labels aladdin62-n15`),
+      blind: bash(`${KEYTOOL} blind aladdin62-n15`),
       help: bash(`${KEYTOOL} --help | head -60`),
       chained: bash(`cd "C:\\Work Space\\FloorTrace" && ${KEYTOOL} snap p1 --role a --spec s.json && ${KEYTOOL} check p1 --role a 2>&1 | tail -20`),
       powershell: bash(`Set-Location "C:\\Work Space\\FloorTrace"; node scripts/realKeyTool.mjs check p1 --role a`),
@@ -331,7 +335,6 @@ describe('the key tool and the other scripts, per role', () => {
       apply: bash(`${KEYTOOL} apply aladdin62-n15`),
       review: bash(`${KEYTOOL} review aladdin62-n15 --approve --agent x`),
       score: bash(`${KEYTOOL} score aladdin62-n15 out.json`),
-      blind: bash(`${KEYTOOL} blind aladdin62-n15`),
       checkWithoutRole: bash(`${KEYTOOL} check aladdin62-n15`),
       checkWithoutRoleChained: bash(`cd x && ${KEYTOOL} check aladdin62-n15 && ls`),
       checkFinal: bash(`${KEYTOOL} check aladdin62-n15 --role final`),
@@ -359,6 +362,7 @@ describe('the key tool and the other scripts, per role', () => {
       checkA: bash(`${KEYTOOL} check aladdin62-n15 --role a`),
       probe: bash(`${KEYTOOL} probe "${PACKET}\\image.jpg" --from 1,2 --to 3,4`),
       labels: bash(`${KEYTOOL} labels aladdin62-n15`),
+      blind: bash(`${KEYTOOL} blind aladdin62-n15`),
     });
     refused('adjudicator', {
       sheet: bash(`${KEYTOOL} sheet aladdin62-n15 --out s.png`),
@@ -382,6 +386,7 @@ describe('the key tool and the other scripts, per role', () => {
       reject: bash(`${KEYTOOL} review aladdin62-n15 --reject --agent rev-1 --region 1,2,3,4 --reason "the edge is on the sill"`),
       probe: bash(`${KEYTOOL} probe "${PACKET}\\image.jpg" --across 10,20,90`),
       labels: bash(`${KEYTOOL} labels aladdin62-n15`),
+      blind: bash(`${KEYTOOL} blind aladdin62-n15`),
     });
     refused('reviewer', {
       checkA: bash(`${KEYTOOL} check aladdin62-n15 --role a`),
@@ -409,6 +414,7 @@ describe('the key tool and the other scripts, per role', () => {
       check: bash(`${KEYTOOL} check p1`),
       snap: bash(`${KEYTOOL} snap p1 --role a --spec s.json`),
       labels: bash(`${KEYTOOL} labels p1`),
+      blind: bash(`${KEYTOOL} blind p1`),
       runDiff: bash('node scripts/realRunDiff.mjs a b'),
       keys: bash('node scripts/realKeys.mjs export'),
       keysWip: bash('ls datasets/real/keys-wip'),

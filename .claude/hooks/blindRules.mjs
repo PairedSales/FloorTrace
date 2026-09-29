@@ -148,11 +148,12 @@ const setFolderViolation = (role, letter, text) => {
 // refused, so a command a later builder adds stays closed to a blind role until
 // it is listed here: `sheet`, `score` and `apply` show or freeze the stored key,
 // `compare` shows where another annotator's key differs, `review` records a
-// reviewer's decision, `snap` moves a key.
+// reviewer's decision, `snap` moves a key; `blind` writes a blind packet (the
+// image and the labels, nothing about the trace) and is blind-safe by design.
 const KEY_TOOL_COMMANDS = {
-  annotator: ['view', 'probe', 'snap', 'check', 'labels'],
-  adjudicator: ['view', 'probe', 'snap', 'check', 'labels', 'compare'],
-  reviewer: ['view', 'probe', 'check', 'labels', 'review'],
+  annotator: ['view', 'probe', 'snap', 'check', 'labels', 'blind'],
+  adjudicator: ['view', 'probe', 'snap', 'check', 'labels', 'blind', 'compare'],
+  reviewer: ['view', 'probe', 'check', 'labels', 'blind', 'review'],
   sourcer: ['view', 'probe'],
 };
 
