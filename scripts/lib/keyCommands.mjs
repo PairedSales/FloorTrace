@@ -9,11 +9,11 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { applyPlan, keyOf } from './realKeys.mjs';
 import {
   checkName, decodeBytes, imageOfPlan, imageOfTarget, labelOfTarget, packetDir, planFile, planImageBytes,
-  readJson, wipDir, wipFile, writeFileRetry, writeJson,
+  readJson, readPacketLabels, wipDir, wipFile, writeFileRetry, writeJson, writeNumbered,
 } from './keyFiles.mjs';
 import { compareKeys } from './keyCompare.mjs';
 import { checkKey } from './keyCheck.mjs';
-import { buildPacket, labelsOf } from './keyPacket.mjs';
+import { buildPacket, labelDrift, labelsOf } from './keyPacket.mjs';
 import { probeAcross, probeLine, probeLines } from './keyProbe.mjs';
 import { snapOutlines } from './keySnap.mjs';
 import { outlinesOfJson, resolveRefs, validateSpec } from './keySpec.mjs';
@@ -115,10 +115,11 @@ export const VIEW_SPEC = {
 
 export const view = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, VIEW_SPEC, 'view');
-  const [target] = need(positional, 1, 'view IMAGE|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels] [--keys] [--trace]');
+  const [target] = need(positional, 1, 'view IMAGE|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels] [--bare] [--keys] [--trace]');
   const tag = tagOf(opts);
   const isFile = exists(target) && fs.statSync(target).isFile();
   if (isFile && (opts.keys || opts.trace)) throw new Error('--keys and --trace need a plan NAME, not an image file');
+  if (opts.bare && (opts.keys || opts.trace)) throw new Error('--bare draws no key and no trace: it cannot be given with --keys or --trace');
   const { bytes, mime } = await imageOfTarget(target, ctx.dir);
   const layers = [];
   const hashInput = [];
@@ -179,6 +180,7 @@ export const view = async (argv, ctx) => {
   const grid = opts.grid === undefined ? undefined : Number(opts.grid);
   if (grid !== undefined && !(grid >= 0)) throw new Error('--grid must be a number of pixels (0 for none)');
   const { png, summary } = await renderView(bytes, { crop, grid, layers });
+  if (summary.clamped) process.stderr.write(`note: --crop ${opts.crop} reaches past the image; showing ${summary.line}\n`);
   const [x0, y0, x1, y1] = summary.crop;
   const parts = [labelOfTarget(target)];
   if (crop) parts.push(`${Math.round(x0)}_${Math.round(y0)}_${Math.round(x1)}_${Math.round(y1)}`);
@@ -243,8 +245,7 @@ export const labels = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, { flags: ['json'] }, 'labels');
   const [name] = need(positional, 1, 'labels NAME [--json]');
   checkName(name);
-  const file = path.join(packetDir(name, ctx.dir), 'labels.json');
-  const list = exists(file) ? readJson(file).labels : labelsOf(readPlan(name, ctx).floors[0].state);
+  const list = readPacketLabels(name, ctx.dir) ?? labelsOf(readPlan(name, ctx).floors[0].state);
   if (opts.json) {
     ctx.out(JSON.stringify({ labels: list }, null, 1));
     return 0;
@@ -267,20 +268,23 @@ export const probe = async (argv, ctx) => {
   if (!(step > 0)) throw new Error('--step must be a positive number of pixels');
   const { image } = await imageOfTarget(target, ctx.dir);
   let result;
+  let header;
   if (opts.across) {
     if (opts.from || opts.to) throw new Error('give --from and --to, or --across, not both');
     const [x, y, angle] = numbers(opts.across, 3, '--across');
     const half = opts.half === undefined ? 12 : Number(opts.half);
     if (!(half > 0)) throw new Error('--half must be a positive number of pixels');
-    ctx.out(`across ${x},${y} at ${angle} degrees (0 = along +x, 90 = down the page), ${half} px each way; distances are from the centre`);
+    header = `across ${x},${y} at ${angle} degrees (0 = along +x, 90 = down the page), ${half} px each way; distances are from the centre`;
     result = probeAcross(image, [x, y], angle, half, { step });
   } else {
     if (!opts.from || !opts.to) throw new UsageError('usage: probe IMAGE --from X,Y --to X,Y [--step 0.5]   |   probe IMAGE --across X,Y,ANGLE_DEG --half 12');
     const from = numbers(opts.from, 2, '--from');
     const to = numbers(opts.to, 2, '--to');
-    ctx.out(`from ${from.join(',')} to ${to.join(',')}; distances are along the segment from --from`);
+    header = `from ${from.join(',')} to ${to.join(',')}; distances are along the segment from --from`;
     result = probeLine(image, from, to, { step });
   }
+  // Said only once the probe has read the page, so an error is not preceded by a header.
+  ctx.out(header);
   for (const line of probeLines(result)) ctx.out(line);
   return 0;
 };
@@ -310,9 +314,13 @@ const readSpec = (file) => {
   return { spec: validateSpec(json), text };
 };
 
+// A vertex may sit on the page's edge (a plan cut by its crop), or a hair past
+// it; further out is a mistyped coordinate.
+const OFF_PAGE = 2;
+
 export const snap = async (argv, ctx) => {
-  const { positional, opts } = parseArgs(argv, { values: ['role', 'spec'], flags: ['dry'] }, 'snap');
-  const [name] = need(positional, 1, 'snap NAME --role a|b|final --spec FILE [--dry]');
+  const { positional, opts } = parseArgs(argv, { values: ['role', 'spec'], flags: ['dry', 'replace'] }, 'snap');
+  const [name] = need(positional, 1, 'snap NAME --role a|b|final --spec FILE [--replace] [--dry]');
   checkName(name);
   if (!opts.role) throw new Error('snap needs --role a|b|final');
   const role = roleOf(opts);
@@ -323,7 +331,33 @@ export const snap = async (argv, ctx) => {
     const problem = ringProblem(o.v);
     if (problem) throw new Error(`outline ${k} (${o.type}) as drawn: ${problem.text}; fix the vertex order before snapping`);
   });
+  // An annotator's key is theirs: a second agent that names the same role (a
+  // mistyped --role a, say) would silently replace it. Re-snapping your own
+  // spec, as you refine it, is the normal loop, and `final` is the adjudicator's
+  // to redo, whoever it is. The only identity a spec has is its `author`, so a
+  // spec that names none cannot replace one without --replace, and a replaced
+  // spec is always said so.
+  const specFile = wipFile(name, `.${role}.json`, ctx.dir);
+  let replaced = null;
+  if (exists(specFile)) {
+    let prior = null;
+    let readable = true;
+    try {
+      prior = readJson(specFile)?.author ?? null;
+    } catch {
+      readable = false; // A spec that will not parse cannot be anyone's; it is replaced.
+    }
+    replaced = { prior, readable };
+    if (role !== 'final' && readable && !opts.replace && (!prior || prior !== spec.author)) {
+      throw new Error(`${path.basename(specFile)} already holds a spec by ${prior ? `"${prior}"` : 'no named author'}, and this spec's author is ${spec.author ? `"${spec.author}"` : 'not set'}: snap --role ${role} would replace it. Use your own role; to refine your own spec keep the same "author" in it; add --replace if you mean to take the role over`);
+    }
+  }
   const { image, from } = await imageOfPlan(name, ctx.dir);
+  rough.forEach((o, k) => o.v.forEach(([x, y], i) => {
+    if (x < -OFF_PAGE || y < -OFF_PAGE || x > image.width + OFF_PAGE || y > image.height + OFF_PAGE) {
+      throw new Error(`outline ${k} (${o.type}) vertex ${i} [${x}, ${y}] lies outside the ${image.width} x ${image.height} px image (a vertex may be on its edge, no further out than ${OFF_PAGE} px): check the coordinate`);
+    }
+  }));
   const snapped = snapOutlines(image, spec.outlines);
   const flagged = [];
   ctx.out(`snap ${name} role ${role}: image ${image.width}x${image.height} (from ${from})`);
@@ -338,7 +372,17 @@ export const snap = async (argv, ctx) => {
         'ink-beyond': `another band ${e.beyond?.toFixed(1)} px beyond the face used (hatched or double-line wall? a dimension line?): look at this edge at full zoom`,
         unstable: `read again from where it now lies, the face moves ${e.residual?.toFixed(1)} px more (windows or doors along the edge?): look at it at full zoom, probe the ink, and fix it on the wall's face`,
       };
-      if (e.flags.length) flagged.push({ outline: k, edge: e.edge, flags: e.flags, moved: round1(e.moved) });
+      if (e.flags.length) {
+        // `beyond` and `residual` are what `check` needs to word a flag it reads back.
+        flagged.push({
+          outline: k,
+          edge: e.edge,
+          flags: e.flags,
+          moved: round1(e.moved),
+          ...(e.flags.includes('ink-beyond') ? { beyond: round1(e.beyond) } : {}),
+          ...(e.flags.includes('unstable') ? { residual: round1(e.residual) } : {}),
+        });
+      }
       ctx.out(`  edge ${e.edge}: ${note}${e.flags.length ? `   <-- ${e.flags.join(', ')}: ${why[e.flags[0]]}` : ''}`);
     }
     for (const w of o.warnings) ctx.out(`  warning: ${w}`);
@@ -346,7 +390,6 @@ export const snap = async (argv, ctx) => {
   });
   const outlines = snapped.map((o) => ({ type: o.type, v: o.v.map((p) => [round1(p[0]), round1(p[1])]) }));
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
-  const specFile = wipFile(name, `.${role}.json`, ctx.dir);
   await writeFileRetry(specFile, text);
   await writeJson(snappedFile, {
     name,
@@ -359,6 +402,7 @@ export const snap = async (argv, ctx) => {
   });
   ctx.out(`${flagged.length} flagged edge(s); snapped outlines -> ${snappedFile}`);
   ctx.out(`spec kept -> ${specFile}`);
+  if (replaced) ctx.out(`note: replaced the earlier ${path.basename(specFile)}${replaced.readable ? ` (author ${replaced.prior ? `"${replaced.prior}"` : 'not set'})` : ' (it could not be read)'}`);
   return 0;
 };
 
@@ -481,21 +525,33 @@ export const scaleOf = (state) => {
 };
 
 // One run of the checks on a plan's `role` key, shared by `check` and `apply`.
+// The labels are the blind packet's when the plan has one (what the annotators
+// saw: their ids, their kinds), else the plan's scan.
 export const runCheck = async (name, role, ctx, { feetPerPixel = null } = {}) => {
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
   if (!exists(snappedFile)) throw new Error(`no ${path.basename(snappedFile)} in ${wipDir(ctx.dir)}: run snap --role ${role} first`);
-  const outlines = readOutlines(snappedFile, { strict: false });
+  const snapped = readJson(snappedFile);
+  const outlines = outlinesOfJson(snapped, snappedFile);
+  const flagged = Array.isArray(snapped?.flagged) ? snapped.flagged : [];
   const specFile = wipFile(name, `.${role}.json`, ctx.dir);
   const spec = exists(specFile) ? validateSpec(readJson(specFile)) : null;
   const project = readPlan(name, ctx);
   const state = project.floors[0].state;
   const { image } = await imageOfPlan(name, ctx.dir);
   const scale = feetPerPixel ? { x: feetPerPixel, y: feetPerPixel } : scaleOf(state);
+  const live = labelsOf(state);
+  const packet = readPacketLabels(name, ctx.dir);
   const result = checkKey({
-    outlines, spec, labels: labelsOf(state), image, scale,
+    outlines,
+    spec,
+    labels: packet ?? live,
+    image,
+    scale,
+    flagged,
+    drift: packet ? labelDrift(packet, live) : [],
   });
   return {
-    ...result, spec, outlines, snappedFile, scale,
+    ...result, spec, outlines, snappedFile, scale, labelsFrom: packet ? 'packet' : 'plan',
   };
 };
 
@@ -504,7 +560,10 @@ const STATUS_TAG = {
 };
 
 export const checkLines = (name, role, result) => {
-  const lines = [`CHECK ${name} (${role}): ${result.outlines.length} outline(s), scale ${result.scale ? `${result.scale.x.toPrecision(5)} x ${result.scale.y.toPrecision(5)} ft/px` : 'none (no calibration; use --feet-per-pixel)'}`];
+  const scaleText = result.scale
+    ? `${result.scale.x.toPrecision(5)} x ${result.scale.y.toPrecision(5)} ft/px`
+    : 'none (no calibration; use --feet-per-pixel)';
+  const lines = [`CHECK ${name} (${role}): ${result.outlines.length} outline(s), labels from the ${result.labelsFrom === 'packet' ? 'blind packet' : "plan's scan"}, scale ${scaleText}`];
   for (const a of result.areas.perOutline) {
     lines.push(`  outline ${a.outline} ${a.type}${a.name ? ` "${a.name}"` : ''}: ${Math.round(a.px2).toLocaleString('en-US')} px2${a.sqft != null ? `, ${Math.round(a.sqft).toLocaleString('en-US')} sq ft` : ''}`);
   }
@@ -583,24 +642,35 @@ export const review = async (argv, ctx) => {
   const region = opts.region ? boxOf(opts.region, '--region') : null;
   const finalFile = wipFile(name, '.final.snapped.json', ctx.dir);
   if (!exists(finalFile)) throw new Error(`nothing to review: ${path.basename(finalFile)} does not exist in ${wipDir(ctx.dir)}`);
+  // The approval covers the notes, waivers and stated figures the final spec
+  // carries as well as the outlines: they are part of what apply records.
+  const specFile = wipFile(name, '.final.json', ctx.dir);
+  if (!exists(specFile)) throw new Error(`nothing to review: ${path.basename(specFile)} (the notes, waivers and stated figures) does not exist in ${wipDir(ctx.dir)}`);
   if (involved(name, ctx).has(agent)) throw new Error(`${agent} drew or adjudicated ${name}'s key and may not review it`);
-  const done = reviewFiles(name, ctx);
-  const n = (done.at(-1)?.n ?? 0) + 1;
-  const record = {
+  const at = new Date().toISOString();
+  const keySha256 = sha256(fs.readFileSync(finalFile));
+  const specSha256 = sha256(fs.readFileSync(specFile));
+  const recordOf = (n) => ({
     name,
     n,
     agent,
-    at: new Date().toISOString(),
+    at,
     decision: opts.approve ? 'approve' : 'reject',
     region,
     reason,
     note: opts.note === undefined ? null : String(opts.note),
-    keySha256: sha256(fs.readFileSync(finalFile)),
-  };
-  const file = wipFile(name, `.review-${n}.json`, ctx.dir);
-  await writeJson(file, record);
+    keySha256,
+    specSha256,
+  });
+  // Two reviewers at once cannot take one number: the create fails for the
+  // second, which takes the next.
+  const { n, file } = await writeNumbered(
+    (k) => wipFile(name, `.review-${k}.json`, ctx.dir),
+    (reviewFiles(name, ctx).at(-1)?.n ?? 0) + 1,
+    (k) => `${JSON.stringify(recordOf(k), null, 1)}\n`,
+  );
   ctx.out(file);
-  ctx.out(JSON.stringify(record, null, 1));
+  ctx.out(JSON.stringify(recordOf(n), null, 1));
   return 0;
 };
 
@@ -627,6 +697,13 @@ export const apply = async (argv, ctx) => {
   if (decision.decision !== 'approve') throw new Error(`the latest review of ${name} (review-${latest.n}) is a rejection: ${decision.reason ?? ''}`);
   if (decision.keySha256 !== sha256(fs.readFileSync(finalFile))) {
     throw new Error(`${name}'s final key changed after review-${latest.n} approved it: it needs a fresh review`);
+  }
+  const specFile = wipFile(name, '.final.json', ctx.dir);
+  if (!decision.specSha256) {
+    throw new Error(`review-${latest.n} holds no hash of the final spec (its notes, waivers and stated figures), so it did not approve them: it needs a fresh review`);
+  }
+  if (!exists(specFile) || decision.specSha256 !== sha256(fs.readFileSync(specFile))) {
+    throw new Error(`${name}'s final spec (its notes, waivers and stated figures) changed after review-${latest.n} approved it: it needs a fresh review`);
   }
   const result = await runCheck(name, 'final', ctx);
   if (result.failures) throw new Error(`${name} fails check (${result.failures} failure(s)): run check ${name} and fix them first`);

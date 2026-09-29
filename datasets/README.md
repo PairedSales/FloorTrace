@@ -284,14 +284,14 @@ the final key; a reviewer who drew none of it records `review`; `apply` freezes 
 
 | Command | What it does |
 |---|---|
-| `view IMAGE\|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels]` | A PNG of the page or the crop (long side ~1,400 px) with a grid labelled in image pixels on all four edges, a legend, and any outlines; prints the path and `crop x0,y0→x1,y1  scale N.NN px/px  grid S`. Each `--poly` file (a spec, a snapped file, or a bare ring) has its own line style and its vertices are numbered `outline.vertex`. A plan `NAME` is drawn bare. |
+| `view IMAGE\|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels] [--bare]` | A PNG of the page or the crop (long side ~1,400 px) with a grid labelled in image pixels on all four edges, a legend, and any outlines; prints the path and `crop x0,y0→x1,y1  scale N.NN px/px  grid S`. Each `--poly` file (a spec, a snapped file, or a bare ring) has its own line style and its vertices are numbered `outline.vertex`. A plan `NAME` is drawn bare. `--bare` is accepted because the protocol's line reads `view --bare`, and does nothing more; with `--keys` or `--trace` it is an error. A crop that misses the page, or shows under 2 px of it, is an error; one that reaches past the page is cut back to it, with a note on stderr. |
 | `view NAME --keys` / `--trace` | Also the plan's stored key (by type) and the app's own trace (dashed red). For the orchestrator, the app checker and engineers, **never for a role that draws or checks a key blind.** |
 | `blind NAME` | The annotator's packet, `keys-wip/packets/NAME/`: `image.<ext>` (the plan's exact bytes, so coordinates are the key's), `labels.json`, `meta.json {name, width, height}`. |
 | `labels NAME` | The packet's labels as a table, for an agent that cannot open the set folder. |
-| `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. |
-| `snap NAME --role a\|b\|final --spec FILE` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. |
+| `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. A segment that leaves the image is an error, not the border's pixels read again. |
+| `snap NAME --role a\|b\|final --spec FILE [--replace]` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. A vertex more than 2 px outside the image is an error. Role `a` or `b` already written by another `author` (or by a spec with none) is not replaced unless you add `--replace`; snapping your own spec again is the normal loop; a replaced spec is always said so. |
 | `compare NAME` or `compare A B [--draw OUT.png --tag T --image IMAGE]` | Per-type IoU, the largest and 95th-percentile boundary distance, the protocol's verdict and the disagreement regions. |
-| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. |
+| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. It prints the plan's scale (the app's own vote) and each outline's sq ft to whoever runs it, blind roles included: accepted, since the stated-area check needs it. |
 | `review NAME --approve\|--reject --agent ID [--region … --reason …]` | The final reviewer's decision, `keys-wip/NAME.review-<n>.json`. |
 | `apply NAME [--dispute ID]` | The freeze for one plan; the only command that writes into a plan. |
 | `sheet NAME... --out FILE [--per N]` | Review sheets: each plan whole with its stored key, its record and its notes. |
@@ -306,7 +306,13 @@ breezeway, balcony, screened space…; `labelKind` in `scripts/lib/keyPacket.mjs
 the one definition `blind` and `check` share) or `level`. A size printed directly
 under an exterior name is that space's own size: it is `nonGla` too, and says
 which name it is under (`nameLabel`). There is no trace, no rooms, no scale, no
-quality figure in it, and no other key.
+quality figure in it, and no other key. `check` (and so `apply`) judges a key
+against the packet's labels, the ids and kinds the annotators saw, and not against
+a scan of the plan read again: a plan drafted again can read other labels under
+one image, so ids would name other labels, and a change to the app's exterior
+feature words would move the kinds under a key already frozen. It warns when the
+plan's scan now differs from the packet (run `blind` again, then check again).
+A plan with no packet is checked against its own scan, kinds by `labelKind`.
 
 **A spec** is what an annotator writes:
 
@@ -344,6 +350,12 @@ It also warns of an edge drawn a hair off level or plumb, of a wall whose face
 leans over 2 px along an edge (a scan tilted on the page: say `tilt`), and of a
 vertex whose two edges are nearly parallel. Look at every flagged edge at full
 zoom; probe the ink where the doubt is; `fix` an edge you have read by hand.
+`check` shows these flags again: a snapped key lies on its bands, so a second snap
+cannot tell the wall from a thin line beside it (a garage door) that captured the
+edge, and only the first snap's flags say so. They are kept in the snapped file
+(`flagged`), and `check` warns of every edge not in `fix` that was flagged `far`,
+`reaches-end`, `ink-beyond` or `unstable`, until the edge is drawn on the face or
+listed in `fix`.
 
 **Faces.** The face is the band's outer end, never its centre. Where a solid band
 sits inside a hatched one, it is the hatched band's outer line. Window sills and
@@ -353,9 +365,14 @@ garage door between two thick piers, can capture a snap: `fix` there.
 **What `compare` calls agreement** (the protocol's step 3): the same outline
 types; the building outlines (gla and below-grade) at IoU 99% or better; garage
 and porch each at 97% or better; and no boundary point more than 3 px from the
-other key's boundary of the same class. IoU is the union of a type's outlines on
-a 0.5 px raster, filled as `bench:real` fills its truth mask. The 95th-percentile
-distance pools both directions, sampled about every pixel.
+other key's boundary of the same class. IoU is exact: the area two keys' outlines
+of a type share over the area of their union, worked out edge by edge with no
+raster (a 0.5 px raster was off by 0.2% on a house of 600-900 px and 0.8% on one of
+100-200 px, and the 99% line falls where it does). It can differ from a
+`bench:real` score by the sub-pixel a truth mask rounds away. The boundary distance
+is measured from each key to the other, so a spike on one key is found by the key
+it is on; the 95th-percentile distance pools both directions, sampled about every
+pixel.
 
 **What `check` tests** (step 5), each `pass`, `warn`, `waived` or `fail`:
 
@@ -369,6 +386,7 @@ distance pools both directions, sampled about every pixel.
   is `waived`, with its reason, for the reviewer), and inside none at all is a warn;
 - every edge not in `fix` (and not a shared boundary) moves no more than 2 px, and
   finds a band, when snapped again; more than half an outline's edges in `fix` warns;
+  an edge the first snap flagged (above) warns;
 - a stated area, from the spec's `stated` or a sq ft figure a level label carries,
   against the key's area at the plan's scale (`--feet-per-pixel` overrides it): over
   5% apart fails unless the entry says why (`explained`, then a warn). An `of` that
@@ -402,9 +420,12 @@ on one plan never overwrite each other.
 | `disputeId` | Present when the key was changed after the freeze, through a dispute (`apply NAME --dispute ID`). |
 
 `apply` needs the final snapped key, a passing `check`, the record file, and a
-latest review that approved this very key (the review stores the key's hash, so a
-key changed after its approval needs a fresh review). A reviewer may not be one of
-the key's annotators or its adjudicator. A plan whose record already has `checked`
+latest review that approved this very key (the review stores the hash of the
+snapped key and of the final spec, that is of its notes, waivers and stated figures
+too, so a key or a note changed after its approval needs a fresh review). A
+reviewer may not be one of the key's annotators or its adjudicator. Reviews are
+created exclusively, so two reviewers who run `review` at once get two numbers and
+neither replaces the other. A plan whose record already has `checked`
 is frozen: `apply` refuses it unless `--dispute ID` names the dispute that
 changes it. `apply` leaves the plan otherwise as it was (image, labels,
 calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`

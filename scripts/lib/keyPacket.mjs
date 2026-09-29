@@ -5,6 +5,14 @@
 // how it does. So the packet is built by naming what it takes (the image and
 // three lists of what the scan read), never by removing what it must not carry.
 // A field a later scan adds to the plan cannot leak into it.
+//
+// The kinds are decided once, when `blind` writes the packet, by `labelKind`, and
+// `labelKind` leans on the app's own `matchExteriorFeature`
+// (src/utils/dimensions/exteriorLabels.js): a change to those words moves the
+// kinds of every packet written after it. `check` reads the packet's labels and
+// not `labelsOf(state)`, so a key drawn against a packet is judged by the kinds its
+// annotators saw whatever the app's words become; a plan with no packet is judged
+// by `labelKind` as it stands.
 import { matchExteriorFeature } from '../../src/utils/dimensions/exteriorLabels.js';
 import { planImageBytes, extOfMime, decodeBytes } from './keyFiles.mjs';
 
@@ -89,6 +97,27 @@ export const labelsOf = (state) => {
     });
   });
   return [...dimensions, ...exterior, ...levels];
+};
+
+/**
+ * How the labels a plan's scan reads now (`live`) differ from a packet's
+ * (`packet`), as one sentence each: an id the scan no longer reads, one it
+ * newly reads, one whose text, kind or box moved. Empty when they agree.
+ */
+export const labelDrift = (packet, live) => {
+  const now = new Map(live.map((l) => [l.id, l]));
+  const out = [];
+  const box = (l) => [l.bbox.x, l.bbox.y, l.bbox.width, l.bbox.height].join(',');
+  for (const p of packet) {
+    const l = now.get(p.id);
+    now.delete(p.id);
+    if (!l) out.push(`${p.id} "${p.text}" is in the packet, and the scan no longer reads it`);
+    else if (l.kind !== p.kind || l.text !== p.text || box(l) !== box(p)) {
+      out.push(`${p.id} is ${p.kind} "${p.text}" at ${box(p)} in the packet, ${l.kind} "${l.text}" at ${box(l)} in the scan now`);
+    }
+  }
+  for (const l of now.values()) out.push(`${l.id} "${l.text}" is in the scan now, and not in the packet`);
+  return out;
 };
 
 /**

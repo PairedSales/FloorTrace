@@ -82,6 +82,93 @@ describe('compare: offsets worked out by hand', () => {
   });
 });
 
+describe('compare: off the pixel grid, where the 99% line is decided', () => {
+  const verdictOf = (a, b) => {
+    const r = compareKeys([gla(rect(...a))], [gla(rect(...b))]);
+    return { r, b: r.criteria.find((c) => c.id === 'b') };
+  };
+
+  it('the IoU of fractional corners is the analytic one: 94.647%, not the 93.99% a 0.5 px raster printed', () => {
+    const { r } = verdictOf([10.3, 12.7, 110.9, 80.2], [11.4, 13.9, 109.6, 81.1]);
+    expect(r.iou.building.iou).toBeCloseTo(6510.66 / 6878.88, 12);
+    expect(r.iou.building.a).toBeCloseTo(6790.5, 6);
+  });
+
+  it('a small house just under 99% disagrees though a raster read it as 99.14%', () => {
+    // 114.9 x 117.4 px against a copy with every side moved by under 0.5 px:
+    // exactly 98.635% (a 0.5 px raster says 99.14%).
+    const a = [49.4, 36.3, 164.3, 153.7];
+    const b = [48.9, 35.9, 164.7, 153.4];
+    const inter = (164.3 - 49.4) * (153.4 - 36.3);
+    const union = (164.3 - 49.4) * (153.7 - 36.3) + (164.7 - 48.9) * (153.4 - 35.9) - inter;
+    const { r, b: crit } = verdictOf(a, b);
+    expect(r.iou.building.iou).toBeCloseTo(inter / union, 12);
+    expect(crit.ok).toBe(false);
+    expect(r.agree).toBe(false);
+    expect(r.failed[0]).toMatch(/building IoU 98\.6\d% < 99\.00%/);
+  });
+
+  it('a small house just over 99% agrees though a raster read it as 98.97%', () => {
+    const a = [10.2, 11.8, 167.8, 135.9];
+    const b = [10, 12, 167.1, 135.6];
+    const inter = (167.1 - 10.2) * (135.6 - 12);
+    const union = (167.8 - 10.2) * (135.9 - 11.8) + (167.1 - 10) * (135.6 - 12) - inter;
+    const { r, b: crit } = verdictOf(a, b);
+    expect(r.iou.building.iou).toBeCloseTo(inter / union, 12);
+    expect(crit.ok).toBe(true);
+    expect(r.agree).toBe(true);
+  });
+
+  it('300 fractional pairs of small houses: the (b) verdict is the analytic one every time', () => {
+    let x = 99;
+    const rand = () => {
+      x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+      return x / 2 ** 32;
+    };
+    for (let n = 0; n < 300; n += 1) {
+      const w = 100 + rand() * 100;
+      const h = 80 + rand() * 70;
+      const a = [rand() * 50, rand() * 50, 0, 0];
+      a[2] = a[0] + w;
+      a[3] = a[1] + h;
+      const b = a.map((v) => v + (rand() - 0.5) * 0.02 * w);
+      const inter = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+      const exact = inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter);
+      expect(verdictOf(a, b).b.ok).toBe(exact >= 0.99);
+    }
+  });
+});
+
+describe('compare: a difference in one direction only', () => {
+  // A 200 x 200 house, and the same with a 4 px wide, 20 px long spike out of its
+  // top wall, or a notch into it. The other key's wall passes within 2 px of the
+  // spike's root, so measured from the plain key the spike is invisible: only a
+  // measurement from the spiked key to the plain one finds its tip 20 px away.
+  const plain = [gla(rect(0, 0, 200, 200))];
+  const spiked = [gla([[0, 0], [98, 0], [98, -20], [102, -20], [102, 0], [200, 0], [200, 200], [0, 200]])];
+  const notched = [gla([[0, 0], [98, 0], [98, 20], [102, 20], [102, 0], [200, 0], [200, 200], [0, 200]])];
+
+  it.each([
+    ['a spike on B', plain, spiked, 'B'],
+    ['a spike on A', spiked, plain, 'A'],
+    ['a notch in B', plain, notched, 'B'],
+    ['a notch in A', notched, plain, 'A'],
+  ])('%s: the tip is 20 px from the other key, and only the measurement from that key finds it', (_, a, b, side) => {
+    const r = compareKeys(a, b);
+    const [own, other] = side === 'A' ? [r.boundary.aToB, r.boundary.bToA] : [r.boundary.bToA, r.boundary.aToB];
+    expect(own.max).toBeCloseTo(20, 0);
+    expect(other.max).toBeLessThan(3);
+    expect(r.boundary.max).toBeCloseTo(20, 0);
+    // 80 px2 of 40,000: the IoU alone would let it through.
+    expect(r.iou.building.iou).toBeGreaterThan(0.99);
+    expect(r.criteria.find((c) => c.id === 'd').ok).toBe(false);
+    expect(r.agree).toBe(false);
+    expect(r.regions).toHaveLength(1);
+    expect(r.regions[0]).toMatchObject({ side, class: 'building' });
+    expect(r.regions[0].maxDistance).toBeCloseTo(20, 0);
+  });
+});
+
 describe('compare: outline types', () => {
   it('the same outline drawn as a garage by one and a porch by the other: types differ, both IoUs 0', () => {
     const r = compareKeys([garage(rect(0, 0, 100, 100))], [porch(rect(0, 0, 100, 100))]);

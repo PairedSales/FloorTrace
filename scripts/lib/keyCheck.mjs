@@ -14,7 +14,15 @@
 //             none, a warn. The spec's `waive` turns either into `waived`, with
 //             its reason, for the reviewer to read.
 //  faces      every edge not in `fix` (and not a shared boundary) is snapped
-//             again: it must move no more than 2 px, and find a band.
+//             again: it must move no more than 2 px, and find a band. The
+//             snapped key is already on a band, so this cannot tell a wrong
+//             band (a garage door's thin line beside the wall) from the right
+//             one: so an edge that was not in `fix` and that the snap flagged
+//             far, reaches-end, ink-beyond or unstable when it ran (the snapped
+//             file's `flagged` list) warns, for a reviewer to look at, and
+//             stays a warning until the edge is drawn on the face or fixed. It
+//             is a warning, not a fail: a rough drawing 5 px off its wall,
+//             snapped onto the right band, is what the snap is for.
 //  stated     a stated area (the spec's, and any the scan's level labels carry)
 //             against the key's at the plan's scale: over 5% apart is a fail
 //             unless the spec's entry says why (`explained`), then a warn.
@@ -52,14 +60,19 @@ export const statedFromLabels = (labels) => labels
  * Runs every check. Inputs:
  *  - `outlines`: the snapped key, `[{type, v}]`;
  *  - `spec`: the annotator's spec (fix/in/R/tilt/bridge, waive, stated) or null;
- *  - `labels`: `labelsOf(state)`;
+ *  - `labels`: the labels the key is judged against (the blind packet's, else
+ *    `labelsOf(state)`);
  *  - `image`: `{width, height, data}`;
- *  - `scale`: `{x, y}` feet per pixel, or null.
+ *  - `scale`: `{x, y}` feet per pixel, or null;
+ *  - `flagged`: the snapped file's `[{outline, edge, flags, moved}]`, what the
+ *    snap itself noticed;
+ *  - `drift`: how the plan's scan now differs from the packet's labels
+ *    (`labelDrift`), each a sentence.
  * Returns `{items, failures, warnings, waived, areas}`; an item is
  * `{status, check, subject, detail}`.
  */
 export const checkKey = ({
-  outlines, spec = null, labels = [], image, scale = null,
+  outlines, spec = null, labels = [], image, scale = null, flagged = [], drift = [],
 }) => {
   const items = [];
   const add = (status, check, subject, detail) => items.push({ status, check, subject, detail });
@@ -106,6 +119,9 @@ export const checkKey = ({
   if (overlapPasses) add('pass', 'overlap', `${overlapPasses} pair(s) that touch or nearly`, 'no overlap beyond the shared boundary');
 
   // ---- labels --------------------------------------------------------------
+  if (drift.length) {
+    add('warn', 'labels', 'packet', `the plan's scan now reads ${drift.length} label(s) differently from the packet the annotators worked from (${drift.slice(0, 3).join('; ')}${drift.length > 3 ? '; ...' : ''}): judged against the packet's labels. If the plan was drafted again, run blind again and check again`);
+  }
   let labelPasses = 0;
   let labelTotal = 0;
   const seenWaive = new Set();
@@ -138,6 +154,10 @@ export const checkKey = ({
   if (labelPasses) add('pass', 'labels', `${labelPasses} of ${labelTotal} labels`, 'each lies inside an outline of its kind');
 
   // ---- faces ---------------------------------------------------------------
+  // Edges the second snap already failed, or already warned of by flag: the
+  // snap's own flags below say only what this did not.
+  const answered = new Set();
+  const raised = new Set();
   const mismatch = specOutlines.length && specOutlines.length !== outlines.length;
   if (!spec) {
     add('warn', 'faces', 'spec', 'no spec found beside the snapped key: every edge was re-snapped as if none were fixed');
@@ -168,13 +188,27 @@ export const checkKey = ({
         let good = 0;
         for (const e of own) {
           const at = `${label(outlines[k], k)} edge ${e.edge}`;
-          if (e.flags.includes('no-band')) add('fail', 'faces', at, 'no wall band found within reach of the edge; list it in "fix" if it is meant to be where drawn');
-          else if (Math.abs(e.moved) > FACE_TOLERANCE) add('fail', 'faces', at, `sits ${Math.abs(e.moved).toFixed(1)} px ${e.moved > 0 ? 'short of' : 'beyond'} the wall face (limit ${FACE_TOLERANCE} px): snap it again, or list it in "fix" if it is meant to be there`);
-          else {
+          const noted = (flag) => raised.add(`${k}:${e.edge}:${flag}`);
+          if (e.flags.includes('no-band')) {
+            add('fail', 'faces', at, 'no wall band found within reach of the edge; list it in "fix" if it is meant to be where drawn');
+            answered.add(`${k}:${e.edge}`);
+          } else if (Math.abs(e.moved) > FACE_TOLERANCE) {
+            add('fail', 'faces', at, `sits ${Math.abs(e.moved).toFixed(1)} px ${e.moved > 0 ? 'short of' : 'beyond'} the wall face (limit ${FACE_TOLERANCE} px): snap it again, or list it in "fix" if it is meant to be there`);
+            answered.add(`${k}:${e.edge}`);
+          } else {
             good += 1;
-            if (e.flags.includes('reaches-end')) add('warn', 'faces', at, 'the band runs to the end of the search: look at the edge at full zoom');
-            if (e.flags.includes('unstable')) add('warn', 'faces', at, `the face moves ${e.residual.toFixed(1)} px more when the edge is read again from where it lies (windows or doors along the edge?): probe the ink and fix the edge on the wall's face`);
-            if (e.flags.includes('ink-beyond')) add('warn', 'faces', at, `another band begins ${e.beyond.toFixed(1)} px beyond the face used (hatched or double-line wall, or a dimension line?)`);
+            if (e.flags.includes('reaches-end')) {
+              add('warn', 'faces', at, 'the band runs to the end of the search: look at the edge at full zoom');
+              noted('reaches-end');
+            }
+            if (e.flags.includes('unstable')) {
+              add('warn', 'faces', at, `the face moves ${e.residual.toFixed(1)} px more when the edge is read again from where it lies (windows or doors along the edge?): probe the ink and fix the edge on the wall's face`);
+              noted('unstable');
+            }
+            if (e.flags.includes('ink-beyond')) {
+              add('warn', 'faces', at, `another band begins ${e.beyond.toFixed(1)} px beyond the face used (hatched or double-line wall, or a dimension line?)`);
+              noted('ink-beyond');
+            }
           }
         }
         for (const text of o.warnings ?? []) add('warn', 'faces', label(outlines[k], k), text);
@@ -191,6 +225,25 @@ export const checkKey = ({
     } else {
       add('warn', 'faces', 'all', 'skipped: an outline above is not a simple polygon');
     }
+  }
+  // What the snap noticed when it ran. Snapped again, an edge that was captured by
+  // the wrong band lies on that band and passes above.
+  const px = (x) => (Number.isFinite(x) ? ` ${Math.abs(x).toFixed(1)} px` : '');
+  const FLAG_TEXT = {
+    far: (f) => `far (moved${px(f.moved)} onto the band it found, which may not be the wall: a thin door or window line, a dimension line?)`,
+    'reaches-end': () => 'reaches-end (the band it found ran to the end of the search)',
+    'ink-beyond': (f) => `ink-beyond (another band began${px(f.beyond)} beyond the face it used: a hatched or double-line wall, a dimension line?)`,
+    unstable: (f) => `unstable (its face moved${px(f.residual)} more when read again from where it landed: windows or doors along the edge?)`,
+  };
+  // (Not when the spec is another key's: its `fix` lists would say nothing of these edges.)
+  for (const f of mismatch ? [] : flagged) {
+    if (!outlines[f?.outline] || !Array.isArray(f.flags)) continue;
+    if ((specOutlines[f.outline]?.fix ?? []).includes(f.edge) || answered.has(`${f.outline}:${f.edge}`)) continue;
+    const texts = Object.keys(FLAG_TEXT)
+      .filter((flag) => f.flags.includes(flag) && !raised.has(`${f.outline}:${f.edge}:${flag}`))
+      .map((flag) => FLAG_TEXT[flag](f));
+    if (!texts.length) continue;
+    add('warn', 'faces', `${label(outlines[f.outline], f.outline)} edge ${f.edge}`, `the snap flagged it ${texts.join('; ')}; it lies on a band now, so a second snap cannot tell whether that band is the wall: probe the ink at full zoom, then draw the edge on the face and snap again, or list it in "fix"`);
   }
 
   // ---- areas and stated figures -------------------------------------------
