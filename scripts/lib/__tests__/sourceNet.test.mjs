@@ -6,9 +6,12 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  HttpError, RefusedUrl, acquireLock, checkUrl, createNet, fetchSourceBytes, hostClass, imageStem, isAllowedHost, netConfig, parseRetryAfter, readCachedImage, sniffImage,
+  afterEach, beforeEach, describe, expect, it, vi,
+} from 'vitest';
+import {
+  HttpError, LockError, RefusedUrl, acquireLock, checkUrl, createNet, fetchSourceBytes, hostClass, imageStem, isAllowedHost, netConfig, normalizeHost, parseRetryAfter,
+  readCachedImage, sniffImage,
 } from '../sourceNet.mjs';
 import {
   HTML_ERROR, JPEG, PNG_BYTES, fakeClock, reply, scriptedFetch,
@@ -43,9 +46,20 @@ describe('the allowlist', () => {
     for (const u of [
       'https://archive.org/metadata/x', 'https://web.archive.org/web/2021id_/https://x.com/a.png', 'https://ia800104.us.archive.org/BookReader/x',
       'https://ARCHIVE.ORG/a', 'https://archive.org./a',
-    ]) expect(checkUrl(u).hostname.endsWith('archive.org') || checkUrl(u).hostname.endsWith('archive.org.')).toBe(true);
+    ]) expect(checkUrl(u).hostname.endsWith('archive.org')).toBe(true);
     expect(isAllowedHost('web.archive.org')).toBe(true);
     expect(isAllowedHost('archive.org')).toBe(true);
+  });
+
+  it('reads a host with a trailing dot, or capitals, as the host it is', () => {
+    // `web.archive.org.` is web.archive.org: one spelling for the cache key and the spacing class.
+    expect(checkUrl('https://web.archive.org./web/2021id_/https://x.com/a.png').href).toBe('https://web.archive.org/web/2021id_/https://x.com/a.png');
+    expect(checkUrl('https://WEB.Archive.Org./a').hostname).toBe('web.archive.org');
+    expect(normalizeHost('Web.Archive.Org.')).toBe('web.archive.org');
+    expect(isAllowedHost('archive.org.')).toBe(true);
+    // Only the one root dot is a spelling of the host; two are not.
+    expect(isAllowedHost('archive.org..')).toBe(false);
+    expect(() => checkUrl('https://archive.org../a')).toThrow(RefusedUrl);
   });
 
   it('upgrades http to https for an allowed host', () => {
@@ -74,6 +88,30 @@ describe('the allowlist', () => {
     expect(hostClass('web.archive.org')).toBe('wayback');
     expect(hostClass('archive.org')).toBe('other');
     expect(hostClass('ia801.us.archive.org')).toBe('other');
+    // The same host spelled another way is the same class.
+    expect(hostClass('web.archive.org.')).toBe('wayback');
+    expect(hostClass('WEB.ARCHIVE.ORG')).toBe('wayback');
+    expect(hostClass('archive.org.')).toBe('other');
+  });
+
+  it('spaces web.archive.org. (trailing dot) requests by the longer gap, and caches them as web.archive.org', async () => {
+    const clock = fakeClock();
+    const fetchImpl = scriptedFetch(clock, () => ok(), 20);
+    const net = netWith(clock, fetchImpl);
+    const capture = (host, name) => `https://${host}/web/20210101000000id_/https://x.com/${name}.png`;
+    await clock.run(Promise.all([
+      net.request(capture('web.archive.org', 'a')), net.request(capture('web.archive.org.', 'b')), net.request(capture('WEB.archive.org.', 'c')),
+    ]));
+    const calls = [...fetchImpl.calls].sort((x, y) => x.start - y.start);
+    expect(calls).toHaveLength(3);
+    expect(calls[1].start - calls[0].end).toBeGreaterThanOrEqual(1000);
+    expect(calls[2].start - calls[1].end).toBeGreaterThanOrEqual(1000);
+    // The request went to the normalised host.
+    expect(calls.every((c) => new URL(c.url).host === 'web.archive.org')).toBe(true);
+    // One image, one cache entry, whichever way the host was typed.
+    const first = await clock.run(net.fetchImage(capture('web.archive.org', 'z')));
+    const again = await clock.run(net.fetchImage(capture('web.archive.org.', 'z')));
+    expect(again).toMatchObject({ cached: true, file: first.file });
   });
 
   it('never calls fetch for a refused URL, or for one a redirect points off the list', async () => {
@@ -159,6 +197,30 @@ describe('the lock', () => {
   const lockFile = () => path.join(dir, 'x.lock');
   const opts = (clock, extra = {}) => ({ clock, jitter: () => 0, exitHooks: false, staleMs: 10000, pollMs: 100, graceMs: 2000, ...extra });
   const writeOwner = (owner) => fs.writeFileSync(lockFile(), JSON.stringify(owner));
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // The virtual clock, with every sleep recorded: a retry that never sleeps is a busy loop.
+  const counting = (clock) => {
+    const sleeps = [];
+    return { clock: { ...clock, sleep: (ms) => { sleeps.push(ms); return clock.sleep(ms); } }, sleeps };
+  };
+  // A file system call that fails as Google Drive or an antivirus scanner
+  // makes it fail on a name they hold: with `code`, for the lock file only, the
+  // first `times` calls (all of them by default). Returns the attempts made.
+  const failing = (method, code, times = Infinity) => {
+    const real = fs[method].bind(fs);
+    const attempts = [];
+    vi.spyOn(fs, method).mockImplementation((file, ...rest) => {
+      if (String(file) === lockFile() && attempts.length < times) {
+        attempts.push(file);
+        throw Object.assign(new Error(`${code}: operation not permitted, ${method} '${file}'`), { code });
+      }
+      return real(file, ...rest);
+    });
+    return attempts;
+  };
 
   it('makes a second holder wait until the first lets go', async () => {
     const clock = fakeClock();
@@ -224,6 +286,99 @@ describe('the lock', () => {
     writeOwner({ token: 'someone-else', pid: process.pid, host: os.hostname(), at: clock.now() });
     release();
     expect(JSON.parse(fs.readFileSync(lockFile(), 'utf8')).token).toBe('someone-else');
+  });
+
+  it('does not spin when the lock file cannot be created and none is there: it waits between tries, then says what is wrong', async () => {
+    const { clock, sleeps } = counting(fakeClock());
+    const attempts = failing('writeFileSync', 'EPERM');
+    const start = clock.now();
+    const failure = await clock.run(acquireLock(lockFile(), opts(clock, { faultMs: 5000 }))).catch((e) => e);
+    expect(failure).toBeInstanceOf(LockError);
+    expect(failure.message).toMatch(/could not take the lock .*x\.lock after 5 s: creating the lock file fails with EPERM and no lock is there to wait for.*Google Drive/);
+    expect(clock.now() - start).toBeGreaterThan(5000);
+    expect(clock.now() - start).toBeLessThan(5500);
+    // Every failed try waited pollMs (100 ms) before the next: about 50 tries in 5 s, never thousands.
+    expect(sleeps.length).toBeGreaterThanOrEqual(49);
+    expect(sleeps.every((ms) => ms >= 100)).toBe(true);
+    expect(attempts.length).toBeLessThanOrEqual(sleeps.length + 1);
+  });
+
+  it('leaves the event loop and the CPU free while it retries, and gives up on time (real clock)', async () => {
+    failing('writeFileSync', 'EBUSY');
+    let ticks = 0;
+    const timer = setInterval(() => { ticks += 1; }, 5);
+    const began = Date.now();
+    const failure = await acquireLock(lockFile(), { exitHooks: false, pollMs: 10, faultMs: 150 }).catch((e) => e);
+    clearInterval(timer);
+    expect(failure).toBeInstanceOf(LockError);
+    expect(failure.message).toMatch(/EBUSY/);
+    expect(Date.now() - began).toBeGreaterThanOrEqual(150);
+    expect(Date.now() - began).toBeLessThan(3000);
+    // A loop that never awaited would have starved this timer (and never returned).
+    expect(ticks).toBeGreaterThan(5);
+  });
+
+  it('rides out a lock file Drive holds for a moment', async () => {
+    const { clock, sleeps } = counting(fakeClock());
+    const attempts = failing('writeFileSync', 'EBUSY', 3);
+    const release = await clock.run(acquireLock(lockFile(), opts(clock)));
+    expect(attempts).toHaveLength(3);
+    expect(sleeps).toHaveLength(3);
+    expect(fs.existsSync(lockFile())).toBe(true);
+    release();
+  });
+
+  it('does not spin when a stale lock will not move aside, and says so', async () => {
+    const { clock, sleeps } = counting(fakeClock());
+    writeOwner({ token: 'old', pid: process.pid, host: 'another-machine', at: clock.now() - 60000 });
+    const attempts = failing('renameSync', 'EPERM');
+    const failure = await clock.run(acquireLock(lockFile(), opts(clock, { faultMs: 2000 }))).catch((e) => e);
+    expect(failure).toBeInstanceOf(LockError);
+    expect(failure.message).toMatch(/the stale lock cannot be moved aside \(EPERM\)/);
+    expect(sleeps.length).toBeGreaterThanOrEqual(19);
+    expect(attempts.length).toBeLessThanOrEqual(sleeps.length + 1);
+    // Nothing was deleted on the way.
+    expect(JSON.parse(fs.readFileSync(lockFile(), 'utf8')).token).toBe('old');
+  });
+
+  it('is not put off by a live holder: waiting for one is not a fault, and ends when it lets go', async () => {
+    const clock = fakeClock();
+    writeOwner({ token: 'busy', pid: process.pid, host: os.hostname(), at: clock.now() });
+    const waiting = acquireLock(lockFile(), opts(clock, { alive: () => true, staleMs: 1e9, faultMs: 1000, timeoutMs: 60000 }));
+    await clock.run(clock.sleep(3000)); // three times the fault deadline
+    fs.unlinkSync(lockFile());
+    const release = await clock.run(waiting);
+    expect(JSON.parse(fs.readFileSync(lockFile(), 'utf8')).token).not.toBe('busy');
+    release();
+  });
+
+  it('gives up on a live holder that is neither dead nor stale after the overall deadline, naming it', async () => {
+    const { clock, sleeps } = counting(fakeClock());
+    writeOwner({ token: 'busy', pid: 4242, host: 'the-holder', at: clock.now() });
+    const start = clock.now();
+    const failure = await clock.run(acquireLock(lockFile(), opts(clock, { alive: () => true, staleMs: 1e9, timeoutMs: 3000 }))).catch((e) => e);
+    expect(failure).toBeInstanceOf(LockError);
+    expect(failure.message).toMatch(/waited 3 s for the lock .*x\.lock, held by pid 4242 on the-holder, since .*neither stale nor dead/);
+    expect(clock.now() - start).toBeGreaterThan(3000);
+    expect(sleeps.length).toBeGreaterThanOrEqual(29);
+    expect(JSON.parse(fs.readFileSync(lockFile(), 'utf8')).token).toBe('busy');
+  });
+
+  it('counts a lock that states no time as garbled, so it cannot hold everyone up for ever', async () => {
+    const clock = fakeClock();
+    writeOwner({ token: 'timeless', pid: process.pid, host: os.hostname() });
+    const start = clock.now();
+    const release = await clock.run(acquireLock(lockFile(), opts(clock, { alive: () => true })));
+    expect(clock.now() - start).toBeGreaterThan(2000); // the grace period
+    release();
+  });
+
+  it('by default waits past a stale takeover before giving up, and gives up sooner on a file it cannot touch', () => {
+    const cfg = netConfig({});
+    expect(cfg.lockWaitMs).toBeGreaterThan(cfg.staleMs);
+    expect(cfg.lockFaultMs).toBeLessThanOrEqual(60000);
+    expect(netConfig({ FLOORTRACE_SOURCE_STALE_MS: '1000' }).lockWaitMs).toBe(64000);
+    expect(netConfig({ FLOORTRACE_SOURCE_LOCK_WAIT_MS: '9000', FLOORTRACE_SOURCE_LOCK_FAULT_MS: '2000' })).toMatchObject({ lockWaitMs: 9000, lockFaultMs: 2000 });
   });
 
   it('lets go of the lock when the request throws', async () => {
@@ -497,6 +652,43 @@ describe('the cache', () => {
     await expect(clock.run(failing.fetchJson('https://archive.org/metadata/other'))).rejects.toThrow(/it is not JSON.*nothing was cached/);
     await expect(clock.run(failing.fetchJson('https://archive.org/metadata/other'))).rejects.toThrow(/not JSON/);
     expect(html.calls).toHaveLength(2);
+  });
+
+  it('refuses a JSON answer the caller\'s validator rejects, caches nothing, and does not serve an old entry it rejects', async () => {
+    const clock = fakeClock();
+    // archive.org answers a query it cannot parse with HTTP 200 and {"error": ...}.
+    const validate = (json) => {
+      if (json?.error) throw new Error(`archive.org said: ${json.error}`);
+    };
+    const first = scriptedFetch(clock, (u, n) => reply(200, JSON.stringify(n === 0 ? { error: 'a group is empty (near char 6)' } : { ok: true })));
+    const net = netWith(clock, first);
+    const url = 'https://archive.org/advancedsearch.php?q=title%3A%28';
+    await expect(clock.run(net.fetchJson(url, { validate }))).rejects.toThrow(/answered 200 but archive\.org said: a group is empty.*nothing was cached/);
+    expect(net.peekText(url)).toBeNull();
+    // Nothing stood in for the answer: the next call asks again and gets the good one.
+    expect((await clock.run(net.fetchJson(url, { validate }))).json).toEqual({ ok: true });
+    expect(first.calls).toHaveLength(2);
+
+    // An error answer cached before there was a validator is not served either.
+    const other = 'https://archive.org/advancedsearch.php?q=another';
+    await clock.run(netWith(clock, scriptedFetch(clock, () => reply(200, JSON.stringify({ error: 'bad' })))).fetchJson(other));
+    const good = scriptedFetch(clock, () => reply(200, JSON.stringify({ ok: 1 })));
+    expect((await clock.run(netWith(clock, good).fetchJson(other, { validate }))).json).toEqual({ ok: 1 });
+    expect(good.calls).toHaveLength(1);
+  });
+
+  it('peeks at an API answer in the cache without a request, however old it is', async () => {
+    const clock = fakeClock();
+    const fetchImpl = scriptedFetch(clock, () => reply(200, '{"imagecount":"164"}'));
+    const net = netWith(clock, fetchImpl);
+    const url = 'https://archive.org/metadata/someitem';
+    expect(net.peekText(url)).toBeNull();
+    await clock.run(net.fetchJson(url));
+    clock.advance(30 * 24 * 3600 * 1000); // a month: fetchJson would ask again, a peek does not
+    expect(net.peekText(url)).toBe('{"imagecount":"164"}');
+    expect(net.peekText('https://archive.org/metadata/other')).toBeNull();
+    expect(() => net.peekText('https://example.com/x')).toThrow(RefusedUrl);
+    expect(fetchImpl.calls).toHaveLength(1);
   });
 
   it('reads an empty answer as no rows when the caller says it may be', async () => {

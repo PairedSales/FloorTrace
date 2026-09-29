@@ -3,17 +3,20 @@
 // print, where they write, what they refuse. The one thing they do not run is
 // `screen`'s scan (that is the app's own OCR, tested with the app); its
 // sampling is tested here.
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   COMMANDS, UsageError, drawContactSheets, leafRange, parseArgs, parseLeafList, sampleLeaves, SCREEN_WARNING,
 } from '../sourceCommands.mjs';
-import { HttpError } from '../sourceNet.mjs';
+import { metadataUrl, itemFileUrl } from '../sourceArchive.mjs';
+import { HttpError, createNet } from '../sourceNet.mjs';
 import { readLog, sourcesFiles } from '../sourceLog.mjs';
-import { fakeClock } from './fakeNet.mjs';
+import { fakeClock, reply, scriptedFetch } from './fakeNet.mjs';
 
 let root;
 let dir;
@@ -46,11 +49,15 @@ const readPng = (file) => PNG.sync.read(fs.readFileSync(file));
 const pixel = (png, x, y) => Array.from(png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3));
 
 // A network that answers from tables and remembers what was asked.
-const fakeNet = ({ images = {}, json = () => null, text = () => '' } = {}) => {
+const fakeNet = ({
+  images = {}, json = () => null, text = () => '', cached = {},
+} = {}) => {
   const calls = [];
   return {
     dir: cache,
     calls,
+    // What the API cache holds, by URL (`meta ID` put it there): read without a request.
+    peekText: (url) => cached[url] ?? null,
     fetchImage: async (url) => {
       calls.push(['image', url]);
       const found = images[url];
@@ -62,6 +69,7 @@ const fakeNet = ({ images = {}, json = () => null, text = () => '' } = {}) => {
       calls.push(['json', url, options]);
       const value = json(url);
       if (value instanceof Error) throw value;
+      options?.validate?.(value); // as the real one: an answer the validator refuses is an error
       return { json: value, cached: false };
     },
     fetchText: async (url) => {
@@ -135,6 +143,25 @@ describe('search', () => {
     expect(new URL(net.calls[0][1]).searchParams.get('q')).toBe('(house plans) AND mediatype:texts');
     expect((await run('search', [], net)).error).toBeInstanceOf(UsageError);
     expect((await run('search', ['x', '--rows', '500'], net)).error).toBeInstanceOf(UsageError);
+  });
+
+  it('fails on a query archive.org rejects (HTTP 200 and an error body) rather than printing 0 results, and caches nothing', async () => {
+    const bad = { error: 'a group is empty (near char 7)' };
+    const r = await run('search', ['title:(', '--raw'], fakeNet({ json: () => bad }));
+    expect(r.error.message).toMatch(/archive\.org rejected the query: a group is empty/);
+    expect(r.out).toEqual([]);
+
+    // Through the real client: the error answer is not cached, so the next call asks again.
+    const clock = fakeClock();
+    const fetchImpl = scriptedFetch(clock, () => reply(200, JSON.stringify(bad)));
+    const net = createNet({
+      dir: cache, fetchImpl, clock, env: {}, jitter: () => 0, exitHooks: false,
+    });
+    const first = await clock.run(run('search', ['title:(', '--raw'], net));
+    expect(first.error.message).toMatch(/answered 200 but archive\.org rejected the query.*nothing was cached/);
+    await clock.run(run('search', ['title:(', '--raw'], net));
+    expect(fetchImpl.calls).toHaveLength(2);
+    expect(fs.existsSync(path.join(cache, 'api')) ? fs.readdirSync(path.join(cache, 'api')) : []).toEqual([]);
   });
 });
 
@@ -429,6 +456,140 @@ describe('fetch', () => {
   });
 });
 
+// archive.org answers `page/n<k>` for any k past the last leaf with HTTP 200 and
+// the last page's image, so only the book's leaf count tells a mistyped leaf.
+describe('a leaf past the end of a book', () => {
+  const cachedMeta = (leaves) => ({ [metadataUrl('Book')]: JSON.stringify({ metadata: { identifier: 'Book', title: 'A book', imagecount: String(leaves) } }) });
+  // One small page file stands for every leaf: what is asked is which leaves are fetched.
+  const leafUrls = (from, to) => {
+    const one = page('leaf.png', 200, 280, [230, 240, 250]);
+    return Object.fromEntries(leafRange(from, to).map((n) => [`https://archive.org/download/Book/page/n${n}`, one]));
+  };
+
+  it('leaf refuses it, naming the count, and fetches nothing', async () => {
+    const net = fakeNet({ images: leafUrls(0, 200), cached: cachedMeta(164) });
+    for (const n of ['164', 'n165', '9999']) {
+      const r = await run('leaf', ['Book', n], net);
+      expect(r.error.message, n).toMatch(new RegExp(`leaf ${n.replace('n', '')} is past the end of Book: it has 164 leaves \\(0\\.\\.163, from its cached metadata\\).*nothing was fetched or cached`));
+    }
+    expect(net.calls).toEqual([]);
+    // The last leaf is a leaf, and there is nothing to note when the count is known.
+    const last = await run('leaf', ['Book', '163'], net);
+    expect(last.status).toBe(0);
+    expect(last.out).toHaveLength(3);
+    expect(net.calls).toHaveLength(1);
+  });
+
+  it('leaf, contact and grid say when they cannot tell (no cached metadata), and fetch as before', async () => {
+    const unknown = /Book has no cached metadata, so a leaf past its end cannot be noticed.*run `meta Book` first/;
+    const net = fakeNet({ images: leafUrls(160, 170) });
+    expect((await run('leaf', ['Book', '9999'], fakeNet({ images: { 'https://archive.org/download/Book/page/n9999': page('far.png') } }))).out.at(-1)).toMatch(unknown);
+    expect((await run('contact', ['Book', '160', '162'], net)).out.at(-1)).toMatch(unknown);
+    expect((await run('grid', ['Book:165'], net)).out.at(-1)).toMatch(unknown);
+  });
+
+  it('a count taken from the scandata counts as known, too', async () => {
+    const noCount = { metadata: { identifier: 'Book', title: 'No count' }, files: [{ name: 'Book_scandata.xml' }] };
+    const net = fakeNet({
+      cached: {
+        [metadataUrl('Book')]: JSON.stringify(noCount),
+        [itemFileUrl('Book', 'Book_scandata.xml')]: '<book><bookData><leafCount>92</leafCount></bookData></book>',
+      },
+    });
+    expect((await run('leaf', ['Book', '92'], net)).error.message).toMatch(/it has 92 leaves \(0\.\.91/);
+  });
+
+  it('contact skips the leaves past the end with a warning, draws the rest, and fetches nothing past it', async () => {
+    const net = fakeNet({ images: leafUrls(0, 20), cached: cachedMeta(12) });
+    const r = await run('contact', ['Book', '10', '14', '--tag', 'me'], net);
+    expect(r.status).toBe(0);
+    expect(r.out[0]).toMatch(/WARNING: leaves n12\.\.n14 are past the end of Book \(12 leaves, 0\.\.11, from its cached metadata\): skipped, nothing was fetched or cached for them/);
+    expect(r.out[2]).toBe('leaves n10 n11');
+    expect(net.calls.map((c) => c[1])).toEqual(['https://archive.org/download/Book/page/n10', 'https://archive.org/download/Book/page/n11']);
+    expect(r.out.join('\n')).not.toMatch(/no cached metadata/);
+  });
+
+  it('contact refuses a range that lies wholly past the end', async () => {
+    const net = fakeNet({ images: leafUrls(0, 300), cached: cachedMeta(12) });
+    const r = await run('contact', ['Book', '200', '210'], net);
+    expect(r.error.message).toMatch(/leaf 200 is past the end of Book: it has 12 leaves/);
+    expect(net.calls).toEqual([]);
+    // A range that only reaches past the end is judged by the leaves that remain: 5 leaves, not the 300 asked.
+    const wide = fakeNet({ images: leafUrls(0, 300), cached: cachedMeta(5) });
+    expect((await run('contact', ['Book', '0', '300'], wide)).status).toBe(0);
+    expect(wide.calls).toHaveLength(5);
+  });
+
+  it('grid ID:LEAF refuses it', async () => {
+    const net = fakeNet({ images: leafUrls(0, 200), cached: cachedMeta(164) });
+    expect((await run('grid', ['Book:164'], net)).error.message).toMatch(/leaf 164 is past the end of Book/);
+    expect(net.calls).toEqual([]);
+    expect((await run('grid', ['Book:163'], net)).status).toBe(0);
+  });
+
+  it('screen skips a named leaf past the end, without a scan of it', async () => {
+    const net = fakeNet({ images: leafUrls(0, 200), cached: cachedMeta(164) });
+    const r = await run('screen', ['Book', '--leaves', '500,n900'], net);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('n500: past the end of Book (164 leaves): skipped, nothing was fetched');
+    expect(r.out).toContain('n900: past the end of Book (164 leaves): skipped, nothing was fetched');
+    expect(net.calls).toEqual([]);
+  });
+});
+
+describe('exit statuses', () => {
+  it('a value of the wrong form is a usage error, whichever command reads it', async () => {
+    const file = page('p.png');
+    const net = fakeNet();
+    const cases = [
+      ['cdx', ['houseplans.com', '--from', 'soon']],
+      ['cdx', ['houseplans.com', '--to', '20x1']],
+      ['cdx', ['houseplans.com', '--match', 'banana']],
+      ['grid', [file, '--crop', '1,2,3']],
+      ['grid', [file, '--crop', '10,10,5,50']],
+      ['grid', [file, '--grid', 'wide']],
+      ['grid', [file, '--tag', '../up']],
+      ['grid', ['nothere']],
+      ['contact', ['Book', '1', '2', '--tag', 'a b']],
+      ['fetch', ['https://archive.org/x.png', '--name', '../up']],
+      ['search', ['x', '--year', '1950-1940']],
+      ['search', ['x', '--sort', 'a;b']],
+      ['leaf', ['Book', 'forty']],
+      ['meta', ['a/b']],
+      ['screen', ['a/b']],
+    ];
+    for (const [command, argv] of cases) {
+      const r = await run(command, argv, net);
+      expect(r.error, `${command} ${argv.join(' ')}`).toBeInstanceOf(UsageError);
+    }
+    expect(net.calls).toEqual([]);
+  });
+
+  it('a well formed request that fails is not one (exit status 1), nor is a log entry the validators refuse', async () => {
+    const r = await run('log', ['reject', '--book', 'B', '--leaf', '12', '--reason', 'banana'], fakeNet());
+    expect(r.error).toBeDefined();
+    expect(r.error).not.toBeInstanceOf(UsageError);
+    expect((await run('meta', ['Ghost'], fakeNet({ json: () => ({}) }))).error).not.toBeInstanceOf(UsageError);
+  });
+
+  // The script itself, as a sourcer runs it. These never reach the network: each is refused before a request is made.
+  it('the script exits 2 for a usage error and 1 for a failure, with one line saying why', () => {
+    const script = fileURLToPath(new URL('../../realSource.mjs', import.meta.url));
+    const exec = (...argv) => spawnSync(process.execPath, [script, ...argv], {
+      encoding: 'utf8', env: { ...process.env, FLOORTRACE_ARCHIVE_CACHE: cache, FLOORTRACE_REAL_DIR: dir },
+    });
+    const soon = exec('cdx', 'houseplans.com', '--from', 'soon');
+    expect([soon.status, soon.stderr.trim()]).toEqual([2, 'cdx: --from "soon" must be a year or a timestamp (2021, 20210315)']);
+    expect(exec('cdx', 'houseplans.com', '--match', 'banana').status).toBe(2);
+    expect(exec('grid', '--crop', '1,2,3', path.join(root, 'nothing.png')).status).toBe(2);
+    expect(exec('cdx', 'houseplans.com', '--nonsense').status).toBe(2);
+    expect(exec('nonsense').status).toBe(2);
+    const refused = exec('fetch', 'https://example.com/a.png');
+    expect([refused.status, refused.stderr]).toEqual([1, expect.stringMatching(/refused example\.com/)]);
+    expect(exec('--help').status).toBe(0);
+  }, 60000);
+});
+
 describe('log and report', () => {
   const planArgs = [
     'plan', '--name', 'popular63-n44a', '--book', 'Popular Homes 1963', '--publisher', 'Popular Homes Inc', '--era', 'vintage', '--year', '1963', '--leaf', '44',
@@ -460,6 +621,43 @@ describe('log and report', () => {
     expect((await run('log', ['sketch'], fakeNet())).error).toBeInstanceOf(UsageError);
     expect((await run('log', [], fakeNet())).error).toBeInstanceOf(UsageError);
     expect((await run('log', [...planArgs, '--colour', 'red'], fakeNet())).error).toBeInstanceOf(UsageError);
+  });
+
+  it('refuses a leaf past the end of the book, by its cached metadata or by a book entry, and writes nothing', async () => {
+    const forLeaf = (n) => planArgs.map((a) => a.replace('popular63-n44a', `popular63-n${n}`).replace('/page/n44', `/page/n${n}`).replace(/^44$/, String(n)));
+    const cached = { [metadataUrl('PopularHomes1963')]: JSON.stringify({ metadata: { identifier: 'PopularHomes1963', title: 'Popular', imagecount: '40' } }) };
+    const r = await run('log', planArgs, fakeNet({ cached }));
+    expect(r.error.message).toMatch(/leaf 44 is past the end of Popular Homes 1963 \(40 leaves, 0\.\.39, from the cached metadata of PopularHomes1963\).*a page that is not there/);
+    expect(readLog(sourcesFiles(dir).jsonl).events).toEqual([]);
+    // The last leaf is inside the book.
+    expect((await run('log', forLeaf(39), fakeNet({ cached }))).status).toBe(0);
+
+    // With no cached metadata, the book's own log entry (its --leaves) says the same.
+    await run('log', ['book', '--book', 'Popular Homes 1963', '--id', 'PopularHomes1963', '--leaves', '40'], fakeNet());
+    expect((await run('log', planArgs, fakeNet())).error.message).toMatch(/leaf 44 is past the end.*from the log entry for "Popular Homes 1963"/);
+    expect((await run('log', forLeaf(38), fakeNet())).status).toBe(0);
+  });
+
+  it('takes --unit and --site, records them, and warns when a plan takes its unit over the cap', async () => {
+    const modernArgs = (id, extra = []) => [
+      'plan', '--name', `hpn21-${id}`, '--book', 'houseplans.net', '--era', '2020-2022', '--year', '2021', '--crop', '0,0,1800,1400',
+      '--url', `https://web.archive.org/web/20210614120000id_/https://www.houseplans.net/plan/${id}.png`,
+      '--line', `hpn21-${id}: 9 labels, 6 rooms set the scale, 10.12 px/ft (high), 1 outline(s), trace ok -> C:\\set\\hpn21-${id}.floorplan`, ...extra,
+    ];
+    // hpn21 is an abbreviation of the book "houseplans.net": the book is logged first, so its spelling is settled.
+    const unlogged = await run('log', modernArgs('940-1', ['--unit', '940']), fakeNet());
+    expect(unlogged.error.message).toMatch(/--book "houseplans\.net" does not look like the name's stem hpn21 and no `log book --book "houseplans\.net"` entry exists/);
+    expect((await run('log', ['book', '--book', 'houseplans.net', '--year', '2021'], fakeNet())).status).toBe(0);
+    const first = await run('log', modernArgs('940-1', ['--unit', '940', '--site', 'houseplans.net']), fakeNet());
+    expect(first.status).toBe(0);
+    expect(readLog(sourcesFiles(dir).jsonl).events.find((e) => e.event === 'plan')).toMatchObject({ unit: '940', site: 'houseplans.net' });
+    expect((await run('log', modernArgs('940-2', ['--unit', 'x y']), fakeNet())).error.message).toMatch(/--unit "x y"/);
+    for (let i = 2; i <= 12; i += 1) await run('log', modernArgs(`940-${i}`, ['--unit', '940']), fakeNet());
+    const over = await run('log', modernArgs('940-13', ['--unit', '940']), fakeNet());
+    expect(over.out.join('\n')).toMatch(/WARNING: this plan takes unit 940 of houseplans\.net \(13\) over the cap of 12/);
+    const report = await run('report', [], fakeNet());
+    expect(report.text).toMatch(/OVER THE CAP OF 12: unit 940 of houseplans\.net \(13\)/);
+    expect(report.text).toContain('no site over the cap of 60');
   });
 
   it('reports per book and per era', async () => {

@@ -12,6 +12,8 @@
 //     "wait until" a 429/503 asked for are kept beside it, so a back-off one
 //     process meets is kept by all of them. A lock whose owner died, or that is
 //     older than STALE_MS, is taken over; the holder removes its lock on exit.
+//     A waiter sleeps between looks (it never spins) and gives up with a
+//     message after a deadline, or when the lock file cannot be touched at all.
 //  3. Nothing is downloaded twice: images are cached by URL under
 //     datasets/archive-cache/ (the main checkout's, git-ignored), and an entry
 //     counts only if it is non-empty and starts with an image's magic bytes, so
@@ -47,8 +49,14 @@ export class HttpError extends Error {
   }
 }
 
+// The host as the allowlist and the spacing class read it: lower case and
+// without the root label's trailing dot (`web.archive.org.` is the same host, so
+// it must get the same gap; a second dot is not one host's spelling and stays,
+// so `archive.org..` is refused).
+export const normalizeHost = (host) => String(host).toLowerCase().replace(/\.$/, '');
+
 export const isAllowedHost = (host) => {
-  const h = String(host).toLowerCase().replace(/\.$/, '');
+  const h = normalizeHost(host);
   return h === 'archive.org' || h.endsWith('.archive.org');
 };
 
@@ -57,7 +65,9 @@ export const isAllowedHost = (host) => {
  * `new URL` says it is (so `archive.org@evil.com` is evil.com, and
  * `archive.org.evil.com` and `notarchive.org` are neither archive.org nor a
  * subdomain), never a port, never credentials. An http URL to an allowed host
- * is upgraded, not refused: archive.org answers http with a redirect anyway.
+ * is upgraded, not refused: archive.org answers http with a redirect anyway. A
+ * trailing dot on the host is dropped, so one host has one spelling in the
+ * cache key and one spacing class.
  */
 export const checkUrl = (text, what = 'URL') => {
   let url;
@@ -73,11 +83,12 @@ export const checkUrl = (text, what = 'URL') => {
   if (url.username || url.password) throw new RefusedUrl(`${what} ${text}: a URL with credentials is refused`);
   if (url.port) throw new RefusedUrl(`${what} ${text}: a URL with a port is refused`);
   url.protocol = 'https:';
+  url.hostname = normalizeHost(url.hostname);
   return url;
 };
 
 // The two spacing classes: the Wayback Machine is the expensive one.
-export const hostClass = (host) => (String(host).toLowerCase() === 'web.archive.org' ? 'wayback' : 'other');
+export const hostClass = (host) => (normalizeHost(host) === 'web.archive.org' ? 'wayback' : 'other');
 
 // ---- images ----------------------------------------------------------------
 
@@ -180,7 +191,8 @@ const hookExit = () => {
 const readOwner = (file) => {
   try {
     const owner = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return owner && typeof owner.token === 'string' ? owner : null;
+    // A lock without a time cannot go stale, so it counts as garbled.
+    return owner && typeof owner.token === 'string' && Number.isFinite(owner.at) ? owner : null;
   } catch (error) {
     return error.code === 'ENOENT' ? undefined : null;
   }
@@ -189,6 +201,36 @@ const readOwner = (file) => {
 export const realClock = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+};
+
+export class LockError extends Error {}
+
+const LOCK_BUSY = ['EEXIST', 'EPERM', 'EBUSY', 'EACCES'];
+
+// Moves a stale lock out of the way (see acquireLock). 'moved': it was ours to
+// clear; 'gone': someone else cleared it first; otherwise the error code that
+// stopped us (Google Drive or an antivirus holding the file).
+const takeOver = (file, token, observed) => {
+  const aside = `${file}.stale-${token}`;
+  try {
+    fs.renameSync(file, aside);
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'gone' : (error.code ?? 'error');
+  }
+  const moved = readOwner(aside);
+  if ((moved?.token ?? null) !== observed) {
+    try {
+      fs.linkSync(aside, file);
+    } catch {
+      // Someone made a new lock already; the moved one's owner will find its lock gone.
+    }
+  }
+  try {
+    fs.unlinkSync(aside);
+  } catch {
+    // Drive holds the moved file: the lock is out of the way, a leftover name is all that remains.
+  }
+  return 'moved';
 };
 
 /**
@@ -201,50 +243,80 @@ export const realClock = {
  * the same lock stale only one succeeds; if what was moved turns out to be a
  * newer lock (a race a real process pair essentially never loses twice), it
  * is put back.
+ *
+ * It never spins: every retry but a few immediate ones (the lock was released
+ * between our two looks) waits `pollMs` first, so the event loop and the CPU
+ * are free while it waits. And it gives up with a message rather than wait for
+ * ever: after `faultMs` of failing to touch the lock file at all (creating it
+ * fails with EPERM/EBUSY/EACCES and no lock is there, or a stale lock will not
+ * move; Google Drive and antivirus scanners do this to a name they hold), or
+ * after `timeoutMs` in all (a live, not yet stale holder).
  */
 export const acquireLock = async (file, {
   clock = realClock, staleMs = 300000, pollMs = 150, graceMs = 3000, jitter = Math.random,
   pid = process.pid, host = os.hostname(), alive = pidAlive, exitHooks = true,
+  timeoutMs = staleMs + graceMs + 60000, faultMs = 30000,
 } = {}) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const token = `${pid}-${crypto.randomBytes(6).toString('hex')}`;
+  const began = clock.now();
   let garbledSince = null;
+  let faultSince = null; // when the file first refused every touch; null while the lock is only busy
+  let fault = '';
+  let holder = null;
+  let quick = 0;
   for (;;) {
+    let createCode;
     try {
       fs.writeFileSync(file, JSON.stringify({ token, pid, host, at: clock.now() }), { flag: 'wx' });
       break;
     } catch (error) {
-      if (!['EEXIST', 'EPERM', 'EBUSY', 'EACCES'].includes(error.code)) throw error;
+      if (!LOCK_BUSY.includes(error.code)) throw error;
+      createCode = error.code;
     }
     const owner = readOwner(file);
-    if (owner === undefined) continue; // released between our two looks: try at once
-    let observed = null;
-    let stale = false;
-    if (owner === null) {
-      garbledSince ??= clock.now();
-      stale = clock.now() - garbledSince > graceMs;
-    } else {
-      garbledSince = null;
-      observed = owner.token;
-      stale = clock.now() - owner.at > staleMs || (owner.host === host && !alive(owner.pid));
-    }
-    if (stale) {
-      const aside = `${file}.stale-${token}`;
-      try {
-        fs.renameSync(file, aside);
-        const moved = readOwner(aside);
-        if ((moved?.token ?? null) !== observed) {
-          try {
-            fs.linkSync(aside, file);
-          } catch {
-            // Someone made a new lock already; the moved one's owner will find its lock gone.
-          }
-        }
-        fs.unlinkSync(aside);
-      } catch {
-        // Another waiter got there first, or Drive holds the file: look again.
+    let again = false; // the file changed under us: look again at once (a few times at most)
+    if (owner === undefined) {
+      if (createCode === 'EEXIST') again = true; // released between our two looks
+      else {
+        faultSince ??= clock.now();
+        fault = `creating the lock file fails with ${createCode} and no lock is there to wait for`;
       }
+    } else {
+      let observed = null;
+      let stale = false;
+      if (owner === null) {
+        garbledSince ??= clock.now();
+        stale = clock.now() - garbledSince > graceMs;
+      } else {
+        garbledSince = null;
+        observed = owner.token;
+        holder = owner;
+        stale = clock.now() - owner.at > staleMs || (owner.host === host && !alive(owner.pid));
+      }
+      if (stale) {
+        const took = takeOver(file, token, observed);
+        if (took === 'moved' || took === 'gone') {
+          again = true;
+          faultSince = null;
+        } else {
+          faultSince ??= clock.now();
+          fault = `the stale lock cannot be moved aside (${took})`;
+        }
+      } else if (owner) faultSince = null; // a live holder: an ordinary wait
+    }
+    if (again && quick < 3) {
+      quick += 1;
       continue;
+    }
+    quick = 0;
+    const waited = clock.now() - began;
+    if (faultSince !== null && clock.now() - faultSince > faultMs) {
+      throw new LockError(`could not take the lock ${file} after ${Math.round(waited / 1000)} s: ${fault}. Is Google Drive, an antivirus scanner or a permissions problem holding that folder? Nothing was changed; try again in a moment`);
+    }
+    if (waited > timeoutMs) {
+      const who = holder ? `pid ${holder.pid} on ${holder.host}, since ${new Date(holder.at).toISOString()}` : 'someone';
+      throw new LockError(`waited ${Math.round(waited / 1000)} s for the lock ${file}, held by ${who}, and it is neither stale nor dead. Try again later; if no tool of this project is running, that file is left over and can be removed`);
     }
     await clock.sleep(pollMs + Math.floor(jitter() * pollMs));
   }
@@ -282,20 +354,28 @@ const num = (value, fallback) => {
 };
 
 /** The request settings, from the environment (each is overridable for tests). */
-export const netConfig = (env = process.env) => ({
-  gapMs: {
-    wayback: num(env.FLOORTRACE_SOURCE_GAP_WAYBACK_MS, 1000),
-    other: num(env.FLOORTRACE_SOURCE_GAP_MS, 300),
-  },
-  timeoutMs: num(env.FLOORTRACE_SOURCE_TIMEOUT_MS, 60000),
-  maxAttempts: Math.max(1, num(env.FLOORTRACE_SOURCE_TRIES, 4)),
-  baseBackoffMs: num(env.FLOORTRACE_SOURCE_BACKOFF_MS, 2000),
-  maxBackoffMs: num(env.FLOORTRACE_SOURCE_BACKOFF_MAX_MS, 60000),
-  maxWaitMs: num(env.FLOORTRACE_SOURCE_MAX_WAIT_MS, 120000),
-  staleMs: num(env.FLOORTRACE_SOURCE_STALE_MS, 300000),
-  pollMs: num(env.FLOORTRACE_SOURCE_POLL_MS, 150),
-  trace: Boolean(env.FLOORTRACE_SOURCE_TRACE),
-});
+export const netConfig = (env = process.env) => {
+  const staleMs = num(env.FLOORTRACE_SOURCE_STALE_MS, 300000);
+  return {
+    gapMs: {
+      wayback: num(env.FLOORTRACE_SOURCE_GAP_WAYBACK_MS, 1000),
+      other: num(env.FLOORTRACE_SOURCE_GAP_MS, 300),
+    },
+    timeoutMs: num(env.FLOORTRACE_SOURCE_TIMEOUT_MS, 60000),
+    maxAttempts: Math.max(1, num(env.FLOORTRACE_SOURCE_TRIES, 4)),
+    baseBackoffMs: num(env.FLOORTRACE_SOURCE_BACKOFF_MS, 2000),
+    maxBackoffMs: num(env.FLOORTRACE_SOURCE_BACKOFF_MAX_MS, 60000),
+    maxWaitMs: num(env.FLOORTRACE_SOURCE_MAX_WAIT_MS, 120000),
+    staleMs,
+    pollMs: num(env.FLOORTRACE_SOURCE_POLL_MS, 150),
+    // How long a request waits for the lock in all (a live holder, past a stale
+    // takeover), and how long it keeps failing to touch the lock file before
+    // it says so (see acquireLock).
+    lockWaitMs: num(env.FLOORTRACE_SOURCE_LOCK_WAIT_MS, staleMs + 63000),
+    lockFaultMs: num(env.FLOORTRACE_SOURCE_LOCK_FAULT_MS, 30000),
+    trace: Boolean(env.FLOORTRACE_SOURCE_TRACE),
+  };
+};
 
 const RETRY_STATUS = new Set([429, 500, 502, 503, 504]);
 const MAX_HOPS = 6;
@@ -349,7 +429,7 @@ export const createNet = ({
   const lockFile = path.join(dir, '.net.lock');
   const stateFile = path.join(dir, '.net-state.json');
   const lockOptions = {
-    clock, staleMs: cfg.staleMs, pollMs: cfg.pollMs, jitter, exitHooks,
+    clock, staleMs: cfg.staleMs, pollMs: cfg.pollMs, timeoutMs: cfg.lockWaitMs, faultMs: cfg.lockFaultMs, jitter, exitHooks,
   };
 
   const readState = () => {
@@ -494,23 +574,35 @@ export const createNet = ({
     return { file, mime, size: res.bytes.length, cached: false, url: url.href };
   };
 
+  const apiFile = (url) => path.join(dir, 'api', `${sha(url.href).slice(0, 24)}.json`);
+
+  // What the cache holds for `url` (its entry, when it reads and is for that URL), or null.
+  const readEntry = (url) => {
+    try {
+      const entry = JSON.parse(fs.readFileSync(apiFile(url), 'utf8'));
+      return entry.url === url.href && typeof entry.text === 'string' && Number.isFinite(entry.at) ? entry : null;
+    } catch {
+      return null; // No entry, or one that does not read.
+    }
+  };
+
   /**
    * An API answer by URL as text, cached for `ttlMs` (a day; `refresh` skips
    * the cache). `check(text)` may throw to say the answer is unusable (not
-   * JSON, an error page), and then nothing is cached.
+   * JSON, an error page), and then nothing is cached (an old entry that fails
+   * it is fetched again).
    */
   const fetchText = async (rawUrl, { ttlMs = DAY_MS, refresh = false, check = () => {} } = {}) => {
     const url = checkUrl(rawUrl);
-    const file = path.join(dir, 'api', `${sha(url.href).slice(0, 24)}.json`);
     if (!refresh) {
-      try {
-        const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (entry.url === url.href && typeof entry.text === 'string' && clock.now() - entry.at < ttlMs) {
+      const entry = readEntry(url);
+      if (entry && clock.now() - entry.at < ttlMs) {
+        try {
           check(entry.text);
           return { text: entry.text, cached: true };
+        } catch {
+          // An old entry the check refuses: fetch it again.
         }
-      } catch {
-        // No entry, or one that does not read: fetch it.
       }
     }
     const res = await request(url.href);
@@ -521,15 +613,23 @@ export const createNet = ({
     } catch (error) {
       throw new Error(`${res.url} answered 200 but ${error.message} (${describeBody(res.bytes)}); nothing was cached`);
     }
-    await writeFileRetry(file, JSON.stringify({ url: url.href, at: clock.now(), text }));
+    await writeFileRetry(apiFile(url), JSON.stringify({ url: url.href, at: clock.now(), text }));
     return { text, cached: false };
   };
 
   /**
-   * A JSON answer by URL, as `fetchText`. `emptyOk` reads an empty body as
-   * null (the CDX API answers a search with no hits that way).
+   * What the cache holds for an API URL, however old, or null: no request is
+   * ever made. For facts that do not go stale (how many leaves a book has).
    */
-  const fetchJson = async (rawUrl, { emptyOk = false, ...options } = {}) => {
+  const peekText = (rawUrl) => readEntry(checkUrl(rawUrl))?.text ?? null;
+
+  /**
+   * A JSON answer by URL, as `fetchText`. `emptyOk` reads an empty body as
+   * null (the CDX API answers a search with no hits that way). `validate(json)`
+   * may throw to refuse an answer that is JSON but not an answer (archive.org
+   * answers a bad query with HTTP 200 and `{"error": ...}`): it is not cached.
+   */
+  const fetchJson = async (rawUrl, { emptyOk = false, validate = () => {}, ...options } = {}) => {
     const parse = (text) => {
       if (!text.trim() && emptyOk) return null;
       try {
@@ -538,9 +638,9 @@ export const createNet = ({
         throw new Error('it is not JSON');
       }
     };
-    const { text, cached } = await fetchText(rawUrl, { ...options, check: parse });
+    const { text, cached } = await fetchText(rawUrl, { ...options, check: (body) => validate(parse(body)) });
     return { json: parse(text), cached };
   };
 
-  return { request, fetchImage, fetchText, fetchJson, config: cfg, dir };
+  return { request, fetchImage, fetchText, fetchJson, peekText, config: cfg, dir };
 };

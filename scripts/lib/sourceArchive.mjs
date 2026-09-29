@@ -11,17 +11,23 @@
 //  - some items have no `imagecount` in their metadata; their `_scandata.xml`
 //    names the leaf count instead.
 
+// A command line the tool cannot read: an unknown option, a missing argument,
+// a value of the wrong form (exit status 2), as opposed to a well formed
+// request that fails (exit status 1). Thrown here for the values these
+// functions read (an identifier, a leaf, a year range, a CDX option).
+export class UsageError extends Error {}
+
 export const ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export const checkItemId = (id) => {
-  if (!ITEM_ID.test(String(id ?? ''))) throw new Error(`"${id ?? ''}" is not an archive.org identifier (letters, digits, . _ - only)`);
+  if (!ITEM_ID.test(String(id ?? ''))) throw new UsageError(`"${id ?? ''}" is not an archive.org identifier (letters, digits, . _ - only)`);
   return String(id);
 };
 
 // A leaf number: `49`, or `n49` as the page URLs and contact sheets write it.
 export const checkLeaf = (n) => {
   const text = String(n ?? '').trim().replace(/^n(?=\d)/i, '');
-  if (!/^\d{1,6}$/.test(text)) throw new Error(`leaf "${n ?? ''}" must be a whole number, 0 or more`);
+  if (!/^\d{1,6}$/.test(text)) throw new UsageError(`leaf "${n ?? ''}" must be a whole number, 0 or more`);
   return Number(text);
 };
 
@@ -44,10 +50,10 @@ const yearOf = (...values) => {
 /** `1920-1959` or `1955` as `[from, to]`. */
 export const parseYearRange = (value) => {
   const m = /^(\d{4})(?:\s*-\s*(\d{4}))?$/.exec(String(value).trim());
-  if (!m) throw new Error(`--year "${value}" must be a year or FROM-TO years, like 1920-1959`);
+  if (!m) throw new UsageError(`--year "${value}" must be a year or FROM-TO years, like 1920-1959`);
   const from = Number(m[1]);
   const to = Number(m[2] ?? m[1]);
-  if (to < from) throw new Error(`--year ${value}: the range runs backwards`);
+  if (to < from) throw new UsageError(`--year ${value}: the range runs backwards`);
   return [from, to];
 };
 
@@ -62,7 +68,7 @@ const SEARCH_FIELDS = ['identifier', 'title', 'year', 'creator', 'imagecount', '
  */
 export const expandQuery = (query, { raw = false } = {}) => {
   const q = String(query ?? '').trim();
-  if (!q) throw new Error('search needs a query, like "house plans"');
+  if (!q) throw new UsageError('search needs a query, like "house plans"');
   const plain = /^[\p{L}\p{N}\s'-]+$/u.test(q) && !/\b(AND|OR|NOT)\b/.test(q);
   if (raw || !plain) return q;
   const words = `(${q.split(/\s+/).join(' AND ')})`;
@@ -79,23 +85,31 @@ export const searchUrl = (query, {
   const n = Math.max(1, Math.min(100, Math.floor(rows)));
   let q = `(${expandQuery(query, { raw })}) AND mediatype:texts`;
   if (years) q += ` AND year:[${years[0]} TO ${years[1]}]`;
-  if (sort !== undefined && !/^[a-z]+( (asc|desc))?$/i.test(sort)) throw new Error(`--sort "${sort}" must be a field and optionally asc or desc, like "downloads desc"`);
+  if (sort !== undefined && !/^[a-z]+( (asc|desc))?$/i.test(sort)) throw new UsageError(`--sort "${sort}" must be a field and optionally asc or desc, like "downloads desc"`);
   return `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}${SEARCH_FIELDS.map((f) => `&fl[]=${f}`).join('')}`
     + `&rows=${n}&page=${Math.max(1, Math.floor(page))}${sort ? `&sort[]=${encodeURIComponent(sort)}` : ''}&output=json`;
 };
 
-export const parseSearch = (json) => ({
-  found: json?.response?.numFound ?? 0,
-  rows: (json?.response?.docs ?? []).map((d) => ({
-    identifier: d.identifier,
-    title: text(d.title),
-    year: d.year ?? null,
-    creator: text(d.creator),
-    imagecount: intOrNull(d.imagecount),
-    downloads: d.downloads ?? null,
-    restricted: /^(true|1|yes)$/i.test(String(d['access-restricted-item'] ?? '')),
-  })),
-});
+/**
+ * A search answer as `{found, rows}`. archive.org answers a query it cannot
+ * parse (`title:(`) with HTTP 200 and `{"error": "..."}`, which is not "no
+ * results": it throws, so nothing caches it and nobody reads it as zero hits.
+ */
+export const parseSearch = (json) => {
+  if (json?.error) throw new Error(`archive.org rejected the query: ${typeof json.error === 'string' ? json.error : JSON.stringify(json.error)}`);
+  return {
+    found: json?.response?.numFound ?? 0,
+    rows: (json?.response?.docs ?? []).map((d) => ({
+      identifier: d.identifier,
+      title: text(d.title),
+      year: d.year ?? null,
+      creator: text(d.creator),
+      imagecount: intOrNull(d.imagecount),
+      downloads: d.downloads ?? null,
+      restricted: /^(true|1|yes)$/i.test(String(d['access-restricted-item'] ?? '')),
+    })),
+  };
+};
 
 export const formatSearchRow = (r) => `${r.identifier}  ${r.year ?? '----'}  ${r.imagecount === null ? '  ?' : String(r.imagecount).padStart(3)} leaves  `
   + `${r.title}${r.creator ? `  / ${r.creator}` : ''}${r.restricted ? '  [borrow-only]' : ''}`;
@@ -109,6 +123,9 @@ export const leafUrl = (id, n, ext) => `https://archive.org/download/${checkItem
 
 // Collections that lend rather than serve: an item in one is borrow-only.
 export const LENDING_COLLECTIONS = ['inlibrary', 'lendinglibrary'];
+
+// The URL of a file of an item (its _scandata.xml, for one).
+export const itemFileUrl = (id, name) => `https://archive.org/download/${checkItemId(id)}/${String(name).split('/').map(encodeURIComponent).join('/')}`;
 
 export const parseMetadata = (json, id) => {
   const m = json?.metadata;
@@ -139,6 +156,26 @@ export const countScandataLeaves = (xml) => {
   return pages || null;
 };
 
+/**
+ * The leaf count of `id` from answers already cached, or null (`peek(url)`
+ * gives a cached answer's text or null; no request is made). A leaf number
+ * past the count is not an error to archive.org: it answers `page/n<k>` for
+ * any k with the last page, so the count is what tells a mistyped leaf.
+ */
+export const cachedLeafCount = (id, peek) => {
+  const body = peek(metadataUrl(id));
+  if (body === null || body === undefined) return null;
+  let info;
+  try {
+    info = parseMetadata(JSON.parse(body), id);
+  } catch {
+    return null;
+  }
+  if (info.leaves) return info.leaves;
+  const scandata = info.scandata ? peek(itemFileUrl(id, info.scandata)) : null;
+  return scandata ? countScandataLeaves(scandata) : null;
+};
+
 /** The leaf to test whether pages are viewable: about 40% in, away from the covers. */
 export const testLeafOf = (leaves) => (leaves ? Math.max(1, Math.min(leaves - 1, Math.round(leaves * 0.4))) : 5);
 
@@ -161,7 +198,7 @@ export const judgeViewable = ({ restricted, lending, test }) => {
 export const CDX_FIELDS = ['timestamp', 'original', 'mimetype', 'statuscode', 'digest', 'length'];
 
 const stamp = (value, what) => {
-  if (!/^\d{4,14}$/.test(String(value))) throw new Error(`${what} "${value}" must be a year or a timestamp (2021, 20210315)`);
+  if (!/^\d{4,14}$/.test(String(value))) throw new UsageError(`${what} "${value}" must be a year or a timestamp (2021, 20210315)`);
   return String(value);
 };
 
@@ -180,8 +217,8 @@ const mimeFilter = (mime) => {
 export const cdxUrl = ({
   prefix, from = '2020', to = '2022', mime = 'image/', status = '200', collapse, limit = 20, match = 'prefix', pattern,
 } = {}) => {
-  if (!String(prefix ?? '').trim()) throw new Error('cdx needs a URL prefix, like houseplans.com');
-  if (!['prefix', 'exact', 'domain', 'host'].includes(match)) throw new Error(`--match "${match}" must be prefix, exact, domain or host`);
+  if (!String(prefix ?? '').trim()) throw new UsageError('cdx needs a URL prefix, like houseplans.com');
+  if (!['prefix', 'exact', 'domain', 'host'].includes(match)) throw new UsageError(`--match "${match}" must be prefix, exact, domain or host`);
   const params = [
     ['url', String(prefix).trim()], ['matchType', match], ['output', 'json'],
     ['from', stamp(from, '--from')], ['to', stamp(to, '--to')], ['fl', CDX_FIELDS.join(',')],

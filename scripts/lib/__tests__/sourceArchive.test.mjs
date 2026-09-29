@@ -2,8 +2,8 @@
 // (scripts/lib/sourceArchive.mjs), against answers shaped like the real ones.
 import { describe, expect, it } from 'vitest';
 import {
-  cdxUrl, checkItemId, checkLeaf, countScandataLeaves, expandQuery, filterCdx, formatCdxRow, formatSearchRow, judgeViewable, leafUrl, metadataUrl, parseCdx,
-  parseMetadata, parseSearch, parseWaybackUrl, parseYearRange, searchUrl, testLeafOf, waybackUrl,
+  UsageError, cachedLeafCount, cdxUrl, checkItemId, checkLeaf, countScandataLeaves, expandQuery, filterCdx, formatCdxRow, formatSearchRow, itemFileUrl, judgeViewable,
+  leafUrl, metadataUrl, parseCdx, parseMetadata, parseSearch, parseWaybackUrl, parseYearRange, searchUrl, testLeafOf, waybackUrl,
 } from '../sourceArchive.mjs';
 
 describe('search', () => {
@@ -67,6 +67,15 @@ describe('search', () => {
     expect(formatSearchRow(rows[1])).toContain('  ? leaves');
     expect(parseSearch({})).toEqual({ found: 0, rows: [] });
   });
+
+  it('throws on the error answer archive.org gives a query it cannot parse, rather than reading it as no results', () => {
+    // A bad Lucene query gets HTTP 200 and this body, not an error status.
+    const bad = { error: 'a group is empty (near char 7)' };
+    expect(() => parseSearch(bad)).toThrow(/archive\.org rejected the query: a group is empty \(near char 7\)/);
+    expect(() => parseSearch({ error: { message: 'x' } })).toThrow(/rejected the query: \{"message":"x"\}/);
+    // No hits is still no hits.
+    expect(parseSearch({ response: { numFound: 0, docs: [] } })).toEqual({ found: 0, rows: [] });
+  });
 });
 
 describe('an item', () => {
@@ -125,6 +134,24 @@ describe('an item', () => {
     expect(judgeViewable({ restricted: false, lending: ['lendinglibrary'], test: good }).viewable).toBe(false);
   });
 
+  it('says how many leaves an item has from what is cached, and nothing from what is not', () => {
+    const cache = new Map();
+    const peek = (url) => cache.get(url) ?? null;
+    expect(cachedLeafCount('PacificBook', peek)).toBeNull();
+    cache.set(metadataUrl('PacificBook'), JSON.stringify(open));
+    expect(cachedLeafCount('PacificBook', peek)).toBe(164);
+    // No imagecount: the scandata's count, if that is cached too.
+    cache.set(metadataUrl('HomesOfToday1932'), JSON.stringify(noCount));
+    expect(cachedLeafCount('HomesOfToday1932', peek)).toBeNull();
+    cache.set(itemFileUrl('HomesOfToday1932', 'HomesofToday-19320001_scandata.xml'), '<book><bookData><leafCount>92</leafCount></bookData></book>');
+    expect(cachedLeafCount('HomesOfToday1932', peek)).toBe(92);
+    // A cached answer that is not an item (`{}` for a missing one, or garbage) says nothing.
+    cache.set(metadataUrl('ghost'), '{}');
+    cache.set(metadataUrl('junk'), '<html>');
+    expect(cachedLeafCount('ghost', peek)).toBeNull();
+    expect(cachedLeafCount('junk', peek)).toBeNull();
+  });
+
   it('builds page and metadata URLs, and refuses names that would point elsewhere', () => {
     expect(leafUrl('PacificBook', 49)).toBe('https://archive.org/download/PacificBook/page/n49');
     expect(leafUrl('PacificBook', '49', 'jpg')).toBe('https://archive.org/download/PacificBook/page/n49.jpg');
@@ -168,6 +195,21 @@ describe('the Wayback CDX', () => {
     expect(q.get('collapse')).toBe('urlkey');
     expect(q.get('limit')).toBe('5');
     expect(parts(cdxUrl({ prefix: 'x.com', mime: 'all' })).all('filter')).toEqual(['statuscode:200']);
+  });
+
+  it('reads a value of the wrong form as a usage error (exit status 2), not a failure', () => {
+    for (const fn of [
+      () => cdxUrl({ prefix: 'x.com', from: 'soon' }),
+      () => cdxUrl({ prefix: 'x.com', to: '20x1' }),
+      () => cdxUrl({ prefix: 'x.com', match: 'banana' }),
+      () => cdxUrl({}),
+      () => parseYearRange('the 1950s'),
+      () => parseYearRange('1959-1920'),
+      () => searchUrl('x', { sort: 'downloads; drop' }),
+      () => expandQuery(' '),
+      () => checkItemId('a/b'),
+      () => checkLeaf('forty'),
+    ]) expect(fn).toThrow(UsageError);
   });
 
   it('refuses options it cannot use', () => {

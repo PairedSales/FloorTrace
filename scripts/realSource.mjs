@@ -11,9 +11,13 @@
  *  - Only archive.org and its subdomains (web.archive.org, ia*.us.archive.org)
  *    are ever fetched, redirects included; anything else is refused.
  *  - One request at a time across every process on the machine, with a gap of
- *    1000 ms between requests to web.archive.org and 300 ms elsewhere. A 429,
- *    a 5xx or a timeout backs off (Retry-After honoured) for every process,
- *    and after four tries the command fails with a message.
+ *    1000 ms between requests to web.archive.org (a trailing dot on the host
+ *    changes nothing) and 300 ms elsewhere. A 429, a 5xx or a timeout backs
+ *    off (Retry-After honoured) for every process, and after four tries the
+ *    command fails with a message. A process waiting for the lock sleeps
+ *    between looks; it fails with a message after about six minutes, or after
+ *    30 s of not being able to create or move the lock file (Google Drive or
+ *    an antivirus holding it).
  *  - Nothing is fetched twice. Pages are cached under datasets/archive-cache/
  *    of the main checkout (items/<id>/n<leaf>.jpg, urls/<hash>.<ext>; API
  *    answers for a day under api/). A cached image counts only if it starts
@@ -45,6 +49,12 @@
  *   leaf ID N [--ext jpg]
  *       Downloads leaf N (or takes it from the cache); prints its path, its
  *       pixel size, and the source URL to record for a plan drawn from it.
+ *       Leaves are numbered from 0. archive.org answers a leaf past the end of
+ *       a book with HTTP 200 and the last page, so a mistyped leaf looks real:
+ *       when the book's leaf count is in the cache (`meta ID` puts it there)
+ *       leaf, contact, grid ID:LEAF and screen --leaves refuse or skip a leaf
+ *       past it and fetch nothing (contact skips them with a WARNING and draws
+ *       the rest); with no cached count they say so in a note.
  *   contact ID FROM TO [--step S] [--cols C] [--rows R] [--tag T]
  *       A contact sheet PNG of leaves FROM..TO (every S-th), each shrunk to a
  *       cell and labelled with its leaf number: 12 to a sheet by default (4
@@ -88,7 +98,8 @@
  *       copy as <cache>/named/N.<ext> (never over a different image).
  *   log plan --name N --book B --era vintage|2020-2022 --year Y --url U
  *       --crop X,Y,W,H --line "<the builder line>" [--publisher P] [--leaf L]
- *       [--size W,H] [--decade D] [--tag T] [--replace] [--no-verify]
+ *       [--size W,H] [--decade D] [--tag T] [--unit CODE] [--site NAME]
+ *       [--replace] [--no-verify]
  *   log reject --book B (--leaf L | --url U) --reason R [--tag T]
  *   log book --book B [--id ID] [--publisher P] [--year Y] [--leaves N] [--note "..."]
  *       Appends an event to <set>/orchestration/sources.jsonl (one JSON object a
@@ -101,11 +112,23 @@
  *                 crop is X,Y,W,H whole numbers (x, y >= 0); --line is the
  *                 builder line, whole (labels, cut-off regions and scale are
  *                 read from it); a name already logged is refused unless
- *                 --replace (the old entry stays, marked superseded). --size
+ *                 --replace (the old entry stays, marked superseded). --book
+ *                 must look like the name's stem (pacific25: "Pacific 1925")
+ *                 or name a `log book` entry, and a stem already logged under
+ *                 one spelling is not logged under another: one book, one
+ *                 spelling. A vintage leaf at or past the book's leaf count
+ *                 (cached metadata, else a `log book --leaves` entry) is
+ *                 refused. --size
  *                 defaults to what the plan itself records. When the plan is in
  *                 the set folder its recorded source (url, crop, size) must
  *                 match the log (--no-verify skips that). A plan under ~1,000 px
- *                 across, cut-off regions or no labels print a WARNING.
+ *                 across, cut-off regions or no labels print a WARNING, and so
+ *                 does a plan that takes its book, unit or site over a cap.
+ *                 The cap unit is a book, or the name's stem, or --unit (the
+ *                 designer code of a plan on an aggregator site such as
+ *                 houseplans.net; 12 per unit); --site (default: the book)
+ *                 groups a site's plans (60 per site). A plan with a --unit
+ *                 does not count toward its --book's 12.
  *         reject  the reason is one of: 3d, elevation, site-plan, too-small,
  *                 hand-lettered, not-us-home, duplicate-house, not-a-plan, or
  *                 other:<text>. How well the app traces a page is NOT a reason:
@@ -115,17 +138,23 @@
  *         book    a book or site looked at, for the report's headings.
  *   report
  *       Regenerates sources.md (plans by book or site, rejected pages, totals)
- *       and prints per-book and per-era counts and any book over the cap of 12.
+ *       and prints per-book and per-era counts and every cap broken: a book,
+ *       name stem or --unit over 12 plans (the spellings it was typed as are
+ *       shown), a site over 60.
  *
  * Where things live: the set folder is datasets/real/ of the main checkout
  * (FLOORTRACE_REAL_DIR overrides it: point it at a scratch folder to try `log`).
  * The cache is datasets/archive-cache/ of the main checkout
  * (FLOORTRACE_ARCHIVE_CACHE overrides it). FLOORTRACE_SOURCE_GAP_WAYBACK_MS and
  * FLOORTRACE_SOURCE_GAP_MS set the gaps; _TRIES, _TIMEOUT_MS, _BACKOFF_MS and
- * _MAX_WAIT_MS the retries.
+ * _MAX_WAIT_MS the retries; _LOCK_WAIT_MS and _LOCK_FAULT_MS how long a process
+ * waits for the request lock.
  *
- * Exit status: 0 on success, 1 on an error or a book whose pages are not
- * viewable (one line says why), 2 on a usage error.
+ * Exit status: 0 on success; 1 on a well formed request that fails (the
+ * network, a refused URL, a log entry the validators refuse, a book whose pages
+ * are not viewable; one line says why); 2 on a command line that cannot be
+ * read (an unknown command or option, a missing argument, a value of the wrong
+ * form such as `cdx --from soon`, `--match banana` or `grid --crop 1,2,3`).
  */
 import fs from 'fs';
 import { fileURLToPath } from 'url';

@@ -7,8 +7,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  BOOK_CAP, activePlanNames, buildBookEvent, buildPlanEvent, buildRejectEvent, logEvent, normalizeReason, parseBuilderLine, parseCrop, parseSize,
-  readLog, regenerate, renderReport, sizeAfterFit, sourcesFiles, summarize, summaryLines,
+  BOOK_CAP, SITE_CAP, activePlanNames, bookAgreesWithStem, buildBookEvent, buildPlanEvent, buildRejectEvent, capViolations, knownLeafCount, logEvent, nameStem,
+  normalizeReason, parseBuilderLine, parseCrop, parseSize, readLog, regenerate, renderReport, sizeAfterFit, sourcesFiles, summarize, summaryLines, violationText,
 } from '../sourceLog.mjs';
 import { fakeClock } from './fakeNet.mjs';
 
@@ -247,6 +247,184 @@ describe('a plan event', () => {
       fs.writeFileSync(path.join(dir, 'popular63-n44a.floorplan'), '{ not json');
       expect(build(vintage(), { dir }).warnings.join('\n')).toMatch(/could not be read/);
     });
+  });
+});
+
+describe('one book, one spelling', () => {
+  const build = (input, options = {}) => buildPlanEvent(input, { clock: fakeClock(), ...options });
+  const logged = (name, book, over = {}) => ({ event: 'plan', name, book, era: 'vintage', year: 1925, leaf: 41, ...over });
+  const pacific = (leaf, over = {}) => vintage({
+    name: `pacific25-n${leaf}`, book: 'Pacific', year: '1925', leaf: String(leaf), url: `https://archive.org/download/PacificBook/page/n${leaf}`, line: LINE(`pacific25-n${leaf}`), ...over,
+  });
+
+  it('takes the stem from the name', () => {
+    expect(nameStem('pacific25-n41')).toBe('pacific25');
+    expect(nameStem('popular63-n44a')).toBe('popular63');
+    expect(nameStem('dongardner21-1234')).toBe('dongardner21');
+    expect(nameStem('Pacific25-n41')).toBeNull();
+    expect(nameStem('n41')).toBeNull();
+    expect(nameStem(undefined)).toBeNull();
+  });
+
+  it('knows a --book that could be the stem\'s book: it holds the stem\'s letters, or they are its initials', () => {
+    for (const [book, stem] of [
+      ['Pacific', 'pacific25'], ['Pacific 1925', 'pacific25'], ["Pacific's book of homes, vol. 25", 'pacific25'], ['Popular Homes 1963', 'popular63'],
+      ['dongardner.com', 'dongardner21'], ['DON GARDNER', 'dongardner21'], ['Sears Modern Homes 1925', 'smh25'],
+    ]) expect(bookAgreesWithStem(book, stem), `${book} / ${stem}`).toBe(true);
+    for (const [book, stem] of [['Sears', 'pacific25'], ['houseplans.net', 'hpn21'], ['', 'pacific25'], ['Pacific', 'notastem']]) {
+      expect(bookAgreesWithStem(book, stem), `${book} / ${stem}`).toBe(false);
+    }
+  });
+
+  it('refuses a --book that does not look like the name\'s stem, unless a book entry names it', () => {
+    const odd = pacific(41, { book: 'Ready-Cut Homes Catalog' });
+    expect(problemsOf(() => build(odd))).toMatch(/--book "Ready-Cut Homes Catalog" does not look like the name's stem pacific25 and no `log book --book "Ready-Cut Homes Catalog"` entry exists/);
+    const entry = { event: 'book', book: 'ready-cut homes  catalog', id: 'PacificBook', leaves: 164 };
+    expect(problemsOf(() => build(odd, { events: [entry] }))).toBeNull();
+  });
+
+  it('refuses a stem already logged under another spelling of the book, and accepts the same one', () => {
+    const events = [logged('pacific25-n41', 'Pacific')];
+    expect(problemsOf(() => build(pacific(42, { book: 'Pacific 1925' }), { events }))).toMatch(/the stem pacific25 is already logged under the book "Pacific", not "Pacific 1925": use that spelling/);
+    expect(problemsOf(() => build(pacific(42), { events }))).toBeNull();
+    // Case and spacing are not another spelling.
+    expect(problemsOf(() => build(pacific(42, { book: ' pacific ' }), { events }))).toBeNull();
+    // Logging the same plan again (--replace) under a new spelling is not a clash with itself.
+    expect(problemsOf(() => build(pacific(41, { book: 'Pacific 1925' }), { events, replace: true }))).toBeNull();
+    // A superseded plan's spelling does not count.
+    expect(problemsOf(() => build(pacific(42, { book: 'Pacific 1925' }), { events: [logged('pacific25-n41', 'Pacific', { superseded: 'x' })] }))).toBeNull();
+  });
+
+  it('reads the names taken from the events, too', () => {
+    const events = [logged('pacific25-n41', 'Pacific')];
+    expect(problemsOf(() => build(pacific(41), { events }))).toMatch(/already logged/);
+  });
+
+  it('refuses a vintage leaf at or past the end of the book: cached metadata first, else the log\'s book entry', () => {
+    const cachedLeaves = (id) => (id === 'PacificBook' ? 164 : null);
+    expect(problemsOf(() => build(pacific(163), { cachedLeaves }))).toBeNull();
+    expect(problemsOf(() => build(pacific(164), { cachedLeaves }))).toMatch(/leaf 164 is past the end of Pacific \(164 leaves, 0\.\.163, from the cached metadata of PacificBook\).*the last page/);
+    // A book entry for the item, or for the book by name.
+    const byId = { event: 'book', book: 'Pacific 1925', id: 'PacificBook', leaves: 100 };
+    const byName = { event: 'book', book: 'PACIFIC', leaves: 100 };
+    for (const entry of [byId, byName]) {
+      expect(problemsOf(() => build(pacific(100), { events: [entry] })), JSON.stringify(entry)).toMatch(/leaf 100 is past the end of Pacific \(100 leaves, 0\.\.99, from the log entry/);
+      expect(problemsOf(() => build(pacific(99), { events: [entry] })), JSON.stringify(entry)).toBeNull();
+    }
+    // The latest entry for the book wins (a typo in an earlier one can be corrected).
+    expect(problemsOf(() => build(pacific(120), { events: [byName, { ...byName, leaves: 164 }] }))).toBeNull();
+    // Cached metadata outranks a book entry; an id the archive layer rejects, or a cache with nothing, is no reason to refuse.
+    expect(problemsOf(() => build(pacific(120), { cachedLeaves, events: [byName] }))).toBeNull();
+    expect(problemsOf(() => build(pacific(500), { cachedLeaves: () => { throw new Error('bad id'); } }))).toBeNull();
+    expect(problemsOf(() => build(pacific(500), { cachedLeaves: () => null }))).toBeNull();
+    // Modern plans have no leaf to check.
+    expect(problemsOf(() => build(modern(), { events: [{ event: 'book', book: 'dongardner.com', leaves: 1 }] }))).toBeNull();
+  });
+
+  it('finds the leaf count by item id or book name', () => {
+    expect(knownLeafCount([], { book: 'B', id: 'X', cachedLeaves: () => 50 })).toEqual({ count: 50, from: 'the cached metadata of X' });
+    expect(knownLeafCount([{ event: 'book', book: 'B', leaves: 30 }], { book: ' b ', id: null })).toEqual({ count: 30, from: 'the log entry for "B"' });
+    expect(knownLeafCount([{ event: 'book', book: 'B', leaves: null }, { event: 'reject', book: 'B', leaves: 9 }], { book: 'B', id: null })).toBeNull();
+  });
+
+  it('takes --unit and --site, and refuses a --unit that is not a code', () => {
+    const { event } = build(modern({ unit: ' 940 ', site: 'houseplans.net' }), { events: [{ event: 'book', book: 'dongardner.com' }] });
+    expect(event).toMatchObject({ unit: '940', site: 'houseplans.net' });
+    expect(build(modern()).event).toMatchObject({ unit: null, site: null });
+    expect(problemsOf(() => build(modern({ unit: 'two words' })))).toMatch(/--unit "two words" must be a code/);
+    expect(problemsOf(() => build(modern({ site: 'x'.repeat(81) })))).toMatch(/--site must be at most 80/);
+  });
+});
+
+describe('the caps', () => {
+  const plan = (name, book, over = {}) => ({
+    event: 'plan', at: 'x', name, book, era: over.era ?? 'vintage', year: 1925, leaf: 5, ...over,
+  });
+  const many = (n, make) => Array.from({ length: n }, (_, i) => make(i + 1));
+
+  it('counts a book by its name stem, so two spellings of one book do not split it', () => {
+    // 8 + 5 = 13 plans of one book, each spelling under the cap of 12 (the audit's case, made larger).
+    const plans = [
+      ...many(8, (i) => plan(`pacific25-n${i}`, 'Pacific')),
+      ...many(5, (i) => plan(`pacific25-n${i + 20}`, 'Pacific 1925')),
+    ];
+    const s = summarize(plans);
+    expect(s.overCap).toEqual([]); // by exact --book text: neither spelling is over
+    expect(s.violations).toHaveLength(1);
+    expect(s.violations[0]).toMatchObject({ kind: 'unit', label: 'unit pacific25', count: 13, cap: 12 });
+    expect(violationText(s.violations[0])).toBe('unit pacific25 (13; typed as "Pacific" 8, "Pacific 1925" 5)');
+    expect(summaryLines(plans).join('\n')).toMatch(/OVER THE CAP OF 12: unit pacific25 \(13; typed as "Pacific" 8, "Pacific 1925" 5\)/);
+    expect(renderReport(plans)).toMatch(/Over the cap of 12 plans from one book or site:\*\* unit pacific25 \(13; typed as/);
+    // The audit's case as it stands (9 plans in all) is under the cap, with the split noticed nowhere.
+    expect(summarize([...plans.slice(0, 8), plan('pacific25-n66', 'Pacific 1925')]).violations).toEqual([]);
+  });
+
+  it('reports a book once when the exact --book text and the stem cover the same plans', () => {
+    const plans = many(13, (i) => plan(`big63-n${i}`, 'Big Book'));
+    const s = summarize(plans);
+    expect(s.overCap.map((g) => g.book)).toEqual(['Big Book']);
+    expect(s.violations.map((v) => [v.kind, v.label, v.count])).toEqual([['book', 'Big Book', 13]]);
+  });
+
+  it('counts a book with two stems as one book (a book over 12 across its editions), and each stem on its own', () => {
+    const plans = [...many(7, (i) => plan(`sears25-n${i}`, 'Sears')), ...many(6, (i) => plan(`sears27-n${i}`, 'Sears'))];
+    expect(summarize(plans).violations.map((v) => [v.kind, v.label, v.count])).toEqual([['book', 'Sears', 13]]);
+    expect(summarize(plans.slice(0, 12)).violations).toEqual([]);
+  });
+
+  it('counts an aggregator site per designer code (12 each) and per site (60), a --unit taking its plans out of the book count', () => {
+    const designer = (code, i) => plan(`hpn21-${code}-${i}`, 'houseplans.net', {
+      era: '2020-2022', year: 2021, leaf: null, unit: code, site: 'houseplans.net',
+    });
+    // Twelve designers of twelve: no unit over 12, and 144 in the site: over 60.
+    const codes = Array.from({ length: 12 }, (_, i) => `d${i}`);
+    const plans = codes.flatMap((code) => many(12, (i) => designer(code, i)));
+    const s = summarize(plans);
+    expect(s.overCap).toEqual([]); // the book cap does not apply to plans with a --unit
+    expect(s.violations.map((v) => [v.kind, v.label, v.count, v.cap])).toEqual([['site', 'houseplans.net', 144, 60]]);
+    expect(violationText(s.violations[0])).toBe('houseplans.net (144; cap 60)');
+    expect(summaryLines(plans).join('\n')).toMatch(/OVER THE CAP OF 60 PER SITE: houseplans\.net \(144; cap 60\)/);
+    expect(summaryLines(plans).join('\n')).toMatch(/no book or site over the cap of 12/);
+    expect(renderReport(plans)).toMatch(/Over the cap of 60 plans from one site:\*\* houseplans\.net \(144; cap 60\)/);
+    expect(renderReport(plans)).toContain('Units (cap 12 each): d0 (12), d1 (12)');
+
+    // 60 plans is the most a site may have; one designer's 13th is over the unit cap.
+    expect(summarize(plans.slice(0, 60)).violations).toEqual([]);
+    const thirteen = [...plans.slice(0, 12), designer('d0', 13)];
+    expect(summarize(thirteen).violations.map((v) => [v.kind, v.label, v.count])).toEqual([['unit', 'unit d0 of houseplans.net', 13]]);
+  });
+
+  it('scopes a designer code to its site, and a site to its --site text however the case falls', () => {
+    const make = (site, code, i) => plan(`${site.slice(0, 3)}21-${code}-${i}`, site, { era: '2020-2022', year: 2021, leaf: null, unit: code });
+    const plans = [...many(8, (i) => make('houseplans.net', '940', i)), ...many(8, (i) => make('thehousedesigners.com', '940', i))];
+    expect(summarize(plans).violations).toEqual([]);
+    const cased = [
+      ...many(7, (i) => ({ ...make('houseplans.net', 'a', i), site: 'HousePlans.net' })), ...many(7, (i) => make('houseplans.net', 'b', i + 20)),
+    ];
+    expect(summarize(cased).violations).toEqual([]); // 14 in the site is under 60
+    const sites = capViolations(many(61, (i) => plan(`hpn21-x${i}`, 'houseplans.net', { unit: `u${i}`, era: '2020-2022', year: 2021, leaf: null })));
+    expect(sites.map((v) => [v.kind, v.count])).toEqual([['site', 61]]);
+  });
+
+  it('leaves out superseded plans, as it always did', () => {
+    const plans = [...many(12, (i) => plan(`big63-n${i}`, 'Big Book')), plan('big63-n99', 'Big Book', { superseded: 'x' })];
+    expect(summarize(plans).violations).toEqual([]);
+    expect(BOOK_CAP).toBe(12);
+    expect(SITE_CAP).toBe(60);
+  });
+
+  it('warns the sourcer who takes a book over the cap, however many log at once, and the report names it', async () => {
+    const clock = fakeClock();
+    const jobs = Array.from({ length: 14 }, (_, i) => logEvent('plan', vintage({
+      name: `popular63-n${100 + i}`, leaf: String(100 + i), url: `https://archive.org/download/PopularHomes1963/page/n${100 + i}`, line: LINE(`popular63-n${100 + i}`),
+    }), { dir, clock, verify: false }));
+    const results = await clock.run(Promise.all(jobs));
+    // The lock makes the count exact: 12 plans in with no word, the 13th and 14th told.
+    const told = results.filter((r) => r.warnings.some((w) => /over the cap of 12/.test(w)));
+    expect(told).toHaveLength(2);
+    expect(told[0].warnings.join('\n')).toMatch(/this plan takes Popular Homes 1963 \(1[34]\) over the cap of 12: log no more plans there/);
+    expect(summaryLines(readLog(sourcesFiles(dir).jsonl).events).join('\n')).toMatch(/OVER THE CAP OF 12: Popular Homes 1963 \(14\)/);
+    expect(fs.readFileSync(sourcesFiles(dir).md, 'utf8')).toMatch(/Over the cap of 12 plans from one book or site:\*\* Popular Homes 1963 \(14\)/);
   });
 });
 

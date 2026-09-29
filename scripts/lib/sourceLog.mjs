@@ -11,6 +11,13 @@
 // by `report`. Writers take a lock file first, since several sourcers log at
 // once, and every write retries while Google Drive holds a file.
 //
+// One book is one spelling, and the diversity caps are counted so that many
+// sourcers logging at once cannot pass them unnoticed: a plan's --book must
+// look like the name's stem (pacific25 for "Pacific 1925") or name a `book`
+// entry, a stem already logged under one spelling is not logged under another,
+// and the report counts plans per book, per stem or --unit (a designer code
+// on an aggregator site) and per --site, whatever spelling was typed.
+//
 // A rejection's reason comes from a closed list of inclusion rules. How well
 // the app traces a page is not on it, and `other:` text that talks about the
 // tracer, the scan or the labels is refused: a page qualifies before it is
@@ -23,7 +30,11 @@ import { parseWaybackUrl } from './sourceArchive.mjs';
 import { MAX_IMAGE_DIMENSION, MIN_TRACEABLE_DIMENSION } from '../../src/utils/imageLoader.js';
 
 export const ERAS = ['vintage', '2020-2022'];
+// At most 12 plans from one book, publisher or builder (the unit: a book, a
+// name stem, or the designer code an aggregator site's plans carry) and no
+// site above 60 in all.
 export const BOOK_CAP = 12;
+export const SITE_CAP = 60;
 export const VINTAGE_NAME = /^[a-z]+[0-9]{2}-n[0-9]+[ab]?$/;
 export const MODERN_NAME = /^[a-z]+[0-9]{2}-[a-z0-9._-]+$/;
 export const REJECT_REASONS = ['3d', 'elevation', 'site-plan', 'too-small', 'hand-lettered', 'not-us-home', 'duplicate-house', 'not-a-plan'];
@@ -43,6 +54,40 @@ const TRACE_MESSAGE = 'a reason that talks about the tracer, the scan or the lab
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const isInt = (n) => Number.isInteger(n);
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
+const keyOf = (text) => str(text).toLowerCase().replace(/\s+/g, ' ');
+const UNIT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+
+/** The book part of a plan name: `pacific25` of `pacific25-n41`, `dongardner21` of `dongardner21-1234`. */
+export const nameStem = (name) => /^([a-z]+[0-9]{2})-/.exec(String(name ?? ''))?.[1] ?? null;
+
+/** Whether a `--book` text could be the book a name stem stands for: it holds the stem's letters, or they are its initials. */
+export const bookAgreesWithStem = (book, stem) => {
+  const letters = /^[a-z]+/.exec(stem ?? '')?.[0];
+  if (!letters) return false;
+  const words = str(book).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const initials = words.filter((w) => /^[a-z]/.test(w)).map((w) => w[0]).join('');
+  return words.join('').includes(letters) || initials.includes(letters);
+};
+
+/**
+ * How many leaves the plan's book has, if anything known says: the cached
+ * metadata of its archive.org item (`cachedLeaves(id)`), else the latest `book`
+ * entry of the log for that item or book. `{count, from}`, or null.
+ */
+export const knownLeafCount = (events, { book, id, cachedLeaves }) => {
+  let cached = null;
+  if (id && cachedLeaves) {
+    try {
+      cached = cachedLeaves(id);
+    } catch {
+      cached = null; // an identifier the archive layer will not build a URL from
+    }
+  }
+  if (cached) return { count: cached, from: `the cached metadata of ${id}` };
+  const entry = [...events].reverse().find((e) => e?.event === 'book' && isInt(e.leaves) && e.leaves > 0
+    && ((id && e.id === id) || keyOf(e.book) === keyOf(book)));
+  return entry ? { count: entry.leaves, from: `the log entry for "${entry.book}"` } : null;
+};
 
 /** A reject reason as the closed list has it, or a thrown error saying what the list is. */
 export const normalizeReason = (raw) => {
@@ -126,13 +171,16 @@ const planSource = (name, dir) => {
 /**
  * A plan event from what the sourcer gave (`input`: name, book, publisher, era,
  * year, decade, leaf, url, crop, size, line, tag), or an Error listing every
- * problem at once. `activeNames` are the plans already logged (superseded ones
- * excluded); `replace` lets a name repeat. `dir` is the set folder: when the
- * plan is there, its own recorded source must agree with the log. Returns
- * `{event, warnings}`.
+ * problem at once. `events` are the log so far: they say which names are taken
+ * (`activeNames` says it directly; superseded plans do not count), which
+ * spelling of a book a stem was logged under, which `book` entries exist and how
+ * many leaves a book has; `replace` lets a name repeat. `cachedLeaves(id)` is
+ * the leaf count of an archive.org item from cached metadata, or null. `dir` is
+ * the set folder: when the plan is there, its own recorded source must agree
+ * with the log. Returns `{event, warnings}`.
  */
 export const buildPlanEvent = (input, {
-  activeNames = new Set(), replace = false, dir, verify = true, clock = realClock,
+  events = [], activeNames = activePlanNames(events), replace = false, dir, verify = true, clock = realClock, cachedLeaves,
 } = {}) => {
   const problems = [];
   const warnings = [];
@@ -166,7 +214,20 @@ export const buildPlanEvent = (input, {
       if (nameLeaf !== undefined && leaf === null) leaf = Number(nameLeaf);
     }
     if (activeNames.has(name) && !replace) problems.push(`a plan named ${name} is already logged (--replace logs it again, marking the old entry superseded)`);
+    const stem = nameStem(name);
+    if (stem && book) {
+      const declared = events.some((e) => e?.event === 'book' && keyOf(e.book) === keyOf(book));
+      if (!declared && !bookAgreesWithStem(book, stem)) {
+        problems.push(`--book "${book}" does not look like the name's stem ${stem} and no \`log book --book "${book}"\` entry exists: name the book as its plans' names do, or log the book first, so that one book is one spelling`);
+      }
+      const clash = events.find((e) => isActivePlan(e) && e.name !== name && nameStem(e.name) === stem && keyOf(e.book) !== keyOf(book));
+      if (clash) problems.push(`the stem ${stem} is already logged under the book "${clash.book}", not "${book}": use that spelling (a different book needs a different name stem)`);
+    }
   }
+  const unit = str(input.unit);
+  if (unit && !UNIT.test(unit)) problems.push(`--unit "${unit}" must be a code of letters, digits, . _ - (at most 40), like a designer code`);
+  const site = str(input.site);
+  if (site.length > 80) problems.push('--site must be at most 80 characters');
   if (year !== null) {
     if (era === '2020-2022' && (year < 2020 || year > 2022)) problems.push(`era 2020-2022 needs a year from 2020 to 2022 (got ${year})`);
     if (era === 'vintage' && (year < 1800 || year > 2019)) problems.push(`era vintage needs a year before 2020 (got ${year})`);
@@ -184,8 +245,14 @@ export const buildPlanEvent = (input, {
         if (!wb) problems.push('a modern plan\'s --url must be the capture\'s original-bytes URL: https://web.archive.org/web/<14-digit timestamp>id_/<image URL>');
         else if (year !== null && wb.year !== year) problems.push(`--url is a capture from ${wb.year}, but --year is ${year}`);
       } else if (era === 'vintage') {
-        const page = /^https:\/\/archive\.org\/download\/[^/]+\/page\/n(\d+)(?:\.jpe?g)?$/.exec(url);
-        if (page && leaf !== null && Number(page[1]) !== leaf) problems.push(`--url is leaf ${page[1]}, but the leaf is ${leaf}`);
+        const page = /^https:\/\/archive\.org\/download\/([^/]+)\/page\/n(\d+)(?:\.jpe?g)?$/.exec(url);
+        if (page && leaf !== null && Number(page[2]) !== leaf) problems.push(`--url is leaf ${page[2]}, but the leaf is ${leaf}`);
+        // archive.org answers a leaf past the last with the last page, so a
+        // mistyped leaf is a plausible page unless the book's length says.
+        const known = leaf !== null ? knownLeafCount(events, { book, id: page?.[1] ?? null, cachedLeaves }) : null;
+        if (known && leaf >= known.count) {
+          problems.push(`leaf ${leaf} is past the end of ${book} (${known.count} leaves, 0..${known.count - 1}, from ${known.from}): archive.org answers a leaf past the last with the last page, so this entry would name a page that is not there`);
+        }
       }
     } catch (error) {
       problems.push(error.message);
@@ -250,6 +317,8 @@ export const buildPlanEvent = (input, {
     url,
     crop,
     size,
+    unit: unit || null,
+    site: site || null,
     labels: drafted.labels,
     scale: drafted.scale,
     cutOff: drafted.cutOff,
@@ -351,10 +420,58 @@ const appendRetry = async (file, text, { retries = 6, delayMs = 200, clock = rea
 
 const cell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 
+// What a plan counts toward. The site is --site, else the book; the unit is
+// the designer code --unit gives (scoped to its site: two sites may both have a
+// designer 940), else the name's stem, so a book typed two ways is still one unit.
+const siteName = (p) => str(p.site) || str(p.book);
+const unitKey = (p) => (p.unit ? `${keyOf(siteName(p))}/${keyOf(p.unit)}` : (nameStem(p.name) ?? `book:${keyOf(p.book)}`));
+const unitLabel = (p) => (p.unit ? `unit ${p.unit} of ${siteName(p)}` : `unit ${nameStem(p.name) ?? p.book}`);
+
+const tally = (plans, keyFn, labelFn) => {
+  const groups = new Map();
+  for (const p of plans) {
+    const key = keyFn(p);
+    if (!groups.has(key)) groups.set(key, { label: labelFn(p), plans: [] });
+    groups.get(key).plans.push(p);
+  }
+  return [...groups.values()];
+};
+
+/**
+ * Every cap the active plans break: per book (the exact --book text, as
+ * always, for plans without a --unit), per unit (name stem or --unit; the
+ * same plans as a book violation are reported once, as the book) and per site
+ * (--site, else the book). `{kind, label, count, cap, names, spellings}`.
+ */
+export const capViolations = (plans) => {
+  const found = [];
+  const add = (kind, cap, groups) => {
+    for (const g of groups) {
+      if (g.plans.length <= cap) continue;
+      const spellings = tally(g.plans, (p) => p.book, (p) => p.book).map((b) => [b.label, b.plans.length]);
+      found.push({
+        kind, cap, label: g.label, count: g.plans.length, names: g.plans.map((p) => p.name), spellings,
+      });
+    }
+  };
+  const setOf = (v) => [...v.names].sort().join('|');
+  add('book', BOOK_CAP, tally(plans.filter((p) => !p.unit), (p) => p.book, (p) => p.book));
+  const bookSets = new Set(found.map(setOf));
+  add('unit', BOOK_CAP, tally(plans, unitKey, unitLabel));
+  add('site', SITE_CAP, tally(plans, (p) => keyOf(siteName(p)), siteName));
+  return found.filter((v) => v.kind !== 'unit' || !bookSets.has(setOf(v)));
+};
+
+export const violationText = (v) => {
+  if (v.kind === 'book') return `${v.label} (${v.count})`;
+  const spelled = v.spellings.length > 1 ? `; typed as ${v.spellings.map(([book, n]) => `"${book}" ${n}`).join(', ')}` : '';
+  return `${v.label} (${v.count}${v.kind === 'site' ? `; cap ${v.cap}` : ''}${spelled})`;
+};
+
 /**
  * The log as the numbers a sourcer's PR and the orchestrator need: per book
- * and per era counts, the books over the cap, and the same as markdown.
- * Superseded plans are set apart and counted nowhere.
+ * and per era counts, the caps broken (`violations`: books, units, sites),
+ * and the same as markdown. Superseded plans are set apart and counted nowhere.
  */
 export const summarize = (events) => {
   const plans = events.filter(isActivePlan);
@@ -388,7 +505,8 @@ export const summarize = (events) => {
     total: plans.length,
     rejected: rejects.length,
     superseded: events.filter((e) => e?.event === 'plan' && e.superseded),
-    overCap: groups.filter((g) => g.plans.length > BOOK_CAP),
+    overCap: groups.filter((g) => g.plans.filter((p) => !p.unit).length > BOOK_CAP),
+    violations: capViolations(plans),
   };
 };
 
@@ -402,16 +520,23 @@ export const renderReport = (events, { at = new Date().toISOString() } = {}) => 
   const unerad = s.groups.filter((g) => !g.era).reduce((n, g) => n + g.rejects.length, 0);
   if (unerad) out.push(`| (books with no plan yet) | - | 0 | ${unerad} |`);
   out.push(`| **all** | ${s.groups.filter((g) => g.plans.length).length} | ${s.total} | ${s.rejected} |`, '');
-  out.push(s.overCap.length
-    ? `**Over the cap of ${BOOK_CAP} plans from one book or site:** ${s.overCap.map((g) => `${g.book} (${g.plans.length})`).join(', ')}`
-    : `No book or site is over the cap of ${BOOK_CAP} plans.`, '');
+  const perUnit = s.violations.filter((v) => v.cap === BOOK_CAP);
+  const perSite = s.violations.filter((v) => v.cap === SITE_CAP);
+  out.push(perUnit.length
+    ? `**Over the cap of ${BOOK_CAP} plans from one book or site:** ${perUnit.map(violationText).join(', ')}`
+    : `No book or site is over the cap of ${BOOK_CAP} plans (counted per book, per name stem and per --unit).`, '');
+  out.push(perSite.length
+    ? `**Over the cap of ${SITE_CAP} plans from one site:** ${perSite.map(violationText).join(', ')}`
+    : `No site is over the cap of ${SITE_CAP} plans.`, '');
   for (const g of s.groups) {
     const info = g.info;
     const head = [g.era, info?.year ?? g.plans[0]?.year, info?.publisher ?? g.plans[0]?.publisher, info?.id ? `id ${info.id}` : null, info?.leaves ? `${info.leaves} leaves` : null]
       .filter(Boolean).join(', ');
     out.push(`## ${cell(g.book)}${head ? ` (${cell(head)})` : ''}`, '');
     if (info?.note) out.push(cell(info.note), '');
-    out.push(`${g.plans.length} plan${g.plans.length === 1 ? '' : 's'}${g.plans.length > BOOK_CAP ? ` (**over the cap of ${BOOK_CAP}**)` : ''}, ${g.rejects.length} rejected page${g.rejects.length === 1 ? '' : 's'}.`, '');
+    out.push(`${g.plans.length} plan${g.plans.length === 1 ? '' : 's'}${s.overCap.includes(g) ? ` (**over the cap of ${BOOK_CAP}**)` : ''}, ${g.rejects.length} rejected page${g.rejects.length === 1 ? '' : 's'}.`, '');
+    const units = tally(g.plans.filter((p) => p.unit), (p) => keyOf(p.unit), (p) => p.unit);
+    if (units.length) out.push(`Units (cap ${BOOK_CAP} each): ${units.map((u) => `${cell(u.label)} (${u.plans.length})`).join(', ')}`, '');
     if (g.plans.length) {
       out.push('| plan | leaf / URL | crop x,y,w,h | size | labels | cut off | scale | builder line |', '|---|---|---|---|---|---|---|---|');
       for (const p of g.plans) {
@@ -439,11 +564,14 @@ export const summaryLines = (events) => {
   const s = summarize(events);
   const lines = [];
   for (const g of s.groups) {
-    lines.push(`${g.era ?? '?'}  ${g.book}: ${g.plans.length} plan${g.plans.length === 1 ? '' : 's'}, ${g.rejects.length} rejected${g.plans.length > BOOK_CAP ? `  OVER THE CAP OF ${BOOK_CAP}` : ''}`);
+    lines.push(`${g.era ?? '?'}  ${g.book}: ${g.plans.length} plan${g.plans.length === 1 ? '' : 's'}, ${g.rejects.length} rejected${s.overCap.includes(g) ? `  OVER THE CAP OF ${BOOK_CAP}` : ''}`);
   }
   for (const e of s.eras) lines.push(`era ${e.era}: ${e.plans} plans from ${e.books} books/sites, ${e.rejects} rejected pages`);
   lines.push(`total: ${s.total} plans, ${s.rejected} rejected pages${s.superseded.length ? `, ${s.superseded.length} superseded entries` : ''}`);
-  lines.push(s.overCap.length ? `OVER THE CAP OF ${BOOK_CAP}: ${s.overCap.map((g) => `${g.book} (${g.plans.length})`).join(', ')}` : `no book or site over the cap of ${BOOK_CAP}`);
+  const perUnit = s.violations.filter((v) => v.cap === BOOK_CAP);
+  const perSite = s.violations.filter((v) => v.cap === SITE_CAP);
+  lines.push(perUnit.length ? `OVER THE CAP OF ${BOOK_CAP}: ${perUnit.map(violationText).join(', ')}` : `no book or site over the cap of ${BOOK_CAP} (counted per book, per name stem and per --unit)`);
+  lines.push(perSite.length ? `OVER THE CAP OF ${SITE_CAP} PER SITE: ${perSite.map(violationText).join(', ')}` : `no site over the cap of ${SITE_CAP}`);
   return lines;
 };
 
@@ -458,11 +586,13 @@ const writeReport = async (files, events, clock) => {
 /**
  * Logs one event of `kind` ("plan", "reject" or "book") from the sourcer's
  * `input`, under the lock, and regenerates sources.md. `replace` (plans only)
- * logs a plan again, marking the old entry superseded. Returns
- * `{event, warnings, files}`.
+ * logs a plan again, marking the old entry superseded. `cachedLeaves(id)` gives
+ * an archive.org item's leaf count from cached metadata (see buildPlanEvent).
+ * A plan that takes its book, unit or site over a cap is logged with a warning
+ * (the report prints every cap broken). Returns `{event, warnings, files}`.
  */
 export const logEvent = async (kind, input, {
-  dir = realDir(), clock = realClock, replace = false, verify = true,
+  dir = realDir(), clock = realClock, replace = false, verify = true, cachedLeaves,
 } = {}) => {
   const files = sourcesFiles(dir);
   const release = await acquireLock(files.lock, lockOptions(clock));
@@ -472,7 +602,7 @@ export const logEvent = async (kind, input, {
     let warnings = [];
     if (kind === 'plan') {
       ({ event, warnings } = buildPlanEvent(input, {
-        activeNames: activePlanNames(events), replace, dir, verify, clock,
+        events, replace, dir, verify, clock, cachedLeaves,
       }));
     } else if (kind === 'reject') event = buildRejectEvent(input, { clock });
     else if (kind === 'book') event = buildBookEvent(input, { clock });
@@ -492,7 +622,13 @@ export const logEvent = async (kind, input, {
     } else {
       await appendRetry(files.jsonl, `${JSON.stringify(event)}\n`, { clock });
     }
-    await writeReport(files, readLog(files.jsonl).events, clock);
+    const after = readLog(files.jsonl).events;
+    await writeReport(files, after, clock);
+    if (kind === 'plan') {
+      for (const v of summarize(after).violations.filter((x) => x.names.includes(event.name))) {
+        warnings.push(`this plan takes ${violationText(v)} over the cap of ${v.cap}: log no more plans there, and tell the orchestrator`);
+      }
+    }
     return { event, warnings, files };
   } finally {
     release();

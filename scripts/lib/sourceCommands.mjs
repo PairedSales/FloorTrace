@@ -12,16 +12,18 @@ import {
   HttpError, acquireLock, createNet, realClock, sniffImage,
 } from './sourceNet.mjs';
 import {
-  checkItemId, checkLeaf, cdxUrl, countScandataLeaves, expandQuery, filterCdx, formatCdxRow, formatSearchRow, judgeViewable, leafUrl, metadataUrl,
-  parseCdx, parseMetadata, parseSearch, parseYearRange, searchUrl, testLeafOf,
+  UsageError, cachedLeafCount, checkItemId, checkLeaf, cdxUrl, countScandataLeaves, expandQuery, filterCdx, formatCdxRow, formatSearchRow, itemFileUrl,
+  judgeViewable, leafUrl, metadataUrl, parseCdx, parseMetadata, parseSearch, parseYearRange, searchUrl, testLeafOf,
 } from './sourceArchive.mjs';
 import { logEvent, regenerate, summaryLines } from './sourceLog.mjs';
 
 // ---- arguments ---------------------------------------------------------------
 
-// A command line the tool cannot read at all (exit status 2), as opposed to
-// one that is well formed and fails (exit status 1).
-export class UsageError extends Error {}
+// A command line the tool cannot read at all (exit status 2): an unknown
+// option, a missing argument, a value of the wrong form. Well formed and
+// failing (the network, a refused URL, a log entry the validators refuse) is
+// exit status 1. The class lives in sourceArchive.mjs, whose value checks throw it.
+export { UsageError };
 
 /**
  * `argv` split by a command's `{values, flags}`: positional arguments, and
@@ -74,13 +76,13 @@ const intOpt = (opts, name, fallback, { min = 0, max = Infinity } = {}) => {
 
 const tagOf = (opts) => {
   const tag = opts.tag ?? 'default';
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) throw new Error(`--tag "${tag}" must be letters, digits, . _ - only`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) throw new UsageError(`--tag "${tag}" must be letters, digits, . _ - only`);
   return tag;
 };
 
 const numbers = (text, count, what) => {
   const parts = String(text).split(',').map((s) => Number(s.trim()));
-  if (parts.length !== count || parts.some((n) => !Number.isFinite(n))) throw new Error(`${what} must be ${count} comma-separated numbers (got "${text}")`);
+  if (parts.length !== count || parts.some((n) => !Number.isFinite(n))) throw new UsageError(`${what} must be ${count} comma-separated numbers (got "${text}")`);
   return parts;
 };
 
@@ -89,6 +91,15 @@ const netOf = (ctx) => {
   return ctx.net;
 };
 const clockOf = (ctx) => ctx.clock ?? realClock;
+
+// A leaf past the end of a book is no error to archive.org: it answers
+// `page/n<k>` for any k with HTTP 200 and the last page's image, so a mistyped
+// leaf looks like a real page that is not the one meant. The book's leaf count
+// is what tells; it is read from cached metadata only (`meta ID` caches it),
+// never by a request of its own.
+const leafCountOf = (id, ctx) => cachedLeafCount(id, (url) => netOf(ctx).peekText(url));
+const pastTheEnd = (id, n, count) => `leaf ${n} is past the end of ${id}: it has ${count} leaves (0..${count - 1}, from its cached metadata), and archive.org answers a leaf past the last with the last page; nothing was fetched or cached (\`meta ${id} --refresh\` if the count is wrong)`;
+const unknownCount = (id) => `note: ${id} has no cached metadata, so a leaf past its end cannot be noticed (archive.org answers one with the last page): run \`meta ${id}\` first`;
 const viewsDir = (ctx, tag) => path.join(ctx.root, 'datasets', 'zz-scratch', 'views', tag);
 const size = (n) => n.toLocaleString('en-US');
 
@@ -112,7 +123,9 @@ export const search = async (argv, ctx) => {
     sort: opts.sort,
     raw: Boolean(opts.raw),
   });
-  const { json, cached } = await netOf(ctx).fetchJson(url, { refresh: Boolean(opts.refresh) });
+  // parseSearch throws on archive.org's `{"error": ...}` answer to a bad query,
+  // and as the validator it keeps that answer out of the cache.
+  const { json, cached } = await netOf(ctx).fetchJson(url, { refresh: Boolean(opts.refresh), validate: parseSearch });
   const { found, rows } = parseSearch(json);
   ctx.out(`query: ${expandQuery(query, { raw: Boolean(opts.raw) })}${opts.year ? `  (years ${opts.year})` : ''}`);
   ctx.out(`${found} texts match; showing ${rows.length}${cached ? ' (from the cache; --refresh asks again)' : ''}`);
@@ -133,8 +146,7 @@ const itemInfo = async (id, ctx, { refresh = false } = {}) => {
   const info = parseMetadata(json, id);
   let leavesFrom = info.leaves === null ? null : 'the metadata\'s imagecount';
   if (info.leaves === null && info.scandata) {
-    const url = `https://archive.org/download/${id}/${info.scandata.split('/').map(encodeURIComponent).join('/')}`;
-    const { text } = await net.fetchText(url, { refresh });
+    const { text } = await net.fetchText(itemFileUrl(id, info.scandata), { refresh });
     info.leaves = countScandataLeaves(text);
     if (info.leaves !== null) leavesFrom = 'the item\'s _scandata.xml';
   }
@@ -184,11 +196,14 @@ export const leaf = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, LEAF_SPEC, 'leaf');
   const [id, n] = need(positional, 2, 'leaf ID N [--ext jpg]');
   const number = checkLeaf(n);
+  const count = leafCountOf(checkItemId(id), ctx);
+  if (count !== null && number >= count) throw new Error(pastTheEnd(id, number, count));
   const got = await netOf(ctx).fetchImage(leafUrl(id, number, opts.ext));
   const [w, h] = await pixelSize(got.file);
   ctx.out(got.file);
   ctx.out(`${w}x${h} px  ${got.mime}  ${size(got.size)} bytes  ${got.cached ? 'from the cache' : 'downloaded'}`);
   ctx.out(`source URL to record: ${leafUrl(id, number)}`);
+  if (count === null) ctx.out(unknownCount(id));
   return 0;
 };
 
@@ -276,7 +291,11 @@ export const contact = async (argv, ctx) => {
   const cols = intOpt(opts, 'cols', 4, { min: 1, max: 8 });
   const rows = intOpt(opts, 'rows', 3, { min: 1, max: 6 });
   const tag = tagOf(opts);
-  const leaves = leafRange(from, to, step);
+  const requested = leafRange(from, to, step);
+  // Leaves past the end of the book would each come back as the last page.
+  const count = leafCountOf(id, ctx);
+  const leaves = count === null ? requested : requested.filter((n) => n < count);
+  if (!leaves.length) throw new Error(pastTheEnd(id, requested[0], count));
   if (leaves.length > MAX_CONTACT_LEAVES) {
     throw new UsageError(`contact: ${leaves.length} leaves is over ${MAX_CONTACT_LEAVES} in one call (each is a ~4 MB download the first time): use --step, or ask for a smaller range`);
   }
@@ -294,6 +313,10 @@ export const contact = async (argv, ctx) => {
       }
     },
   });
+  if (leaves.length < requested.length) {
+    const past = requested.slice(leaves.length);
+    ctx.out(`WARNING: leaves n${past[0]}..n${past.at(-1)} are past the end of ${id} (${count} leaves, 0..${count - 1}, from its cached metadata): skipped, nothing was fetched or cached for them`);
+  }
   const paths = [];
   for (const [i, sheet] of sheets.entries()) {
     const name = `contact-${id}-${from}-${to}${step > 1 ? `-s${step}` : ''}${sheets.length > 1 ? `-p${i + 1}` : ''}.png`;
@@ -303,6 +326,7 @@ export const contact = async (argv, ctx) => {
     ctx.out(out);
     ctx.out(`leaves ${sheet.leaves.map((n) => `n${n}`).join(' ')}${sheet.failed.length ? `   (could not fetch: ${sheet.failed.map((n) => `n${n}`).join(' ')})` : ''}`);
   }
+  if (count === null) ctx.out(unknownCount(id));
   const failedAll = sheets.every((s) => s.failed.length === s.leaves.length);
   if (failedAll) {
     (ctx.err ?? console.error)(`contact: no leaf could be fetched (is ${id} borrow-only? \`meta ${id}\` tests it)`);
@@ -321,9 +345,11 @@ const resolveImage = async (target, ctx) => {
     return { file: target, label: path.basename(target).replace(/\.[^.]+$/, '') };
   }
   const m = /^([A-Za-z0-9][A-Za-z0-9._-]*):(\d+)$/.exec(target);
-  if (!m) throw new Error(`${target} is not an image file or ID:LEAF (an item's identifier, a colon and a leaf number)`);
+  if (!m) throw new UsageError(`${target} is not an image file or ID:LEAF (an item's identifier, a colon and a leaf number)`);
+  const count = leafCountOf(m[1], ctx);
+  if (count !== null && Number(m[2]) >= count) throw new Error(pastTheEnd(m[1], Number(m[2]), count));
   const got = await netOf(ctx).fetchImage(leafUrl(m[1], Number(m[2])));
-  return { file: got.file, label: `${m[1]}-n${m[2]}` };
+  return { file: got.file, label: `${m[1]}-n${m[2]}`, unknownCount: count === null ? m[1] : null };
 };
 
 export const grid = async (argv, ctx) => {
@@ -333,11 +359,11 @@ export const grid = async (argv, ctx) => {
   let crop;
   if (opts.crop) {
     crop = numbers(opts.crop, 4, '--crop');
-    if (!(crop[2] > crop[0] && crop[3] > crop[1])) throw new Error('--crop X0,Y0,X1,Y1 needs X1 > X0 and Y1 > Y0');
+    if (!(crop[2] > crop[0] && crop[3] > crop[1])) throw new UsageError('--crop X0,Y0,X1,Y1 needs X1 > X0 and Y1 > Y0');
   }
   const step = opts.grid === undefined ? undefined : Number(opts.grid);
-  if (step !== undefined && !(step >= 0)) throw new Error('--grid must be a number of pixels (0 for none)');
-  const { file, label } = await resolveImage(target, ctx);
+  if (step !== undefined && !(step >= 0)) throw new UsageError('--grid must be a number of pixels (0 for none)');
+  const { file, label, unknownCount: unknownIn } = await resolveImage(target, ctx);
   const bytes = fs.readFileSync(file);
   if (!sniffImage(bytes)) throw new Error(`${file} is not an image`);
   const { png, summary } = await renderView(bytes, { crop, grid: step });
@@ -349,6 +375,7 @@ export const grid = async (argv, ctx) => {
   await writeFileRetry(out, png);
   ctx.out(out);
   ctx.out(summary.line);
+  if (unknownIn) ctx.out(unknownCount(unknownIn));
   return 0;
 };
 
@@ -389,6 +416,8 @@ export const screen = async (argv, ctx) => {
     if (!count) throw new Error(`${id} states no leaf count, so it cannot be sampled: name the pages with --leaves`);
     leaves = sampleLeaves(count, intOpt(opts, 'samples', 5, { min: 1, max: 20 }));
   }
+  // Sampled leaves are inside the book by construction; named ones may not be.
+  const end = count ?? leafCountOf(id, ctx);
   ctx.out(SCREEN_WARNING);
   // The scan is the app's own, and it is CPU-heavy: one at a time, here and in
   // any other process, since a scan that loses a CPU race drops labels
@@ -398,6 +427,10 @@ export const screen = async (argv, ctx) => {
   const counts = [];
   try {
     for (const n of leaves) {
+      if (end !== null && n >= end) {
+        ctx.out(`n${n}: past the end of ${id} (${end} leaves): skipped, nothing was fetched`);
+        continue;
+      }
       let got;
       try {
         got = await net.fetchImage(leafUrl(id, n));
@@ -475,7 +508,7 @@ export const FETCH_SPEC = { values: ['name'], flags: [] };
 export const fetchCommand = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, FETCH_SPEC, 'fetch');
   const [url] = need(positional, 1, 'fetch URL [--name N]');
-  if (opts.name !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(opts.name)) throw new Error(`--name "${opts.name}" must be letters, digits, . _ - only`);
+  if (opts.name !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(opts.name)) throw new UsageError(`--name "${opts.name}" must be letters, digits, . _ - only`);
   const net = netOf(ctx);
   const got = await net.fetchImage(url);
   const [w, h] = await pixelSize(got.file);
@@ -497,7 +530,9 @@ export const fetchCommand = async (argv, ctx) => {
 // ---- log and report ----------------------------------------------------------
 
 export const LOG_SPECS = {
-  plan: { values: ['name', 'book', 'publisher', 'era', 'year', 'decade', 'leaf', 'url', 'crop', 'size', 'line', 'tag'], flags: ['replace', 'no-verify'] },
+  plan: {
+    values: ['name', 'book', 'publisher', 'era', 'year', 'decade', 'leaf', 'url', 'crop', 'size', 'line', 'tag', 'unit', 'site'], flags: ['replace', 'no-verify'],
+  },
   reject: { values: ['book', 'leaf', 'url', 'reason', 'tag'], flags: [] },
   book: { values: ['book', 'id', 'publisher', 'year', 'leaves', 'note'], flags: [] },
 };
@@ -507,7 +542,11 @@ export const logCommand = async (argv, ctx) => {
   if (!LOG_SPECS[kind]) throw new UsageError('usage: log plan|reject|book [options] (--help lists them)');
   const { opts } = parseArgs(rest, LOG_SPECS[kind], `log ${kind}`);
   const { event, warnings, files } = await logEvent(kind, opts, {
-    dir: ctx.dir, clock: clockOf(ctx), replace: Boolean(opts.replace), verify: !opts['no-verify'],
+    dir: ctx.dir,
+    clock: clockOf(ctx),
+    replace: Boolean(opts.replace),
+    verify: !opts['no-verify'],
+    cachedLeaves: (id) => cachedLeafCount(id, (url) => netOf(ctx).peekText(url)),
   });
   const what = kind === 'plan' ? event.name : (kind === 'reject' ? `${event.book} ${event.leaf !== null ? `leaf ${event.leaf}` : event.url} (${event.reason})` : event.book);
   ctx.out(`logged ${kind} ${what}`);
