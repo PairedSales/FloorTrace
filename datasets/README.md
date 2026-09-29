@@ -108,6 +108,121 @@ plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
 belong to whoever drew them: keep them in `datasets/real/`, which git ignores.
 
+### Splits, the manifest and the run files
+
+The set is split into `dev`, which engineers tune against, and `test`, which
+nobody tunes against. Whole books, publishers and builders go to one split, so
+`test` measures drawing styles the tracer was never tuned on. The split, each
+plan's era and a fingerprint of its key are recorded in the manifest, and every
+scoreboard number names the manifest it was measured under.
+
+**The manifest** is `orchestration/manifest.json` in the set folder, so
+`datasets/real/orchestration/manifest.json` (a run's `--dir` moves it with the
+folder). Version 1:
+
+```json
+{
+  "version": 1, "seed": 20260928, "createdAt": "2026-…",
+  "plans": {
+    "aladdin62-n15": {
+      "book": "aladdin62", "publisher": "Aladdin", "era": "vintage", "decade": 1960,
+      "split": "dev",
+      "source": {"url": "…", "crop": [0, 0, 1200, 900], "size": [1200, 900]},
+      "keySha256": "<64 hex digits>",
+      "annotation": {"annotators": ["A", "B"], "agreement": {}, "adjudicated": false,
+                     "verifiedBy": "blind double annotation",
+                     "checked": {"by": "AI review", "at": "…", "via": "final review"}}
+    }
+  }
+}
+```
+
+`bench:real` reads four fields and leaves the rest to whoever writes the
+manifest: `split` (`dev` or `test`) and `era` (`vintage` or `2020-2022`), both
+required, since a mistyped one would drop a plan from every run without a word;
+`keySha256`, the SHA-256 of `JSON.stringify(key)` where `key` is what
+`keyOf(state)` returns (`scripts/lib/realKeys.mjs`), and `book`. A file that is
+not JSON, or of another version, is refused with the reason. The **manifest
+hash** is the SHA-256 of the file's bytes: any edit, of a field the benchmark
+reads or not, is a new manifest. `orchestration/watch.json` holds the watch
+lists, `{"lists": {"<mechanism>": ["plan", …]}}`. The code is
+`scripts/lib/manifest.mjs`.
+
+**The test-split rule.** Nobody tunes against `test`. Only the orchestrator runs
+it, at milestones, and reads aggregates only. `--split test`, `--split all` and
+naming a test plan with `--only` refuse to run (exit 2) unless the environment
+variable `FLOORTRACE_TEST_SPLIT_OK=1` is set, which is the orchestrator's alone.
+A run that includes test plans prints no line about any one of them, draws no
+overlay for it, and keeps its per-plan results out of the main run file (below);
+an engineer who needs a test number asks for the aggregate.
+
+#### `bench:real` options
+
+```
+npm run bench:real -- [--split dev|test|all] [--only NAME,NAME…] [--watch LIST]
+                      [--jobs N] [--out NAME] [--compare NAME] [--draw]
+                      [--dir PATH] [--manifest PATH] [--fixtures]
+```
+
+- `--split`: which plans, read from the manifest. The default is `dev` when a
+  manifest exists and `all` when there is none (every plan in the folder, as
+  before; a split cannot be named without a manifest). `all` with a manifest is
+  dev and test. A plan in the folder but not in the manifest is never scored:
+  it is listed as "not in the manifest". A plan the manifest lists and the folder
+  lacks is an ERROR row. `--split dev` does not open a test plan's file.
+- `--only A,B`: exactly these plans, by name (repeat the option or use commas).
+  Without `--split` a plan is taken from whichever split it lies in; with one,
+  it must lie in that split. A name the manifest does not know, or the folder
+  does not hold, is an error.
+- `--watch LIST`: the plans of a list in `watch.json`, within the chosen split.
+  An unknown list, or a plan in it nobody has, is an error. With `--only`,
+  both must hold.
+- `--jobs N` (default 1): plans are shared out over N worker processes (the
+  same script started with `--worker`). The results, their order and the run
+  file are those of a serial run, apart from `ms`: `node scripts/realRunDiff.mjs A B`
+  compares two run files that way. Timings taken with N > 1 ran under parallel
+  load and the output says so. A worker that dies is reported as an ERROR row
+  for the plan it was on and replaced; the run goes on. `--draw` works.
+- `--manifest PATH`: another manifest, with `watch.json` beside it (for tests
+  and scratch sets). `--dir` moves the folder, and with it the default manifest.
+- `--compare NAME`: the verdict moves against an earlier run, refused (exit 2,
+  before the run, with no override) when that run was measured under another
+  manifest hash. A run made before manifests, or with none, has hash `null`,
+  and two of those compare. When both runs held test plans, the test split's
+  aggregate delta is printed, and nothing per plan.
+- An unknown option is an error. Exit codes: 0; 1 when any plan ended as an
+  ERROR row (a crashed worker, a key changed since the manifest, a plan missing
+  from the folder); 2 for a request refused.
+
+A plan in the manifest whose key no longer hashes to its `keySha256` is not
+scored: `ERROR key changed since the manifest (was ab12cd34, is ef56ab78)`, or
+`is none` when the plan holds only the app's own trace again. A key is changed
+only by a dispute (`orchestration/disputes.md`), which writes a new manifest.
+
+#### The output and the run file
+
+Every run begins with the line that names it: `bench:real  commit 9d212fb+dirty
+split dev  manifest 3fa9c1d2e4b7  plans 250  jobs 8` (`+dirty` when the working
+tree differs from the commit; the manifest hash is 12 of its 64 digits). After
+the overall scoreboard come the mean error by cause (non-GLA space kept, other
+space taken in, living space left out), the median and 90th-percentile trace
+time (`app` and `bare`), then, when there is a manifest, a scoreboard for each
+era (`vintage`, `2020-2022`, the latter shown as "0 plans" while it is empty)
+and, when the run holds both splits, one for each split. Test-split
+scoreboards are aggregates.
+
+`datasets/real_runs/<out>.json` holds `meta`, `results` and, when test plans ran,
+`testAggregate`. `meta` is `{date, dir, commit, dirty, split, only, watch,
+manifestHash, jobs, timing}` with the full manifest hash and `timing` =
+`{app: {median, p90}, bare: {median, p90}, plans, jobs, parallel}` in ms.
+`results` holds every non-test plan (scored, skipped, or ERROR). `testAggregate`
+holds the test plans' scoreboard counts and shares, mean error by cause, timings,
+error and skip counts, and the same for each era: no plan name. The per-plan test
+results go to `<out>.test.json` (`{meta, results}`), written only when test
+plans ran and never read by `--compare`. A `<out>.test.json` left by an earlier
+run of the same name is not removed, so name the milestone runs. `--draw`
+overlays go in `real_runs/<out>/`, none for a test plan.
+
 ### The set so far
 
 75 pages of 17 US house-plan books, 1914 to 1963, each named for its book, its

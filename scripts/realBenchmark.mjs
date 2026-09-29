@@ -16,275 +16,250 @@
  *   --fixtures       also the plans in fixtures/ with a polygon truth, traced
  *                    the way bench:detection's constrained run traces them
  *   --out NAME       results file (default latest), under datasets/real_runs/
- *   --compare NAME   per-plan verdict moves against an earlier results file
+ *   --compare NAME   per-plan verdict moves against an earlier results file;
+ *                    refused (exit 2) when that run was made under another manifest
  *   --draw           an overlay per plan: truth green, app red, bare orange
+ *   --split S        dev, test or all, from the manifest (default dev; all
+ *                    when there is no manifest). test and all are the
+ *                    orchestrator's, at milestones: they need FLOORTRACE_TEST_SPLIT_OK=1
+ *   --only A,B,…     exactly these plans (one in the test split needs the same variable)
+ *   --watch LIST     the plans of a list in watch.json, within the chosen split
+ *   --jobs N         score plans on N worker processes; results and file are
+ *                    the same as a serial run's, timings are not
+ *   --manifest PATH  a manifest other than <dir>/orchestration/manifest.json
+ *
+ * The manifest (lib/manifest.mjs) says which split and era each plan is in.
+ * Every run prints and records the commit, split, manifest hash and job
+ * count. The test split is never printed per plan, drawn, or written to the
+ * main results file: it appears as an aggregate there, and per plan only in
+ * <out>.test.json.
  *
  * Answer key: GLA and below-grade outlines are the building (a basement is
  * still traced; its type decides the total, not the tracer), garage and
  * porch/patio outlines are non-GLA, unfinished outlines are not scored. A hole
  * is subtracted unless it is stale. A plan whose outlines are still the app's
  * untouched trace (a draft, `realDrafts.mjs`) has no key yet and is not scored:
- * held against its own trace, it would count as perfect.
+ * held against its own trace, it would count as perfect. The truth masks and
+ * the scoring are in lib/realScore.mjs and lib/verdict.mjs.
  */
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PNG } from 'pngjs';
-import { traceFloorplanBoundaryCore } from '../src/utils/detection/pipeline.js';
-import { boundaryConstraints, nonGlaExcludeRegions } from '../src/utils/traceInputs.js';
-import { decodeImage, loadPng } from './lib/benchUtils.mjs';
-import { DATASETS_DIR, fillPolygon } from './lib/cubicasa.mjs';
-import { keyOf } from './lib/realKeys.mjs';
+import { DATASETS_DIR } from './lib/cubicasa.mjs';
+import { ERAS, SPLITS, loadManifest, manifestFileFor, readWatch, watchFileFor } from './lib/manifest.mjs';
 import {
-  VERDICTS, pct, scoreMask, scoreboardLines,
-} from './lib/verdict.mjs';
+  UsageError, aggregateDeltaLines, aggregateOf, boardLines, causeLine, compareRefusal, identityLine, isScored,
+  mergeInOrder, moveLines, parseArgs, resolveSelection, summaryOf, timingLines, timingOf,
+} from './lib/realBench.mjs';
+import { runPlan, writeFileRetry } from './lib/realBenchPlan.mjs';
+import { runPool } from './lib/realBenchPool.mjs';
+import { VERDICTS, pct, scoreboardLines } from './lib/verdict.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPT = fileURLToPath(import.meta.url);
+const ROOT = path.resolve(path.dirname(SCRIPT), '..');
 const RUNS_DIR = path.join(DATASETS_DIR, 'real_runs');
-const CELL = 2;
-const BUILDING = new Set(['gla', 'below-grade']);
-const NON_GLA = new Set(['garage', 'porch']);
-const UNSCORED = new Set(['unfinished']);
 
-const parseArgs = (argv) => {
-  const args = { dir: path.join(DATASETS_DIR, 'real'), out: 'latest' };
-  for (let i = 0; i < argv.length; i += 1) {
-    const key = argv[i].replace(/^--/, '');
-    if (['dir', 'out', 'compare'].includes(key)) {
-      args[key] = argv[i + 1];
-      i += 1;
-    } else if (key === 'draw') args.draw = true;
-    else if (key === 'fixtures') args.fixtures = true;
+// The commit the run measures, and whether the working tree differs from it.
+const gitState = () => {
+  const git = (...args) => execFileSync('git', args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  try {
+    return { commit: git('rev-parse', '--short', 'HEAD'), dirty: git('status', '--porcelain') !== '' };
+  } catch {
+    return { commit: null, dirty: null };
   }
-  return args;
 };
 
-// The saved image as `{width, height, data}`.
-const decodeDataUrl = (dataUrl) => {
-  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl ?? '');
-  if (!match) throw new Error('the project holds no image');
-  return decodeImage(Buffer.from(match[3], match[2] ? 'base64' : 'utf8'), match[1]);
-};
-
-const holeRing = (hole) => (Array.isArray(hole) ? hole : hole?.ring);
-
-const answerKey = (traces, image) => {
-  const width = Math.ceil(image.width / CELL);
-  const height = Math.ceil(image.height / CELL);
-  const footprint = new Uint8Array(width * height);
-  const nonGla = new Uint8Array(width * height);
-  const ignore = new Uint8Array(width * height);
-  const paint = (mask, trace) => {
-    fillPolygon(mask, width, height, trace.vertices, { cell: CELL });
-    for (const hole of trace.holes ?? []) {
-      if (hole?.stale || !(holeRing(hole)?.length >= 3)) continue;
-      fillPolygon(mask, width, height, holeRing(hole), { cell: CELL, value: 0 });
-    }
-  };
-  for (const trace of traces) {
-    const type = trace.type ?? 'gla';
-    if (BUILDING.has(type)) paint(footprint, trace);
-    else if (NON_GLA.has(type)) paint(nonGla, trace);
-    else if (UNSCORED.has(type)) paint(ignore, trace);
+const readJson = (file, what) => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new UsageError(`${what} ${file} cannot be read: ${err.message}`);
   }
-  let cells = 0;
-  for (let i = 0; i < footprint.length; i += 1) cells += footprint[i];
-  return {
-    grid: { width, height, cell: CELL },
-    footprint,
-    nonGla,
-    ignore,
-    cells,
-    outlines: traces.map((t) => ({ type: t.type ?? 'gla', vertices: t.vertices })),
-  };
-};
-
-const tracedMask = (result, truth) => {
-  const { width, height, cell } = truth.grid;
-  const mask = new Uint8Array(width * height);
-  const floors = result?.floors?.length
-    ? result.floors.filter((f) => f.outer).map((f) => ({ outer: f.outer.polygon, holes: f.holes ?? [] }))
-    : (result?.outer ? [{ outer: result.outer.polygon, holes: result.holes ?? [] }] : []);
-  for (const floor of floors) {
-    fillPolygon(mask, width, height, floor.outer, { cell });
-    for (const hole of floor.holes) fillPolygon(mask, width, height, hole, { cell, value: 0 });
-  }
-  return { mask, floors };
-};
-
-const scoreTrace = (result, truth, ms) => {
-  const { mask, floors } = tracedMask(result, truth);
-  return {
-    ...scoreMask(mask, truth),
-    floors: floors.length,
-    confidence: Number((result?.quality?.confidence ?? 0).toFixed(3)),
-    warnings: [...new Set((result?.quality?.warnings ?? [])
-      .filter((w) => w.severity !== 'info')
-      .map((w) => w.code))],
-    ms,
-    rings: floors.map((f) => f.outer.map((p) => [Math.round(p.x), Math.round(p.y)])),
-  };
-};
-
-const drawOverlay = (image, truth, result, file) => {
-  const png = new PNG({ width: image.width, height: image.height });
-  png.data = Buffer.from(image.data);
-  const stroke = (ring, [r, g, b]) => {
-    for (let i = 0; i < ring.length; i += 1) {
-      const a = ring[i];
-      const z = ring[(i + 1) % ring.length];
-      const [ax, ay] = Array.isArray(a) ? a : [a.x, a.y];
-      const [bx, by] = Array.isArray(z) ? z : [z.x, z.y];
-      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay)));
-      for (let s = 0; s <= steps; s += 1) {
-        const x = Math.round(ax + ((bx - ax) * s) / steps);
-        const y = Math.round(ay + ((by - ay) * s) / steps);
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const xx = x + dx;
-            const yy = y + dy;
-            if (xx < 0 || yy < 0 || xx >= png.width || yy >= png.height) continue;
-            const idx = (yy * png.width + xx) * 4;
-            png.data[idx] = r;
-            png.data[idx + 1] = g;
-            png.data[idx + 2] = b;
-            png.data[idx + 3] = 255;
-          }
-        }
-      }
-    }
-  };
-  for (const outline of truth.outlines) stroke(outline.vertices, BUILDING.has(outline.type) ? [0, 170, 0] : [60, 110, 255]);
-  for (const ring of result.bare.rings) stroke(ring, [255, 150, 0]);
-  for (const ring of result.app.rings) stroke(ring, [230, 0, 0]);
-  fs.writeFileSync(file, PNG.sync.write(png));
-};
-
-// A saved project: its image, its corrected outlines, and the inputs the app
-// gave the tracer after the scan.
-const loadProject = async (file) => {
-  const project = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const state = project.floors?.[0]?.state;
-  if (!state) return { skipped: 'no plan in the file' };
-  if (!keyOf(state)) return { skipped: "no answer key yet: the outlines are the app's own trace" };
-  return {
-    image: await decodeDataUrl(project.images?.[state.imageRef]),
-    outlines: (state.perimeterTraces ?? []).filter((t) => t.closed && t.vertices?.length >= 3),
-    bareInputs: {},
-    appInputs: { excludeRegions: nonGlaExcludeRegions(state), constraints: boundaryConstraints(state) },
-    about: {
-      labels: (state.detectedDimensions ?? []).length,
-      nonGlaLabels: (state.exteriorLabels ?? []).length,
-      scaleSource: state.calibration?.quality?.source ?? (state.calibration?.calibrated ? 'unknown' : null),
-    },
-  };
-};
-
-// A fixture with a polygon truth, traced as bench:detection traces it: its
-// porch/patio label boxes excluded in both runs, and its room clicks as known
-// rooms in the app run.
-const loadFixture = (truthFile) => {
-  const truth = JSON.parse(fs.readFileSync(truthFile, 'utf8'));
-  const polygons = truth.boundary?.floorPolygons
-    ?? (truth.boundary?.outerPolygon ? [truth.boundary.outerPolygon] : []);
-  if (!polygons.length) return { skipped: 'no polygon truth' };
-  // A floor without one would score its own trace as excess.
-  if (!polygons.every(Array.isArray)) return { skipped: 'a floor has no polygon truth' };
-  const excludeRegions = (truth.boundary.excludeRegions ?? [])
-    .map(([x, y, w, h]) => ({ x, y, width: w, height: h }));
-  const interiorPoints = (truth.rooms ?? []).filter((r) => Array.isArray(r.click))
-    .map((r) => ({ x: r.click[0], y: r.click[1], name: r.name ?? null }));
-  return {
-    image: loadPng(truthFile.replace(/\.truth\.json$/, '.png')),
-    outlines: polygons.map((poly) => ({ type: 'gla', vertices: poly.map(([x, y]) => ({ x, y })) })),
-    bareInputs: excludeRegions.length ? { excludeRegions } : {},
-    appInputs: { excludeRegions, constraints: { rooms: [], interiorPoints } },
-    about: { labels: interiorPoints.length, nonGlaLabels: excludeRegions.length, scaleSource: 'truth' },
-  };
-};
-
-const evaluate = (name, plan, args) => {
-  if (plan.skipped) return { name, skipped: plan.skipped };
-  const { image } = plan;
-  const truth = answerKey(plan.outlines, image);
-  if (!truth.cells) return { name, skipped: 'no GLA outline to hold the trace against' };
-  let t = Date.now();
-  const bare = scoreTrace(traceFloorplanBoundaryCore(image, plan.bareInputs), truth, Date.now() - t);
-  t = Date.now();
-  const app = scoreTrace(traceFloorplanBoundaryCore(image, plan.appInputs), truth, Date.now() - t);
-  const result = {
-    name,
-    size: [image.width, image.height],
-    outlines: truth.outlines.map((o) => o.type),
-    ...plan.about,
-    bare,
-    app,
-  };
-  if (args.draw) {
-    const dir = path.join(RUNS_DIR, args.out);
-    fs.mkdirSync(dir, { recursive: true });
-    drawOverlay(image, truth, result, path.join(dir, `${name}.png`));
-  }
-  return result;
 };
 
 const main = async () => {
-  const args = parseArgs(process.argv.slice(2));
-  const files = fs.existsSync(args.dir)
-    ? fs.readdirSync(args.dir).filter((f) => f.endsWith('.floorplan')).sort().map((f) => path.join(args.dir, f))
+  const args = parseArgs(process.argv.slice(2), { dir: path.join(DATASETS_DIR, 'real') });
+  const manifestFile = args.manifest ? path.resolve(args.manifest) : manifestFileFor(args.dir);
+  let loaded;
+  let watch = null;
+  try {
+    loaded = loadManifest(manifestFile);
+    if (args.watch) watch = readWatch(watchFileFor(manifestFile));
+  } catch (err) {
+    throw new UsageError(err.message);
+  }
+  const manifest = loaded?.manifest ?? null;
+  const manifestHash = loaded?.hash ?? null;
+
+  const names = fs.existsSync(args.dir)
+    ? fs.readdirSync(args.dir).filter((f) => f.endsWith('.floorplan')).sort().map((f) => path.basename(f, '.floorplan'))
     : [];
   const fixtureDir = path.join(ROOT, 'fixtures');
   const fixtures = args.fixtures
     ? fs.readdirSync(fixtureDir).filter((f) => f.endsWith('.truth.json')).sort()
       .map((f) => path.join(fixtureDir, f))
     : [];
-  if (!files.length && !fixtures.length) {
-    console.error(`No .floorplan files in ${args.dir}. Open a plan in FloorTrace, correct its outlines,`
+  if (!names.length && !fixtures.length) {
+    throw new UsageError(`No .floorplan files in ${args.dir}. Open a plan in FloorTrace, correct its outlines,`
       + ' set their types and save the project there — see datasets/README.md. --fixtures scores fixtures/.');
-    process.exitCode = 2;
-    return;
   }
-  const results = [];
-  const run = async (name, load) => {
-    try {
-      results.push(evaluate(name, await load(), args));
-    } catch (err) {
-      results.push({ name, error: String(err?.message ?? err) });
+
+  // Which plans, decided before any is opened: a dev run never loads a test plan.
+  const selection = resolveSelection({
+    names, manifest, watch, args, manifestFile,
+  });
+  const drawDir = args.draw ? path.join(RUNS_DIR, args.out) : null;
+  const entries = selection.entries.map((e) => {
+    const file = path.join(args.dir, `${e.name}.floorplan`);
+    if (e.state === 'missing') return { ...e, row: { name: e.name, error: `in the manifest, but ${e.name}.floorplan is not in ${args.dir}` } };
+    if (e.state === 'unlisted') return { ...e, row: { name: e.name, skipped: 'not in the manifest' } };
+    return {
+      ...e,
+      job: {
+        name: e.name, kind: 'project', file, expectKey: e.keySha256, drawDir: e.split === 'test' ? null : drawDir,
+      },
+    };
+  });
+  for (const file of fixtures) {
+    const name = `fixture:${path.basename(file, '.truth.json')}`;
+    entries.push({
+      name, split: null, era: null, job: { name, kind: 'fixture', file, drawDir },
+    });
+  }
+  const jobs = entries.filter((e) => e.job).map((e) => e.job);
+  if (!entries.length) throw new UsageError('nothing to run: that selection holds no plan');
+
+  // A baseline from another manifest is refused before the run, not after it.
+  let baseline = null;
+  if (args.compare) {
+    const baselineFile = path.join(RUNS_DIR, `${args.compare}.json`);
+    if (fs.existsSync(baselineFile)) {
+      baseline = readJson(baselineFile, 'the baseline');
+      const refusal = compareRefusal(baseline.meta, manifestHash, args.compare);
+      if (refusal) throw new UsageError(refusal);
     }
-  };
-  for (const file of files) await run(path.basename(file, '.floorplan'), () => loadProject(file));
-  for (const file of fixtures) await run(`fixture:${path.basename(file, '.truth.json')}`, () => loadFixture(file));
-  const scored = results.filter((r) => !r.skipped && !r.error);
-  const lines = [`\n=== Real plans: ${scored.length} scored of ${results.length} ===`];
+  }
+
+  const workers = Math.min(args.jobs, Math.max(1, jobs.length));
+  const git = gitState();
+  const planCount = entries.filter((e) => e.state !== 'unlisted').length;
+  console.log(identityLine({
+    ...git, split: selection.split, manifestHash, plans: planCount, jobs: workers,
+  }));
+
+  let completed;
+  if (workers > 1) completed = await runPool(SCRIPT, jobs, workers);
+  else {
+    completed = [];
+    for (const job of jobs) completed.push(await runPlan(job));
+  }
+  const byName = new Map(mergeInOrder(jobs.map((j) => j.name), completed).map((r) => [r.name, r]));
+  for (const e of entries) e.row ??= byName.get(e.name);
+
+  const rows = entries.map((e) => e.row);
+  const isTest = (e) => e.split === 'test';
+  const openRows = entries.filter((e) => !isTest(e)).map((e) => e.row);
+  const testRows = entries.filter(isTest).map((e) => e.row);
+  const scored = rows.filter(isScored);
+  const openScored = openRows.filter(isScored);
+  const eraOf = (name) => manifest?.plans?.[name]?.era ?? null;
+  const splitOf = (name) => manifest?.plans?.[name]?.split ?? null;
+
+  const lines = [`\n=== Real plans: ${scored.length} scored of ${rows.length} ===`];
   if (scored.length) {
     lines.push(...scoreboardLines(scored, 'real plans'));
     lines.push(`   bare near-perfect ${pct(scored.filter((r) => r.bare.verdict !== 'wrong').length / scored.length)}`);
+    lines.push(causeLine(summaryOf(scored)), ...timingLines(timingOf(scored), workers));
+    if (manifest) {
+      for (const era of ERAS) lines.push(...boardLines(scored.filter((r) => eraOf(r.name) === era), `${era} plans`));
+      if (testRows.length && openRows.length) {
+        for (const split of SPLITS) {
+          lines.push(...boardLines(scored.filter((r) => splitOf(r.name) === split),
+            `${split}-split plans${split === 'test' ? ' (aggregate only)' : ''}`));
+        }
+      }
+    }
     lines.push('\nPer plan (app trace):');
-    for (const r of scored) {
+    for (const r of openScored) {
       lines.push(`   ${r.name.padEnd(32)} ${r.app.verdict.padEnd(7)} IoU ${pct(r.app.iou).padStart(6)}`
         + `  area ${(r.app.areaErr >= 0 ? '+' : '') + pct(r.app.areaErr)}  conf ${pct(r.app.confidence)}`
         + `  ${r.app.regions.map((g) => `${g.cause} ${pct(g.share)}`).join(', ')}`);
     }
   }
-  for (const r of results.filter((x) => x.skipped || x.error)) lines.push(`   ${r.name}: ${r.skipped ?? `ERROR ${r.error}`}`);
+  for (const r of openRows.filter((x) => x.skipped || x.error)) lines.push(`   ${r.name}: ${r.skipped ?? `ERROR ${r.error}`}`);
+  const outFile = path.join(RUNS_DIR, `${args.out}.json`);
+  const testFile = path.join(RUNS_DIR, `${args.out}.test.json`);
+  if (testRows.length) {
+    const failed = testRows.filter((r) => r.error).length;
+    lines.push(`   test split: ${testRows.filter(isScored).length} scored, ${failed} errors, `
+      + `${testRows.filter((r) => r.skipped).length} skipped; per plan only in ${path.basename(testFile)}`);
+    if (args.draw) lines.push(`   --draw: no overlay for the ${testRows.length} test plans`);
+  }
+
+  const timing = {
+    ...timingOf(scored), plans: scored.length, jobs: workers, parallel: workers > 1,
+  };
+  const testAggregate = testRows.length ? { ...aggregateOf(testRows, eraOf), jobs: workers } : null;
   if (args.compare) {
-    const baselineFile = path.join(RUNS_DIR, `${args.compare}.json`);
-    if (fs.existsSync(baselineFile)) {
-      const before = new Map(JSON.parse(fs.readFileSync(baselineFile, 'utf8')).results.map((r) => [r.name, r]));
+    if (baseline) {
       lines.push(`\n=== Against ${args.compare} ===`);
-      for (const r of scored) {
-        const b = before.get(r.name);
-        if (!b?.app || b.app.verdict === r.app.verdict) continue;
-        const moved = VERDICTS.indexOf(r.app.verdict) < VERDICTS.indexOf(b.app.verdict) ? 'better' : 'worse';
-        lines.push(`   ${moved.padEnd(6)} ${r.name}: ${b.app.verdict} -> ${r.app.verdict}  IoU ${pct(b.app.iou)} -> ${pct(r.app.iou)}`);
+      const was = baseline.meta ?? {};
+      if (was.commit) {
+        lines.push(`   baseline: commit ${was.commit}${was.dirty ? '+dirty' : ''}, split ${was.split ?? '?'}, `
+          + `manifest ${was.manifestHash ? was.manifestHash.slice(0, 12) : 'none'}`);
       }
+      lines.push(...moveLines(baseline.results, openScored, VERDICTS));
+      if (testAggregate && baseline.testAggregate) lines.push(...aggregateDeltaLines(baseline.testAggregate, testAggregate));
     } else lines.push(`\nno results named ${args.compare} to compare against`);
   }
   for (const line of lines) console.log(line);
+
+  const meta = {
+    date: new Date().toISOString(),
+    dir: args.dir,
+    ...git,
+    split: selection.split,
+    only: args.only,
+    watch: args.watch ?? null,
+    manifestHash,
+    jobs: workers,
+    timing,
+  };
   fs.mkdirSync(RUNS_DIR, { recursive: true });
-  const outFile = path.join(RUNS_DIR, `${args.out}.json`);
-  fs.writeFileSync(outFile, JSON.stringify({ meta: { date: new Date().toISOString(), dir: args.dir }, results }));
-  console.log(`results: ${path.relative(ROOT, outFile).startsWith('..') ? outFile : path.relative(ROOT, outFile)}`);
+  writeFileRetry(outFile, JSON.stringify({ meta, results: openRows, ...(testAggregate ? { testAggregate } : {}) }));
+  const shown = (file) => (path.relative(ROOT, file).startsWith('..') ? file : path.relative(ROOT, file));
+  console.log(`results: ${shown(outFile)}`);
+  if (testRows.length) {
+    writeFileRetry(testFile, JSON.stringify({ meta, results: testRows }));
+    console.log(`test results (per plan): ${shown(testFile)}`);
+  }
+  // A plan that could not be scored is not a quiet gap in the scoreboard.
+  if (rows.some((r) => r.error)) process.exitCode = 1;
 };
 
-main();
+// A worker: score the plans the parent sends, one at a time (lib/realBenchPool.mjs).
+const runWorker = () => {
+  if (!process.send) {
+    console.error('--worker is started by --jobs, not by hand');
+    process.exit(2);
+  }
+  // A parent that has gone (it finished, or was stopped) is not an error to report.
+  const say = (message) => process.send(message, (err) => {
+    if (err) process.exit(0);
+  });
+  process.on('disconnect', () => process.exit(0));
+  process.on('message', async ({ job }) => {
+    say({ result: await runPlan(job) });
+  });
+  say({ type: 'ready' });
+};
+
+if (process.argv.slice(2).includes('--worker')) runWorker();
+else {
+  main().catch((err) => {
+    if (!(err instanceof UsageError)) throw err;
+    console.error(err.message);
+    process.exitCode = 2;
+  });
+}
