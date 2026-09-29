@@ -101,7 +101,8 @@ person checked. To add one:
 3. Save the project (`.floorplan`) into `datasets/real/`.
 
 `npm run bench:real` replays the app's own trace on each saved plan, with the
-labels its scan read, and judges it against your outlines; `--draw` writes an
+labels its scan read, and judges it against your outlines (a plan still
+holding the app's untouched trace has no key yet and is listed, not scored); `--draw` writes an
 overlay per plan and `--compare` shows verdict moves. `--fixtures` adds the
 plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
