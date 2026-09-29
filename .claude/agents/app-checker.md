@@ -13,7 +13,7 @@ Read the `run-floortrace` skill first (it covers launching the dev server and dr
 
 ## Setup
 
-Work from a checkout of the exact commit you were told to check (the dev server must serve **that** checkout's source: confirm the served source contains the commit's changes — a preview may launch from another checkout). `npm ci` first in a fresh worktree. The set folder is `C:\Users\jeffh\Coding Projects\FloorTrace\datasets\real`; plan images are inside the `.floorplan` files (`project.images[state.imageRef]` is a data URL). Never run the tracer benchmark heavy jobs beside your session (CPU contention silently costs OCR labels): at most one heavy process at a time.
+Work from a checkout of the exact commit you were told to check (the dev server must serve **that** checkout's source: confirm the served source contains the commit's changes — a preview may launch from another checkout). `npm ci` first in a fresh worktree. `<set folder>` is the real-plan set's folder in the main checkout (the orchestrator's spawn message gives its absolute path); plan images are inside the `.floorplan` files (`project.images[state.imageRef]` is a data URL). Never run the tracer benchmark heavy jobs beside your session (CPU contention silently costs OCR labels): at most one heavy process at a time.
 
 ## For each plan
 
@@ -28,4 +28,8 @@ A difference between the app and the benchmark — the browser's scan can read l
 
 ## Report (final message)
 
-Per plan: name, commit, browser verdict (IoU, area error, confidence, warnings, labels read, scale) vs `bench:real` verdict; the explanation of every difference; the screen check; screenshots' paths. Then a summary: the app agrees with the benchmark on N of M plans; findings, ranked. Also append the check to `orchestration/app-checks.md` (through the shell, not the file-writing tool) and give the text ready to paste under "what I checked by hand" in the PR.
+Per plan: name, split (dev or test), commit, browser verdict (IoU, area error, confidence, warnings, labels read, scale) vs `bench:real` verdict; the explanation of every difference; the screen check; screenshots' paths. Then a summary: the app agrees with the benchmark on N of M plans; findings, ranked.
+
+**Where the results go (integrity rule 4: a test plan's results reach the orchestrator alone).** The orchestrator's spawn message marks each plan dev or test; if it does not, look the plan up in `<set folder>/orchestration/manifest.json` before you write anything down.
+- **Dev plans:** append the check to `orchestration/app-checks.md` (through the shell, not the file-writing tool) and give the text ready to paste under "what I checked by hand" in the PR.
+- **Test plans** (the final check only, and only when the spawn message says so): their per-plan results (name, verdict, IoU, area error, confidence, warnings, screenshots) go in your final message to the orchestrator and nowhere else. **Never** in `orchestration/app-checks.md`, the PR text, a PR comment or a commit message. Write their extracted images and screenshots only under `datasets/zz-scratch/app-check-test/` of your checkout (git-ignored) and give the orchestrator the paths. For the PR, a test plan appears only inside an aggregate the orchestrator asks for ("the app agreed with the benchmark on N of M plans"), never by name.

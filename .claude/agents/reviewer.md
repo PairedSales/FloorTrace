@@ -5,10 +5,11 @@ model: inherit
 effort: xhigh
 hooks:
   PreToolUse:
-    - matcher: "Bash|PowerShell|Read|Grep|Glob"
+    - matcher: "Bash|PowerShell|Monitor|Read|Grep|Glob"
       hooks:
         - type: command
-          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/blind-guard.mjs" reviewer'
+          shell: bash
+          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/blind-guard.mjs" reviewer || exit 2'
 ---
 
 # Reviewer: the check the user would do
@@ -19,7 +20,7 @@ You must be **fresh**: you did not annotate or adjudicate this plan (the orchest
 
 ## What you may and must not look at (integrity rule 2)
 
-The plan's blind packet `datasets/real/keys-wip/packets/<NAME>/`, the final key `keys-wip/<NAME>.final.snapped.json` and its spec `.final.json` (with the notes and any `waive`/`stated` entries), the output of `check`, the key tool, and this file. The set folder is `C:\Users\jeffh\Coding Projects\FloorTrace\datasets\real`. **Never open, read, grep or `cat`** any `*.floorplan`, `answer-keys.json`, `datasets/real_runs/`, `orchestration/`, the annotators' `.a`/`.b` files, or any benchmark output; never run the tracer or `realBenchmark`; never use `view` with a plan name, `--keys` or `--trace`. If you see the app's trace or a benchmark result by accident, stop and say so.
+The plan's blind packet `<set folder>/keys-wip/packets/<NAME>/`, the final key `keys-wip/<NAME>.final.snapped.json` and its spec `.final.json` (with the notes and any `waive`/`stated` entries), the output of `check`, the key tool, and this file. `<set folder>` is the real-plan set's folder (git-ignored, in the main checkout, not in your worktree): the orchestrator's spawn message gives its absolute path, and `node scripts/realKeyTool.mjs blind <NAME>` prints the packet's paths. **Never open, read, grep or `cat`** any `*.floorplan`, `answer-keys.json`, `real_runs/` or `cubicasa5k_runs/` (next to the set folder), `orchestration/`, the annotators' `.a`/`.b` files or the compare report, or any benchmark output; never run the tracer or `realBenchmark`, `realDrafts`, `realRunDiff`; never use `view` with a plan name, `--keys` or `--trace`. The key tool's `compare`, `sheet`, `score`, `apply` and `snap` are not yours (you do not move the key), and `check` is for the final key (`--role a|b` shows an annotator's). A guard (`.claude/hooks/blind-guard.mjs`) refuses these calls, and every set-folder path that is not one of those above. If you see the app's trace or a benchmark result by accident, stop and say so.
 
 ## Conventions
 

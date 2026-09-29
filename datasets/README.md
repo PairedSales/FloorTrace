@@ -636,3 +636,63 @@ folder, with its crop and its size. `apply` makes a plan the folder does not
 have yet from its source before writing its key, so the set grows by that file
 rather than by its images. An image of any other size is refused, since the
 key is coordinates on it.
+
+### The roles, the blind guard and the transcript audit
+
+The agents that source, draw, check and improve on this set are defined in
+`.claude/agents/`, one file per role, each with its model effort in the
+frontmatter: `sourcer`, `annotator`, `adjudicator`, `reviewer` (the four
+**blind** roles: they never see the app's trace, a benchmark result, or another
+agent's key), `engineer`, `app-checker` and `auditor`. Each file says where
+`<set folder>` is (the orchestrator's spawn message gives its absolute path;
+`realKeyTool blind NAME` prints a packet's path).
+
+**The guard.** Each blind role's frontmatter wires a `PreToolUse` hook,
+`.claude/hooks/blind-guard.mjs <role>`, to `Bash|PowerShell|Monitor|Read|Grep|Glob`,
+with `shell: bash` and a command that ends `|| exit 2`. It reads the tool call's
+inputs and refuses (exit 2, the reason on stderr) a call that would show the
+role what it may not see; it fails **closed**: an unknown role, an error in the
+guard, a rules file that will not load, or a missing script is also a refusal,
+where any other exit code would let the call through. The rules are data in
+`.claude/hooks/blindRules.mjs`, shared with the audit below. What they refuse, by
+what a call names (paths are read with quotes removed and `..` resolved):
+
+- to every blind role: any `.floorplan`, `real_runs/`, `cubicasa5k_runs/`, a
+  `datasets/real-…` backup, `answer-keys`, `perimeterTraces`, the benchmark and
+  tracer commands, `realKeyTool view --keys|--trace`, the set folder as a working
+  directory, a search rooted at `datasets/`, `orchestration/`, `realRunDiff`,
+  `realKeys`, and the environment variables that re-point the set folder;
+- the set folder is an **allow-list** per role, and every other path in it is
+  refused, wildcards and the folder itself included: annotator, adjudicator and
+  reviewer may open `keys-wip/packets/`; the adjudicator also `keys-wip/<plan>.{a,b,final}.*`
+  and `<plan>.compare.json`; the reviewer `<plan>.final.*` and `<plan>.review-<n>.json`;
+  the sourcer only `inbox/`. An annotator's own key files are allowed by the audit
+  (it knows the letter) but not by the live guard, which does not: an annotator
+  draws its own snapped key from the copy the key tool writes to its scratch
+  folder, not from `keys-wip/`;
+- the key tool's subcommands, per role: annotator `view probe snap check labels`
+  (`snap` and `check` need `--role a|b`), adjudicator those and `compare` (`snap`
+  needs `--role final`), reviewer `view probe check labels review` (`check` on the
+  final key), sourcer `view probe`; `realDrafts` is the sourcer's alone.
+
+It is a speed bump for an honest agent about to open the wrong file, not a
+sandbox: it reads the text of a call, so a path built in a variable gets past it.
+
+**The audit.** A workflow's subagents cannot carry the hook, so the
+orchestrator runs `node scripts/auditBlind.mjs TRANSCRIPT_DIR [--json]
+[--ignore-prefix a,b] [--manifest FILE]` on each workflow's transcript folder
+(`journal.jsonl` and an `agent-<id>.jsonl` per agent): it reads every agent's
+tool calls against its role's rules, the same table the guard uses. **The role
+comes from the agent's label in the journal, `<prefix>:<plan>`**, so a workflow
+script labels its agents `a:` or `b:` (annotators; an annotator's own letter's key
+files are allowed), `adj:` or `final:` (adjudicator), `rev:` (reviewer), `src:`
+(sourcer), `eng:` (engineer: never the test split, never a key edit) and `app:`
+(app checker: never a key edit). Any other label, or none, is **listed and makes
+the exit status 1**: an audit that skips agents it does not recognise looks
+clean while it has not looked. Labels that are deliberately not audited (builders,
+auditors, fixers) are declared with `--ignore-prefix build,audit,fix,resume`; a
+role's own prefix cannot be ignored, and the summary counts what was. `--manifest
+<set folder>/orchestration/manifest.json` makes it refuse an `eng:` agent any
+plan the manifest puts in the test split, by name. A missing or unparseable
+transcript is a finding, and tools it does not read are listed per agent.
+Exit: 0 clean, 1 a finding, 2 a folder or option it cannot use.

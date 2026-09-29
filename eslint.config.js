@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['**/dist/**', '.claude/**', '.ocrperf/**', '.perfprobe/**']),
+  globalIgnores(['**/dist/**', '.claude/worktrees/**', '.ocrperf/**', '.perfprobe/**']),
   {
     // `.mjs` is in the glob because it was not, and that left every file under
     // `scripts/` — the two benchmarks CI gates each PR on included — with
@@ -42,8 +42,10 @@ export default defineConfig([
   // Node's globals — `process`, `Buffer`, `global`. Declared as its own block
   // rather than by loosening `no-undef` above, which is the rule that would
   // have caught a genuine typo in the detection cores these scripts share.
+  // The blind-role guard in `.claude/hooks` runs under `node` too, and is linted
+  // (only `.claude/worktrees`, the nested checkouts, is ignored above).
   {
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', '.claude/hooks/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
 ])
