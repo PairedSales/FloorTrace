@@ -261,6 +261,20 @@ The outlines follow these conventions:
 - Eave storage behind knee walls, chimney masses and space the drawing does not
   decide are Unfinished, so not scored. Steps, planters and walks are not
   outlined.
+- Space the sheet itself labels as future, expansion or unfinished (an
+  "expansion attic" drawn with a suggested layout) is Unfinished, not GLA: the
+  drawing says the space is not finished, whatever layout it suggests.
+- A chimney or fireplace mass that protrudes beyond the wall face is an
+  Unfinished outline of its own, and the GLA edge stays on the wall face across
+  it. A hearth inside the room is GLA. (Two independent annotators split on
+  whether to outline a 12 sq ft chimney at all, so `compare` does not let one that
+  small decide agreement: below.)
+- A bay or bow that encloses floor area at floor level is inside the GLA
+  outline. A glazed unit drawn proud of the wall with no wall band under it (a
+  window box, a greenhouse window) is not.
+- Unfinished space shares boundaries with its neighbours and does not overlap
+  scored outlines: it stops where the GLA, Garage or Porch outline starts
+  (`["ref", k, i]` vertices make the boundary exactly shared).
 
 **None has been checked by a person yet.** Claude drew every key, and each file
 says so in its `answerKey` record (`by: "Claude (draft for review)"`, with notes
@@ -316,12 +330,13 @@ the final key; a reviewer who drew none of it records `review`; `apply` freezes 
 | `blind NAME` | The annotator's packet, `keys-wip/packets/NAME/`: `image.<ext>` (the plan's exact bytes, so coordinates are the key's), `labels.json`, `meta.json {name, width, height}`. |
 | `labels NAME` | The packet's labels as a table, for an agent that cannot open the set folder. |
 | `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. A segment that leaves the image is an error, not the border's pixels read again. |
-| `snap NAME --role a\|b\|final --spec FILE [--replace]` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. A vertex more than 2 px outside the image is an error. Role `a` or `b` already written by another `author` (or by a spec with none) is not replaced unless you add `--replace`; snapping your own spec again is the normal loop; a replaced spec is always said so. |
-| `compare NAME` or `compare A B [--draw OUT.png --tag T --image IMAGE]` | Per-type IoU, the largest and 95th-percentile boundary distance, the protocol's verdict and the disagreement regions. |
-| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. It prints the plan's scale (the app's own vote) and each outline's sq ft to whoever runs it, blind roles included: accepted, since the stated-area check needs it. |
+| `snap NAME --role a\|b\|final --spec FILE [--tag T] [--replace] [--dry]` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. A vertex more than 2 px outside the image is an error. Role `a` or `b` already written by another `author` (or by a spec with none) is not replaced unless you add `--replace`; snapping your own spec again is the normal loop; a replaced spec is always said so. `--dry` is accepted and changes nothing: it is not a preview, `snap` always writes `keys-wip/` (and never the plan), and says so. `--tag T` also writes scratch copies (below). |
+| `compare NAME` or `compare A B [--draw OUT.png --tag T --image IMAGE]` | Per-type IoU, the largest and 95th-percentile boundary distance, the protocol's verdict and the disagreement regions. A small unfinished outline does not decide agreement (below). With `NAME`, `--tag T` also writes scratch copies (below). |
+| `check NAME [--role R] [--feet-per-pixel X] [--tag T]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. It prints the plan's own calibration (the app's scale vote, which is not the trace) and each outline's sq ft to whoever runs it, blind roles included: accepted, since the stated-area check needs it. `--tag T` prints the scratch copy's path, not the set's, where `--json` names the file checked. |
 | `review NAME --approve\|--reject --agent ID [--region … --reason …]` | The final reviewer's decision, `keys-wip/NAME.review-<n>.json`. |
 | `apply NAME [--dispute ID]` | The freeze for one plan; the only command that writes into a plan. |
 | `sheet NAME... --out FILE [--per N]` | Review sheets: each plan whole with its stored key, its record and its notes. |
+| `score NAME FILE [--json]` | The verdict of the outlines in `FILE` against the plan's stored key, by `bench:real`'s own code (below). For the app checker; **never for a role that draws or checks a key blind.** |
 
 **The blind packet** holds the image and what the scan read, and nothing else: a
 packet is built by naming the fields it takes, so nothing the tracer knows can
@@ -363,7 +378,15 @@ tilted; `bridge` (default 2.5 px) is the gap a hatched or double-line wall may
 have without ending its band. A snap moves each edge along its normal and keeps
 its slope, so give the two ends of a level edge the same y. `waive` excuses a
 label from the label check with a reason the reviewer reads; `stated` gives areas
-the page prints. Everything is validated with the place and the reason.
+the page prints, each `{"sqft", "of", "explained"}`. `of` says what the figure is
+of, and matches, in this order: an outline's `name` (case does not matter; the
+sq ft of every outline of that name, added), else a type (`gla`, `below-grade`,
+`garage`, `porch`, `unfinished`: all the outlines of that type), else total GLA,
+which is the `gla` outlines only, below-grade space not included. An `of` that
+is none of them, or absent, is compared with total GLA, and the check line says
+so (`"first floor" names no outline`): name your outlines to compare a level on
+its own, and put a page's "total" figure under `of: "total GLA"` (or leave `of`
+out). Everything is validated with the place and the reason.
 
 **What a snap flags.** `no-band`: no wall band within reach. `far`: the edge moved
 over 4 px. `reaches-end`: the band runs to the end of the search on the side that
@@ -404,7 +427,20 @@ garage door between two thick piers, can capture a snap: `fix` there.
 **What `compare` calls agreement** (the protocol's step 3): the same outline
 types; the building outlines (gla and below-grade) at IoU 99% or better; garage
 and porch each at 97% or better; and no boundary point more than 3 px from the
-other key's boundary of the same class. IoU is exact: the area two keys' outlines
+other key's boundary of the same class (building, non-GLA). **Unfinished space is
+not scored, so it is in neither IoU nor the boundary distance, and a small
+unfinished outline does not count as an outline type:** one under 2% of its own
+key's building area (the summed area of that key's gla and below-grade
+outlines) is set aside. It is listed under "informational" in the output (and as
+`informational` in `NAME.compare.json`: the key, the outline, its area and share,
+its box, and whether the other key drew unfinished space over the same ground),
+and the two keys agree without it. A larger unfinished outline that only one key
+draws still fails the types, and is listed as a region to crop at (it is not a
+distance failure). The pilot's two annotators split on 12-13 sq ft chimney masses
+alone, which forced an adjudication of nothing that is scored. (Before this,
+unfinished was a third class in the distance criterion, so a chimney that one key
+lacked failed the distance too, and two keys that drew the same large unfinished
+region more than 3 px apart disagreed.) IoU is exact: the area two keys' outlines
 of a type share over the area of their union, worked out edge by edge with no
 raster (a 0.5 px raster was off by 0.2% on a house of 600-900 px and 0.8% on one of
 100-200 px, and the 99% line falls where it does). It can differ from a
@@ -433,7 +469,12 @@ pixel.
   against the key's area at the plan's scale (`--feet-per-pixel` overrides it): over
   5% apart fails unless the entry says why (`explained`, then a warn). An `of` that
   names an outline (by its `name`) or a type compares that; any other is compared
-  with total GLA, and the line says so.
+  with total GLA (the `gla` outlines), and the line says so.
+
+`check` reads the plan's own calibration, to put a key's area in sq ft, and prints
+that scale and each outline's sq ft to whoever runs it, blind annotators included.
+The app's scale is the tracer's vote, not its trace, and no key is judged by it,
+so this is accepted; the annotator sees a number, never an outline of the app's.
 
 **Files.** The set folder is `datasets/real/` of the main checkout;
 `FLOORTRACE_REAL_DIR` points the tool at another folder of plans, so `apply` can be
@@ -471,9 +512,113 @@ neither replaces the other. A plan whose record already has `checked`
 is frozen: `apply` refuses it unless `--dispute ID` names the dispute that
 changes it, and refuses a dispute whose final key is the key the plan already holds
 (a dispute id marks a change; a dispute the key survived is logged, not applied).
-`apply` leaves the plan otherwise as it was (image, labels, calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
-command, which would judge outlines against a key by the verdict code `bench:real`
-uses (`scripts/lib/realScore.mjs`), is not part of this tool yet: a follow-up adds it.
+`apply` leaves the plan otherwise as it was (image, labels, calibration); run `node scripts/realKeys.mjs export` afterwards.
+
+#### Scoring outlines against a key: `score`
+
+```
+node scripts/realKeyTool.mjs score NAME FILE [--json]
+```
+
+The verdict of the outlines in `FILE` against the plan's stored key, reached by the
+code `bench:real` judges by: the truth masks are `answerKeyFromOutlines` and the
+traced mask is `tracedMask` (through `scoreTrace`) from `scripts/lib/realScore.mjs`,
+the verdict is `scoreMask` from `scripts/lib/verdict.mjs`, and nothing of them is
+copied (`scripts/lib/keyScore.mjs` only reads `FILE` and words the result). The app
+checker, who tries the running app on real plans, uses it to score the outlines it
+reads from the app's state, and compares the verdict with `bench:real`'s for the
+same plan and commit. It reads the stored key, so it is not for a role that draws or checks a
+key blind. It exits 0 whatever the verdict (the verdict is the answer), and 1 on an
+error.
+
+The key is the plan's stored outlines, as `bench:real` reads them (closed outlines
+of three or more points, at the precision they are stored), not `keyOf`'s copy
+rounded to a tenth of a pixel: the same rings score the same. A plan with no key
+yet is refused (`no answer key yet`). A test-split plan (the manifest beside the
+folder, or the set's own when the folder has none) is refused too, unless
+`FLOORTRACE_TEST_SPLIT_OK=1` is set, which is the orchestrator's alone: as in
+`bench:real`, integrity rule 4 leaves a test plan's verdict to the orchestrator,
+and the check comes before the plan is opened. When the manifest holds a
+`keySha256` for the plan and the key no longer hashes to it, `score` scores anyway
+and says so (`key changed since the manifest`), since `bench:real` would refuse
+the plan.
+
+`FILE` is JSON in one of two shapes, in the plan's own image pixels:
+
+```json
+{"outlines": [{"type": "gla", "vertices": [{"x": 100, "y": 80}, "..."], "holes": [], "closed": true}],
+ "confidence": 0.93, "warnings": ["thin-structure-excluded"]}
+```
+
+the app's outlines (`perimeterTraces` of the app's state), each with `vertices`
+(`{x, y}` or `[x, y]`) or `points` (`[[x, y], ...]`), or a bare array of such
+outlines; or
+
+```json
+{"rings": [[[100, 80], [300, 80], [300, 220], [100, 220]]], "confidence": 0.93}
+```
+
+each ring a traced floor's outer polygon, as `bench:real` records them in a run
+file's `results[i].app.rings` (holes are not in them). `confidence` is a number from
+0 to 1 and `warnings` are codes, or `{code, severity}` (an `info` one is not one, as
+in `bench:real`); both are optional. **The traced area is the union of the `gla` and
+`below-grade` outlines** (an outline with no type is `gla`) **less their holes**
+(unless stale), filled as `bench:real` fills the floors of a trace, so a ring list
+gives exactly the mask `bench:real` builds from the floors it traced. Garage, porch
+and unfinished outlines are not the trace and are left out, and an outline with
+`closed: false` or under three points is skipped: each is said in a `note:` line. It
+also notes a file with no building outline (nothing was traced: wrong), one whose
+points lie beyond the plan's image (coordinates on another scale than the plan's
+own image score as a wrong trace), and a confidence that was not given.
+
+It prints the verdict, the IoU, the area error (positive: the outlines cover more
+than the key's building), the error by cause as a share of the key's building area
+(non-GLA space kept, other space taken in, living space missed), the largest error
+regions, the key's outline types and record (who drew it, whether it was checked),
+and, when `confidence` is given, the confidence with the app's word for it
+(`good` from 75%) and **whether the outline is wrong but shown as good**: the
+verdict is `wrong` and the confidence is at least `QUALITY_GOOD`
+(`src/utils/boundaryQuality.js`). `--json` prints the same as JSON
+(`verdict, iou, areaErr, overNonGla, overOther, missed, regions, floors, key, counted,
+left, confidence, level, warnings, wrongButShownGood, outside, notes, keyRecord,
+keyChanged`).
+
+The rings of a run file are rounded to whole pixels and have no holes, so scoring
+them differs from that run's own figures by the rounding, and by the area of any
+hole the trace had: on the 75 plans of `real_runs/phase0-9d212fb.json` every
+verdict and every wrong-but-shown-good flag is the run's, and the IoU differs by
+0.0006 at the median and 0.029 at most (a plan with holes). Fed the trace's
+unrounded outlines with their holes, `score` gave `bench:real`'s per-plan result
+exactly on all 75 plans (9 of them with holes): verdict, IoU, area error, the
+error by cause and its regions, traced area, confidence, warnings and floors.
+
+#### Scratch copies for blind roles: `--tag`
+
+A blind annotator's guard forbids naming `keys-wip/`, and the orchestrator's audit
+looks for it. `snap`, `compare` and `check` take `--tag T` (letters, digits, `.`, `_`,
+`-`), and then copy what they write into `datasets/zz-scratch/T/` of the checkout
+that runs the tool, and print those paths where they would have printed the set's:
+
+- `snap NAME --role R --spec FILE --tag T` writes `NAME.R.snapped.json` and
+  `NAME.R.json` (the spec) there, prints them as `snapped outlines -> ...` and
+  `spec kept -> ...`, and a line `use this with --poly: <the snapped copy>`.
+  `view IMAGE --poly <that path>` draws it as it draws the set's.
+- `compare NAME --tag T` copies both keys (`NAME.a.snapped.json`,
+  `NAME.b.snapped.json`), their specs and `NAME.compare.json` (whose `a` and `b`
+  name the copies), prints `use this with --poly:` for each key, and a key that is
+  missing is said without the set's path. With two files, `--tag` still only names
+  the folder a `--draw` picture goes to.
+- `check NAME --role R --tag T` names the snap copy where it prints a path (`--json`'s
+  `snappedFile`, left out when there is no copy), and a key not yet snapped without
+  the set's path. Its text output has never named one.
+
+Without `--tag` nothing changes. The only line these commands print that names a
+path in `keys-wip/` is `snap`'s header, when a packet exists: the packet's image is
+what the key is drawn on, and is the one thing of `keys-wip/` a blind role may open.
+(`snap --dry`'s note names the folder, as a fact about what `snap` writes, not as
+somewhere to look.)
+`view`, `labels` and `probe` print no path of the set in normal use (`view`'s is
+its picture, in the checkout's scratch folder).
 
 ### Moving keys without their plans
 

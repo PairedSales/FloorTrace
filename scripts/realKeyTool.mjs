@@ -14,6 +14,11 @@
  * check, and prints it and the areas to whoever runs it, blind roles included:
  * the orchestrator accepted that.)
  *
+ * A blind role never has to name keys-wip/ (its guard forbids it): `snap`,
+ * `compare` and `check` take --tag T and then print, and copy their outputs
+ * to, datasets/zz-scratch/T/ of the checkout (see each command). Where a
+ * command prints "use this with --poly: PATH", `view --poly PATH` draws it.
+ *
  * Usage:  node scripts/realKeyTool.mjs COMMAND ...      (--help prints this)
  *
  *   view IMAGE|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T]
@@ -61,14 +66,18 @@
  *       is the wall face". --across reads through a point at an angle (0 = along
  *       +x, 90 = down the page) with distances from that point. A segment that
  *       leaves the image is an error.
- *   snap NAME --role a|b|final --spec FILE [--replace] [--dry]
+ *   snap NAME --role a|b|final --spec FILE [--tag T] [--replace] [--dry]
  *       Validates the spec you wrote in your scratch folder, copies it to
  *       <set>/keys-wip/NAME.<role>.json, moves every edge to the outer face of
  *       the wall band the ink shows, prints each edge's move and flag, and
  *       writes NAME.<role>.snapped.json {outlines: [{type, v}], flagged, ...}.
  *       It reads the plan for its image only (the packet's image when there is
  *       one), never its trace or key, and never writes into the plan. --dry is
- *       accepted and does nothing extra. A vertex more than 2 px outside the
+ *       accepted and changes nothing (it is not a preview: snap always writes
+ *       keys-wip/, and says so). --tag T also writes copies, NAME.<role>.snapped.json
+ *       and NAME.<role>.json (the spec), into datasets/zz-scratch/T/ of the
+ *       checkout, prints their paths instead of the set's, and prints
+ *       `use this with --poly: <the snapped copy>`. A vertex more than 2 px outside the
  *       image is an error. Role a or b already holding a spec is not replaced
  *       without --replace unless the new spec names the same "author" (a spec
  *       with no author cannot show it is anyone's): only your own spec is yours
@@ -101,7 +110,7 @@
  *       that are each at least 60% as continuous as the wall, so a window frame
  *       is never joined to the wall silently. Look at every flagged edge at full
  *       zoom. The flags are kept in the snapped file for `check`.
- *   compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png --tag T]
+ *   compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png] [--tag T]
  *                [--image IMAGE|NAME] [--crop X0,Y0,X1,Y1]
  *       NAME compares keys-wip/NAME.a.snapped.json with NAME.b.snapped.json and
  *       writes NAME.compare.json. Prints per-type IoU, outline-type counts, the
@@ -111,10 +120,20 @@
  *       at least 99%, garage and porch IoU each at least 97%, and no boundary
  *       point is over 3 px from the other key's; else DISAGREE with each failed
  *       criterion and the disagreement regions (bbox in image px and largest
- *       distance, worst first) to crop at. --draw writes A solid, B dashed with
+ *       distance, worst first) to crop at. Unfinished space is not scored, so
+ *       it is in neither the IoUs nor the boundary distance, and an unfinished
+ *       outline under 2% of ITS OWN key's building area (gla + below-grade,
+ *       summed) is not counted as an outline type: it is listed under
+ *       "informational" (compare.json's `informational`) and does not decide
+ *       agreement. A larger unfinished outline in one key only fails the types.
+ *       --draw writes A solid, B dashed with
  *       the regions boxed and numbered; a bare file name goes to the views
  *       folder of --tag, a path is used as given; two files need --image.
- *   check NAME [--role a|b|final] [--feet-per-pixel X] [--json]
+ *       With NAME, --tag T also copies both keys (NAME.a.snapped.json,
+ *       NAME.b.snapped.json, and their specs NAME.a.json, NAME.b.json) and
+ *       NAME.compare.json into datasets/zz-scratch/T/, prints those paths
+ *       instead of the set's, and `use this with --poly: PATH` for each key.
+ *   check NAME [--role a|b|final] [--feet-per-pixel X] [--tag T] [--json]
  *       The automatic checks on keys-wip/NAME.<role>.snapped.json (role defaults
  *       to final) with its spec: closed and not self-crossing; building and
  *       non-GLA outlines not overlapping beyond a shared boundary (tolerance
@@ -131,7 +150,12 @@
  *       the key at the plan's scale unless `explained`. The labels are the blind packet's when there is one (the ids
  *       and kinds the annotators saw), else the plan's scan; a packet that no
  *       longer matches the scan is a warning. Prints a table, the areas in sq ft,
- *       then CHECK PASS or CHECK FAIL (n); exits non-zero on a fail.
+ *       then CHECK PASS or CHECK FAIL (n); exits non-zero on a fail. A stated
+ *       area's `of` names an outline (its `name`), a type (all of that type),
+ *       or is compared with total GLA (the gla outlines only). --tag T names
+ *       the `snap --tag T` copy, not the set's file, where a path is printed
+ *       (--json's `snappedFile`, left out when there is no copy). It prints the
+ *       plan's own scale and areas to whoever runs it, blind roles included.
  *   review NAME --approve|--reject --agent ID [--region X0,Y0,X1,Y1 --reason "..."]
  *          [--note "..."]
  *       Records the final reviewer's decision in keys-wip/NAME.review-<n>.json
@@ -155,6 +179,30 @@
  *       Review sheets: each plan whole with its stored key, its record and its
  *       notes, N plans to an image (default 4). Shows the stored key, so it is
  *       not for blind roles.
+ *   score NAME FILE [--json]
+ *       The verdict of the outlines in FILE against the plan's stored key, by
+ *       the code `bench:real` judges by (lib/realScore.mjs, lib/verdict.mjs).
+ *       For the app checker, which reads the outlines from the running app; it
+ *       reads the stored key, so it is never for a role that draws or checks a
+ *       key blind. A plan with no key yet is refused ("no answer key yet"), and
+ *       a test-split plan (per the manifest) needs FLOORTRACE_TEST_SPLIT_OK=1,
+ *       the orchestrator's, as in bench:real.
+ *       FILE is JSON, in one of two shapes:
+ *         {"outlines": [{"type": "gla", "vertices": [{"x": 1, "y": 2}, ...]
+ *                        or "points": [[1, 2], ...], "holes": [...], "closed": true}, ...],
+ *          "confidence": 0.93, "warnings": ["code", ...]}      or a bare array of outlines
+ *         {"rings": [[[x, y], ...], ...], "confidence": 0.93}   each ring a traced
+ *                        floor's outer polygon, as a bench:real run file's app.rings
+ *       Coordinates are image px of the plan's own image. The traced area is the
+ *       union of the gla and below-grade outlines (no type is gla) less their
+ *       holes, filled as bench:real fills a trace's floors; garage, porch and
+ *       unfinished outlines are left out, and an outline with closed: false or
+ *       under 3 points is skipped, each said. Prints the verdict, IoU, area
+ *       error, the error by cause (non-GLA kept, other taken in, living space
+ *       missed) and its largest regions; with a confidence, the confidence and
+ *       whether the outline is WRONG BUT SHOWN AS GOOD (verdict wrong and
+ *       confidence at least 75%). --json prints the same as JSON. Exit 0 whatever
+ *       the verdict; 1 on an error.
  *
  * Where things live: the set folder is datasets/real/ of the main checkout
  * (FLOORTRACE_REAL_DIR overrides it: point it at a scratch copy to try `apply`).
@@ -187,7 +235,7 @@ const main = async (argv) => {
   }
   const run = COMMANDS[command];
   if (!run) {
-    console.error(`unknown command "${command}" (view, blind, labels, probe, snap, compare, check, review, apply, sheet; --help for the manual)`);
+    console.error(`unknown command "${command}" (view, blind, labels, probe, snap, compare, check, review, apply, sheet, score; --help for the manual)`);
     return 2;
   }
   const ctx = { dir: realDir(), root: ROOT, out: (line) => console.log(line) };
