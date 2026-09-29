@@ -636,3 +636,133 @@ folder, with its crop and its size. `apply` makes a plan the folder does not
 have yet from its source before writing its key, so the set grows by that file
 rather than by its images. An image of any other size is refused, since the
 key is coordinates on it.
+
+### Running the key pipeline (`realPipeline`, `realManifest`)
+
+```
+node scripts/realPipeline.mjs COMMAND [selector] [options]     # --help prints the manual
+node scripts/realManifest.mjs COMMAND [options]                # --help prints the manual
+```
+
+The key protocol has agents' steps (drawing, adjudicating, reviewing) and
+mechanical steps between them. The mechanical steps are these two scripts, for the
+orchestrator to run over hundreds of plans at a time. They read the plans, so
+**roles that draw or check a key blind never use them** (`realKeyTool` is theirs),
+and engineers have no use for them. Every command is safe to run again (it does
+what is still to do), prints one line per plan and a summary, exits 1 when a plan
+ended in an error, a refusal or a failed check (2 for a command line it cannot
+read), never deletes, and writes into the set folder only through the key tool's
+retrying, atomic writer (Google Drive holds files it syncs). Both point at
+another folder with `FLOORTRACE_REAL_DIR`, so a command can be tried on a scratch
+copy. The tools' headers are their manuals; this is the map.
+
+**One batch, in order.**
+
+1. `packets` gives each annotator its blind packet; annotators A and B draw with
+   `realKeyTool` (for the first 75 plans `import-existing` makes A of the stored
+   draft key, and only B is drawn).
+2. `compare-all`, then `finalize-agreed` for what agrees (A becomes the final key
+   and the record is written), `finalize-single` for the dev plans that get no B.
+3. The adjudicator settles each DISAGREE with `realKeyTool snap --role final`,
+   then `adjudicated NAME --adjudicator TAG`.
+4. A fresh reviewer records `realKeyTool review`; `status` says which reviews are
+   approved, rejected or stale.
+5. `freeze` writes the approved keys into their plans, runs `realKeys export` and
+   backs the set folder up; `realManifest build` writes the manifest; `verify`
+   checks it; `stats` gives the milestone report its four numbers.
+
+**Selectors** (every `realPipeline` command but `adjudicated`, `backup` and `stats`
+needs one; `stats` takes one to narrow): `--names A,B` (repeatable; bare names
+work too), `--book X` (a book or site unit, as the manifest's `book`; the book as
+logged, or the site, also match), `--split dev|test` (from the manifest, else
+`splits.json`), `--all`. They combine as filters: `--names` picks exactly those
+plans, else every plan, and `--book` and `--split` then keep what is in that book
+and that split. With none of them the command refuses and lists them.
+
+| `realPipeline` command | What it does |
+|---|---|
+| `status [selector] [--json] [--no-check\|--recheck]` | One row per plan: `packet` (`ok`, `STALE` when the plan's image is no longer the packet's), `A` and `B` (`ok` = snapped, `existing` = the imported draft, `unsnapped`), `compare` (`agree`, `DISAGREE` with the criteria that failed, `stale`), `final`, `check` (`PASS`, `FAIL`, `?` = never run, `(old)` = of another key), `review` (`approved`, `rejected(n)`, `revised(n)` = the key changed after a rejection, `approved-STALE` = the key or its notes changed after the approval), `rnd` (review rounds) and `frozen` (`yes`, `draft` = an unchecked stored key). Then one summary line per stage. A check is about a second, so its result is cached beside the key (`keys-wip/NAME.check.json`, under a fingerprint of the final key, its spec, the plan and the packet's labels) and run only for a final key that has none for its current fingerprint; `--recheck` runs them all again, `--no-check` runs none and writes nothing. 400 plans read in seconds. |
+| `packets [selector]` | `realKeyTool blind` for each plan. |
+| `import-existing [selector \| --all-existing]` | For a plan whose stored key is an unchecked draft (`answerKey.by` starts with "Claude", no `checked`): writes `keys-wip/NAME.a.json` (the stored outlines as `v`, every edge in `fix`, since an earlier snap placed them; the record's notes; `"author": "existing-draft"`, `"existingDraft": true`) and `NAME.a.snapped.json`. The plan is not touched. Refuses a plan whose key is checked, one whose A another agent drew, and a key with holes. |
+| `compare-all [selector] [--redo]` | `realKeyTool compare` for every plan with A and B snapped; one line per plan (verdict, smallest per-type IoU, worst boundary distance, criteria failed) and the tally: how many compared, the agreement rate, and how many failed types, building IoU, non-GLA IoU, distance. A comparison newer than both keys is kept; `--redo` recomputes. |
+| `finalize-agreed [selector]` | For a plan whose fresh comparison agrees and that has no final key: `NAME.final.json` and `NAME.final.snapped.json` as copies of A's, `NAME.record.json` (below), then `check`. A final that fails is marked "needs adjudication" and kept. Refuses A and B by one author, and a spec with no author. |
+| `finalize-single [selector]` | The same for a dev plan that has an A and no B, with `verifiedBy: "single annotation"`. Refuses a plan whose split is not dev (every test plan gets a B) and one whose A is the existing draft (every existing plan needs an independent B). |
+| `adjudicated NAME --adjudicator TAG` | After `snap --role final`: writes `NAME.record.json` (below) with `adjudicated: true`, then `check`. Refuses an adjudicator who drew A or B. |
+| `sample selector --fraction F --seed N [--exclude-existing]` | A deterministic random sample of the selected plans (sorted, then a seeded mulberry32 shuffle): the same plans and seed give the same sample. Prints the seed, the size and the names comma-separated; writes nothing. "30% of the rest of dev get a B" is `--split dev --fraction 0.3 --seed N --exclude-existing`, which leaves out the plans that predate the sourcing log. |
+| `stats [selector] [--json]` | The four numbers of a milestone report: agreement (overall, by era, by book), adjudication (adjudicated of finalized), the final review's send-back rate with the rounds per plan, and the disputes tally (below). |
+| `freeze selector [--dry] [--backup \| --backup-name NAME]` | The key tool's `apply` for every plan whose latest review approved this very key and spec, that passes `check` and is not frozen. Refuses, by name, a plan whose approval is stale and one with no record; says why the rest are not ready. Then `realKeys export`, and with `--backup` the backup. `--dry` writes nothing. |
+| `backup [--name real-backup-YYYY-MM-DD]` | Copies the set folder to `<set folder>/../<name>/` (not the `zz-*` folders), never over an existing folder (`-2`, `-3`, …), and verifies the copy: file count, bytes, and the SHA-256 of `answer-keys.json` and of `orchestration/manifest.json`. |
+
+**Files.** In `keys-wip/`, beside what `realKeyTool` writes (spec and snapped file
+per role, `NAME.compare.json`, `NAME.review-<n>.json`, `packets/NAME/`):
+`NAME.check.json` (the cached check) and `NAME.record.json`:
+
+```json
+{"annotators": ["a-colonial63-n16", "b-colonial63-n16"], "adjudicator": null,
+ "verifiedBy": "blind double annotation",
+ "agreement": {"agree": true, "iou": {"building": 0.9997, "nonGla": 0.9984, "byType": {"gla": 0.9997, "garage": 0.9981}},
+               "boundary": {"max": 1.1, "p95": 0.41}, "types": {"gla": 1, "garage": 1}, "comparedAt": "…"},
+ "adjudicated": true}
+```
+
+`annotators` are the specs' `author`s (`existing-draft` for an imported A);
+`adjudicator` is `null` or the agent's id, and `adjudicated: true` and `agreement`
+of a disagreeing pair are written by `adjudicated`; a single annotation has no
+`agreement`. `apply` reads `annotators`, `adjudicator` and `verifiedBy`; the
+agreement figures travel from here into the manifest. In `orchestration/`:
+`sources.jsonl` and `sources.md` (`realSource`), `splits.json`, `manifest.json`,
+`manifest-log.md`, `manifest-versions/`, `disputes.md`.
+
+**The dispute line.** `orchestration/disputes.md` is prose for people with one
+machine-readable line per dispute, and one more each time its status changes (the
+latest line of an id wins):
+
+```
+DISPUTE <id> plan=NAME status=decided|open outcome=changed|kept direction=toward-tracer|away|neutral
+```
+
+`outcome` is given only when the dispute is decided; `direction` is required for a
+changed key (did the change move the key toward the app's trace, away from it, or
+neither) and optional for a kept one. The line may sit in a list item, a quote or
+backticks. A line that starts with `DISPUTE` and is not this is reported by
+`stats` with its line number and makes it exit 1, since a tally that skips what it
+cannot read overstates what it can. `stats` warns when every changed key moved
+toward the tracer (three or more): disputes that always go the tracer's way are a
+warning sign in themselves.
+
+| `realManifest` command | What it does |
+|---|---|
+| `assign-splits --seed N [--roster FILE] [--pin-dev BOOK,… \| --pin-existing] [--target-test 150] [--total 400] [--write [--replace]] [--created-at ISO]` | Assigns whole books (the sourcing log's cap units: a plan book, or a designer code on an aggregator site) to `dev` or `test` with a fixed seed, stratified by era × decade. Pinned books go to dev first and their plans count toward dev (`--pin-existing` pins every book none of whose plans is in `sources.jsonl`: the 17 that predate it). In each stratum (in a fixed order) the other books are sorted by name and shuffled by a stream seeded from the run's seed and the stratum, and a book goes to test when that brings the running count of test plans closer to the running share `--target-test/--total` of all plans so far: books are whole, so a stratum ends up to about one book off its share, the running target carries the difference to the next, and the total lands within about half a book of `--target-test`. The roster is read from the set folder (`sources.jsonl` for logged plans, else the plan's name: a book, its era, the decade most of its plans are from, its publisher, its plans) or from `--roster FILE`, `[{"book","era","decade","publisher","plans"}]`. Prints plans per era × decade and split with the deviation from the target, per split × era, and each book's split. `--write` writes `orchestration/splits.json` (below). |
+| `build [--allow-partial] [--reason TEXT]` | Assembles `orchestration/manifest.json` from the plan files, `splits.json`, `sources.jsonl` and each plan's record. Only plans whose record is `checked` enter; one that is not is listed and fails the build unless `--allow-partial` leaves it out. A new manifest is archived as `manifest-versions/manifest-<first 12 digits of its hash>.json` and a row `{version, hash, date, reason, counts}` is appended to `manifest-log.md`; one that would not change the file logs nothing. Prints the SHA-256, the manifest hash every `bench:real` run names. |
+| `verify [--final] [--allow-partial]` | Checks the manifest against the folder, each rule PASS, FAIL or INFO: every manifest plan has its file and its key still hashes to its `keySha256`; every plan file is in the manifest (`--allow-partial`: INFO); every record is checked, in the plan and in the manifest; each plan sits in the split `splits.json` gives its book; no book is in both splits. `--final` adds the finished set's rules: exactly 400 plans; at most 12 per book (unit) and 60 per site; at least 34 books; test and dev sizes (INFO, aimed at 150 and 250); both splits hold both eras; at least 90% of plans have a detected room size; no plan name looks like an address (three digits or more, then a street word); every new plan has a source (only the original 75 may be `embedded`); the 2020–2022 count (INFO, aimed at about 160 of the 325 new). |
+| `hash` | Prints the SHA-256 of `orchestration/manifest.json`. |
+| `amend PLAN --reason TEXT` | After a dispute changed a key (`realKeyTool apply PLAN --dispute ID` marks the plan's record with `disputeId`): rebuilds that plan's entry (its book, era and split and every other entry stay as they are), writes the new manifest, archives it and logs it with the dispute id. Refuses a plan whose record has no `disputeId`, or that the manifest does not hold. |
+
+**`splits.json`:** `{"seed", "createdAt", "params": {targetTest, total, share,
+pinDev, rosterSha256}, "books": {"<book>": {"split", "era", "decade", "publisher",
+"plans"[, "site"][, "pinned"]}}}`, keys sorted, two-space indent. The same roster
+and seed give the same file byte for byte (`createdAt` is the time it was first
+written: an existing file that a re-run would not change is left as it is, and
+`--created-at` fixes the time for a reproduction). A `splits.json` that holds
+another assignment is not replaced without `--replace`, which keeps the old one as
+`splits-superseded-<hash>.json`: books do not move between dev and test after
+plans were drawn against the assignment.
+
+**The manifest `build` writes** is version 1 of the schema in "Splits, the manifest
+and the run files", with optional fields added, so `bench:real` reads it as it read
+the hand-written ones. Per plan: `book` (the cap unit: the name's stem for a plan
+book, the designer code (`--unit`) on an aggregator site, else the logged book),
+`site` (when the log has one), `publisher`, `era`, `decade`, `year`, `split`,
+`source` (`{url, crop, size}`, or `{file, …}` for a plan drafted from a file, or
+`{"embedded": true}` for the plans whose image lives in the plan and has nowhere to
+be fetched from), `keySha256`, and `annotation`: `{annotators, adjudicator,
+adjudicated, agreement, verifiedBy, checked[, disputeId]}`, from the plan's own
+`answerKey` record (the frozen truth) and the agreement figures of
+`NAME.record.json`. The file is a pure function of the plans, `splits.json` and the
+log: keys sorted at every depth, a fixed layout, and nothing in it that says when
+it was built (the log does), so the same inputs are the same bytes and the same
+hash. Its `seed` and `createdAt` are `splits.json`'s. The plans that predate the
+sourcing log take their book, era and decade from their names (`aladdin62-n15`,
+`dwellings14-p101`: 19yy); a plan with no digits in its name and no log line (a
+`listing-NNN`) has no era until something says, and is left out of a derived
+roster with a warning.
