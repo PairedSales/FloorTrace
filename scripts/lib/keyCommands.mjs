@@ -7,6 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { applyPlan, keyOf } from './realKeys.mjs';
+import { MANIFEST_FILE, hasPlan, keyCheck, loadManifest, manifestFileFor, planSplit } from './manifest.mjs';
+import { TEST_SPLIT_ENV } from './realBench.mjs';
+import { decodeDataUrl } from './realScore.mjs';
+import { scoreAgainstKey, scoreLines, tracedOfJson } from './keyScore.mjs';
 import {
   checkName, decodeBytes, imageOfPlan, imageOfTarget, labelOfTarget, packetDir, planFile, planImageBytes,
   readJson, readPacketLabels, wipDir, wipFile, writeFileAtomic, writeJson, writeNumbered,
@@ -84,6 +88,14 @@ const tagOf = (opts) => {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) throw new Error(`--tag "${tag}" must be letters, digits, . _ - only`);
   return tag;
 };
+
+// `--tag T` on snap, compare and check: the checkout's datasets/zz-scratch/T/,
+// where a copy of what the command wrote into the set lands. A blind role never
+// has to name keys-wip/ (its guard forbids it): it opens the copies, and the
+// command prints their paths where it would have printed the set's. Without
+// --tag nothing changes.
+const scratchTagOf = (opts) => (opts.tag === undefined ? null : tagOf(opts));
+const scratchFile = (ctx, tag, name) => path.join(ctx.root, 'datasets', 'zz-scratch', tag, name);
 
 const round1 = (x) => Math.round(x * 10) / 10;
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
@@ -319,9 +331,10 @@ const readSpec = (file) => {
 const OFF_PAGE = 2;
 
 export const snap = async (argv, ctx) => {
-  const { positional, opts } = parseArgs(argv, { values: ['role', 'spec'], flags: ['dry', 'replace'] }, 'snap');
-  const [name] = need(positional, 1, 'snap NAME --role a|b|final --spec FILE [--replace] [--dry]');
+  const { positional, opts } = parseArgs(argv, { values: ['role', 'spec', 'tag'], flags: ['dry', 'replace'] }, 'snap');
+  const [name] = need(positional, 1, 'snap NAME --role a|b|final --spec FILE [--tag T] [--replace] [--dry]');
   checkName(name);
+  const tag = scratchTagOf(opts);
   if (!opts.role) throw new Error('snap needs --role a|b|final');
   const role = roleOf(opts);
   if (!opts.spec) throw new Error('snap needs --spec FILE (a spec you wrote in your scratch folder)');
@@ -394,8 +407,7 @@ export const snap = async (argv, ctx) => {
   });
   const outlines = snapped.map((o) => ({ type: o.type, v: o.v.map((p) => [round1(p[0]), round1(p[1])]) }));
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
-  await writeFileAtomic(specFile, text);
-  await writeJson(snappedFile, {
+  const snappedJson = {
     name,
     role,
     author: spec.author ?? null,
@@ -403,9 +415,22 @@ export const snap = async (argv, ctx) => {
     outlines,
     flagged,
     warnings: snapped.flatMap((o, k) => o.warnings.map((w) => `outline ${k}: ${w}`)),
-  });
-  ctx.out(`${flagged.length} flagged edge(s); snapped outlines -> ${snappedFile}`);
-  ctx.out(`spec kept -> ${specFile}`);
+  };
+  await writeFileAtomic(specFile, text);
+  await writeJson(snappedFile, snappedJson);
+  // The copies a blind role opens (view --poly, or to read its own spec back).
+  const copy = tag && {
+    snapped: scratchFile(ctx, tag, `${name}.${role}.snapped.json`),
+    spec: scratchFile(ctx, tag, `${name}.${role}.json`),
+  };
+  if (copy) {
+    await writeFileAtomic(copy.spec, text);
+    await writeJson(copy.snapped, snappedJson);
+  }
+  ctx.out(`${flagged.length} flagged edge(s); snapped outlines -> ${copy ? copy.snapped : snappedFile}`);
+  ctx.out(`spec kept -> ${copy ? copy.spec : specFile}`);
+  if (copy) ctx.out(`use this with --poly: ${copy.snapped}`);
+  if (opts.dry) ctx.out('note: --dry changes nothing: snap only writes keys-wip/ (never the plan)');
   if (replaced) ctx.out(`note: replaced the earlier ${path.basename(specFile)}${replaced.readable ? ` (author ${replaced.prior ? `"${replaced.prior}"` : 'not set'})` : ' (it could not be read)'}`);
   return 0;
 };
@@ -419,8 +444,10 @@ export const compareLines = (result, labelA, labelB) => {
   const lines = [];
   lines.push(`outline types: ${labelA} [${typeList(result.counts.a)}]  ${labelB} [${typeList(result.counts.b)}]`);
   const iou = [];
-  for (const cls of ['building', 'nonGla', 'unfinished']) if (result.iou[cls]) iou.push(`${cls} ${pct(result.iou[cls].iou)}`);
-  const byType = Object.entries(result.iou.byType).map(([t, v]) => `${t} ${pct(v.iou)}`).join(', ');
+  for (const cls of ['building', 'nonGla']) if (result.iou[cls]) iou.push(`${cls} ${pct(result.iou[cls].iou)}`);
+  // Unfinished space is not scored: shown only when both keys drew some, as a figure to glance at.
+  if (result.iou.unfinished && result.counts.a.unfinished && result.counts.b.unfinished) iou.push(`unfinished ${pct(result.iou.unfinished.iou)} (not scored)`);
+  const byType = Object.entries(result.iou.byType).filter(([t]) => t !== 'unfinished').map(([t, v]) => `${t} ${pct(v.iou)}`).join(', ');
   lines.push(`IoU: ${iou.join(', ')}   (per type: ${byType})`);
   const b = result.boundary;
   lines.push(`boundary distance: largest ${b.max.toFixed(2)} px, 95th percentile ${b.p95.toFixed(2)} px   (${labelA} to ${labelB}: largest ${b.aToB.max.toFixed(2)}, p95 ${b.aToB.p95.toFixed(2)}; ${labelB} to ${labelA}: largest ${b.bToA.max.toFixed(2)}, p95 ${b.bToA.p95.toFixed(2)})`);
@@ -430,8 +457,17 @@ export const compareLines = (result, labelA, labelB) => {
     for (const r of result.regions) {
       const [x0, y0, x1, y1] = r.bbox.map(round1);
       lines.push(r.missing
-        ? `  ${r.id}. bbox ${x0},${y0},${x1},${y1}  only key ${r.missing} has a ${r.class} outline here`
+        ? `  ${r.id}. bbox ${x0},${y0},${x1},${y1}  only key ${r.missing === 'A' ? labelA : labelB} has ${r.class === 'unfinished' ? 'an unfinished' : `a ${r.class}`} outline here${r.scored === false ? ' (not scored: it fails the outline types, criterion a, and nothing else)' : ''}`
         : `  ${r.id}. bbox ${x0},${y0},${x1},${y1}  largest ${r.maxDistance.toFixed(2)} px at ${round1(r.at[0])},${round1(r.at[1])} on ${r.side === 'A' ? labelA : labelB}'s ${r.class} boundary  (${r.points} points)`);
+    }
+  }
+  if (result.informational?.length) {
+    lines.push('informational (unfinished space is not scored, so these do not decide agreement):');
+    for (const i of result.informational) {
+      const [x0, y0, x1, y1] = i.bbox.map(round1);
+      const own = i.key === 'A' ? labelA : labelB;
+      const other = i.key === 'A' ? labelB : labelA;
+      lines.push(`  ${own}'s outline ${i.outline}${i.name ? ` "${i.name}"` : ''} (unfinished): ${Math.round(i.area).toLocaleString('en-US')} px2, ${pct(i.share)} of ${own}'s building (under ${pct(i.limit)}), bbox ${x0},${y0},${x1},${y1}; ${i.inOther ? `${other} drew unfinished space there too` : `${other} has none there`}`);
     }
   }
   lines.push(result.agree ? 'AGREE' : `DISAGREE (${result.failed.length})`);
@@ -453,7 +489,7 @@ const readOutlines = (file, { strict = true } = {}) => {
 
 export const compare = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, { values: ['draw', 'tag', 'image', 'crop'], flags: ['json'] }, 'compare');
-  need(positional, 1, 'compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png --tag T]');
+  need(positional, 1, 'compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png] [--tag T]');
   if (positional.length > 2) throw new Error('compare takes NAME, or two snapped files');
   let fileA;
   let fileB;
@@ -463,6 +499,13 @@ export const compare = async (argv, ctx) => {
     name = checkName(positional[0]);
     fileA = wipFile(name, '.a.snapped.json', ctx.dir);
     fileB = wipFile(name, '.b.snapped.json', ctx.dir);
+  }
+  // With --tag and a NAME, copies land in the tag's scratch folder (see scratchTagOf).
+  const tag = name ? scratchTagOf(opts) : null;
+  if (tag) {
+    for (const [role, file] of [['a', fileA], ['b', fileB]]) {
+      if (!exists(file)) throw new Error(`there is no key for role ${role} of ${name} yet: snap --role ${role} first`);
+    }
   }
   const a = readOutlines(fileA);
   const b = readOutlines(fileB);
@@ -503,7 +546,25 @@ export const compare = async (argv, ctx) => {
     a: fileA, b: fileB, at: new Date().toISOString(), ...result,
   };
   if (name) await writeJson(wipFile(name, '.compare.json', ctx.dir), record);
-  if (opts.json) ctx.out(JSON.stringify(record, null, 1));
+  // The copies of a comparison: both keys as snapped and as specified (an
+  // adjudicator draws them with `view --poly`), and the comparison itself, its
+  // two files named as the copies.
+  let copies = null;
+  if (tag) {
+    copies = {
+      a: scratchFile(ctx, tag, `${name}.a.snapped.json`),
+      b: scratchFile(ctx, tag, `${name}.b.snapped.json`),
+      compare: scratchFile(ctx, tag, `${name}.compare.json`),
+    };
+    await writeFileAtomic(copies.a, fs.readFileSync(fileA));
+    await writeFileAtomic(copies.b, fs.readFileSync(fileB));
+    for (const role of ['a', 'b']) {
+      const specFile = wipFile(name, `.${role}.json`, ctx.dir);
+      if (exists(specFile)) await writeFileAtomic(scratchFile(ctx, tag, `${name}.${role}.json`), fs.readFileSync(specFile));
+    }
+    await writeJson(copies.compare, { ...record, a: copies.a, b: copies.b });
+  }
+  if (opts.json) ctx.out(JSON.stringify(copies ? { ...record, a: copies.a, b: copies.b } : record, null, 1));
   else {
     ctx.out(`compare ${name ?? `${path.basename(fileA)} ${path.basename(fileB)}`}`);
     for (const line of compareLines(result, labelA, labelB)) ctx.out(line);
@@ -511,7 +572,11 @@ export const compare = async (argv, ctx) => {
       ctx.out(drawn.file);
       ctx.out(drawn.line);
     }
-    if (name) ctx.out(`written -> ${wipFile(name, '.compare.json', ctx.dir)}`);
+    if (name) ctx.out(`written -> ${copies ? copies.compare : wipFile(name, '.compare.json', ctx.dir)}`);
+    if (copies) {
+      ctx.out(`use this with --poly: ${copies.a}   (A)`);
+      ctx.out(`use this with --poly: ${copies.b}   (B)`);
+    }
   }
   return 0;
 };
@@ -531,9 +596,14 @@ export const scaleOf = (state) => {
 // One run of the checks on a plan's `role` key, shared by `check` and `apply`.
 // The labels are the blind packet's when the plan has one (what the annotators
 // saw: their ids, their kinds), else the plan's scan.
-export const runCheck = async (name, role, ctx, { feetPerPixel = null } = {}) => {
+export const runCheck = async (name, role, ctx, { feetPerPixel = null, tag = null } = {}) => {
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
-  if (!exists(snappedFile)) throw new Error(`no ${path.basename(snappedFile)} in ${wipDir(ctx.dir)}: run snap --role ${role} first`);
+  // Under --tag the message names no path of the set (see scratchTagOf).
+  if (!exists(snappedFile)) {
+    throw new Error(tag
+      ? `no key has been snapped for role ${role} of ${name}: run snap --role ${role} first`
+      : `no ${path.basename(snappedFile)} in ${wipDir(ctx.dir)}: run snap --role ${role} first`);
+  }
   const snapped = readJson(snappedFile);
   const outlines = outlinesOfJson(snapped, snappedFile);
   const flagged = Array.isArray(snapped?.flagged) ? snapped.flagged : [];
@@ -583,19 +653,28 @@ export const checkLines = (name, role, result) => {
 };
 
 export const check = async (argv, ctx) => {
-  const { positional, opts } = parseArgs(argv, { values: ['role', 'feet-per-pixel'], flags: ['json'] }, 'check');
-  const [name] = need(positional, 1, 'check NAME [--role a|b|final] [--feet-per-pixel X] [--json]');
+  const { positional, opts } = parseArgs(argv, { values: ['role', 'feet-per-pixel', 'tag'], flags: ['json'] }, 'check');
+  const [name] = need(positional, 1, 'check NAME [--role a|b|final] [--feet-per-pixel X] [--tag T] [--json]');
   checkName(name);
   const role = roleOf(opts);
+  const tag = scratchTagOf(opts);
   let feetPerPixel = null;
   if (opts['feet-per-pixel'] !== undefined) {
     feetPerPixel = Number(opts['feet-per-pixel']);
     if (!(feetPerPixel > 0)) throw new Error('--feet-per-pixel must be a positive number');
   }
-  const result = await runCheck(name, role, ctx, { feetPerPixel });
+  const result = await runCheck(name, role, ctx, { feetPerPixel, tag });
   if (opts.json) {
     const { spec: _spec, outlines: _outlines, ...rest } = result;
-    ctx.out(JSON.stringify({ name, role, ...rest, pass: result.failures === 0 }, null, 1));
+    const json = { name, role, ...rest, pass: result.failures === 0 };
+    // Under --tag the file checked is the copy `snap --tag` made, or is left out
+    // when there is none: the set's path is never printed.
+    if (tag) {
+      const copy = scratchFile(ctx, tag, `${name}.${role}.snapped.json`);
+      if (exists(copy)) json.snappedFile = copy;
+      else delete json.snappedFile;
+    }
+    ctx.out(JSON.stringify(json, null, 1));
   } else for (const line of checkLines(name, role, result)) ctx.out(line);
   return result.failures ? 1 : 0;
 };
@@ -838,6 +917,42 @@ export const sheet = async (argv, ctx) => {
   return 0;
 };
 
+// ---- score -----------------------------------------------------------------------
+
+// Integrity rule 4: a test plan's verdict is the orchestrator's, as `bench:real`
+// gates it (`TEST_SPLIT_ENV`); the check comes before the plan is opened. A
+// folder beside no manifest of its own is read against the set's, so a copy of
+// the set made without its `orchestration/` folder is no way round it.
+export const score = async (argv, ctx) => {
+  const { positional, opts } = parseArgs(argv, { flags: ['json'] }, 'score');
+  const [name, file] = need(positional, 2, 'score NAME FILE [--json]');
+  checkName(name);
+  const own = loadManifest(manifestFileFor(ctx.dir))?.manifest ?? null;
+  const held = own ?? loadManifest(ctx.setManifestFile ?? MANIFEST_FILE)?.manifest ?? null;
+  if ((ctx.env ?? process.env)[TEST_SPLIT_ENV] !== '1' && planSplit(held, name) === 'test') {
+    throw new UsageError(`${name} is in the test split: a test plan's verdict is the orchestrator's alone, at milestones (integrity rule 4: nobody tunes against test). The orchestrator sets ${TEST_SPLIT_ENV}=1.`);
+  }
+  const project = readPlan(name, ctx);
+  const state = project.floors[0].state;
+  const key = keyOf(state);
+  if (!key) throw new Error(`${name} has no answer key yet: its outlines are the app's own trace, so there is nothing to score against`);
+  const traced = tracedOfJson(readJson(file), file);
+  const image = await decodeDataUrl(project.images?.[state.imageRef]);
+  // The truth is the plan's stored outlines as `bench:real` reads them, not
+  // `keyOf`'s copy rounded to a tenth of a pixel, so the same rings score the same.
+  const result = scoreAgainstKey(state.perimeterTraces ?? [], image, traced);
+  // A key that is not the one the manifest froze is not the key `bench:real` scores.
+  const changed = hasPlan(own, name) ? keyCheck(own.plans[name].keySha256 ?? null, key) : null;
+  if (changed) result.notes.push(`${changed}: bench:real would refuse to score ${name} against it`);
+  const record = project.answerKey;
+  const keyRecord = record
+    ? `${record.by ?? 'no author named'}; ${record.checked ? `checked ${String(record.checked.at).slice(0, 10)} (${record.checked.by})` : 'not checked'}`
+    : 'no record';
+  if (opts.json) ctx.out(JSON.stringify({ name, ...result, keyRecord, keyChanged: changed }, null, 1));
+  else for (const line of scoreLines(name, result, { keyRecord })) ctx.out(line);
+  return 0;
+};
+
 export const COMMANDS = {
-  view, blind, labels, probe, snap, compare, check, review, apply, sheet,
+  view, blind, labels, probe, snap, compare, check, review, apply, sheet, score,
 };
