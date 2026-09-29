@@ -8,8 +8,26 @@
 // band's outer end, which is what an appraiser measures to, never its centre.
 // An edge listed in `in` takes the inner end instead: a garage or porch edge
 // along the house wall, so the two outlines meet at the house's exterior face.
+//
+// A band is a run of offsets where at least 0.45 of the samples along the edge
+// are dark, so a window sill drawn proud of the wall (a short stretch of the
+// edge) is not part of it. The run nearest the drawn line is the one snapped
+// to; a gap of `bridge` px (default 2.5) or less does not end a band, and
+// ink close beyond the face used flags the edge `ink-beyond` (a hatched or
+// double-line wall, or a dimension line): look at it at full zoom.
 
 const EPS = 1e-9;
+const STEP = 0.25;
+// The band must hold this share of the peak dark fraction, and never less than
+// MIN_FRACTION of the samples along the edge.
+const BAND_SHARE = 0.45;
+const MIN_FRACTION = 0.15;
+// A second band this close beyond the face used is worth a look.
+const LOOK_BEYOND = 10;
+export const DEFAULT_R = 14;
+export const DEFAULT_BRIDGE = 2.5;
+// An edge that moved more than this is flagged 'far'.
+export const FAR_PX = 4;
 
 // The page's ink threshold: Otsu's split of a 256-bin luma histogram, taken as
 // the midpoint of the two classes' means. Otsu's own index is the last bin of
@@ -53,7 +71,7 @@ export const otsuOfImage = (image) => {
 
 // Luma at a point of the image's own coordinates, where pixel i spans
 // [i, i + 1) as in the canvas and in every key: its centre is i + 0.5.
-const lumaAt = (image, x, y) => {
+export const lumaAt = (image, x, y) => {
   const { data, width, height } = image;
   const fx = Math.min(Math.max(x - 0.5, 0), width - 1);
   const fy = Math.min(Math.max(y - 0.5, 0), height - 1);
@@ -85,9 +103,10 @@ const windingOf = (v) => {
 // The band along one stretch of an edge: offsets (along the outward normal)
 // from -R to +R every 0.25 px, the fraction of samples darker than `dark` at
 // each, and the run of offsets at least max(0.15, 0.45 x peak) nearest the
-// drawn line. `t0`..`t1` bound the stretch along the edge.
-const profileOf = (image, dark, a, dir, normal, t0, t1, R) => {
-  const steps = Math.round((2 * R) / 0.25);
+// drawn line, with runs less than `bridge` px apart taken as one. `t0`..`t1`
+// bound the stretch along the edge.
+const profileOf = (image, dark, a, dir, normal, t0, t1, R, bridge) => {
+  const steps = Math.round((2 * R) / STEP);
   const frac = new Float64Array(steps + 1);
   let count = 0;
   for (let t = t0; t <= t1 + EPS; t += 1) {
@@ -95,7 +114,7 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R) => {
     const bx = a[0] + dir[0] * t;
     const by = a[1] + dir[1] * t;
     for (let k = 0; k <= steps; k += 1) {
-      const d = -R + k * 0.25;
+      const d = -R + k * STEP;
       if (lumaAt(image, bx + normal[0] * d, by + normal[1] * d) < dark) frac[k] += 1;
     }
   }
@@ -105,9 +124,9 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R) => {
     frac[k] /= count;
     if (frac[k] > peak) peak = frac[k];
   }
-  const threshold = Math.max(0.15, 0.45 * peak);
-  if (peak < 0.15) return { found: false, peak };
-  const runs = [];
+  const threshold = Math.max(MIN_FRACTION, BAND_SHARE * peak);
+  if (peak < MIN_FRACTION) return { found: false, peak };
+  let runs = [];
   let k = 0;
   while (k <= steps) {
     if (frac[k] < threshold) {
@@ -119,7 +138,14 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R) => {
     runs.push([k, e]);
     k = e + 1;
   }
-  const offsetOf = (idx) => -R + idx * 0.25;
+  // Two strokes with a hairline of paper between them are one band.
+  runs = runs.reduce((merged, run) => {
+    const last = merged[merged.length - 1];
+    if (last && (run[0] - last[1] - 1) * STEP <= bridge) last[1] = run[1];
+    else merged.push([...run]);
+    return merged;
+  }, []);
+  const offsetOf = (idx) => -R + idx * STEP;
   // The crossing between the last offset inside the run and the first outside.
   const crossing = (inside, outside) => {
     if (outside < 0 || outside > steps) return offsetOf(inside);
@@ -128,14 +154,24 @@ const profileOf = (image, dark, a, dir, normal, t0, t1, R) => {
     const u = fi === fo ? 0 : (fi - threshold) / (fi - fo);
     return offsetOf(inside) + (offsetOf(outside) - offsetOf(inside)) * u;
   };
-  const gap = ([s, e]) => (s <= R * 4 && e >= R * 4 ? 0 : Math.min(Math.abs(offsetOf(s)), Math.abs(offsetOf(e))));
-  const [s, e] = runs.reduce((best, run) => (gap(run) < gap(best) ? run : best));
+  const centre = R / STEP;
+  const gap = ([s, e]) => (s <= centre && e >= centre ? 0 : Math.min(Math.abs(offsetOf(s)), Math.abs(offsetOf(e))));
+  const at = runs.reduce((best, run, idx) => (gap(run) < gap(runs[best]) ? idx : best), 0);
+  const [s, e] = runs[at];
+  const next = runs[at + 1];
+  const prev = runs[at - 1];
+  const beyondOuter = next ? (next[0] - e - 1) * STEP : null;
+  const beyondInner = prev ? (s - prev[1] - 1) * STEP : null;
   return {
     found: true,
     peak,
     outer: crossing(e, e + 1),
     inner: crossing(s, s - 1),
-    reachesEnd: s === 0 || e === steps,
+    reachesOuter: e === steps,
+    reachesInner: s === 0,
+    // How far past the face a second band begins, when it is close.
+    beyondOuter: beyondOuter !== null && beyondOuter <= LOOK_BEYOND ? beyondOuter : null,
+    beyondInner: beyondInner !== null && beyondInner <= LOOK_BEYOND ? beyondInner : null,
   };
 };
 
@@ -158,19 +194,26 @@ const closestOn = (line, pt) => {
 /**
  * One outline's edges moved to the outer face of the wall bands.
  *
- * `outline`: `{v: [[x, y], …], fix?: [edge…], in?: [edge…], R?: 14, tilt?: bool}`.
- * Edge i runs from v[i] to v[i+1]. Returns `{v, edges}` where `edges[i]` is
- * `{edge, moved, flag}`: `flag` is null, 'no-band', 'far' (moved more than
- * 4 px) or 'reaches-end' (the band runs to the end of the search).
+ * `outline`: `{v: [[x, y], …], fix?: [edge…], in?: [edge…], R?: 14, tilt?: bool,
+ * bridge?: 2.5}`. Edge i runs from v[i] to v[i+1]. Returns `{v, edges, warnings}`
+ * where `edges[i]` is `{edge, moved, flag, flags}`: `moved` is px along the
+ * outward normal (positive = outward), `flag` the first of `flags`, and a flag
+ * is 'no-band', 'reaches-end' (the band runs to the end of the search on the
+ * side that decides the face), 'far' (moved more than 4 px) or 'ink-beyond'
+ * (another band within 10 px past the face used). A vertex whose two edges are
+ * nearly parallel slides along its next edge and is named in `warnings`.
  */
 export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVertices = [] } = {}) => {
-  const { v, R = 14, tilt = false } = outline;
+  const {
+    v, R = DEFAULT_R, tilt = false, bridge = DEFAULT_BRIDGE,
+  } = outline;
   const fix = new Set(outline.fix ?? []);
   const inside = new Set(outline.in ?? []);
   const n = v.length;
   const sign = windingOf(v);
   const lines = [];
   const edges = [];
+  const warnings = [];
   for (let i = 0; i < n; i += 1) {
     const a = v[i];
     const b = v[(i + 1) % n];
@@ -182,24 +225,23 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
     const shared = fixedVertices[i] && fixedVertices[(i + 1) % n];
     if (fix.has(i) || shared) {
       lines.push(lineThrough(a, dir));
-      edges.push({ edge: i, moved: 0, flag: null, fixed: true });
+      edges.push({ edge: i, moved: 0, flag: null, flags: [], fixed: true });
       continue;
     }
     const skip = Math.min(12, 0.2 * len);
     const useInner = inside.has(i);
     const pick = (p) => (useInner ? p.inner : p.outer);
-    const whole = profileOf(image, dark, a, dir, normal, skip, len - skip, R);
+    const whole = profileOf(image, dark, a, dir, normal, skip, len - skip, R, bridge);
     if (!whole?.found) {
       lines.push(lineThrough(a, dir));
-      edges.push({ edge: i, moved: 0, flag: 'no-band' });
+      edges.push({ edge: i, moved: 0, flag: 'no-band', flags: ['no-band'] });
       continue;
     }
     let line;
     let moved = pick(whole);
-    const flagged = whole.reachesEnd;
     if (tilt && len >= 180) {
-      const first = profileOf(image, dark, a, dir, normal, skip, len / 3, R);
-      const last = profileOf(image, dark, a, dir, normal, (2 * len) / 3, len - skip, R);
+      const first = profileOf(image, dark, a, dir, normal, skip, len / 3, R, bridge);
+      const last = profileOf(image, dark, a, dir, normal, (2 * len) / 3, len - skip, R, bridge);
       if (first?.found && last?.found) {
         const t1 = (skip + len / 3) / 2;
         const t2 = ((2 * len) / 3 + len - skip) / 2;
@@ -212,17 +254,28 @@ export const snapOutline = (image, outline, { dark = otsuOfImage(image), fixedVe
     }
     line ??= lineThrough([a[0] + normal[0] * moved, a[1] + normal[1] * moved], dir);
     lines.push(line);
-    edges.push({ edge: i, moved, flag: flagged ? 'reaches-end' : Math.abs(moved) > 4 ? 'far' : null });
+    const flags = [];
+    if (useInner ? whole.reachesInner : whole.reachesOuter) flags.push('reaches-end');
+    if (Math.abs(moved) > FAR_PX) flags.push('far');
+    const beyond = useInner ? whole.beyondInner : whole.beyondOuter;
+    if (beyond !== null) flags.push('ink-beyond');
+    edges.push({
+      edge: i, moved, flag: flags[0] ?? null, flags, ...(beyond !== null ? { beyond } : {}),
+    });
   }
   // Each vertex is where its two edges meet; two edges on one line meet
-  // nowhere, so the vertex slides to the edge instead.
+  // nowhere, so the vertex slides to the edge instead. So does one whose edges
+  // are so nearly parallel that they meet far away.
   const out = v.map((pt, i) => {
     if (fixedVertices[i]) return fixedVertices[i];
     const prev = lines[(i + n - 1) % n];
     const next = lines[i];
-    return intersect(prev, next) ?? closestOn(next, pt);
+    const hit = intersect(prev, next);
+    if (hit && Math.hypot(hit[0] - pt[0], hit[1] - pt[1]) <= 6 * R) return hit;
+    if (hit) warnings.push(`vertex ${i}: edges ${(i + n - 1) % n} and ${i} are nearly parallel, so the corner slid along edge ${i} instead of meeting`);
+    return closestOn(next, pt);
   });
-  return { v: out, edges };
+  return { v: out, edges, warnings };
 };
 
 // The keys-wip file's outlines snapped together: `['ref', k, i]` is vertex i of
@@ -241,7 +294,9 @@ export const snapOutlines = (image, outlines, options = {}) => {
       const fixedVertices = outlines[k].v.map((p) => (isRef(p) ? done[p[1]].v[p[2]] : null));
       const rough = outlines[k].v.map((p, i) => fixedVertices[i] ?? p);
       const snapped = snapOutline(image, { ...outlines[k], v: rough }, { dark, fixedVertices });
-      done[k] = { type: outlines[k].type ?? 'gla', v: snapped.v, edges: snapped.edges };
+      done[k] = {
+        type: outlines[k].type ?? 'gla', v: snapped.v, edges: snapped.edges, warnings: snapped.warnings,
+      };
       remaining -= 1;
       progressed = true;
     }
