@@ -22,6 +22,7 @@ import { boundaryConstraints, nonGlaExcludeRegions } from '../../src/utils/trace
 import { classifyTraces } from '../../src/utils/traceClassification.js';
 import { qualitySummary } from '../../src/utils/boundaryQuality.js';
 import { assignTypeColors, autoTraceName, makeTrace, normalizeTraceType } from '../../src/utils/traceTypes.js';
+import { MAX_IMAGE_DIMENSION } from '../../src/utils/imageLoader.js';
 import { decodeImage, toOcrInput } from './benchUtils.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -36,19 +37,36 @@ export { terminateOcrWorker };
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 
-const cropImage = async (bytes, [x, y, width, height]) => {
+// What the app's crop tool writes (hooks/useCropTool.js): the image's own type,
+// at the browser's default quality; PNG for anything else.
+const ENCODINGS = { 'image/jpeg': ['jpeg', 92], 'image/webp': ['webp', 92] };
+
+const cropImage = async (bytes, mime, [x, y, width, height]) => {
   const canvas = await import('@napi-rs/canvas');
   const image = await canvas.loadImage(bytes);
   const surface = canvas.createCanvas(width, height);
   surface.getContext('2d').drawImage(image, x, y, width, height, 0, 0, width, height);
-  return { bytes: await surface.encode('jpeg', 92), mime: 'image/jpeg' };
+  const [format, quality] = ENCODINGS[mime] ?? ['png'];
+  return { bytes: await surface.encode(format, quality), mime: ENCODINGS[mime] ? mime : 'image/png' };
+};
+
+// What the app's loader holds (utils/imageLoader.js): a side over the cap is
+// scaled to fit, and the result is PNG.
+const fitImage = async (bytes, { width, height }) => {
+  const canvas = await import('@napi-rs/canvas');
+  const scale = Math.min(MAX_IMAGE_DIMENSION / width, MAX_IMAGE_DIMENSION / height);
+  const surface = canvas.createCanvas(Math.round(width * scale), Math.round(height * scale));
+  surface.getContext('2d').drawImage(await canvas.loadImage(bytes), 0, 0, surface.width, surface.height);
+  return { bytes: await surface.encode('png'), mime: 'image/png' };
 };
 
 /**
- * A plan's image from its source: `{url}` or `{file}` (relative to `baseDir`),
- * cut to `crop: [x, y, width, height]` when the page holds more than the plan.
- * An answer key is coordinates on this image, so a source that names a `size`
- * must produce exactly that size, or no plan is made from it.
+ * A plan's image from its source, as the app would hold it: `{url}` or
+ * `{file}` (relative to `baseDir`), cut to `crop: [x, y, width, height]` (in
+ * the source's pixels) when the page holds more than the plan, then fitted to
+ * the app's size cap. An answer key is coordinates on this image, so a source
+ * that names a `size` must produce exactly that size, or no plan is made from
+ * it; `source` is the record to keep, with the size it produced.
  */
 export const loadSource = async (source, baseDir) => {
   let bytes;
@@ -67,13 +85,17 @@ export const loadSource = async (source, baseDir) => {
     throw new Error('a source names a url or a file');
   }
   if (!mime?.startsWith('image/')) throw new Error(`not an image: ${source.url ?? source.file}`);
-  if (source.crop) ({ bytes, mime } = await cropImage(bytes, source.crop));
-  const image = await decodeImage(bytes, mime);
+  if (source.crop) ({ bytes, mime } = await cropImage(bytes, mime, source.crop));
+  let image = await decodeImage(bytes, mime);
+  if (image.width > MAX_IMAGE_DIMENSION || image.height > MAX_IMAGE_DIMENSION) {
+    ({ bytes, mime } = await fitImage(bytes, image));
+    image = await decodeImage(bytes, mime);
+  }
   if (source.size && (image.width !== source.size[0] || image.height !== source.size[1])) {
     throw new Error(`${source.url ?? source.file} is ${image.width}x${image.height}, `
       + `not the ${source.size[0]}x${source.size[1]} its key was drawn on`);
   }
-  return { bytes, mime, image };
+  return { bytes, mime, image, source: { ...source, size: [image.width, image.height] } };
 };
 
 // The app's scan (DimensionsOCR.scanImage), Tesseract path.
@@ -273,8 +295,10 @@ export const draftProject = ({ name, mime, bytes, state, source = null, at = Dat
 
 /** A draft plan from a source: loaded, scanned, measured, calibrated, traced. */
 export const draftFromSource = async (name, source, baseDir) => {
-  const { bytes, mime, image } = await loadSource(source, baseDir);
-  const scan = await scanImage(image);
-  const project = draftProject({ name, mime, bytes, source, state: planState(image, scan) });
+  const loaded = await loadSource(source, baseDir);
+  const scan = await scanImage(loaded.image);
+  const project = draftProject({
+    name, mime: loaded.mime, bytes: loaded.bytes, source: loaded.source, state: planState(loaded.image, scan),
+  });
   return { project, scan };
 };

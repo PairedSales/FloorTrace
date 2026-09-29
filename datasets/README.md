@@ -142,8 +142,11 @@ writes the `.floorplan` the app would save after scanning the image: the labels
 it reads, the rooms that set the scale, the scale, and the app's own trace,
 ready for its outlines to be corrected. Each step is the app's own code; the
 scan is the Tesseract path, without the browser's PaddleOCR rescue. It makes
-the set's first drafts exactly as they were made. The draft records its
-`source`, the image and crop it was made from.
+the set's first drafts exactly as they were made. The image is held as the app
+would hold it: a crop (in the page's pixels) is cut as the app's crop tool cuts
+it, and a side over 4000 px is scaled to fit, as the app's loader scales it.
+The draft records its `source`: the image, the crop and the size they came
+out, which is the size its key will be drawn on.
 
 ### Moving keys without their plans
 

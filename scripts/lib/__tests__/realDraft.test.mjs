@@ -3,6 +3,7 @@
 // draft opens in the app, and an image that is not the one its key was drawn
 // on is refused. The labels are the fixture's own, so no OCR runs here.
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -57,5 +58,25 @@ describe('a draft plan', () => {
       .rejects.toThrow(/600x370/);
     const cropped = await loadSource({ file: 'ExampleFloorplan8.png', crop: [20, 26, 300, 200], size: [300, 200] }, FIXTURES);
     expect([cropped.image.width, cropped.image.height]).toEqual([300, 200]);
+  });
+
+  it('is held as the app holds it, and records the size it came out', async () => {
+    // A crop keeps the plan's own type, as the app's crop tool does.
+    const cropped = await loadSource({ file: 'ExampleFloorplan8.png', crop: [20, 26, 300, 200] }, FIXTURES);
+    expect(cropped.mime).toBe('image/png');
+    expect(cropped.source).toEqual({ file: 'ExampleFloorplan8.png', crop: [20, 26, 300, 200], size: [300, 200] });
+
+    // A side over the app's cap is scaled to fit, and held as PNG.
+    const canvas = await import('@napi-rs/canvas');
+    const file = path.join(os.tmpdir(), `realDraft-wide-${process.pid}.jpg`);
+    fs.writeFileSync(file, await canvas.createCanvas(4200, 300).encode('jpeg', 92));
+    try {
+      const fitted = await loadSource({ file }, FIXTURES);
+      expect([fitted.image.width, fitted.image.height]).toEqual([4000, 286]);
+      expect(fitted.mime).toBe('image/png');
+      expect(fitted.source.size).toEqual([4000, 286]);
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
   });
 });
