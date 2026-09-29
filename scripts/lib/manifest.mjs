@@ -33,6 +33,12 @@
 // and `book` (optional). A mistyped split would drop a plan from every run
 // without a word, so it is an error at read time, not a plan nobody scores.
 //
+// What `keySha256` guards is the KEY only: a plan whose outlines were edited
+// after the manifest froze them is not scored. It does not cover the plan's
+// image, its labels or its scale, so a rescan or a recalibration of a plan
+// moves its score without tripping the check. The manifest hash covers the
+// manifest's own bytes, not the plan files.
+//
 // `orchestration/watch.json` holds the watch lists, plans that show one failure
 // for a fix to be tried on first: {"lists": {"<mechanism>": ["plan", ...]}}.
 import crypto from 'crypto';
@@ -110,9 +116,14 @@ export const parseManifest = (text, source = 'manifest') => {
 };
 
 // The manifest and its hash from one read of the file, so the hash is of the
-// bytes that were parsed; null when there is no file.
-export const loadManifest = (file = MANIFEST_FILE) => {
-  if (!fs.existsSync(file)) return null;
+// bytes that were parsed; null when there is no file. `required` is for a file
+// somebody named: a manifest that is not there is then an error, not a run
+// without one (which would be a run with no split and no test-split gate).
+export const loadManifest = (file = MANIFEST_FILE, { required = false } = {}) => {
+  if (!fs.existsSync(file)) {
+    if (required) throw new Error(`the manifest ${file} does not exist`);
+    return null;
+  }
   const bytes = fs.readFileSync(file);
   return { manifest: parseManifest(bytes.toString('utf8'), file), hash: sha256(bytes), file };
 };
@@ -122,8 +133,11 @@ export const readManifest = (file = MANIFEST_FILE) => loadManifest(file)?.manife
 // SHA-256 hex of the file's bytes; null when there is no manifest.
 export const manifestHash = (file = MANIFEST_FILE) => (fs.existsSync(file) ? sha256(fs.readFileSync(file)) : null);
 
-export const planSplit = (manifest, name) => manifest?.plans?.[name]?.split ?? null;
-export const planEra = (manifest, name) => manifest?.plans?.[name]?.era ?? null;
+// A plan is listed only by a name the manifest holds itself: `plans.constructor`
+// is a function, not a plan called "constructor".
+export const hasPlan = (manifest, name) => Boolean(manifest?.plans) && Object.hasOwn(manifest.plans, name);
+export const planSplit = (manifest, name) => (hasPlan(manifest, name) ? manifest.plans[name].split : null);
+export const planEra = (manifest, name) => (hasPlan(manifest, name) ? manifest.plans[name].era : null);
 
 // The watch lists, `{lists: {mechanism: [plan, ...]}}`; null when there is no file.
 export const readWatch = (file = WATCH_FILE) => {

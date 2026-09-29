@@ -23,16 +23,12 @@ const jobs = (...names) => names.map((name) => ({ name }));
 const withoutMs = (result) => JSON.parse(JSON.stringify(result, (key, value) => (key === 'ms' ? undefined : value)));
 
 describe('the worker pool', () => {
-  it('hands every plan to a worker and gets every result back', async () => {
-    const results = await runPool(STUB, jobs('p1', 'p2', 'p3', 'p4', 'p5', 'p6'), 3);
-    expect(results.map((r) => r.name).sort()).toEqual(['p1', 'p2', 'p3', 'p4', 'p5', 'p6']);
+  it('hands every plan to a worker, gets every result back, and reads as a serial run once merged', async () => {
+    const order = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
+    const results = await runPool(STUB, jobs(...order), 3);
+    expect(results.map((r) => r.name).sort()).toEqual(order);
     expect(results.every((r) => r.echoed)).toBe(true);
-  });
-
-  it('reads as a serial run once merged into the order of the plans', async () => {
-    const order = ['p1', 'p2', 'p3', 'p4', 'p5'];
-    const merged = mergeInOrder(order, await runPool(STUB, jobs(...order), 4));
-    expect(merged.map((r) => r.name)).toEqual(order);
+    expect(mergeInOrder(order, results).map((r) => r.name)).toEqual(order);
   });
 
   it('reports the plan a worker died on, and goes on with the rest', async () => {
@@ -71,19 +67,20 @@ describe('the real worker', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('scores a plan as the main process does', async () => {
-    const items = plans.map(({ name, file }) => ({ name, kind: 'project', file }));
+  // One pool for both cases (a worker is a process that loads the tracer, and
+  // that is most of what a case costs): two plans it can score, and one it
+  // cannot open, which is an error row and not a crash.
+  it('scores a plan as the main process does, and reports one it cannot open as an error row', async () => {
+    const items = [
+      ...plans.map(({ name, file }) => ({ name, kind: 'project', file })),
+      { name: 'absent', kind: 'project', file: path.join(dir, 'absent.floorplan') },
+    ];
     const mine = [];
     for (const item of items) mine.push(await runPlan(item));
     const theirs = mergeInOrder(items.map((i) => i.name), await runPool(BENCH, items, 2));
-    expect(mine.every((r) => r.app?.verdict)).toBe(true);
+    expect(mine.slice(0, 2).every((r) => r.app?.verdict)).toBe(true);
     expect(theirs.map(withoutMs)).toEqual(mine.map(withoutMs));
-  }, 60000);
-
-  it('reports a plan it cannot open as an error row, not a crash', async () => {
-    const [result] = await runPool(BENCH, [{ name: 'absent', kind: 'project', file: path.join(dir, 'absent.floorplan') }], 1);
-    expect(result.name).toBe('absent');
-    expect(result.error).toMatch(/ENOENT/);
+    expect(theirs[2]).toMatchObject({ name: 'absent', error: expect.stringMatching(/ENOENT/) });
   }, 60000);
 
   it('refuses to be started by hand', () => {

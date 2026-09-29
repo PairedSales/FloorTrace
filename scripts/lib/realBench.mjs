@@ -6,7 +6,7 @@
 // The rule they enforce most carefully is integrity rule 4: nobody tunes
 // against the test split. It is gated here (`resolveSelection`), never loaded
 // for a dev run, and never printed per plan (`realBenchmark.mjs`).
-import { ERAS, SPLITS } from './manifest.mjs';
+import { ERAS, SPLITS, hasPlan } from './manifest.mjs';
 import {
   SCOREBOARD, pct, scoreboardLines,
 } from './verdict.mjs';
@@ -81,6 +81,8 @@ const named = (list) => list.join(', ');
  * Returns `entries` in file order: `{name, split, era, keySha256, state}`,
  * state `run`, `missing` (in the manifest and the chosen set, no file), or
  * `unlisted` (in the folder, not in the manifest: never scored, listed).
+ * Names are looked up as the manifest and the watch file hold them, never
+ * through the prototype: `--only constructor` is no plan, not a plan of that name.
  */
 export const resolveSelection = ({
   names, manifest, watch, args, env = process.env, manifestFile = 'the manifest',
@@ -96,8 +98,8 @@ export const resolveSelection = ({
   let watchNames = null;
   if (args.watch) {
     if (!watch) throw new UsageError(`--watch ${args.watch}: there is no watch.json beside ${manifestFile}`);
-    watchNames = watch.lists?.[args.watch];
-    if (!watchNames) {
+    if (Object.hasOwn(watch.lists, args.watch)) watchNames = watch.lists[args.watch];
+    else {
       throw new UsageError(`--watch ${args.watch}: no such list; watch.json has ${named(Object.keys(watch.lists)) || 'none'}`);
     }
   }
@@ -111,7 +113,6 @@ export const resolveSelection = ({
     if (watchNames) pick = pick.filter((n) => watchNames.includes(n));
     return {
       split: 'all',
-      usesTest: false,
       entries: pick.map((name) => ({
         name, split: null, era: null, keySha256: null, state: 'run',
       })),
@@ -119,12 +120,13 @@ export const resolveSelection = ({
   }
 
   const plans = manifest.plans;
+  const listed = (name) => hasPlan(manifest, name);
   const splitFilter = asked ?? (only ? null : 'dev');
   const inSplit = (name) => !splitFilter || splitFilter === 'all' || plans[name].split === splitFilter;
   let picked;
   if (only) {
     for (const name of new Set([...only, ...(watchNames ?? [])])) {
-      if (plans[name]) continue;
+      if (listed(name)) continue;
       throw new UsageError(inFolder.has(name)
         ? `${name} is not in the manifest`
         : `no such plan: ${name}`);
@@ -135,7 +137,7 @@ export const resolveSelection = ({
     picked = [...new Set(only)];
   } else {
     if (watchNames) {
-      const unknown = watchNames.filter((n) => !plans[n]);
+      const unknown = watchNames.filter((n) => !listed(n));
       if (unknown.length) throw new UsageError(`watch list ${args.watch} names plans that are not in the manifest: ${named(unknown)}`);
     }
     picked = Object.keys(plans).filter(inSplit);
@@ -153,7 +155,7 @@ export const resolveSelection = ({
   }));
   if (!only && !watchNames) {
     for (const name of names) {
-      if (!plans[name]) {
+      if (!listed(name)) {
         entries.push({
           name, split: null, era: null, keySha256: null, state: 'unlisted',
         });
@@ -164,9 +166,43 @@ export const resolveSelection = ({
   const splits = new Set(entries.filter((e) => e.state !== 'unlisted').map((e) => e.split));
   return {
     split: splitFilter ?? (splits.size > 1 ? 'all' : ([...splits][0] ?? 'dev')),
-    usesTest: splits.has('test'),
     entries,
   };
+};
+
+/**
+ * The test plans a folder holds that a set manifest names, when no manifest
+ * sits beside the folder. A copy of the set made without its `orchestration/`
+ * folder would otherwise run every plan, test ones included, with no gate and
+ * no silence; the count (never the names) is what a refusal says.
+ */
+export const testPlansHeldWithoutManifest = (names, setManifest) => (setManifest
+  ? names.filter((n) => hasPlan(setManifest, n) && setManifest.plans[n].split === 'test').length
+  : 0);
+
+/**
+ * The `only` a run records in the main results file: without the test plans it
+ * names, and how many those were. The file's test plans are meant to stay
+ * anonymous there; `<out>.test.json` keeps the whole request.
+ */
+export const openOnly = (only, entries) => {
+  if (!only) return { only: null, onlyTest: 0 };
+  const test = new Set(entries.filter((e) => e.split === 'test').map((e) => e.name));
+  const open = only.filter((n) => !test.has(n));
+  return { only: open.length ? open : null, onlyTest: only.length - open.length };
+};
+
+/**
+ * A line for the run when plans in the manifest carry no `keySha256`: their
+ * keys are not checked, and a scoreboard that reads as guarded should say
+ * where it is not. A count only, so it can be printed for the test split.
+ */
+export const unpinnedLine = (entries) => {
+  const listed = entries.filter((e) => e.state === 'run' && e.split);
+  const unpinned = listed.filter((e) => !e.keySha256).length;
+  return unpinned
+    ? `   key check: ${unpinned} of ${listed.length} manifest plans carry no keySha256, so their keys are not checked`
+    : null;
 };
 
 /**
@@ -257,11 +293,19 @@ const withoutMs = (value) => {
  * Whether two run files scored the same: their `results`, plan by plan, apart
  * from `ms`. The proof that a change to the benchmark itself, or a run on more
  * workers, moved no number. `meta` is not read: it says when and how, not what.
+ * A run with no results proves nothing (two wrong or empty files would
+ * "match"), so it throws, naming the side, instead of reporting equality.
  */
 export const diffRuns = (a, b) => {
-  const side = (run) => new Map((run.results ?? []).map((r) => [r.name, JSON.stringify(withoutMs(r))]));
-  const left = side(a);
-  const right = side(b);
+  const side = (run, which) => {
+    if (!Array.isArray(run?.results) || !run.results.length) {
+      throw new Error(`the ${which} run has no results, so there is nothing to compare`
+        + ' (a --split test run keeps its plans in <out>.test.json, which is not compared)');
+    }
+    return new Map(run.results.map((r) => [r.name, JSON.stringify(withoutMs(r))]));
+  };
+  const left = side(a, 'first');
+  const right = side(b, 'second');
   return {
     plans: left.size,
     onlyLeft: [...left.keys()].filter((n) => !right.has(n)),

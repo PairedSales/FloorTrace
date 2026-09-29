@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   TEST_SPLIT_ENV, UsageError, aggregateDeltaLines, aggregateOf, boardLines, causeLine, compareRefusal, diffRuns,
-  fileOrder, identityLine, mergeInOrder, moveLines, parseArgs, quantile, resolveSelection, summaryOf, timingLines,
-  timingOf,
+  fileOrder, identityLine, mergeInOrder, moveLines, openOnly, parseArgs, quantile, resolveSelection, summaryOf,
+  testPlansHeldWithoutManifest, timingLines, timingOf, unpinnedLine,
 } from '../realBench.mjs';
 
 const HEX = 'b'.repeat(64);
@@ -58,7 +58,7 @@ describe('which plans a run covers', () => {
   it('is the dev split by default, and never names a test plan', () => {
     const selection = select([]);
     expect(selection.split).toBe('dev');
-    expect(selection.usesTest).toBe(false);
+    expect(selection.entries.some((e) => e.split === 'test')).toBe(false);
     expect(namesOf(selection)).toEqual(['a1', 'a2', 'a3', 'a4']);
     expect(namesOf(selection, 'run')).toEqual(['a1', 'a2']);
     expect(selection.entries.some((e) => e.name.startsWith('t'))).toBe(false);
@@ -91,7 +91,7 @@ describe('which plans a run covers', () => {
   it('covers the test split, or both, once the variable is set', () => {
     const test = select(['--split', 'test'], { env: OK });
     expect(test.split).toBe('test');
-    expect(test.usesTest).toBe(true);
+    expect(test.entries.filter((e) => e.state !== 'unlisted').every((e) => e.split === 'test')).toBe(true);
     expect(namesOf(test, 'run')).toEqual(['t1', 't2']);
     const all = select(['--split', 'all'], { env: OK });
     expect(all.split).toBe('all');
@@ -137,10 +137,26 @@ describe('which plans a run covers', () => {
     expect(namesOf(select(['--only', 'a1,a2', '--watch', 'porch']))).toEqual(['a1']);
   });
 
+  it('looks names up as the files hold them, never through the prototype', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(() => select(['--only', name]), name).toThrow(/no such plan: /);
+      expect(() => select(['--only', name], { m: null }), name).toThrow(/no such plan in the folder/);
+      expect(() => select(['--watch', name]), name).toThrow(/no such list/);
+      expect(() => select(['--watch', name], { m: null }), name).toThrow(/no such list/);
+    }
+    // A folder file named like one is a plan the manifest does not list, not one it does.
+    const selection = resolveSelection({
+      names: ['a1', 'constructor'], manifest, watch, args: parseArgs([]), env: {},
+    });
+    expect(namesOf(selection, 'unlisted')).toEqual(['constructor']);
+    expect(() => resolveSelection({
+      names: ['a1', 'constructor'], manifest, watch, args: parseArgs(['--only', 'constructor']), env: {},
+    })).toThrow(/constructor is not in the manifest/);
+  });
+
   it('is every plan in the folder when there is no manifest, as it always was', () => {
     const selection = select([], { m: null });
     expect(selection.split).toBe('all');
-    expect(selection.usesTest).toBe(false);
     expect(namesOf(selection, 'run')).toEqual(names);
     expect(selection.entries[0]).toMatchObject({ split: null, era: null, keySha256: null });
     expect(namesOf(select(['--split', 'all'], { m: null }))).toEqual(names);
@@ -159,6 +175,54 @@ describe('which plans a run covers', () => {
     expect(['a1.x', 'a1-b'].sort(fileOrder)).toEqual(['a1-b', 'a1.x']);
     expect(['a15', 'a1', 'a1-b', 'a1a'].sort(fileOrder)).toEqual(['a1-b', 'a1', 'a15', 'a1a']);
     expect(fileOrder('a', 'a')).toBe(0);
+  });
+});
+
+describe('a folder with no manifest of its own', () => {
+  it('holds no test plan the set\'s manifest knows, or it says how many, never which', () => {
+    expect(testPlansHeldWithoutManifest(['a1', 'a2', 'zz'], manifest)).toBe(0);
+    expect(testPlansHeldWithoutManifest(['a1', 't1', 't2', 'zz'], manifest)).toBe(2);
+    expect(testPlansHeldWithoutManifest(['t1'], null)).toBe(0);
+    expect(testPlansHeldWithoutManifest(['constructor', 'toString'], manifest)).toBe(0);
+  });
+});
+
+describe('what the main results file says a run asked for', () => {
+  const entries = [
+    { name: 'a1', split: 'dev' }, { name: 'a2', split: 'dev' }, { name: 't1', split: 'test' }, { name: 'stray', split: null },
+  ];
+
+  it('is the plans asked for, and none of them a test plan', () => {
+    expect(openOnly(['a1', 't1', 'a2'], entries)).toEqual({ only: ['a1', 'a2'], onlyTest: 1 });
+    expect(openOnly(['a2'], entries)).toEqual({ only: ['a2'], onlyTest: 0 });
+  });
+
+  it('is nothing at all when only test plans were asked for, or none were', () => {
+    expect(openOnly(['t1'], entries)).toEqual({ only: null, onlyTest: 1 });
+    expect(openOnly(null, entries)).toEqual({ only: null, onlyTest: 0 });
+  });
+});
+
+describe('the note for plans whose keys are not checked', () => {
+  const run = (name, split, keySha256 = null) => ({
+    name, split, keySha256, state: 'run',
+  });
+
+  it('is a count of manifest plans with no fingerprint, and silent when all have one', () => {
+    expect(unpinnedLine([run('a1', 'dev', HEX), run('a2', 'dev'), run('t1', 'test')]))
+      .toBe('   key check: 2 of 3 manifest plans carry no keySha256, so their keys are not checked');
+    expect(unpinnedLine([run('a1', 'dev', HEX), run('t1', 'test', HEX)])).toBeNull();
+  });
+
+  it('leaves out what is not a manifest plan that ran: a fixture, a stray, one the folder lacks', () => {
+    expect(unpinnedLine([
+      run('fixture:x', null), { ...run('stray', null) }, { ...run('ghost', 'dev'), state: 'missing' }, run('a1', 'dev', HEX),
+    ])).toBeNull();
+    expect(unpinnedLine([])).toBeNull();
+  });
+
+  it('names no plan, so it can be printed for the test split', () => {
+    expect(unpinnedLine([run('secret-test-plan', 'test')])).not.toMatch(/secret/);
   });
 });
 
@@ -309,6 +373,15 @@ describe('whether two run files scored the same', () => {
     expect(diffRuns(run(p1), run(p1, p2))).toMatchObject({ onlyLeft: [], onlyRight: ['p2'] });
     const ring = { ...p1, app: { ...p1.app, rings: [[[1, 3]]] } };
     expect(diffRuns(run(p1), run(ring)).differing).toEqual(['p1']);
+  });
+
+  it('is not equality for a run with nothing in it: two empty or wrong files prove nothing', () => {
+    expect(() => diffRuns(run(), run())).toThrow(/first run has no results/);
+    expect(() => diffRuns(run(p1), run())).toThrow(/second run has no results/);
+    expect(() => diffRuns(run(), run(p1))).toThrow(/first run has no results/);
+    expect(() => diffRuns({ meta: {} }, run(p1))).toThrow(/first run has no results/);
+    expect(() => diffRuns({ meta: {}, testAggregate: {} }, { results: 'x' })).toThrow(/no results/);
+    expect(() => diffRuns(null, run(p1))).toThrow(/no results/);
   });
 });
 

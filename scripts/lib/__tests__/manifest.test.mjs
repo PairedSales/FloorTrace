@@ -7,8 +7,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  keyCheck, keySha256, loadManifest, manifestFileFor, manifestHash, parseManifest, planEra, planSplit, readManifest,
-  readWatch, watchFileFor,
+  hasPlan, keyCheck, keySha256, loadManifest, manifestFileFor, manifestHash, parseManifest, planEra, planSplit,
+  readManifest, readWatch, watchFileFor,
 } from '../manifest.mjs';
 
 const HEX = 'a'.repeat(64);
@@ -39,6 +39,15 @@ describe('the manifest file', () => {
     expect(loadManifest(file)).toBeNull();
   });
 
+  it('is an error, not an absence, when the file was asked for by name', () => {
+    const file = path.join(dir, 'named.json');
+    expect(() => loadManifest(file, { required: true })).toThrow(/manifest .*named\.json does not exist/);
+    write('named.json', JSON.stringify(manifestOf({ p1: entry('dev', 'vintage') })));
+    expect(loadManifest(file, { required: true }).manifest.plans.p1.split).toBe('dev');
+    // The default is the lookup that may find nothing.
+    expect(loadManifest(path.join(dir, 'other.json'), { required: false })).toBeNull();
+  });
+
   it('hashes the bytes of the file, whatever the JSON means', () => {
     const text = JSON.stringify(manifestOf({ p1: entry('dev', 'vintage') }));
     const file = write('m.json', text);
@@ -64,6 +73,18 @@ describe('the manifest file', () => {
     expect(planSplit(manifest, 'nope')).toBeNull();
     expect(planEra(null, 'p1')).toBeNull();
     expect(manifest.plans.p1.annotation).toEqual({ annotators: ['A', 'B'] });
+  });
+
+  it('lists a plan only by a name the file holds, never one the prototype has', () => {
+    const manifest = parseManifest(JSON.stringify(manifestOf({ p1: entry('dev', 'vintage') })), 'm');
+    expect(hasPlan(manifest, 'p1')).toBe(true);
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(hasPlan(manifest, name), name).toBe(false);
+      expect(planSplit(manifest, name), name).toBeNull();
+      expect(planEra(manifest, name), name).toBeNull();
+    }
+    expect(hasPlan(null, 'p1')).toBe(false);
+    expect(hasPlan({}, 'p1')).toBe(false);
   });
 
   it('reads a file that begins with a byte-order mark', () => {

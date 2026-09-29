@@ -73,7 +73,7 @@ describe('the answer key from an exported key', () => {
   });
 
   it('is the one bench:real builds from the saved outlines', () => {
-    const traces = [{ type: 'gla', vertices: outer }, { type: 'porch', vertices: rect(240, 20, 340, 120) }];
+    const traces = [{ type: 'gla', closed: true, vertices: outer }, { type: 'porch', closed: true, vertices: rect(240, 20, 340, 120) }];
     const direct = answerKey(traces, SIZE);
     const viaKey = answerKeyFromOutlines(traces, SIZE);
     expect(viaKey.grid).toEqual(direct.grid);
@@ -89,6 +89,39 @@ describe('the answer key from an exported key', () => {
     ], SIZE);
     expect(key.cells).toBe(cells(200, 100));
     expect(key.outlines).toHaveLength(1);
+  });
+
+  it('keeps an app outline only when it is closed, as bench:real does, and an exported one unless it says not', () => {
+    const far = rect(240, 20, 340, 120);
+    const outlines = [
+      { type: 'gla', closed: true, vertices: outer },
+      // The app's own shape with no `closed`: bench:real's loader drops it.
+      { type: 'gla', vertices: far },
+      { type: 'gla', closed: 0, vertices: far },
+      // An exported key has no `closed`: keyOf lists closed outlines only.
+      { type: 'garage', points: pairs(far) },
+      { type: 'porch', closed: false, points: pairs(rect(20, 140, 120, 200)) },
+    ];
+    const key = answerKeyFromOutlines(outlines, SIZE);
+    expect(key.outlines.map((o) => o.type)).toEqual(['gla', 'garage']);
+    // The loader as bench:real writes it (realBenchPlan.loadProject) on the app-shaped ones.
+    const loaded = answerKey(outlines.slice(0, 3).filter((t) => t.closed && t.vertices?.length >= 3), SIZE);
+    expect(count(key.footprint)).toBe(count(loaded.footprint));
+    expect(key.cells).toBe(cells(200, 100));
+    expect(count(key.nonGla)).toBe(cells(100, 100));
+  });
+
+  it('names an outline that is neither shape, instead of failing inside the loop', () => {
+    expect(() => answerKeyFromOutlines([null], SIZE)).toThrow(/outline 0 has neither vertices nor points/);
+    expect(() => answerKeyFromOutlines([{ type: 'gla', points: pairs(outer) }, { type: 'gla' }], SIZE))
+      .toThrow(/outline 1 has neither vertices nor points/);
+    expect(() => answerKeyFromOutlines(['gla'], SIZE)).toThrow(/outline 0 has neither/);
+    expect(() => answerKeyFromOutlines([{ type: 'gla', points: 'x' }], SIZE)).toThrow(/outline 0 has neither/);
+    expect(() => answerKeyFromOutlines([{ type: 'gla', points: [[1, 2], [3, 'a'], [5, 6]] }], SIZE))
+      .toThrow(/outline 0 holds a point that is not \[x, y\] or \{x, y\}/);
+    expect(() => answerKeyFromOutlines([{ type: 'gla', closed: true, vertices: [{ x: 1 }, { x: 2 }, { x: 3 }] }], SIZE))
+      .toThrow(/outline 0 holds a point/);
+    expect(answerKeyFromOutlines([], SIZE).cells).toBe(0);
   });
 });
 

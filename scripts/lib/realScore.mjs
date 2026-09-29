@@ -64,23 +64,40 @@ export const answerKey = (traces, image) => {
   };
 };
 
+const isPoint = (p) => (Array.isArray(p)
+  ? p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])
+  : Number.isFinite(p?.x) && Number.isFinite(p?.y));
+
 // An outline as `answerKey` reads it, from either shape an outline is kept in:
-// the app's trace `{type, vertices: [{x, y}], holes?}` or an exported key
-// `{type, points: [[x, y]], holes?: [[[x, y]]]}` (`realKeys.keyOf`).
-const traceOf = (outline) => ({
-  type: outline.type,
-  vertices: outline.vertices ?? outline.points.map(([x, y]) => ({ x, y })),
-  holes: outline.holes ?? [],
-});
+// the app's trace `{type, vertices: [{x, y}], closed, holes?}` or an exported key
+// `{type, points: [[x, y]], holes?: [[[x, y]]]}` (`realKeys.keyOf`, which lists
+// closed outlines only, so its shape has no `closed`). An outline that is
+// neither is a caller's mistake and is named, not left to fail inside the loop.
+const traceOf = (outline, index) => {
+  const isKey = outline !== null && typeof outline === 'object' && Array.isArray(outline.points) && !outline.vertices;
+  const isTrace = outline !== null && typeof outline === 'object' && Array.isArray(outline.vertices);
+  if (!isKey && !isTrace) throw new Error(`outline ${index} has neither vertices nor points`);
+  const ring = isKey ? outline.points : outline.vertices;
+  if (!ring.every(isPoint)) throw new Error(`outline ${index} holds a point that is not [x, y] or {x, y}`);
+  return {
+    type: outline.type,
+    vertices: isKey ? ring.map(([x, y]) => ({ x, y })) : ring,
+    holes: outline.holes ?? [],
+    // `bench:real` keeps a project's outline only when it is `closed` (an
+    // unfinished one is not a key); an exported key is closed by construction.
+    closed: isKey ? outline.closed !== false : Boolean(outline.closed),
+  };
+};
 
 /**
  * `answerKey` from outlines in either shape, for a caller that holds a key or
- * the app's outlines and the image's size, not the image. An outline of fewer
- * than three points, or one the app marks not closed, is no outline, as
- * `bench:real` reads them from a project.
+ * the app's outlines and the image's size, not the image. It reads outlines as
+ * `bench:real` reads a project's: one with fewer than three points, or an app
+ * outline not marked `closed`, is no outline. An outline of neither shape
+ * throws, naming its index.
  */
 export const answerKeyFromOutlines = (outlines, imageSize) => answerKey(
-  outlines.filter((o) => o.closed !== false).map(traceOf).filter((t) => t.vertices?.length >= 3),
+  outlines.map(traceOf).filter((t) => t.closed && t.vertices.length >= 3),
   imageSize,
 );
 

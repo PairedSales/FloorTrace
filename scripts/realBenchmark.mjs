@@ -26,13 +26,15 @@
  *   --watch LIST     the plans of a list in watch.json, within the chosen split
  *   --jobs N         score plans on N worker processes; results and file are
  *                    the same as a serial run's, timings are not
- *   --manifest PATH  a manifest other than <dir>/orchestration/manifest.json
+ *   --manifest PATH  a manifest other than <dir>/orchestration/manifest.json;
+ *                    one that is not there is an error (exit 2), not a run without splits
  *
  * The manifest (lib/manifest.mjs) says which split and era each plan is in.
  * Every run prints and records the commit, split, manifest hash and job
  * count. The test split is never printed per plan, drawn, or written to the
  * main results file: it appears as an aggregate there, and per plan only in
- * <out>.test.json.
+ * <out>.test.json. A --dir with no manifest beside it, holding plans the set's
+ * manifest puts in the test split, is refused: the split could not be enforced.
  *
  * Answer key: GLA and below-grade outlines are the building (a basement is
  * still traced; its type decides the total, not the tracer), garage and
@@ -47,14 +49,22 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DATASETS_DIR } from './lib/cubicasa.mjs';
-import { ERAS, SPLITS, loadManifest, manifestFileFor, readWatch, watchFileFor } from './lib/manifest.mjs';
+import {
+  ERAS, MANIFEST_FILE, SPLITS, loadManifest, manifestFileFor, planEra, planSplit, readManifest, readWatch, watchFileFor,
+} from './lib/manifest.mjs';
 import {
   UsageError, aggregateDeltaLines, aggregateOf, boardLines, causeLine, compareRefusal, identityLine, isScored,
-  mergeInOrder, moveLines, parseArgs, resolveSelection, summaryOf, timingLines, timingOf,
+  mergeInOrder, moveLines, openOnly, parseArgs, resolveSelection, summaryOf, testPlansHeldWithoutManifest,
+  timingLines, timingOf, unpinnedLine,
 } from './lib/realBench.mjs';
-import { runPlan, writeFileRetry } from './lib/realBenchPlan.mjs';
 import { runPool } from './lib/realBenchPool.mjs';
 import { VERDICTS, pct, scoreboardLines } from './lib/verdict.mjs';
+import { writeFileRetry } from './lib/writeFileRetry.mjs';
+
+// The tracer (lib/realBenchPlan.mjs) is loaded when a plan is about to be
+// scored, not before: a run refused for its options, and the parent of a pool
+// whose workers each load it, do not pay for it.
+const loadRunPlan = async () => (await import('./lib/realBenchPlan.mjs')).runPlan;
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(SCRIPT), '..');
@@ -80,12 +90,17 @@ const readJson = (file, what) => {
 
 const main = async () => {
   const args = parseArgs(process.argv.slice(2), { dir: path.join(DATASETS_DIR, 'real') });
-  const manifestFile = args.manifest ? path.resolve(args.manifest) : manifestFileFor(args.dir);
+  // A manifest that was named must be there: a run that quietly went without
+  // one would have no split, and so no test-split gate.
+  const named = Boolean(args.manifest);
+  const manifestFile = named ? path.resolve(args.manifest) : manifestFileFor(args.dir);
   let loaded;
   let watch = null;
+  let setManifest = null;
   try {
-    loaded = loadManifest(manifestFile);
+    loaded = loadManifest(manifestFile, { required: named });
     if (args.watch) watch = readWatch(watchFileFor(manifestFile));
+    if (!loaded && !named) setManifest = readManifest(MANIFEST_FILE);
   } catch (err) {
     throw new UsageError(err.message);
   }
@@ -95,6 +110,15 @@ const main = async () => {
   const names = fs.existsSync(args.dir)
     ? fs.readdirSync(args.dir).filter((f) => f.endsWith('.floorplan')).sort().map((f) => path.basename(f, '.floorplan'))
     : [];
+  // A copy of the set made without its orchestration/ folder has no manifest of
+  // its own, and would run its test plans ungated. The set's manifest is the
+  // authority on which plans those are.
+  const held = testPlansHeldWithoutManifest(names, setManifest);
+  if (held) {
+    throw new UsageError(`${held} of the plans in ${args.dir} are in the test split of ${MANIFEST_FILE}, but no manifest`
+      + ` sits beside them, so the split cannot be enforced (integrity rule 4). Run the set folder itself,`
+      + ` or pass --manifest ${MANIFEST_FILE}.`);
+  }
   const fixtureDir = path.join(ROOT, 'fixtures');
   const fixtures = args.fixtures
     ? fs.readdirSync(fixtureDir).filter((f) => f.endsWith('.truth.json')).sort()
@@ -147,11 +171,13 @@ const main = async () => {
   console.log(identityLine({
     ...git, split: selection.split, manifestHash, plans: planCount, jobs: workers,
   }));
+  const unpinned = unpinnedLine(entries);
+  if (unpinned) console.log(unpinned);
 
-  let completed;
+  let completed = [];
   if (workers > 1) completed = await runPool(SCRIPT, jobs, workers);
-  else {
-    completed = [];
+  else if (jobs.length) {
+    const runPlan = await loadRunPlan();
     for (const job of jobs) completed.push(await runPlan(job));
   }
   const byName = new Map(mergeInOrder(jobs.map((j) => j.name), completed).map((r) => [r.name, r]));
@@ -163,8 +189,8 @@ const main = async () => {
   const testRows = entries.filter(isTest).map((e) => e.row);
   const scored = rows.filter(isScored);
   const openScored = openRows.filter(isScored);
-  const eraOf = (name) => manifest?.plans?.[name]?.era ?? null;
-  const splitOf = (name) => manifest?.plans?.[name]?.split ?? null;
+  const eraOf = (name) => planEra(manifest, name);
+  const splitOf = (name) => planSplit(manifest, name);
 
   const lines = [`\n=== Real plans: ${scored.length} scored of ${rows.length} ===`];
   if (scored.length) {
@@ -215,23 +241,28 @@ const main = async () => {
   }
   for (const line of lines) console.log(line);
 
-  const meta = {
-    date: new Date().toISOString(),
+  const date = new Date().toISOString();
+  // `only` names plans, so the main file (which never names a test plan) keeps
+  // the open ones and a count; `watch` is a list's name, which names none.
+  const metaOf = (only) => ({
+    date,
     dir: args.dir,
     ...git,
     split: selection.split,
-    only: args.only,
+    only,
     watch: args.watch ?? null,
     manifestHash,
     jobs: workers,
     timing,
-  };
+  });
+  const open = openOnly(args.only, entries);
+  const meta = { ...metaOf(open.only), ...(open.onlyTest ? { onlyTest: open.onlyTest } : {}) };
   fs.mkdirSync(RUNS_DIR, { recursive: true });
   writeFileRetry(outFile, JSON.stringify({ meta, results: openRows, ...(testAggregate ? { testAggregate } : {}) }));
   const shown = (file) => (path.relative(ROOT, file).startsWith('..') ? file : path.relative(ROOT, file));
   console.log(`results: ${shown(outFile)}`);
   if (testRows.length) {
-    writeFileRetry(testFile, JSON.stringify({ meta, results: testRows }));
+    writeFileRetry(testFile, JSON.stringify({ meta: metaOf(args.only), results: testRows }));
     console.log(`test results (per plan): ${shown(testFile)}`);
   }
   // A plan that could not be scored is not a quiet gap in the scoreboard.
@@ -239,7 +270,7 @@ const main = async () => {
 };
 
 // A worker: score the plans the parent sends, one at a time (lib/realBenchPool.mjs).
-const runWorker = () => {
+const runWorker = async () => {
   if (!process.send) {
     console.error('--worker is started by --jobs, not by hand');
     process.exit(2);
@@ -249,6 +280,7 @@ const runWorker = () => {
     if (err) process.exit(0);
   });
   process.on('disconnect', () => process.exit(0));
+  const runPlan = await loadRunPlan();
   process.on('message', async ({ job }) => {
     say({ result: await runPlan(job) });
   });

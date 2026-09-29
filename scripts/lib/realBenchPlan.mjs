@@ -13,20 +13,7 @@ import { keyOf } from './realKeys.mjs';
 import {
   BUILDING, answerKey, decodeDataUrl, scoreTrace,
 } from './realScore.mjs';
-
-// Google Drive backs the folders these write to up, and holds a file it is
-// reading: on EBUSY or EPERM wait and try again.
-export const writeFileRetry = (file, data, tries = 10) => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      fs.writeFileSync(file, data);
-      return;
-    } catch (err) {
-      if (attempt >= tries || !['EBUSY', 'EPERM', 'EACCES'].includes(err.code)) throw err;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250 * attempt);
-    }
-  }
-};
+import { writeFileRetry } from './writeFileRetry.mjs';
 
 const drawOverlay = (image, truth, result, file) => {
   const png = new PNG({ width: image.width, height: image.height });

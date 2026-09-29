@@ -148,6 +148,13 @@ reads or not, is a new manifest. `orchestration/watch.json` holds the watch
 lists, `{"lists": {"<mechanism>": ["plan", …]}}`. The code is
 `scripts/lib/manifest.mjs`.
 
+`keySha256` guards the key and only the key: a plan whose outlines were edited
+after the manifest froze them is not scored. It does not cover the plan's image,
+its scanned labels or its scale, so a plan rescanned or recalibrated after the
+freeze moves its score without tripping the check. A plan with no `keySha256` is
+not checked at all, and the run says how many (`key check: 3 of 75 manifest
+plans carry no keySha256, so their keys are not checked`).
+
 **The test-split rule.** Nobody tunes against `test`. Only the orchestrator runs
 it, at milestones, and reads aggregates only. `--split test`, `--split all` and
 naming a test plan with `--only` refuse to run (exit 2) unless the environment
@@ -183,8 +190,18 @@ npm run bench:real -- [--split dev|test|all] [--only NAME,NAME…] [--watch LIST
   compares two run files that way. Timings taken with N > 1 ran under parallel
   load and the output says so. A worker that dies is reported as an ERROR row
   for the plan it was on and replaced; the run goes on. `--draw` works.
+  `realRunDiff.mjs` exits 2, not 0, when either file holds no results: two
+  empty or wrong files are not "identical".
 - `--manifest PATH`: another manifest, with `watch.json` beside it (for tests
-  and scratch sets). `--dir` moves the folder, and with it the default manifest.
+  and scratch sets). It must exist: a manifest that was named and is not there
+  is an error (exit 2), never a run without one, which would have no split and
+  no test-split gate. `--dir` moves the folder, and with it the default
+  manifest. A `--dir` with no `orchestration/manifest.json` beside it runs every
+  plan in it, as before, with one exception: if the set's own manifest
+  (`datasets/real/orchestration/manifest.json`) calls any of its plans `test`,
+  the run is refused (exit 2, saying how many, not which) until `--manifest`
+  names the set's manifest, so a copy of the set without its manifest is no way
+  around the split.
 - `--compare NAME`: the verdict moves against an earlier run, refused (exit 2,
   before the run, with no override) when that run was measured under another
   manifest hash. A run made before manifests, or with none, has hash `null`,
@@ -214,7 +231,10 @@ scoreboards are aggregates.
 `datasets/real_runs/<out>.json` holds `meta`, `results` and, when test plans ran,
 `testAggregate`. `meta` is `{date, dir, commit, dirty, split, only, watch,
 manifestHash, jobs, timing}` with the full manifest hash and `timing` =
-`{app: {median, p90}, bare: {median, p90}, plans, jobs, parallel}` in ms.
+`{app: {median, p90}, bare: {median, p90}, plans, jobs, parallel}` in ms. In the
+main file `only` lists the open plans that `--only` named, plus an `onlyTest`
+count when it also named test plans (`watch` is a list's name, which names no
+plan); `<out>.test.json` keeps the whole `only`.
 `results` holds every non-test plan (scored, skipped, or ERROR). `testAggregate`
 holds the test plans' scoreboard counts and shares, mean error by cause, timings,
 error and skip counts, and the same for each era: no plan name. The per-plan test
