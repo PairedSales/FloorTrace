@@ -1,10 +1,30 @@
 import { useRef, useCallback, useEffect } from 'react';
 import useAppStore from '../store/appStore';
+import useWorkspaceStore, { ANNOTATION_SIZE_STEP } from '../store/workspaceStore';
+
+// Browsers deliver a trackpad pinch as a wheel event with `ctrlKey` set, so
+// Ctrl alone can't tell "resize the labels" from "zoom". A mouse notch comes in
+// lines (Firefox) or as a whole ±100/120 pixels (Chromium); a pinch streams
+// small, usually fractional pixel deltas. Pinches stay camera zoom.
+export const isCtrlWheelNotch = (evt) =>
+  !!evt.ctrlKey && (evt.deltaMode !== 0 || (Number.isInteger(evt.deltaY) && Math.abs(evt.deltaY) >= 50));
+
+// Ctrl+wheel: grow or shrink every on-canvas label and handle, not the plan.
+const stepAnnotationSize = (deltaY) => {
+  if (!deltaY) return;
+  const ws = useWorkspaceStore.getState();
+  const next = deltaY < 0
+    ? ws.annotationSize * ANNOTATION_SIZE_STEP
+    : ws.annotationSize / ANNOTATION_SIZE_STEP;
+  ws.setAnnotationSize(next);
+  ws.flashStatus(`Label size ${Math.round(useWorkspaceStore.getState().annotationSize * 100)}%`);
+};
 
 /**
  * useCanvasZoom
  *
- * Encapsulates mouse-wheel zoom behaviour for a Konva Stage.
+ * Encapsulates mouse-wheel zoom behaviour for a Konva Stage. Ctrl+wheel
+ * resizes the labels and handles instead (`workspaceStore.annotationSize`).
  *
  * @param {React.RefObject} stageRef   - ref to the Konva Stage node
  * @param {React.RefObject} scaleRef   - imperative scale ref kept in sync with React state
@@ -37,6 +57,11 @@ export function useCanvasZoom(stageRef, scaleRef, setScale, viewportSyncTokenRef
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault();
     e.evt.stopPropagation();
+
+    if (isCtrlWheelNotch(e.evt)) {
+      stepAnnotationSize(e.evt.deltaY);
+      return;
+    }
 
     const stage = stageRef.current;
     if (!stage) return;
