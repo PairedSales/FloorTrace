@@ -254,3 +254,118 @@ describe('the boundary distance statistics', () => {
     expect(r.regions.map((g) => g.id)).toEqual([1, 2]);
   });
 });
+
+describe('compare: small unfinished outlines do not decide agreement', () => {
+  // A 300 x 200 house is 60,000 px2, so 2% of it is 1,200 px2. Unfinished space
+  // is not scored: only a large outline of it is a type the keys must share.
+  const house = gla(rect(0, 0, 300, 200));
+  const unfinished = (v) => ({ type: 'unfinished', v });
+  // A chimney mass out of the right wall, 24 x 20 = 480 px2 = 0.8% of the house
+  // (about 12 sq ft at 0.5 ft/px on a 1,500 sq ft house).
+  const chimney = unfinished(rect(300, 80, 324, 100));
+  const criterion = (r, id) => r.criteria.find((c) => c.id === id);
+
+  it('a 12 sq ft chimney that only A drew: they agree, and it is listed as informational', () => {
+    const r = compareKeys([house, chimney], [house]);
+    expect(r.agree).toBe(true);
+    expect(criterion(r, 'a')).toMatchObject({ ok: true });
+    expect(criterion(r, 'a').text).toMatch(/outline types match \(gla\) \(1 small unfinished outline\(s\) set aside, under 2\.00% of their key's building: informational\)/);
+    expect(r.informational).toHaveLength(1);
+    expect(r.informational[0]).toMatchObject({ key: 'A', outline: 1, inOther: false });
+    expect(r.informational[0].area).toBeCloseTo(480, 6);
+    expect(r.informational[0].share).toBeCloseTo(0.008, 9);
+    expect(r.informational[0].bbox).toEqual([300, 80, 324, 100]);
+    // The raw counts still say what each key drew; the boundary and the regions do not read it.
+    expect(r.counts.a).toEqual({ gla: 1, unfinished: 1 });
+    expect(r.counts.b).toEqual({ gla: 1 });
+    expect(r.regions).toEqual([]);
+    expect(criterion(r, 'd').ok).toBe(true);
+    expect(r.boundary.byClass.unfinished).toBeUndefined();
+    expect(r.boundary.max).toBeLessThan(1e-9);
+  });
+
+  it('a 10% unfinished region that only B drew: DISAGREE, on the types, with the outline as a region to look at', () => {
+    // 100 x 60 = 6,000 px2 = 10% of the house.
+    const eave = unfinished(rect(300, 0, 400, 60));
+    const r = compareKeys([house], [house, eave]);
+    expect(r.agree).toBe(false);
+    expect(criterion(r, 'a').ok).toBe(false);
+    expect(criterion(r, 'a').text).toBe('outline types differ: A has [gla], B has [gla, unfinished]');
+    expect(r.informational).toEqual([]);
+    expect(r.failed).toHaveLength(1);
+    // Not a distance failure: unfinished is in no boundary criterion.
+    expect(criterion(r, 'd').ok).toBe(true);
+    expect(r.regions).toHaveLength(1);
+    expect(r.regions[0]).toMatchObject({ missing: 'B', class: 'unfinished', scored: false, id: 1 });
+    expect(r.regions[0].bbox).toEqual([300, 0, 400, 60]);
+  });
+
+  it('the line is 2% of the key\'s own building: 1,190 px2 is set aside, 1,210 px2 counts', () => {
+    // 34 x 35 = 1,190 px2 = 1.983%; 22 x 55 = 1,210 px2 = 2.017%.
+    const under = compareKeys([house, unfinished(rect(300, 0, 334, 35))], [house]);
+    expect(under.agree).toBe(true);
+    expect(under.informational).toHaveLength(1);
+    const over = compareKeys([house, unfinished(rect(300, 0, 322, 55))], [house]);
+    expect(over.agree).toBe(false);
+    expect(over.informational).toEqual([]);
+    expect(criterion(over, 'a').ok).toBe(false);
+  });
+
+  it('the building is the gla and the below-grade outlines of that key, summed', () => {
+    // 20,000 + 20,000 px2: 2% is 800. 750 px2 is 3.75% of the gla alone.
+    const ground = gla(rect(0, 0, 200, 100));
+    const basement = { type: 'below-grade', v: rect(0, 100, 200, 200) };
+    const stub = unfinished(rect(200, 40, 230, 65));
+    const r = compareKeys([ground, basement, stub], [ground, basement]);
+    expect(r.agree).toBe(true);
+    expect(r.informational[0].share).toBeCloseTo(0.01875, 9);
+    // The same stub against the ground floor alone is 3.75%: it counts.
+    expect(compareKeys([ground, stub], [ground]).agree).toBe(false);
+  });
+
+  it('each key\'s own building sets its own limit: a stub small in A only is set aside in A only', () => {
+    // B draws a half-size house, so the same 700 px2 stub is 3.5% of B's building.
+    const big = gla(rect(0, 0, 200, 200));
+    const small = gla(rect(0, 0, 200, 100));
+    const stub = unfinished(rect(200, 40, 220, 75));
+    const r = compareKeys([big, stub], [small, stub]);
+    expect(r.informational.map((i) => i.key)).toEqual(['A']);
+    expect(criterion(r, 'a').ok).toBe(false);
+    expect(criterion(r, 'a').text).toMatch(/A has \[gla\], B has \[gla, unfinished\]/);
+  });
+
+  it('a large unfinished region both keys drew agrees whatever its edges do: unfinished is not in the IoU or the distance', () => {
+    const eave = (x) => unfinished(rect(300 + x, 0, 400 + x, 60));
+    const r = compareKeys([house, eave(0)], [house, eave(10)]);
+    expect(r.agree).toBe(true);
+    expect(r.iou.unfinished.iou).toBeLessThan(1);
+    expect(r.boundary.max).toBeLessThan(1e-9);
+    expect(r.informational).toEqual([]);
+  });
+
+  it('small unfinished outlines in both keys are all set aside, and say whether the other key drew there too', () => {
+    const near = compareKeys([house, chimney], [house, unfinished(rect(300, 82, 324, 102))]);
+    expect(near.agree).toBe(true);
+    expect(near.informational.map((i) => [i.key, i.inOther])).toEqual([['A', true], ['B', true]]);
+    const apart = compareKeys([house, chimney], [house, unfinished(rect(-24, 80, 0, 100))]);
+    expect(apart.agree).toBe(true);
+    expect(apart.informational.map((i) => [i.key, i.inOther])).toEqual([['A', false], ['B', false]]);
+  });
+
+  it('a small unfinished outline beside a large one leaves the large one to count', () => {
+    const eave = unfinished(rect(300, 0, 400, 60));
+    const withBoth = [house, chimney, eave];
+    expect(compareKeys(withBoth, [house, eave]).agree).toBe(true);
+    const r = compareKeys(withBoth, [house]);
+    expect(r.agree).toBe(false);
+    expect(criterion(r, 'a').text).toMatch(/A has \[gla, unfinished\], B has \[gla\]/);
+    expect(r.regions.map((g) => g.bbox)).toEqual([[300, 0, 400, 60]]);
+  });
+
+  it('never softens a scored outline: a small garage is still a type, and a building 3.5 px off still fails', () => {
+    const shed = garage(rect(300, 80, 324, 100));
+    expect(compareKeys([house, shed], [house]).agree).toBe(false);
+    const big = [gla(rect(0, 0, 2000, 1500))];
+    expect(compareKeys([...big, unfinished(rect(2000, 0, 2020, 20))], [gla(rect(3.5, 0, 2003.5, 1500))]).agree).toBe(false);
+  });
+});

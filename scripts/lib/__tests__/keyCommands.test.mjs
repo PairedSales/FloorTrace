@@ -11,9 +11,10 @@ import path from 'path';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  UsageError, apply, blind, check, compare, labels, parseArgs, probe, review, sheet, snap, view,
+  UsageError, apply, blind, check, compare, labels, parseArgs, probe, review, score, sheet, snap, view,
 } from '../keyCommands.mjs';
-import { keyOf } from '../realKeys.mjs';
+import { keySha256 } from '../manifest.mjs';
+import { applyKey, keyOf } from '../realKeys.mjs';
 
 const W = 460;
 const H = 300;
@@ -109,7 +110,10 @@ beforeEach(() => {
   fs.mkdirSync(scratch);
   fs.writeFileSync(plan(), JSON.stringify(project()));
   lines = [];
-  ctx = { dir: root, root, out: (l) => lines.push(l) };
+  // `setManifestFile`: where `score` looks for the set's own manifest when the folder has none.
+  ctx = {
+    dir: root, root, out: (l) => lines.push(l), setManifestFile: path.join(root, 'no-set-manifest.json'), env: {},
+  };
 });
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -837,5 +841,283 @@ describe('view, probe and sheet', () => {
     expect(written).toBe(out);
     expect(fs.statSync(out).size).toBeGreaterThan(1000);
     await expect(run(sheet, '--out', out)).rejects.toThrow(UsageError);
+  });
+});
+
+describe('--dry and --tag: what a blind role sees, and never has to name', () => {
+  const scratchOf = (tag) => path.join(root, 'datasets', 'zz-scratch', tag);
+  const namesWip = (out) => out.split('\n').filter((l) => l.includes('keys-wip'));
+
+  it('says --dry changes nothing: it is not a preview, snap writes keys-wip/ either way', async () => {
+    const dry = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--dry');
+    expect(dry.out).toContain('note: --dry changes nothing: snap only writes keys-wip/ (never the plan)');
+    expect(fs.existsSync(wip('.a.snapped.json'))).toBe(true);
+    const plain = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
+    expect(plain.out).not.toMatch(/--dry/);
+  });
+
+  it('snap --tag copies the spec and the snapped key into the tag\'s scratch folder, and prints those paths for --poly', async () => {
+    await run(blind, 'demo');
+    const spec = writeSpec('a.json', specOf('a-demo'));
+    const { code, out } = await run(snap, 'demo', '--role', 'a', '--spec', spec, '--tag', 'ann-a');
+    expect(code).toBe(0);
+    const snappedCopy = path.join(scratchOf('ann-a'), 'demo.a.snapped.json');
+    const specCopy = path.join(scratchOf('ann-a'), 'demo.a.json');
+    expect(fs.readFileSync(snappedCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.snapped.json'), 'utf8'));
+    expect(fs.readFileSync(specCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.json'), 'utf8'));
+    expect(out).toContain(`snapped outlines -> ${snappedCopy}`);
+    expect(out).toContain(`spec kept -> ${specCopy}`);
+    expect(out).toContain(`use this with --poly: ${snappedCopy}`);
+    // The packet's image is the only thing of keys-wip/ it names, on the header line.
+    const named = namesWip(out);
+    expect(named).toHaveLength(1);
+    expect(named[0]).toMatch(/^snap demo role a: .*\(from .*packets/);
+    // view --poly draws the copy as it drew the set's file.
+    const drawn = await run(view, 'demo', '--poly', snappedCopy, '--tag', 'ann-a');
+    expect(fs.existsSync(drawn.out.split('\n')[0])).toBe(true);
+    // Snapped again, the copy follows.
+    await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a2.json', specOf('a-demo', 1)), '--tag', 'ann-a');
+    expect(fs.readFileSync(snappedCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.snapped.json'), 'utf8'));
+  });
+
+  it('snap without --tag prints the set\'s paths and makes no scratch copy, as before', async () => {
+    const { out } = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
+    expect(out).toContain(`snapped outlines -> ${wip('.a.snapped.json')}`);
+    expect(out).toContain(`spec kept -> ${wip('.a.json')}`);
+    expect(out).not.toMatch(/use this with --poly/);
+    expect(fs.existsSync(path.join(root, 'datasets', 'zz-scratch'))).toBe(false);
+  });
+
+  it('refuses a tag that is not a name before writing anything', async () => {
+    await expect(run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', '../x')).rejects.toThrow(/--tag/);
+    expect(fs.existsSync(wip('.a.json'))).toBe(false);
+  });
+
+  describe('compare and check', () => {
+    const both = async (tag, aSpec = specOf('a-demo'), bSpec = specOf('b-demo', 2)) => {
+      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', aSpec), '--tag', tag);
+      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', bSpec), '--tag', tag);
+    };
+
+    it('compare NAME --tag copies both keys, their specs and the comparison, and names only the copies', async () => {
+      await both('adj');
+      const { out } = await run(compare, 'demo', '--tag', 'adj');
+      const dir = scratchOf('adj');
+      for (const f of ['demo.a.snapped.json', 'demo.b.snapped.json', 'demo.a.json', 'demo.b.json', 'demo.compare.json']) {
+        expect(fs.existsSync(path.join(dir, f)), f).toBe(true);
+      }
+      expect(fs.readFileSync(path.join(dir, 'demo.b.snapped.json'), 'utf8')).toBe(fs.readFileSync(wip('.b.snapped.json'), 'utf8'));
+      expect(out).toContain(`written -> ${path.join(dir, 'demo.compare.json')}`);
+      expect(out).toContain(`use this with --poly: ${path.join(dir, 'demo.a.snapped.json')}`);
+      expect(out).toContain(`use this with --poly: ${path.join(dir, 'demo.b.snapped.json')}`);
+      expect(namesWip(out)).toEqual([]);
+      // The set's own record names the set's files; the copy names the copies.
+      expect(readJson(wip('.compare.json')).a).toBe(wip('.a.snapped.json'));
+      expect(readJson(path.join(dir, 'demo.compare.json'))).toMatchObject({
+        a: path.join(dir, 'demo.a.snapped.json'), b: path.join(dir, 'demo.b.snapped.json'), agree: true,
+      });
+      const json = await run(compare, 'demo', '--tag', 'adj', '--json');
+      expect(json.out).not.toContain('keys-wip');
+      expect(JSON.parse(json.out).a).toBe(path.join(dir, 'demo.a.snapped.json'));
+      // The copies are what view --poly takes.
+      await run(view, 'demo', '--poly', path.join(dir, 'demo.a.snapped.json'), '--poly', path.join(dir, 'demo.b.snapped.json'), '--tag', 'adj');
+    });
+
+    it('compare without --tag prints the set\'s path and copies nothing; two files with --tag copy nothing either', async () => {
+      await both('t0');
+      fs.rmSync(scratchOf('t0'), { recursive: true });
+      const plain = await run(compare, 'demo');
+      expect(plain.out).toContain(`written -> ${wip('.compare.json')}`);
+      expect(fs.existsSync(scratchOf('t0'))).toBe(false);
+      await run(compare, wip('.a.snapped.json'), wip('.b.snapped.json'), '--tag', 'adj9');
+      expect(fs.existsSync(scratchOf('adj9'))).toBe(false);
+    });
+
+    it('under --tag a key that is missing is said without the set\'s path', async () => {
+      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', 'adj');
+      await expect(run(compare, 'demo', '--tag', 'adj')).rejects.toThrow(/^there is no key for role b of demo yet: snap --role b first$/);
+      await expect(run(check, 'demo', '--role', 'b', '--tag', 'adj')).rejects.toThrow(/^no key has been snapped for role b of demo: run snap --role b first$/);
+    });
+
+    it('check --tag names the copy where it prints a path, and no path when there is no copy', async () => {
+      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', 'ann-a');
+      const copy = path.join(scratchOf('ann-a'), 'demo.a.snapped.json');
+      const tagged = await run(check, 'demo', '--role', 'a', '--tag', 'ann-a', '--json');
+      expect(tagged.out).not.toContain('keys-wip');
+      expect(JSON.parse(tagged.out).snappedFile).toBe(copy);
+      // The text output has never named a path.
+      expect((await run(check, 'demo', '--role', 'a', '--tag', 'ann-a')).out).not.toContain('keys-wip');
+      // Snapped without a tag there is no copy: the field is left out, not the set's path.
+      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
+      const bare = await run(check, 'demo', '--role', 'b', '--tag', 'ann-a', '--json');
+      expect(bare.out).not.toContain('keys-wip');
+      expect(JSON.parse(bare.out).snappedFile).toBeUndefined();
+      // Without --tag, as before.
+      expect(JSON.parse((await run(check, 'demo', '--role', 'b', '--json')).out).snappedFile).toBe(wip('.b.snapped.json'));
+    });
+  });
+
+  describe('compare: a small unfinished outline decides nothing', () => {
+    // A chimney 12 x 20 px = 240 px2 out of the house's left wall, 0.86% of its 28,000 px2.
+    const chimney = { type: 'unfinished', v: [[88, 120], [100, 120], [100, 140], [88, 140]], fix: [0, 1, 2, 3] };
+    const withChimney = (extra) => {
+      const spec = specOf('a-demo');
+      spec.outlines.push({ ...chimney, ...extra });
+      return spec;
+    };
+
+    it('lists it as informational, and the keys agree', async () => {
+      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', withChimney()));
+      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
+      const { out } = await run(compare, 'demo');
+      expect(out).toMatch(/outline types: A \[gla, garage, unfinished\] {2}B \[gla, garage\]/);
+      expect(out).toMatch(/informational \(unfinished space is not scored, so these do not decide agreement\):\n {2}A's outline 2 \(unfinished\): 240 px2, 0\.86% of A's building \(under 2\.00%\), bbox 88,120,100,140; B has none there/);
+      expect(out).not.toMatch(/unfinished \d+\.\d+% \(not scored\)/);
+      expect(out).toMatch(/^AGREE$/m);
+      expect(readJson(wip('.compare.json')).informational).toHaveLength(1);
+    });
+
+    it('but a large one only B drew is a disagreement, and a region to crop at, and not a distance failure', async () => {
+      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
+      const big = specOf('b-demo');
+      big.outlines.push({ type: 'unfinished', v: [[100, 220], [300, 220], [300, 240], [100, 240]], fix: [0, 1, 2, 3] });
+      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', big));
+      const { out } = await run(compare, 'demo');
+      expect(out).toMatch(/FAIL \(a\) outline types differ: A has \[garage, gla\], B has \[garage, gla, unfinished\]/);
+      expect(out).toMatch(/ok {3}\(d\) largest boundary distance/);
+      // One key's unfinished space is not a figure: no "unfinished 0.00%" to alarm anyone.
+      expect(out).not.toMatch(/unfinished 0\.00%/);
+      expect(out).toMatch(/1\. bbox 100,220,300,240 {2}only key B has an unfinished outline here \(not scored: it fails the outline types, criterion a, and nothing else\)/);
+      expect(out).toMatch(/^DISAGREE \(1\)$/m);
+    });
+  });
+});
+
+describe('score', () => {
+  const KEY = [
+    { type: 'gla', points: [[100, 80], [300, 80], [300, 220], [100, 220]] },
+    { type: 'garage', points: [[300, 80], [400, 80], [400, 220], [300, 220]] },
+  ];
+  const RECORD = {
+    by: 'annotators: a-demo, b-demo; adjudicator: none',
+    verifiedBy: 'blind double annotation',
+    checked: { by: 'AI review', at: '2026-09-29T10:00:00.000Z', via: 'final review' },
+    at: '2026-09-29T10:00:00.000Z',
+    notes: 'a test key',
+  };
+  const keyed = () => {
+    const p = project();
+    applyKey(p.floors[0].state, KEY, { force: true });
+    p.answerKey = RECORD;
+    return p;
+  };
+  const traceFile = (name, json) => writeSpec(name, json);
+  const houseOnly = { outlines: [{ type: 'gla', closed: true, vertices: [{ x: 100, y: 80 }, { x: 300, y: 80 }, { x: 300, y: 220 }, { x: 100, y: 220 }] }] };
+  const merged = { outlines: [{ type: 'gla', closed: true, vertices: [{ x: 100, y: 80 }, { x: 400, y: 80 }, { x: 400, y: 220 }, { x: 100, y: 220 }] }] };
+
+  beforeEach(() => {
+    fs.writeFileSync(plan(), JSON.stringify(keyed()));
+  });
+
+  it('refuses a plan with no key yet, and says how to call it', async () => {
+    fs.writeFileSync(plan(), JSON.stringify(project()));
+    await expect(run(score, 'demo', traceFile('t.json', houseOnly))).rejects.toThrow(/demo has no answer key yet/);
+    await expect(run(score, 'demo')).rejects.toThrow(UsageError);
+    await expect(run(score, 'demo', path.join(scratch, 'nope.json'))).rejects.toThrow(/no answer key yet|does not exist/);
+    fs.writeFileSync(plan(), JSON.stringify(keyed()));
+    await expect(run(score, 'demo', path.join(scratch, 'nope.json'))).rejects.toThrow(/nope\.json does not exist/);
+    await expect(run(score, 'nosuch', traceFile('t.json', houseOnly))).rejects.toThrow(/no plan named nosuch/);
+  });
+
+  it('scores the key\'s own house as perfect and writes nothing', async () => {
+    const before = sha(plan());
+    const { code, out } = await run(score, 'demo', traceFile('t.json', { ...houseOnly, confidence: 0.93, warnings: ['thin-structure-excluded'] }));
+    expect(code).toBe(0);
+    expect(out.split('\n')[0]).toBe('score demo: verdict PERFECT   IoU 100.00%   area error +0.0% (the outlines cover more than the key\'s building)');
+    expect(out).toContain('key: gla, garage   (annotators: a-demo, b-demo; adjudicator: none; checked 2026-09-29 (AI review))');
+    expect(out).toContain('traced: 1 floor(s) from gla');
+    expect(out).toContain('confidence 93.0% (good)');
+    expect(out).not.toMatch(/WRONG BUT SHOWN/);
+    expect(out).toContain('warnings: thin-structure-excluded');
+    expect(sha(plan())).toBe(before);
+  });
+
+  it('calls the outline merged with the garage wrong, names the garage as the cause, and flags it as shown good', async () => {
+    const { code, out } = await run(score, 'demo', traceFile('t.json', { ...merged, confidence: 0.93 }));
+    expect(code).toBe(0);
+    expect(out.split('\n')[0]).toBe('score demo: verdict WRONG   IoU 66.67%   area error +50.0% (the outlines cover more than the key\'s building)');
+    expect(out).toMatch(/non-GLA space kept 50\.0%, other space taken in 0\.0%, living space missed 0\.0%/);
+    expect(out).toMatch(/error regions, largest first: non-GLA space kept 50\.0%/);
+    expect(out).toMatch(/confidence 93\.0% \(good\) {3}WRONG BUT SHOWN AS GOOD/);
+    const { out: json } = await run(score, 'demo', traceFile('t2.json', { ...merged, confidence: 0.4 }), '--json');
+    expect(JSON.parse(json)).toMatchObject({
+      name: 'demo', verdict: 'wrong', overNonGla: 0.5, confidence: 0.4, level: 'poor', wrongButShownGood: false, keyChanged: null,
+    });
+    const { out: none } = await run(score, 'demo', traceFile('t3.json', merged), '--json');
+    expect(JSON.parse(none)).toMatchObject({ confidence: null, wrongButShownGood: null });
+  });
+
+  it('takes the rings of a run file and the outlines of the app, and a shifted copy is judged by cells', async () => {
+    const ring = (dx) => [[100 + dx, 80], [300 + dx, 80], [300 + dx, 220], [100 + dx, 220]];
+    expect(JSON.parse((await run(score, 'demo', traceFile('r0.json', { rings: [ring(0)] }), '--json')).out).verdict).toBe('perfect');
+    const shifted = JSON.parse((await run(score, 'demo', traceFile('r4.json', { rings: [ring(4)] }), '--json')).out);
+    expect(shifted).toMatchObject({ verdict: 'wrong', iou: 0.9608, areaErr: 0 });
+    // The app's own outlines: a bare array, with the garage as an outline of its own.
+    const appOutlines = [...houseOnly.outlines, { type: 'garage', closed: true, vertices: [{ x: 300, y: 80 }, { x: 400, y: 80 }, { x: 400, y: 220 }, { x: 300, y: 220 }] }];
+    const bare = JSON.parse((await run(score, 'demo', traceFile('app.json', appOutlines), '--json')).out);
+    expect(bare).toMatchObject({ verdict: 'perfect', floors: 1 });
+    expect(bare.left).toEqual([{ index: 1, type: 'garage', why: 'not a building type' }]);
+  });
+
+  it('scores against the plan\'s stored outlines, not their copy rounded to a tenth of a pixel', async () => {
+    // A key edge at x = 100.04: keyOf writes 100, but the truth is what bench:real reads.
+    const p = keyed();
+    p.floors[0].state.perimeterTraces[0].vertices[0].x = 100.04;
+    fs.writeFileSync(plan(), JSON.stringify(p));
+    expect(keyOf(readJson(plan()).floors[0].state)[0].points[0][0]).toBe(100);
+    const { out } = await run(score, 'demo', traceFile('t.json', houseOnly), '--json');
+    expect(JSON.parse(out).verdict).toBe('perfect');
+  });
+
+  describe('the test split, and the manifest', () => {
+    const writeManifest = (file, split, extra = {}) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ version: 1, plans: { demo: { split, era: 'vintage', ...extra } } }));
+    };
+
+    it('leaves a test plan\'s verdict to the orchestrator: refused before the plan is opened, unless it says so', async () => {
+      writeManifest(path.join(root, 'orchestration', 'manifest.json'), 'test');
+      const file = traceFile('t.json', houseOnly);
+      await expect(run(score, 'demo', file)).rejects.toThrow(/demo is in the test split.*FLOORTRACE_TEST_SPLIT_OK=1/);
+      await expect(run(score, 'demo', file)).rejects.toThrow(UsageError);
+      // Not even the plan is read: a plan that is not there is the gate's answer too.
+      await expect(run(score, 'demo', path.join(scratch, 'nope.json'))).rejects.toThrow(/test split/);
+      ctx.env = { FLOORTRACE_TEST_SPLIT_OK: '1' };
+      const { code, out } = await run(score, 'demo', file);
+      expect(code).toBe(0);
+      expect(out).toMatch(/verdict PERFECT/);
+    });
+
+    it('scores a dev plan, and reads the set\'s manifest when the folder has none of its own', async () => {
+      writeManifest(path.join(root, 'orchestration', 'manifest.json'), 'dev');
+      expect((await run(score, 'demo', traceFile('t.json', houseOnly))).code).toBe(0);
+      fs.rmSync(path.join(root, 'orchestration'), { recursive: true });
+      writeManifest(ctx.setManifestFile, 'test');
+      await expect(run(score, 'demo', traceFile('t.json', houseOnly))).rejects.toThrow(/test split/);
+      // A plan the manifest does not list is not in test.
+      fs.writeFileSync(ctx.setManifestFile, JSON.stringify({ version: 1, plans: {} }));
+      expect((await run(score, 'demo', traceFile('t.json', houseOnly))).code).toBe(0);
+    });
+
+    it('says when the plan\'s key is not the one the manifest froze, as bench:real refuses it', async () => {
+      const key = keyOf(readJson(plan()).floors[0].state);
+      writeManifest(path.join(root, 'orchestration', 'manifest.json'), 'dev', { keySha256: keySha256(key) });
+      const same = await run(score, 'demo', traceFile('t.json', houseOnly), '--json');
+      expect(JSON.parse(same.out).keyChanged).toBeNull();
+      writeManifest(path.join(root, 'orchestration', 'manifest.json'), 'dev', { keySha256: 'ab'.repeat(32) });
+      const { out } = await run(score, 'demo', traceFile('t.json', houseOnly));
+      expect(out).toMatch(/note: key changed since the manifest \(was abababab, is [0-9a-f]{8}\): bench:real would refuse to score demo against it/);
+      expect(out).toMatch(/verdict PERFECT/);
+    });
   });
 });
