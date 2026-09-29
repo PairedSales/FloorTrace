@@ -2,7 +2,7 @@
 // what the scan read, and nothing that would show how the tracer did.
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { buildPacket, labelKind, labelsOf } from '../keyPacket.mjs';
+import { buildPacket, labelDrift, labelKind, labelsOf } from '../keyPacket.mjs';
 
 const png = (w, h) => {
   const p = new PNG({ width: w, height: h });
@@ -138,5 +138,28 @@ describe('the blind packet', () => {
     delete p.floors[0].state.areaLabels;
     const packet = await buildPacket(p, 'x');
     expect(packet.labels.labels).toEqual([]);
+  });
+});
+
+describe('how the scan now differs from a packet', () => {
+  const at = (x) => ({ x, y: 10, width: 40, height: 20 });
+  const label = (id, text, x = 0, kind = 'room') => ({ id, kind, text, bbox: at(x) });
+
+  it('is empty when the scan reads what the packet holds, in any order', () => {
+    const packet = [label('d0', "10' x 12'"), label('e0', 'GARAGE', 90, 'nonGla')];
+    expect(labelDrift(packet, [packet[1], packet[0]])).toEqual([]);
+    expect(labelDrift([], [])).toEqual([]);
+  });
+
+  it('names a label the scan no longer reads, one it newly reads, and one that moved, changed text or changed kind', () => {
+    const packet = [label('d0', "10' x 12'"), label('d1', "9' x 9'", 50), label('d2', "8' x 8'", 100), label('e0', 'GARAGE', 150, 'nonGla')];
+    const live = [label('d0', "10' x 12'"), label('d1', "9' x 9'", 60), label('d2', "8' x 10'", 100), label('e0', 'GARAGE', 150, 'room'), label('d3', "5' x 5'", 200)];
+    const drift = labelDrift(packet, live);
+    expect(drift).toHaveLength(4);
+    expect(drift[0]).toMatch(/^d1 is room "9' x 9'" at 50,10,40,20 in the packet, room "9' x 9'" at 60,10,40,20 in the scan now/);
+    expect(drift[1]).toMatch(/^d2 is room "8' x 8'".*room "8' x 10'"/);
+    expect(drift[2]).toMatch(/^e0 is nonGla "GARAGE".*room "GARAGE"/);
+    expect(drift[3]).toBe('d3 "5\' x 5\'" is in the scan now, and not in the packet');
+    expect(labelDrift(packet, packet.slice(1))).toEqual(['d0 "10\' x 12\'" is in the packet, and the scan no longer reads it']);
   });
 });

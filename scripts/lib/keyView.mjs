@@ -21,8 +21,10 @@
 //   });
 //
 // `bytes` is an encoded image (Buffer/Uint8Array) or an @napi-rs/canvas Image.
-// `png` is a Buffer; `summary` is `{crop, scale, grid, width, height, line}`,
-// where `line` reads `crop x0,y0→x1,y1  scale N.NN px/px  grid S`.
+// `png` is a Buffer; `summary` is `{crop, clamped, scale, grid, width, height,
+// line}`, where `crop` is what is shown (the asked one cut back to the page,
+// `clamped` when it was) and `line` reads `crop x0,y0→x1,y1  scale N.NN px/px
+// grid S`. A crop showing under 2 px of the page throws.
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 export const TYPE_COLORS = {
@@ -42,6 +44,7 @@ export const TYPE_LABELS = {
 
 const GUTTER = 30;
 const LEGEND_ROW = 20;
+const MIN_SHOWN = 2;
 const NICE_STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
 
 // The smallest tidy step whose lines sit at least ~40 screen px apart.
@@ -73,6 +76,13 @@ export const renderView = async (source, options = {}) => {
   const img = source && typeof source.width === 'number' && !ArrayBuffer.isView(source) ? source : await loadImage(source);
   const { layers = [], longSide = 1400 } = options;
   const box = options.crop ?? [0, 0, img.width, img.height];
+  // A crop that misses the page, or grazes it, would be scaled up to a picture
+  // of a pixel: say so instead of drawing it.
+  const shownW = Math.min(img.width, box[2]) - Math.max(0, box[0]);
+  const shownH = Math.min(img.height, box[3]) - Math.max(0, box[1]);
+  if (!(shownW >= MIN_SHOWN && shownH >= MIN_SHOWN)) {
+    throw new Error(`the crop ${box.map(fmt).slice(0, 2).join(',')}→${box.map(fmt).slice(2).join(',')} shows ${shownW > 0 && shownH > 0 ? `only ${fmt(shownW)} x ${fmt(shownH)} px` : 'none'} of the ${img.width} x ${img.height} px image`);
+  }
   const x0 = Math.max(0, Math.min(img.width - 1, box[0]));
   const y0 = Math.max(0, Math.min(img.height - 1, box[1]));
   const x1 = Math.max(x0 + 1, Math.min(img.width, box[2]));
@@ -243,6 +253,8 @@ export const renderView = async (source, options = {}) => {
 
   const summary = {
     crop: [x0, y0, x1, y1],
+    // The crop asked for reached past the page and was cut back to it.
+    clamped: box[0] < x0 || box[1] < y0 || box[2] > x1 || box[3] > y1,
     scale,
     grid,
     width: canvas.width,

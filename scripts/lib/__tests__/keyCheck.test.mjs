@@ -271,3 +271,82 @@ describe('a stated area', () => {
     expect(none.areas.totals.gla.sqft).toBeNull();
   });
 });
+
+describe('edges the snap flagged when it ran', () => {
+  // The key is on the wall faces, so a second snap finds nothing to say. What the
+  // first snap flagged is in the snapped file, and it is all that says an edge
+  // was captured by a thin line beside the wall.
+  const flag = (edge, flags, extra = {}, outline = 0) => ({ outline, edge, flags, moved: 0, ...extra });
+  const warnsOf = (result) => only(result, 'faces', 'warn').filter((w) => /the snap flagged it/.test(w.detail));
+
+  it('warns of an edge flagged far, with how far it moved, and still passes', () => {
+    const result = run({ flagged: [flag(0, ['far'], { moved: -11.5 })] });
+    const warns = warnsOf(result);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].subject).toBe('outline 0 gla edge 0');
+    expect(warns[0].detail).toMatch(/far \(moved 11\.5 px onto the band it found, which may not be the wall/);
+    expect(warns[0].detail).toMatch(/probe the ink.*list it in "fix"/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('warns of reaches-end, ink-beyond and unstable as well, all of an edge in one line', () => {
+    const result = run({
+      flagged: [
+        flag(1, ['reaches-end']),
+        flag(2, ['ink-beyond'], { beyond: 6.5 }),
+        flag(3, ['unstable', 'far'], { moved: 4.4, residual: 2.6 }, 0),
+      ],
+    });
+    const warns = warnsOf(result);
+    expect(warns.map((w) => w.subject)).toEqual(['outline 0 gla edge 1', 'outline 0 gla edge 2', 'outline 0 gla edge 3']);
+    expect(warns[0].detail).toMatch(/reaches-end \(the band it found ran to the end of the search\)/);
+    expect(warns[1].detail).toMatch(/ink-beyond \(another band began 6\.5 px beyond the face it used/);
+    expect(warns[2].detail).toMatch(/far \(moved 4\.4 px.*; unstable \(its face moved 2\.6 px more when read again/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('says nothing of an edge in "fix", where the annotator took the edge where it was drawn', () => {
+    const spec = { outlines: [{ ...SPEC.outlines[0], fix: [0] }, SPEC.outlines[1]] };
+    const result = run({ spec, flagged: [flag(0, ['far'], { moved: -11.5 })] });
+    expect(warnsOf(result)).toHaveLength(0);
+  });
+
+  it('does not say it twice when the second snap read the same flag, and says nothing of an edge it failed', () => {
+    // Another band 6 px beyond the house's top wall: the second snap sees it too.
+    const image = plan();
+    fillRect(image, 100, 71, 300, 74);
+    const result = run({ image, flagged: [flag(0, ['ink-beyond'], { beyond: 6 })] });
+    expect(only(result, 'faces', 'warn').filter((w) => w.subject.endsWith('edge 0'))).toHaveLength(1);
+    expect(warnsOf(result)).toHaveLength(0);
+    // An edge 5 px off its wall fails as it is: the flag adds nothing to that line.
+    const v = rect(100, 75, 300, 220);
+    const off = run({
+      outlines: [{ type: 'gla', v }, GARAGE],
+      spec: { outlines: [{ type: 'gla', v }, { type: 'garage', v: GARAGE.v, in: [3] }] },
+      flagged: [flag(0, ['far'], { moved: 5 })],
+    });
+    expect(only(off, 'faces', 'fail').length).toBeGreaterThan(0);
+    expect(warnsOf(off)).toHaveLength(0);
+  });
+
+  it('reads a flagged list from an older snap, and ignores what does not name an outline or flags', () => {
+    const result = run({
+      flagged: [{ outline: 0, edge: 1, flags: ['ink-beyond'] }, { outline: 9, edge: 0, flags: ['far'] }, { outline: 0, edge: 1 }, null, flag(2, ['no-band'])],
+    });
+    const warns = warnsOf(result);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].subject).toBe('outline 0 gla edge 1');
+    expect(warns[0].detail).toMatch(/ink-beyond \(another band began beyond the face it used/);
+  });
+
+  it('leaves the flags alone when the spec is another key\'s: its "fix" lists say nothing of these edges', () => {
+    const result = run({ spec: { outlines: [SPEC.outlines[0]] }, flagged: [flag(0, ['far'], { moved: 9 })] });
+    expect(only(result, 'faces', 'fail')[0].detail).toMatch(/spec has 1 outlines and the snapped key 2/);
+    expect(warnsOf(result)).toHaveLength(0);
+  });
+
+  it('no flags, no warning: a key snapped clean adds nothing', () => {
+    expect(warnsOf(run({ flagged: [] }))).toHaveLength(0);
+    expect(run({ flagged: [] }).warnings).toBe(0);
+  });
+});

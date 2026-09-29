@@ -72,6 +72,29 @@ export const writeFileRetry = async (file, data, { retries = 6, delayMs = 200, f
 
 export const writeJson = (file, value, options) => writeFileRetry(file, `${JSON.stringify(value, null, 1)}\n`, options);
 
+/**
+ * Creates `fileOf(n)` for the first free n from `start`, holding `dataOf(n)`.
+ * The create fails when the file exists (flag `wx`), so two writers running at
+ * once (two reviewers) never take one n: whoever loses the race tries the next.
+ * Returns `{n, file}`.
+ */
+export const writeNumbered = async (fileOf, start, dataOf, { retries = 6, delayMs = 200, fsImpl = fs } = {}) => {
+  const opts = { retries, delayMs };
+  for (let n = start; n < start + 1000; n += 1) {
+    const file = fileOf(n);
+    try {
+      await retrying(() => {
+        fsImpl.mkdirSync(path.dirname(file), { recursive: true });
+        fsImpl.writeFileSync(file, dataOf(n), { flag: 'wx' });
+      }, opts);
+      return { n, file };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+    }
+  }
+  throw new Error(`no free number from ${start} for ${fileOf(start)}`);
+};
+
 export const readJson = (file) => {
   let text;
   try {
@@ -150,6 +173,23 @@ export const imageOfPlan = async (name, dir = realDir()) => {
   if (!fs.existsSync(file)) throw new Error(`no plan named ${name} in ${dir}`);
   const { bytes, mime } = planImageBytes(readJson(file));
   return { bytes, mime, image: await decodeBytes(bytes, mime), from: file };
+};
+
+// The labels of a plan's blind packet, as the annotators saw them (their ids,
+// their kinds), or null when the plan has no packet. `check` reads these and
+// not the plan's scan again: a plan drafted again can read other labels under
+// the same image, and a change to labelKind would move every kind under a key
+// already frozen.
+export const readPacketLabels = (name, dir = realDir()) => {
+  const file = path.join(packetDir(name, dir), 'labels.json');
+  if (!fs.existsSync(file)) return null;
+  const list = readJson(file)?.labels;
+  const num = (x) => typeof x === 'number' && Number.isFinite(x);
+  const ok = Array.isArray(list) && list.every((l) => typeof l?.id === 'string'
+    && ['room', 'nonGla', 'level'].includes(l.kind)
+    && num(l.bbox?.x) && num(l.bbox?.y) && num(l.bbox?.width) && num(l.bbox?.height));
+  if (!ok) throw new Error(`${file} is not a labels list (each label needs id, kind room|nonGla|level and a bbox): run blind ${name} again`);
+  return list;
 };
 
 // An IMAGE argument that is a file, or else a plan name.

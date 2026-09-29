@@ -2,13 +2,16 @@
 // the set survives Google Drive holding a file and never leaves a half-written
 // plan, a plan name cannot point out of the set, and the image a key is drawn
 // on is the blind packet's when there is one.
+import { execFile } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  checkName, flattenAlpha, imageOfPlan, imageOfTarget, labelOfTarget, mimeOfFile, packetDir, planImageBytes, realDir, writeFileRetry,
+  checkName, flattenAlpha, imageOfPlan, imageOfTarget, labelOfTarget, mimeOfFile, packetDir, planImageBytes, readPacketLabels, realDir, writeFileRetry,
+  writeNumbered,
 } from '../keyFiles.mjs';
 
 let dir;
@@ -170,5 +173,95 @@ describe('the image a key is drawn on', () => {
     expect([...image.data]).toEqual([255, 255, 255, 255, 0, 0, 0, 255]);
     expect(mimeOfFile('a.JPG')).toBe('image/jpeg');
     expect(mimeOfFile('a.txt')).toBeNull();
+  });
+});
+
+describe('writeNumbered', () => {
+  it('takes the first free number from the start, and holds what was written for it', async () => {
+    const fileOf = (n) => path.join(dir, `x.review-${n}.json`);
+    fs.writeFileSync(fileOf(1), 'one');
+    fs.writeFileSync(fileOf(2), 'two');
+    const got = await writeNumbered(fileOf, 1, (n) => `number ${n}`);
+    expect(got).toEqual({ n: 3, file: fileOf(3) });
+    expect(fs.readFileSync(fileOf(3), 'utf8')).toBe('number 3');
+    expect(fs.readFileSync(fileOf(1), 'utf8')).toBe('one');
+  });
+
+  it('never gives two writers one number: writers that all started at 1 get 1 to 8 between them', async () => {
+    const fileOf = (n) => path.join(dir, 'sub', `x.review-${n}.json`);
+    const got = await Promise.all(Array.from({ length: 8 }, (_, i) => writeNumbered(fileOf, 1, (n) => `writer ${i} took ${n}`)));
+    expect(got.map((g) => g.n).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    got.forEach((g, i) => expect(fs.readFileSync(g.file, 'utf8')).toBe(`writer ${i} took ${g.n}`));
+  });
+
+  it('never gives two processes one number, which is what two reviewers at once are', async () => {
+    // Separate processes, so the creates really do race: 4 of them take 5 numbers each.
+    const child = path.join(dir, 'child.mjs');
+    fs.writeFileSync(child, [
+      "const { writeNumbered } = await import(process.argv[2]);",
+      "const folder = process.argv[3];",
+      "for (let i = 0; i < 5; i += 1) {",
+      "  await writeNumbered((n) => folder + '/x.review-' + n + '.json', 1, (n) => 'pid ' + process.pid + ' took ' + n);",
+      "}",
+    ].join('\n'));
+    const keyFiles = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'keyFiles.mjs')).href;
+    const folder = path.join(dir, 'r');
+    const spawn = () => new Promise((resolve, reject) => {
+      execFile(process.execPath, [child, keyFiles, folder], (error, _out, err) => (error ? reject(new Error(err || error.message)) : resolve()));
+    });
+    await Promise.all([spawn(), spawn(), spawn(), spawn()]);
+    const files = fs.readdirSync(folder).sort();
+    expect(files).toEqual(Array.from({ length: 20 }, (_, i) => 'x.review-' + (i + 1) + '.json').sort());
+    // Each file is whole and says the number it was made under.
+    for (const f of files) expect(fs.readFileSync(path.join(folder, f), 'utf8')).toMatch(new RegExp('took ' + /x\.review-(\d+)\.json/.exec(f)[1] + '$'));
+  }, 60000);
+
+  it('retries a file Drive holds, and does not overwrite what is there when it loses a race', async () => {
+    const fileOf = (n) => path.join(dir, `y.review-${n}.json`);
+    let busy = 2;
+    const impl = {
+      ...fs,
+      writeFileSync: (...args) => {
+        if (busy > 0) {
+          busy -= 1;
+          throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+        }
+        return fs.writeFileSync(...args);
+      },
+    };
+    fs.writeFileSync(fileOf(1), 'taken');
+    const got = await writeNumbered(fileOf, 1, () => 'mine', { delayMs: 1, fsImpl: impl });
+    expect(got.n).toBe(2);
+    expect(busy).toBe(0);
+    expect(fs.readFileSync(fileOf(1), 'utf8')).toBe('taken');
+  });
+
+  it('does not swallow an error that is not a number taken', async () => {
+    const impl = { ...fs, writeFileSync: () => { throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); } };
+    await expect(writeNumbered((n) => path.join(dir, `z-${n}.json`), 1, () => 'x', { fsImpl: impl })).rejects.toThrow(/disk full/);
+  });
+});
+
+describe('a blind packet\'s labels', () => {
+  const write = (labels) => {
+    const folder = packetDir('demo', dir);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'labels.json'), JSON.stringify(labels));
+  };
+  const good = { id: 'd0', kind: 'room', text: 'x', bbox: { x: 1, y: 2, width: 3, height: 4 } };
+
+  it('are read as the annotators saw them, and there are none without a packet', () => {
+    expect(readPacketLabels('demo', dir)).toBeNull();
+    write({ labels: [good, { ...good, id: 'a0', kind: 'level' }] });
+    expect(readPacketLabels('demo', dir)).toEqual([good, { ...good, id: 'a0', kind: 'level' }]);
+    write({ labels: [] });
+    expect(readPacketLabels('demo', dir)).toEqual([]);
+  });
+
+  it('are refused when they are not a labels list, saying to run blind again', () => {
+    for (const bad of [{ labels: [{ id: 'd0' }] }, { labels: [{ ...good, kind: 'garage' }] }, { labels: [{ ...good, bbox: { x: 1 } }] }, { labels: 'x' }, {}]) {
+      write(bad);
+      expect(() => readPacketLabels('demo', dir), JSON.stringify(bad)).toThrow(/is not a labels list.*run blind demo again/);
+    }
   });
 });

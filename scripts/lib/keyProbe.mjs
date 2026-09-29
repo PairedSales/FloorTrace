@@ -15,6 +15,13 @@ export const probeLine = (image, from, to, { step = 0.5, origin = 0, threshold =
   const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
   if (length === 0) throw new Error('the segment has zero length');
   if (!(step > 0)) throw new Error('--step must be positive');
+  // Off the page the luminance is the border pixel's, clamped: a run there would
+  // read as ink or paper that is not on the drawing.
+  const inside = ([x, y]) => x >= 0 && y >= 0 && x <= image.width && y <= image.height;
+  if (!inside(from) || !inside(to)) {
+    const at = (p) => p.map((n) => Math.round(n * 10) / 10).join(',');
+    throw new Error(`the segment ${at(from)} to ${at(to)} leaves the ${image.width} x ${image.height} px image: keep both ends on the page`);
+  }
   const dir = [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
   const count = Math.max(1, Math.ceil(length / step - 1e-9));
   const samples = [];
