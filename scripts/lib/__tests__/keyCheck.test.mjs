@@ -229,6 +229,20 @@ describe('edges on the wall face', () => {
   });
 });
 
+describe('the page a key was snapped on', () => {
+  it('passes at the plan\'s size, fails at another, and is not judged when the snapped file recorded none', () => {
+    expect(only(run({ snappedSize: { width: W, height: H } }), 'page', 'pass')).toHaveLength(1);
+    const wrong = run({ snappedSize: { width: 1000, height: 400 } });
+    expect(only(wrong, 'page', 'fail')).toHaveLength(1);
+    expect(only(wrong, 'page', 'fail')[0].detail).toMatch(/snapped on a 1000 x 400 px page and the plan's image is 460 x 300 px/);
+    expect(wrong.failures).toBe(1);
+    // One side alone is another page too.
+    expect(only(run({ snappedSize: { width: W, height: H + 1 } }), 'page', 'fail')).toHaveLength(1);
+    expect(only(run({ snappedSize: null }), 'page')).toHaveLength(0);
+    expect(only(run({ snappedSize: { width: 'x' } }), 'page')).toHaveLength(0);
+  });
+});
+
 describe('a stated area', () => {
   const stated = (list, over = {}) => run({ spec: { ...SPEC, stated: list }, ...over });
 
@@ -303,6 +317,39 @@ describe('edges the snap flagged when it ran', () => {
     expect(warns[1].detail).toMatch(/ink-beyond \(another band began 6\.5 px beyond the face it used/);
     expect(warns[2].detail).toMatch(/far \(moved 4\.4 px.*; unstable \(its face moved 2\.6 px more when read again/);
     expect(result.failures).toBe(0);
+  });
+
+  it('warns of a bridged face and of a partial stroke, with the figures the snap kept', () => {
+    const result = run({
+      flagged: [
+        flag(1, ['bridged'], { bridgedBy: 3.1 }),
+        flag(2, ['partial'], { share: 0.48 }),
+      ],
+    });
+    const warns = warnsOf(result);
+    expect(warns.map((w) => w.subject)).toEqual(['outline 0 gla edge 1', 'outline 0 gla edge 2']);
+    expect(warns[0].detail).toMatch(/bridged \(its face is the end of a stroke joined across a gap, 3\.1 px from the stroke nearest the drawn line/);
+    expect(warns[1].detail).toMatch(/partial \(the stroke its face is read from is only 48% as continuous along the edge/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('warns once of a partial stroke the second snap finds too: a key drawn on a window frame lies on it, and passes the face test', () => {
+    // A frame 4 px thick over half of the house's top edge, 2 px above its wall,
+    // and the key's top edge on the frame's outer end. Snapped again the edge
+    // stays (1 px is well inside 2), so only the flag can say it is a frame.
+    const image = plan();
+    fillRect(image, 130, 74, 218, 78);
+    const v = rect(100, 75, 300, 220);
+    const result = run({
+      image,
+      outlines: [{ type: 'gla', v }, GARAGE],
+      spec: { outlines: [{ type: 'gla', v }, { type: 'garage', v: GARAGE.v, in: [3] }] },
+      flagged: [flag(0, ['partial'], { share: 0.5 })],
+    });
+    expect(only(result, 'faces', 'fail')).toHaveLength(0);
+    const warns = only(result, 'faces', 'warn').filter((w) => w.subject.endsWith('edge 0'));
+    expect(warns).toHaveLength(1);
+    expect(warns[0].detail).toMatch(/flagged partial \(the stroke its face is read from is only 49% as continuous.*probe the ink at full zoom/);
   });
 
   it('says nothing of an edge in "fix", where the annotator took the edge where it was drawn', () => {

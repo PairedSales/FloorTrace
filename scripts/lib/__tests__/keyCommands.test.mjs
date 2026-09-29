@@ -17,7 +17,7 @@ import { keyOf } from '../realKeys.mjs';
 
 const W = 460;
 const H = 300;
-const image = () => {
+const image = (extra = () => {}) => {
   const p = new PNG({ width: W, height: H });
   p.data.fill(255);
   const fill = (x0, y0, x1, y1) => {
@@ -35,14 +35,15 @@ const image = () => {
   fill(100, 80, 108, 220);
   fill(292, 80, 300, 220);
   fill(392, 80, 400, 220);
+  extra(fill);
   return PNG.sync.write(p);
 };
 const TRACE_MARK = 777.7777;
-const project = () => ({
+const project = (extra) => ({
   fileType: 'floortrace',
   version: 1,
   metadata: { projectId: 'real-demo', projectName: 'demo', createdAt: 'then', updatedAt: 'then' },
-  images: { 'img-1': `data:image/png;base64,${image().toString('base64')}` },
+  images: { 'img-1': `data:image/png;base64,${image(extra).toString('base64')}` },
   floors: [{
     id: 'f1',
     name: 'Floor 1',
@@ -222,6 +223,33 @@ describe('snap', () => {
     expect(out).toMatch(/edge 0: \+?-?\d+\.\d px {3}<-- far/);
     const snapped = readJson(wip('.a.snapped.json'));
     expect(snapped.flagged.some((f) => f.outline === 0 && f.edge === 0 && f.flags.includes('far'))).toBe(true);
+  });
+
+  it('says what a frame beside the wall did to an edge: bridged when it was joined, partial when the line was drawn on it', async () => {
+    // A frame 4 px thick 2 px above the top wall (face y=80). Over 68% of the
+    // edge it counts as wall and is joined to it; over 48% it does not.
+    const framed = async (w, y) => {
+      fs.writeFileSync(plan(), JSON.stringify(project((fill) => fill(130, 74, 130 + w, 78))));
+      const spec = specOf('a-demo');
+      spec.outlines[0].v[0][1] = y;
+      spec.outlines[0].v[1][1] = y;
+      const { out } = await run(snap, 'demo', '--role', 'a', '--replace', '--spec', writeSpec('a.json', spec));
+      return { out, flagged: readJson(wip('.a.snapped.json')).flagged.find((f) => f.outline === 0 && f.edge === 0), top: readJson(wip('.a.snapped.json')).outlines[0].v[0][1] };
+    };
+    const joined = await framed(124, 81);
+    expect(joined.top).toBeCloseTo(74, 0);
+    expect(joined.flagged.flags).toEqual(expect.arrayContaining(['far', 'bridged']));
+    expect(joined.flagged.bridgedBy).toBeCloseTo(6, 0);
+    expect(joined.out).toMatch(/edge 0: \+6\.\d px {3}<-- far, bridged: .*; the face is the end of a stroke joined across a gap, [56]\.\d px from the stroke nearest your line.*"bridge": 0/);
+    const apart = await framed(88, 76);
+    expect(apart.top).toBeCloseTo(74, 0);
+    expect(apart.flagged.flags).toEqual(['partial']);
+    expect(apart.flagged.share).toBeCloseTo(0.49, 1);
+    expect(apart.out).toMatch(/edge 0: [+-]?\d\.\d px {3}<-- partial: the stroke the face is read from is only 4[89]% as continuous along the edge as the strongest stroke on it/);
+    // Drawn on the wall, the same frame is beyond the face used and no more.
+    const beside = await framed(88, 81);
+    expect(beside.top).toBeCloseTo(80, 0);
+    expect(beside.flagged.flags).toEqual(['ink-beyond']);
   });
 
   it('will not let a second agent replace an annotator\'s key by naming the same role, unless --replace', async () => {
@@ -408,6 +436,27 @@ describe('check', () => {
     expect(out).toMatch(/PASS +stated/);
     const { out: json } = await run(check, 'demo', '--feet-per-pixel', '0.1', '--json');
     expect(JSON.parse(json)).toMatchObject({ pass: true, failures: 0 });
+  });
+
+  it('fails a key snapped on a page of another size than the plan\'s image, as when the plan was drafted again', async () => {
+    await finalKey();
+    const file = wip('.final.snapped.json');
+    let { code, out } = await run(check, 'demo');
+    expect(code).toBe(0);
+    expect(out).toMatch(/PASS +page +460 x 300 px: the key was snapped on a page of the plan's size/);
+    const snapped = readJson(file);
+    snapped.image = { width: 1000, height: 400 };
+    fs.writeFileSync(file, JSON.stringify(snapped));
+    ({ code, out } = await run(check, 'demo'));
+    expect(code).toBe(1);
+    expect(out).toMatch(/FAIL +page +460 x 300 px: the key was snapped on a 1000 x 400 px page and the plan's image is 460 x 300 px/);
+    expect(out).toMatch(/CHECK FAIL \(1\)$/);
+    // A snapped file that records no size is not judged by it.
+    delete snapped.image;
+    fs.writeFileSync(file, JSON.stringify(snapped));
+    ({ code, out } = await run(check, 'demo'));
+    expect(code).toBe(0);
+    expect(out).not.toMatch(/ page /);
   });
 
   it('says to snap first when there is no key to check', async () => {
@@ -635,31 +684,63 @@ describe('review and apply: the freeze', () => {
     await expect(run(apply, 'demo')).rejects.toThrow(/has no "notes"/);
   });
 
+  it('will not freeze a key snapped on another page than the plan\'s image', async () => {
+    await finalKey();
+    const snapped = readJson(wip('.final.snapped.json'));
+    snapped.image = { width: 1000, height: 400 };
+    fs.writeFileSync(wip('.final.snapped.json'), JSON.stringify(snapped));
+    writeRecord();
+    await run(review, 'demo', '--approve', '--agent', 'rev-1');
+    await expect(run(apply, 'demo')).rejects.toThrow(/fails check \(1 failure/);
+    expect(readJson(plan()).answerKey).toBeUndefined();
+  });
+
   it('never replaces a checked key unless a dispute is named, and then records it', async () => {
     await finalKey();
     writeRecord({ adjudicator: 'adj-demo' });
     await run(review, 'demo', '--approve', '--agent', 'rev-1');
     await run(apply, 'demo');
     expect(readJson(plan()).answerKey.by).toBe('annotators: a-demo, b-demo; adjudicator: adj-demo');
+    // A dispute settles that the garage is a porch: a changed final key.
+    const changed = specOf('a-demo');
+    changed.outlines[1].type = 'porch';
+    await run(snap, 'demo', '--role', 'final', '--spec', writeSpec('final2.json', changed));
     await run(review, 'demo', '--approve', '--agent', 'rev-2');
     await expect(run(apply, 'demo')).rejects.toThrow(/is frozen: a change comes only through a dispute/);
     const { out } = await run(apply, 'demo', '--dispute', 'D-7');
     expect(out).toContain('dispute D-7');
     expect(readJson(plan()).answerKey.disputeId).toBe('D-7');
+    expect(keyOf(readJson(plan()).floors[0].state).map((o) => o.type)).toEqual(['gla', 'porch']);
   });
 
-  it('applies the same key again under a new record without complaint', async () => {
+  it('refuses a dispute that would change nothing: the plan is not marked as changed by it', async () => {
     await finalKey();
     writeRecord();
     await run(review, 'demo', '--approve', '--agent', 'rev-1');
     await run(apply, 'demo');
-    const first = readJson(plan()).answerKey;
     await run(review, 'demo', '--approve', '--agent', 'rev-2');
-    const { out } = await run(apply, 'demo', '--dispute', 'D-8');
+    const before = sha(plan());
+    // The frozen key survives its dispute: the final key is the key already there.
+    await expect(run(apply, 'demo', '--dispute', 'D-8')).rejects.toThrow(/--dispute D-8: the final key is the key demo already holds.*log that the key stands/);
+    expect(sha(plan())).toBe(before);
+    expect(readJson(plan()).answerKey.disputeId).toBeUndefined();
+  });
+
+  it('applies the same key again under a new record when the plan\'s key was never checked', async () => {
+    await finalKey();
+    writeRecord();
+    await run(review, 'demo', '--approve', '--agent', 'rev-1');
+    await run(apply, 'demo');
+    const first = readJson(plan());
+    // A record from an earlier pass: written by someone, never checked.
+    delete first.answerKey.checked;
+    fs.writeFileSync(plan(), JSON.stringify(first));
+    await run(review, 'demo', '--approve', '--agent', 'rev-2');
+    const { out } = await run(apply, 'demo');
     expect(out).toMatch(/key unchanged/);
     const second = readJson(plan()).answerKey;
-    expect(second.disputeId).toBe('D-8');
-    expect(second.checked.at).not.toBe(first.checked.at);
+    expect(second.checked).toMatchObject({ by: 'AI review', via: 'final review' });
+    expect(second.disputeId).toBeUndefined();
   });
 });
 

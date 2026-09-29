@@ -3,8 +3,10 @@
 // The set folder is outside every worktree and Google Drive backs it up, so
 // two things matter here: a write must survive Drive holding the file for a
 // moment (EBUSY/EPERM), and it must never leave a half-written plan behind,
-// since the folder holds the only copy of each. `writeFileRetry` therefore
+// since the folder holds the only copy of each. `writeFileAtomic` therefore
 // writes a temporary file and renames it over the target, retrying either step.
+// (`writeFileRetry.mjs` beside it is the benchmark's: synchronous, a direct write,
+// for files that can be made again. A plan cannot, so this tool keeps its own.)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -53,7 +55,7 @@ const retrying = async (fn, { retries, delayMs }) => {
  * write goes to a temporary file that is then renamed over `file`, so a
  * failure leaves the old file whole. `fsImpl` is a seam for the test.
  */
-export const writeFileRetry = async (file, data, { retries = 6, delayMs = 200, fsImpl = fs } = {}) => {
+export const writeFileAtomic = async (file, data, { retries = 6, delayMs = 200, fsImpl = fs } = {}) => {
   const opts = { retries, delayMs };
   await retrying(() => fsImpl.mkdirSync(path.dirname(file), { recursive: true }), opts);
   const tmp = `${file}.tmp-${process.pid}-${Date.now().toString(36)}`;
@@ -70,7 +72,7 @@ export const writeFileRetry = async (file, data, { retries = 6, delayMs = 200, f
   }
 };
 
-export const writeJson = (file, value, options) => writeFileRetry(file, `${JSON.stringify(value, null, 1)}\n`, options);
+export const writeJson = (file, value, options) => writeFileAtomic(file, `${JSON.stringify(value, null, 1)}\n`, options);
 
 /**
  * Creates `fileOf(n)` for the first free n from `start`, holding `dataOf(n)`.
