@@ -21,6 +21,11 @@ describe('a valid spec', () => {
     expect(validateSpec(good())).toBeTruthy();
     expect(validateSpec({ outlines: [{ type: 'porch', v: rect(0, 0, 10, 10), bridge: 6 }] })).toBeTruthy();
   });
+
+  it('may say it is an existing draft (realPipeline import-existing writes that mark), and only as a boolean', () => {
+    expect(validateSpec({ ...good(), existingDraft: true })).toBeTruthy();
+    expect(() => validateSpec({ ...good(), existingDraft: 'yes' })).toThrow(/existingDraft: must be true or false/);
+  });
 });
 
 describe('an invalid spec is refused with the place and the reason', () => {

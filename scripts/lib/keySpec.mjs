@@ -9,7 +9,10 @@ export const CLASS_OF = {
   gla: 'building', 'below-grade': 'building', garage: 'nonGla', porch: 'nonGla', unfinished: 'unfinished',
 };
 
-const SPEC_KEYS = ['author', 'notes', 'outlines', 'waive', 'stated'];
+// `existingDraft: true` marks the spec `realPipeline import-existing` writes for
+// a plan whose stored key predates the protocol (annotation A of the first 75
+// plans). Nobody's hand drew it, and the pipeline must be able to tell.
+const SPEC_KEYS = ['author', 'notes', 'outlines', 'waive', 'stated', 'existingDraft'];
 const OUTLINE_KEYS = ['type', 'v', 'fix', 'in', 'R', 'tilt', 'bridge', 'name'];
 
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
@@ -32,6 +35,7 @@ export const validateSpec = (spec) => {
   }
   if (spec.author !== undefined && typeof spec.author !== 'string') bad('author', 'must be a string');
   if (spec.notes !== undefined && typeof spec.notes !== 'string') bad('notes', 'must be a string');
+  if (spec.existingDraft !== undefined && typeof spec.existingDraft !== 'boolean') bad('existingDraft', 'must be true or false');
   const { outlines } = spec;
   if (!Array.isArray(outlines) || !outlines.length) {
     throw new Error('outlines: must be a non-empty array of {"type", "v"}');
