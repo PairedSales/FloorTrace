@@ -24,6 +24,7 @@ import { qualitySummary } from '../../src/utils/boundaryQuality.js';
 import { assignTypeColors, autoTraceName, makeTrace, normalizeTraceType } from '../../src/utils/traceTypes.js';
 import { MAX_IMAGE_DIMENSION } from '../../src/utils/imageLoader.js';
 import { decodeImage, toOcrInput } from './benchUtils.mjs';
+import { fetchSourceBytes } from './sourceNet.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -72,11 +73,12 @@ export const loadSource = async (source, baseDir) => {
   let bytes;
   let mime;
   if (source.url) {
-    const response = await fetch(source.url);
-    if (!response.ok) throw new Error(`${source.url}: HTTP ${response.status}`);
-    bytes = Buffer.from(await response.arrayBuffer());
-    mime = (response.headers.get('content-type') ?? '').split(';')[0].trim()
-      || MIME[path.extname(new URL(source.url).pathname).toLowerCase()];
+    // A page on archive.org comes through the sourcing tool's client: one
+    // request at a time across the machine, spaced, and cached, so a draft
+    // neither refetches what `realSource leaf` holds nor fires beside another
+    // agent's request.
+    ({ bytes, mime } = await fetchSourceBytes(source.url));
+    mime ||= MIME[path.extname(new URL(source.url).pathname).toLowerCase()];
   } else if (source.file) {
     const file = path.resolve(baseDir, source.file);
     bytes = fs.readFileSync(file);

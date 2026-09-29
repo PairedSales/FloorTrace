@@ -3,11 +3,11 @@
 // shapes whose areas are worked out by hand.
 //
 // A ring is `[[x, y], …]` in image pixels, closed implicitly. Areas of unions
-// are counted on a raster of cell centres, filled with `fillPolygon` from
-// lib/cubicasa.mjs: the very fill bench:real uses for the truth mask, so an
-// IoU here means what the score means by it. At 0.5 px a cell's error is far
-// inside the ±0.2% the protocol needs.
-import { fillPolygon } from './cubicasa.mjs';
+// and intersections are exact (`areasOf`), not counted on a raster: a raster's
+// error is a fraction of a cell along every edge, which for a small house is
+// enough to put an IoU on the wrong side of the 99% line. (bench:real's truth
+// masks are rasters, so an IoU here can differ from a score's by the sub-pixel
+// a mask rounds away: the agreement rule is about the shapes, not a mask.)
 
 const EPS = 1e-6;
 
@@ -36,16 +36,6 @@ export const bboxOf = (rings) => {
     }
   }
   return [x0, y0, x1, y1];
-};
-
-export const ringLength = (v) => {
-  let len = 0;
-  for (let i = 0; i < v.length; i += 1) {
-    const [x0, y0] = v[i];
-    const [x1, y1] = v[(i + 1) % v.length];
-    len += Math.hypot(x1 - x0, y1 - y0);
-  }
-  return len;
 };
 
 // Signed distance of p from the line through a and b (positive on the left of
@@ -173,67 +163,108 @@ export const distanceToSegments = (pt, segments) => {
   return best;
 };
 
-// The raster's cell: 0.5 px, coarser only when the box would need more than
-// ~30 million cells.
-const MAX_CELLS = 3e7;
-export const cellFor = (box, cell = 0.5) => {
-  let c = cell;
-  while (((box[2] - box[0]) / c) * ((box[3] - box[1]) / c) > MAX_CELLS) c *= 2;
-  return c;
+// ---- exact areas ---------------------------------------------------------------
+//
+// A scanline strip is the band between two consecutive "event" heights: the y of
+// a vertex, or of a crossing of two edges. Inside a strip no edge starts, ends
+// or crosses another, so which edges bound the shape, and in what order, never
+// changes: the x-length the shape covers is a linear function of y, and the
+// strip's area is exactly its height times that length at its middle.
+
+// The x-spans a ring covers on the horizontal line `y` (non-zero winding, the
+// fill `bench:real` uses), as sorted `[x0, x1]`.
+const spansAt = (ring, y) => {
+  const hits = [];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const a = ring[j];
+    const b = ring[i];
+    if ((a[1] <= y) === (b[1] <= y)) continue;
+    hits.push({ x: a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]), dir: b[1] > a[1] ? 1 : -1 });
+  }
+  hits.sort((p, q) => p.x - q.x);
+  const spans = [];
+  let winding = 0;
+  for (let k = 0; k < hits.length - 1; k += 1) {
+    winding += hits[k].dir;
+    if (winding) spans.push([hits[k].x, hits[k + 1].x]);
+  }
+  return spans;
 };
 
-/** `{mask, width, height, cell, box}`: the union of `rings`, painted on cell centres inside `box`. */
-export const rasterise = (rings, box, cell) => {
-  const width = Math.max(1, Math.ceil((box[2] - box[0]) / cell));
-  const height = Math.max(1, Math.ceil((box[3] - box[1]) / cell));
-  const mask = new Uint8Array(width * height);
-  for (const ring of rings) fillPolygon(mask, width, height, ring, { cell, ox: box[0], oy: box[1] });
-  return { mask, width, height, cell, box };
+const mergeSpans = (spans) => {
+  spans.sort((p, q) => p[0] - q[0]);
+  const out = [];
+  for (const s of spans) {
+    const last = out[out.length - 1];
+    if (last && s[0] <= last[1]) last[1] = Math.max(last[1], s[1]);
+    else out.push([s[0], s[1]]);
+  }
+  return out;
 };
 
-const countOf = (mask) => {
-  let n = 0;
-  for (let i = 0; i < mask.length; i += 1) n += mask[i];
-  return n;
+const unionSpans = (rings, y) => mergeSpans(rings.flatMap((ring) => spansAt(ring, y)));
+const lengthOf = (spans) => spans.reduce((t, [a, b]) => t + (b - a), 0);
+const intersectSpans = (p, q) => {
+  const out = [];
+  for (let i = 0, j = 0; i < p.length && j < q.length;) {
+    const lo = Math.max(p[i][0], q[j][0]);
+    const hi = Math.min(p[i][1], q[j][1]);
+    if (hi > lo) out.push([lo, hi]);
+    if (p[i][1] < q[j][1]) i += 1;
+    else j += 1;
+  }
+  return out;
+};
+
+// Every height at which the set of edges across a scanline can change.
+const eventHeights = (rings) => {
+  const segs = segmentsOf(rings);
+  const ys = new Set();
+  for (const [, ay, , by] of segs) {
+    ys.add(ay);
+    ys.add(by);
+  }
+  for (let i = 0; i < segs.length; i += 1) {
+    const [px, py, p2x, p2y] = segs[i];
+    const rx = p2x - px;
+    const ry = p2y - py;
+    for (let j = i + 1; j < segs.length; j += 1) {
+      const [qx, qy, q2x, q2y] = segs[j];
+      if (Math.max(py, p2y) < Math.min(qy, q2y) || Math.max(qy, q2y) < Math.min(py, p2y)) continue;
+      const sx = q2x - qx;
+      const sy = q2y - qy;
+      const denom = rx * sy - ry * sx;
+      if (Math.abs(denom) < 1e-12) continue;
+      const t = ((qx - px) * sy - (qy - py) * sx) / denom;
+      const u = ((qx - px) * ry - (qy - py) * rx) / denom;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) ys.add(py + t * ry);
+    }
+  }
+  const sorted = [...ys].sort((p, q) => p - q);
+  return sorted.filter((y, i) => i === 0 || y - sorted[i - 1] > 1e-9);
 };
 
 /**
- * The area of the union of `ringsA`, of `ringsB`, of both together and of what
- * they share, in px². `iou` is 1 when both are empty, 0 when only one is.
+ * The area of the union of `ringsA`, of `ringsB`, and of what they share, in
+ * px², exactly; `union` is the area of both together. `iou` is 1 when both are
+ * empty, 0 when only one is.
  */
-export const areasOf = (ringsA, ringsB, cell = 0.5) => {
-  const all = [...ringsA, ...ringsB];
-  if (!all.length) return { a: 0, b: 0, inter: 0, union: 0, iou: 1 };
-  const [x0, y0, x1, y1] = bboxOf(all);
-  const box = [Math.floor(x0) - 1, Math.floor(y0) - 1, Math.ceil(x1) + 1, Math.ceil(y1) + 1];
-  const c = cellFor(box, cell);
-  const A = rasterise(ringsA, box, c);
-  const B = rasterise(ringsB, box, c);
+export const areasOf = (ringsA, ringsB) => {
   let a = 0;
   let b = 0;
   let inter = 0;
-  for (let i = 0; i < A.mask.length; i += 1) {
-    a += A.mask[i];
-    b += B.mask[i];
-    inter += A.mask[i] & B.mask[i];
+  const ys = eventHeights([...ringsA, ...ringsB]);
+  for (let k = 0; k + 1 < ys.length; k += 1) {
+    const h = ys[k + 1] - ys[k];
+    const mid = ys[k] + h / 2;
+    const sa = unionSpans(ringsA, mid);
+    const sb = unionSpans(ringsB, mid);
+    a += h * lengthOf(sa);
+    b += h * lengthOf(sb);
+    inter += h * lengthOf(intersectSpans(sa, sb));
   }
-  const cellArea = c * c;
   const union = a + b - inter;
-  return {
-    a: a * cellArea,
-    b: b * cellArea,
-    inter: inter * cellArea,
-    union: union * cellArea,
-    iou: union === 0 ? 1 : inter / union,
-  };
-};
-
-export const unionArea = (rings, cell = 0.5) => {
-  if (!rings.length) return 0;
-  const [x0, y0, x1, y1] = bboxOf(rings);
-  const box = [Math.floor(x0) - 1, Math.floor(y0) - 1, Math.ceil(x1) + 1, Math.ceil(y1) + 1];
-  const c = cellFor(box, cell);
-  return countOf(rasterise(rings, box, c).mask) * c * c;
+  return { a, b, inter, union, iou: union > 0 ? inter / union : 1 };
 };
 
 /**

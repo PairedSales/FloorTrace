@@ -229,6 +229,20 @@ describe('edges on the wall face', () => {
   });
 });
 
+describe('the page a key was snapped on', () => {
+  it('passes at the plan\'s size, fails at another, and is not judged when the snapped file recorded none', () => {
+    expect(only(run({ snappedSize: { width: W, height: H } }), 'page', 'pass')).toHaveLength(1);
+    const wrong = run({ snappedSize: { width: 1000, height: 400 } });
+    expect(only(wrong, 'page', 'fail')).toHaveLength(1);
+    expect(only(wrong, 'page', 'fail')[0].detail).toMatch(/snapped on a 1000 x 400 px page and the plan's image is 460 x 300 px/);
+    expect(wrong.failures).toBe(1);
+    // One side alone is another page too.
+    expect(only(run({ snappedSize: { width: W, height: H + 1 } }), 'page', 'fail')).toHaveLength(1);
+    expect(only(run({ snappedSize: null }), 'page')).toHaveLength(0);
+    expect(only(run({ snappedSize: { width: 'x' } }), 'page')).toHaveLength(0);
+  });
+});
+
 describe('a stated area', () => {
   const stated = (list, over = {}) => run({ spec: { ...SPEC, stated: list }, ...over });
 
@@ -269,5 +283,117 @@ describe('a stated area', () => {
     expect(only(none, 'stated', 'warn')[0].detail).toMatch(/no scale/);
     expect(none.failures).toBe(0);
     expect(none.areas.totals.gla.sqft).toBeNull();
+  });
+});
+
+describe('edges the snap flagged when it ran', () => {
+  // The key is on the wall faces, so a second snap finds nothing to say. What the
+  // first snap flagged is in the snapped file, and it is all that says an edge
+  // was captured by a thin line beside the wall.
+  const flag = (edge, flags, extra = {}, outline = 0) => ({ outline, edge, flags, moved: 0, ...extra });
+  const warnsOf = (result) => only(result, 'faces', 'warn').filter((w) => /the snap flagged it/.test(w.detail));
+
+  it('warns of an edge flagged far, with how far it moved, and still passes', () => {
+    const result = run({ flagged: [flag(0, ['far'], { moved: -11.5 })] });
+    const warns = warnsOf(result);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].subject).toBe('outline 0 gla edge 0');
+    expect(warns[0].detail).toMatch(/far \(moved 11\.5 px onto the band it found, which may not be the wall/);
+    expect(warns[0].detail).toMatch(/probe the ink.*list it in "fix"/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('warns of reaches-end, ink-beyond and unstable as well, all of an edge in one line', () => {
+    const result = run({
+      flagged: [
+        flag(1, ['reaches-end']),
+        flag(2, ['ink-beyond'], { beyond: 6.5 }),
+        flag(3, ['unstable', 'far'], { moved: 4.4, residual: 2.6 }, 0),
+      ],
+    });
+    const warns = warnsOf(result);
+    expect(warns.map((w) => w.subject)).toEqual(['outline 0 gla edge 1', 'outline 0 gla edge 2', 'outline 0 gla edge 3']);
+    expect(warns[0].detail).toMatch(/reaches-end \(the band it found ran to the end of the search\)/);
+    expect(warns[1].detail).toMatch(/ink-beyond \(another band began 6\.5 px beyond the face it used/);
+    expect(warns[2].detail).toMatch(/far \(moved 4\.4 px.*; unstable \(its face moved 2\.6 px more when read again/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('warns of a bridged face and of a partial stroke, with the figures the snap kept', () => {
+    const result = run({
+      flagged: [
+        flag(1, ['bridged'], { bridgedBy: 3.1 }),
+        flag(2, ['partial'], { share: 0.48 }),
+      ],
+    });
+    const warns = warnsOf(result);
+    expect(warns.map((w) => w.subject)).toEqual(['outline 0 gla edge 1', 'outline 0 gla edge 2']);
+    expect(warns[0].detail).toMatch(/bridged \(its face is the end of a stroke joined across a gap, 3\.1 px from the stroke nearest the drawn line/);
+    expect(warns[1].detail).toMatch(/partial \(the stroke its face is read from is only 48% as continuous along the edge/);
+    expect(result.failures).toBe(0);
+  });
+
+  it('warns once of a partial stroke the second snap finds too: a key drawn on a window frame lies on it, and passes the face test', () => {
+    // A frame 4 px thick over half of the house's top edge, 2 px above its wall,
+    // and the key's top edge on the frame's outer end. Snapped again the edge
+    // stays (1 px is well inside 2), so only the flag can say it is a frame.
+    const image = plan();
+    fillRect(image, 130, 74, 218, 78);
+    const v = rect(100, 75, 300, 220);
+    const result = run({
+      image,
+      outlines: [{ type: 'gla', v }, GARAGE],
+      spec: { outlines: [{ type: 'gla', v }, { type: 'garage', v: GARAGE.v, in: [3] }] },
+      flagged: [flag(0, ['partial'], { share: 0.5 })],
+    });
+    expect(only(result, 'faces', 'fail')).toHaveLength(0);
+    const warns = only(result, 'faces', 'warn').filter((w) => w.subject.endsWith('edge 0'));
+    expect(warns).toHaveLength(1);
+    expect(warns[0].detail).toMatch(/flagged partial \(the stroke its face is read from is only 49% as continuous.*probe the ink at full zoom/);
+  });
+
+  it('says nothing of an edge in "fix", where the annotator took the edge where it was drawn', () => {
+    const spec = { outlines: [{ ...SPEC.outlines[0], fix: [0] }, SPEC.outlines[1]] };
+    const result = run({ spec, flagged: [flag(0, ['far'], { moved: -11.5 })] });
+    expect(warnsOf(result)).toHaveLength(0);
+  });
+
+  it('does not say it twice when the second snap read the same flag, and says nothing of an edge it failed', () => {
+    // Another band 6 px beyond the house's top wall: the second snap sees it too.
+    const image = plan();
+    fillRect(image, 100, 71, 300, 74);
+    const result = run({ image, flagged: [flag(0, ['ink-beyond'], { beyond: 6 })] });
+    expect(only(result, 'faces', 'warn').filter((w) => w.subject.endsWith('edge 0'))).toHaveLength(1);
+    expect(warnsOf(result)).toHaveLength(0);
+    // An edge 5 px off its wall fails as it is: the flag adds nothing to that line.
+    const v = rect(100, 75, 300, 220);
+    const off = run({
+      outlines: [{ type: 'gla', v }, GARAGE],
+      spec: { outlines: [{ type: 'gla', v }, { type: 'garage', v: GARAGE.v, in: [3] }] },
+      flagged: [flag(0, ['far'], { moved: 5 })],
+    });
+    expect(only(off, 'faces', 'fail').length).toBeGreaterThan(0);
+    expect(warnsOf(off)).toHaveLength(0);
+  });
+
+  it('reads a flagged list from an older snap, and ignores what does not name an outline or flags', () => {
+    const result = run({
+      flagged: [{ outline: 0, edge: 1, flags: ['ink-beyond'] }, { outline: 9, edge: 0, flags: ['far'] }, { outline: 0, edge: 1 }, null, flag(2, ['no-band'])],
+    });
+    const warns = warnsOf(result);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].subject).toBe('outline 0 gla edge 1');
+    expect(warns[0].detail).toMatch(/ink-beyond \(another band began beyond the face it used/);
+  });
+
+  it('leaves the flags alone when the spec is another key\'s: its "fix" lists say nothing of these edges', () => {
+    const result = run({ spec: { outlines: [SPEC.outlines[0]] }, flagged: [flag(0, ['far'], { moved: 9 })] });
+    expect(only(result, 'faces', 'fail')[0].detail).toMatch(/spec has 1 outlines and the snapped key 2/);
+    expect(warnsOf(result)).toHaveLength(0);
+  });
+
+  it('no flags, no warning: a key snapped clean adds nothing', () => {
+    expect(warnsOf(run({ flagged: [] }))).toHaveLength(0);
+    expect(run({ flagged: [] }).warnings).toBe(0);
   });
 });

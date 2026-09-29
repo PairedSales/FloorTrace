@@ -4,8 +4,6 @@
 // place and the reason, before anything is written.
 
 export const OUTLINE_TYPES = ['gla', 'below-grade', 'garage', 'porch', 'unfinished'];
-export const BUILDING_TYPES = ['gla', 'below-grade'];
-export const NON_GLA_TYPES = ['garage', 'porch'];
 // The classes compare and check reason in, and the types each holds.
 export const CLASS_OF = {
   gla: 'building', 'below-grade': 'building', garage: 'nonGla', porch: 'nonGla', unfinished: 'unfinished',

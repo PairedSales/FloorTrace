@@ -6,8 +6,11 @@
 //   (d) no boundary point more than 3 px from the other key's boundary of the
 //       same class (building, non-GLA, unfinished).
 //
-// IoU is the union of a type's outlines on a 0.5 px raster (lib/keyGeometry.mjs),
-// exact to far better than the ±0.2% the protocol needs. Boundary distance
+// IoU is the exact area of what a type's outlines share over the exact area of
+// their union (lib/keyGeometry.mjs `areasOf`, with no raster: a 0.5 px raster
+// was off by 0.2% on a house of 600-900 px and 0.8% on one of 100-200 px, past
+// the protocol's ±0.2%, and the 99% line is where two keys agree or not).
+// Boundary distance
 // samples each key's boundary about every 1 px and measures to the other key's
 // boundary of the same class, in both directions; the p95 pools both.
 import { CLASS_OF, OUTLINE_TYPES } from './keySpec.mjs';

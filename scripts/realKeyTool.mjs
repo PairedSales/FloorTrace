@@ -10,20 +10,21 @@
  * it into the plan. Blind roles use `blind`, `labels`, `view` (without --keys
  * and --trace), `probe`, `snap`, `compare` and `check`, and never the app's
  * trace, a benchmark result or another agent's opinion of the tracer. (`check`
- * reads the plan's scale, only to put the key's area in sq ft for the
- * stated-area check.)
+ * reads the plan's scale, to put the key's area in sq ft for the stated-area
+ * check, and prints it and the areas to whoever runs it, blind roles included:
+ * the orchestrator accepted that.)
  *
  * Usage:  node scripts/realKeyTool.mjs COMMAND ...      (--help prints this)
  *
  *   view IMAGE|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T]
- *                   [--labels] [--keys] [--trace] [--no-verts]
+ *                   [--labels] [--bare] [--keys] [--trace] [--no-verts]
  *       A PNG of the page or of the crop, the long side scaled to about 1,400
  *       px, under datasets/zz-scratch/views/<TAG>/ of this checkout (TAG
  *       defaults to "default"; use your own so two agents on one plan never
  *       overwrite each other). The grid is in IMAGE PIXELS, labelled on all four
  *       edges (a crop of 300-500 px reads well with --grid 10 to 25; the
  *       default grid is chosen from the zoom); the legend says what each line
- *       is. Prints the PNG's path, then `crop x0,y0->x1,y1  scale N px/px  grid S`.
+ *       is. Prints the PNG's path, then `crop x0,y0→x1,y1  scale N.NN px/px  grid S`.
  *         IMAGE  an image file (the blind packet's image.png, a cached page):
  *                the ink only, plus any --poly.
  *         NAME   a plan in the set: the bare image only, by default. This is
@@ -34,6 +35,11 @@
  *                so two keys compare visibly. Vertices are numbered
  *                "outline.vertex", the numbers `fix`/`in` and edge indexes use.
  *         --labels   the scan's labels as boxes with their ids (blind-safe).
+ *         --bare     accepted, and does nothing more: a plan NAME is drawn as
+ *                the bare image already, and the protocol's line reads "view
+ *                --bare". With --keys or --trace it is an error.
+ *         A crop that misses the page or shows under 2 px of it is an error;
+ *                one reaching past the page is cut back to it (a note on stderr).
  *         --keys     the plan's stored key, by type. NOT for blind roles: it is
  *                for the orchestrator, the app checker and engineers.
  *         --trace    the app's own draft trace, dashed red (the tracer is run
@@ -47,20 +53,27 @@
  *       any quality figure goes in. Run it again any time; it never refuses.
  *   labels NAME [--json]
  *       Prints the packet's labels: id, kind, box x,y,w,h, text, printed size.
+ *       (The plan's own scan when the plan has no packet.)
  *   probe IMAGE|NAME --from X,Y --to X,Y [--step 0.5]
  *   probe IMAGE|NAME --across X,Y,ANGLE_DEG --half 12 [--step 0.5]
  *       The luminance along a segment at pixel centres, the page's ink
  *       threshold, and the runs: `dark 12.0-17.5 (5.5 px)`. Settles "which line
  *       is the wall face". --across reads through a point at an angle (0 = along
- *       +x, 90 = down the page) with distances from that point.
- *   snap NAME --role a|b|final --spec FILE [--dry]
+ *       +x, 90 = down the page) with distances from that point. A segment that
+ *       leaves the image is an error.
+ *   snap NAME --role a|b|final --spec FILE [--replace] [--dry]
  *       Validates the spec you wrote in your scratch folder, copies it to
  *       <set>/keys-wip/NAME.<role>.json, moves every edge to the outer face of
  *       the wall band the ink shows, prints each edge's move and flag, and
  *       writes NAME.<role>.snapped.json {outlines: [{type, v}], flagged, ...}.
  *       It reads the plan for its image only (the packet's image when there is
  *       one), never its trace or key, and never writes into the plan. --dry is
- *       accepted and does nothing extra.
+ *       accepted and does nothing extra. A vertex more than 2 px outside the
+ *       image is an error. Role a or b already holding a spec is not replaced
+ *       without --replace unless the new spec names the same "author" (a spec
+ *       with no author cannot show it is anyone's): only your own spec is yours
+ *       to snap again. A replaced spec is said so; role final is the
+ *       adjudicator's, whoever it is.
  *         {"author": "a-<plan>", "notes": "...",
  *          "outlines": [{"type": "gla", "v": [[x, y], ...], "name": "first floor",
  *                        "fix": [edge...], "in": [edge...], "R": 14, "tilt": false,
@@ -72,19 +85,29 @@
  *       inner face (a garage or porch edge along the house wall), `R` is the
  *       search reach in px, `tilt` follows a scan-tilted wall, `bridge` (px)
  *       is the gap a hatched or double-line wall may have without ending its
- *       band (default 2.5). A vertex written ["ref", k, i] is vertex i of outline
+ *       band (default 2.5; 0 reads the stroke nearest your line alone). A vertex written ["ref", k, i] is vertex i of outline
  *       k after it snapped, so two outlines share a boundary exactly.
  *       `waive` excuses a label from the label check with a reason the reviewer
  *       reads; `stated` gives areas the page prints, for the stated-area check.
  *       Flags: no-band, reaches-end, far (moved over 4 px), ink-beyond (another
- *       band within 10 px past the face used: hatched or double-line wall, or a
- *       dimension line). Look at every flagged edge at full zoom.
+ *       band within 10 px past the face used: hatched or double-line wall, a
+ *       dimension line, or a window frame or sill drawn proud of the wall that a
+ *       bridge was refused for covering too little of the edge), bridged (the face
+ *       is the end of a stroke joined across a gap, not of the stroke nearest your
+ *       line: it says by how many px), partial (the stroke the face is read from
+ *       covers under 60% as much of the edge as the strongest stroke on it: a
+ *       frame you drew on), unstable (the face moves over 1 px more when read
+ *       again from where the edge landed). A gap is bridged only between strokes
+ *       that are each at least 60% as continuous as the wall, so a window frame
+ *       is never joined to the wall silently. Look at every flagged edge at full
+ *       zoom. The flags are kept in the snapped file for `check`.
  *   compare NAME | A_SNAPPED B_SNAPPED [--json] [--draw OUT.png --tag T]
  *                [--image IMAGE|NAME] [--crop X0,Y0,X1,Y1]
  *       NAME compares keys-wip/NAME.a.snapped.json with NAME.b.snapped.json and
  *       writes NAME.compare.json. Prints per-type IoU, outline-type counts, the
  *       largest and 95th-percentile boundary distance (both directions), and the
- *       protocol's verdict: AGREE when the outline types match, building IoU is
+ *       protocol's verdict (IoU is exact, from the polygons, not a raster): AGREE
+ *       when the outline types match, building IoU is
  *       at least 99%, garage and porch IoU each at least 97%, and no boundary
  *       point is over 3 px from the other key's; else DISAGREE with each failed
  *       criterion and the disagreement regions (bbox in image px and largest
@@ -100,23 +123,34 @@
  *       label inside a garage, porch or unfinished one (a label's spot is its
  *       box's centre; a spec `waive` reports it waived, a label in no outline
  *       warns); every edge not in `fix` within 2 px of a wall face on a fresh
- *       snap; stated areas within 5% of the key at the plan's scale unless
- *       `explained`. Prints a table, the areas in sq ft, then CHECK PASS or
- *       CHECK FAIL (n); exits non-zero on a fail.
+ *       snap, and a warning for each such edge the first snap flagged far,
+ *       reaches-end, ink-beyond, bridged, partial or unstable (a snapped key lies
+ *       on its band, so only those flags show that a thin line beside the wall
+ *       captured an edge); the page the key was snapped on is the plan's size (a
+ *       plan drafted again is another page: a fail); stated areas within 5% of
+ *       the key at the plan's scale unless `explained`. The labels are the blind packet's when there is one (the ids
+ *       and kinds the annotators saw), else the plan's scan; a packet that no
+ *       longer matches the scan is a warning. Prints a table, the areas in sq ft,
+ *       then CHECK PASS or CHECK FAIL (n); exits non-zero on a fail.
  *   review NAME --approve|--reject --agent ID [--region X0,Y0,X1,Y1 --reason "..."]
  *          [--note "..."]
  *       Records the final reviewer's decision in keys-wip/NAME.review-<n>.json
- *       (n counts up) with the hash of the final key it looked at. A rejection
- *       needs a reason. Refuses an agent that drew or adjudicated the key.
+ *       (n counts up; two reviewers at once take two numbers) with the hash of
+ *       the final key and of the final spec (its notes, waivers and stated
+ *       figures) it looked at. A rejection needs a reason. Refuses an agent that
+ *       drew or adjudicated the key.
  *   apply NAME [--dispute ID]
  *       The freeze for one plan. Needs NAME.final.snapped.json, a passing check,
  *       NAME.record.json ({"annotators": [...], "adjudicator": null|"...",
  *       "verifiedBy": "blind double annotation"|"single annotation"}, written by
- *       the orchestrator) and a latest review that approved this very key. Writes
+ *       the orchestrator) and a latest review that approved this very key and
+ *       this very spec (the notes it records). Writes
  *       the key into the plan with the record {by, verifiedBy, checked: {by: "AI
  *       review", at, via: "final review"}, at, notes[, disputeId]}, and nothing
- *       else. A plan whose record is already checked is refused unless --dispute.
- *       Run `node scripts/realKeys.mjs export` afterwards.
+ *       else. A plan whose record is already checked is refused unless --dispute,
+ *       and a --dispute whose final key is the key the plan already holds is
+ *       refused too: a dispute id marks a change, so a dispute the key survived is
+ *       logged, not applied. Run `node scripts/realKeys.mjs export` afterwards.
  *   sheet NAME... --out FILE [--per N]
  *       Review sheets: each plan whole with its stored key, its record and its
  *       notes, N plans to an image (default 4). Shows the stored key, so it is

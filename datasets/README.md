@@ -108,6 +108,141 @@ plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
 belong to whoever drew them: keep them in `datasets/real/`, which git ignores.
 
+### Splits, the manifest and the run files
+
+The set is split into `dev`, which engineers tune against, and `test`, which
+nobody tunes against. Whole books, publishers and builders go to one split, so
+`test` measures drawing styles the tracer was never tuned on. The split, each
+plan's era and a fingerprint of its key are recorded in the manifest, and every
+scoreboard number names the manifest it was measured under.
+
+**The manifest** is `orchestration/manifest.json` in the set folder, so
+`datasets/real/orchestration/manifest.json` (a run's `--dir` moves it with the
+folder). Version 1:
+
+```json
+{
+  "version": 1, "seed": 20260928, "createdAt": "2026-…",
+  "plans": {
+    "aladdin62-n15": {
+      "book": "aladdin62", "publisher": "Aladdin", "era": "vintage", "decade": 1960,
+      "split": "dev",
+      "source": {"url": "…", "crop": [0, 0, 1200, 900], "size": [1200, 900]},
+      "keySha256": "<64 hex digits>",
+      "annotation": {"annotators": ["A", "B"], "agreement": {}, "adjudicated": false,
+                     "verifiedBy": "blind double annotation",
+                     "checked": {"by": "AI review", "at": "…", "via": "final review"}}
+    }
+  }
+}
+```
+
+`bench:real` reads four fields and leaves the rest to whoever writes the
+manifest: `split` (`dev` or `test`) and `era` (`vintage` or `2020-2022`), both
+required, since a mistyped one would drop a plan from every run without a word;
+`keySha256`, the SHA-256 of `JSON.stringify(key)` where `key` is what
+`keyOf(state)` returns (`scripts/lib/realKeys.mjs`), and `book`. A file that is
+not JSON, or of another version, is refused with the reason. The **manifest
+hash** is the SHA-256 of the file's bytes: any edit, of a field the benchmark
+reads or not, is a new manifest. `orchestration/watch.json` holds the watch
+lists, `{"lists": {"<mechanism>": ["plan", …]}}`. The code is
+`scripts/lib/manifest.mjs`.
+
+`keySha256` guards the key and only the key: a plan whose outlines were edited
+after the manifest froze them is not scored. It does not cover the plan's image,
+its scanned labels or its scale, so a plan rescanned or recalibrated after the
+freeze moves its score without tripping the check. A plan with no `keySha256` is
+not checked at all, and the run says how many (`key check: 3 of 75 manifest
+plans carry no keySha256, so their keys are not checked`).
+
+**The test-split rule.** Nobody tunes against `test`. Only the orchestrator runs
+it, at milestones, and reads aggregates only. `--split test`, `--split all` and
+naming a test plan with `--only` refuse to run (exit 2) unless the environment
+variable `FLOORTRACE_TEST_SPLIT_OK=1` is set, which is the orchestrator's alone.
+A run that includes test plans prints no line about any one of them, draws no
+overlay for it, and keeps its per-plan results out of the main run file (below);
+an engineer who needs a test number asks for the aggregate.
+
+#### `bench:real` options
+
+```
+npm run bench:real -- [--split dev|test|all] [--only NAME,NAME…] [--watch LIST]
+                      [--jobs N] [--out NAME] [--compare NAME] [--draw]
+                      [--dir PATH] [--manifest PATH] [--fixtures]
+```
+
+- `--split`: which plans, read from the manifest. The default is `dev` when a
+  manifest exists and `all` when there is none (every plan in the folder, as
+  before; a split cannot be named without a manifest). `all` with a manifest is
+  dev and test. A plan in the folder but not in the manifest is never scored:
+  it is listed as "not in the manifest". A plan the manifest lists and the folder
+  lacks is an ERROR row. `--split dev` does not open a test plan's file.
+- `--only A,B`: exactly these plans, by name (repeat the option or use commas).
+  Without `--split` a plan is taken from whichever split it lies in; with one,
+  it must lie in that split. A name the manifest does not know, or the folder
+  does not hold, is an error.
+- `--watch LIST`: the plans of a list in `watch.json`, within the chosen split.
+  An unknown list, or a plan in it nobody has, is an error. With `--only`,
+  both must hold.
+- `--jobs N` (default 1): plans are shared out over N worker processes (the
+  same script started with `--worker`). The results, their order and the run
+  file are those of a serial run, apart from `ms`: `node scripts/realRunDiff.mjs A B`
+  compares two run files that way. Timings taken with N > 1 ran under parallel
+  load and the output says so. A worker that dies is reported as an ERROR row
+  for the plan it was on and replaced; the run goes on. `--draw` works.
+  `realRunDiff.mjs` exits 2, not 0, when either file holds no results: two
+  empty or wrong files are not "identical".
+- `--manifest PATH`: another manifest, with `watch.json` beside it (for tests
+  and scratch sets). It must exist: a manifest that was named and is not there
+  is an error (exit 2), never a run without one, which would have no split and
+  no test-split gate. `--dir` moves the folder, and with it the default
+  manifest. A `--dir` with no `orchestration/manifest.json` beside it runs every
+  plan in it, as before, with one exception: if the set's own manifest
+  (`datasets/real/orchestration/manifest.json`) calls any of its plans `test`,
+  the run is refused (exit 2, saying how many, not which) until `--manifest`
+  names the set's manifest, so a copy of the set without its manifest is no way
+  around the split.
+- `--compare NAME`: the verdict moves against an earlier run, refused (exit 2,
+  before the run, with no override) when that run was measured under another
+  manifest hash. A run made before manifests, or with none, has hash `null`,
+  and two of those compare. When both runs held test plans, the test split's
+  aggregate delta is printed, and nothing per plan.
+- An unknown option is an error. Exit codes: 0; 1 when any plan ended as an
+  ERROR row (a crashed worker, a key changed since the manifest, a plan missing
+  from the folder); 2 for a request refused.
+
+A plan in the manifest whose key no longer hashes to its `keySha256` is not
+scored: `ERROR key changed since the manifest (was ab12cd34, is ef56ab78)`, or
+`is none` when the plan holds only the app's own trace again. A key is changed
+only by a dispute (`orchestration/disputes.md`), which writes a new manifest.
+
+#### The output and the run file
+
+Every run begins with the line that names it: `bench:real  commit 9d212fb+dirty
+split dev  manifest 3fa9c1d2e4b7  plans 250  jobs 8` (`+dirty` when the working
+tree differs from the commit; the manifest hash is 12 of its 64 digits). After
+the overall scoreboard come the mean error by cause (non-GLA space kept, other
+space taken in, living space left out), the median and 90th-percentile trace
+time (`app` and `bare`), then, when there is a manifest, a scoreboard for each
+era (`vintage`, `2020-2022`, the latter shown as "0 plans" while it is empty)
+and, when the run holds both splits, one for each split. Test-split
+scoreboards are aggregates.
+
+`datasets/real_runs/<out>.json` holds `meta`, `results` and, when test plans ran,
+`testAggregate`. `meta` is `{date, dir, commit, dirty, split, only, watch,
+manifestHash, jobs, timing}` with the full manifest hash and `timing` =
+`{app: {median, p90}, bare: {median, p90}, plans, jobs, parallel}` in ms. In the
+main file `only` lists the open plans that `--only` named, plus an `onlyTest`
+count when it also named test plans (`watch` is a list's name, which names no
+plan); `<out>.test.json` keeps the whole `only`.
+`results` holds every non-test plan (scored, skipped, or ERROR). `testAggregate`
+holds the test plans' scoreboard counts and shares, mean error by cause, timings,
+error and skip counts, and the same for each era: no plan name. The per-plan test
+results go to `<out>.test.json` (`{meta, results}`), written only when test
+plans ran and never read by `--compare`. A `<out>.test.json` left by an earlier
+run of the same name is not removed, so name the milestone runs. `--draw`
+overlays go in `real_runs/<out>/`, none for a test plan.
+
 ### The set so far
 
 75 pages of 17 US house-plan books, 1914 to 1963, each named for its book, its
@@ -149,6 +284,146 @@ it, and a side over 4000 px is scaled to fit, as the app's loader scales it.
 The draft records its `source`: the image, the crop and the size they came
 out, which is the size its key will be drawn on.
 
+### Sourcing plans (`realSource`)
+
+```
+node scripts/realSource.mjs COMMAND ...       # --help prints the manual
+```
+
+Finds the pages a set grows from, on archive.org only: house-plan books (vintage
+plans) and Wayback Machine captures of house-plan and builder sites (2020 to
+2022). A sourcer looks through a book with `meta`, `contact` and `grid`, drafts
+each plan with `realDrafts.mjs` from the page's URL, and records it with `log`.
+Every command that writes a file prints its absolute path.
+
+| Command | What it does |
+|---|---|
+| `search QUERY [--rows N] [--year FROM-TO] [--page N] [--sort "downloads desc"] [--raw]` | archive.org advanced search over texts. Plain words must all be in the title or subject (`house plans` is searched as `title:(house AND plans) OR subject:(house AND plans)`: typed as is, archive.org matches any word anywhere and the first hits are memos that mention a house). Lucene syntax (a quote, `field:`, parentheses, `AND`/`OR`/`NOT`) and `--raw` are sent as typed. Prints the query sent, then identifier, year, leaf count (blank where the search lacks it; `meta` counts), title, creator, and `[borrow-only]`. A query archive.org cannot parse (`title:(`) is answered with HTTP 200 and `{"error": ...}`: the command fails with that message and caches nothing, so it is never read as "no results". |
+| `meta ID` | Title, year, publisher, **leaf count**, collections, and whether **anyone can view the pages**: the `access-restricted-item` flag, the lending collections, and a test of one page image about 40% into the book (it says which leaf, the URL and what came back, and keeps the page). Prints the page URL pattern `https://archive.org/download/ID/page/n<leaf>`. **Exits 1 if the pages are not viewable**, with the reasons; a borrow-only item answers a page with 403. |
+| `leaf ID N [--ext jpg]` | Downloads leaf N (or takes it from the cache): prints its path, its pixel size (a full-resolution page is about 4,000 by 6,000) and the source URL to record. Leaves are numbered from 0. **A leaf past the end of a book is not an error to archive.org**: it answers `page/n<k>` for any k with HTTP 200 and the last page's image. So when the book's leaf count is in the cache (`meta ID` puts it there), `leaf`, `contact`, `grid ID:LEAF` and `screen --leaves` refuse or skip a leaf at or past it and fetch and cache nothing (`contact` skips those leaves with a `WARNING` and draws the rest); with no cached count they say so in a note, and `meta ID` fixes that. |
+| `contact ID FROM TO [--step S] [--cols C] [--rows R] [--tag T]` | A **contact sheet** PNG of leaves FROM to TO (every S-th), each shrunk to a cell and labelled with its leaf number: 12 to a sheet by default (4 across, 3 down, about 1,600 px each way), more sheets when more leaves are asked for, at most 96 leaves a call. It is how a plan page is found fast. A leaf that cannot be fetched is marked in its cell. Uses the cache, so a second call costs no requests. |
+| `grid IMAGE\|ID:LEAF [--crop X0,Y0,X1,Y1] [--grid STEP] [--tag T]` | The key tool's `view` (grid labelled in the page's own pixels on all four edges), for choosing a crop from a page or a cached leaf (`ID:LEAF` fetches the leaf if it is not cached). Read crop coordinates from views of 300 to 500 px with a grid of 10 to 25 px, never from a whole page. Prints the PNG's path, then `crop x0,y0→x1,y1  scale N px/px  grid S`. |
+| `screen ID [--samples 5] [--leaves n1,n2,...]` | Runs the app's own scan (`scanImage` of `realDraft.mjs`, the Tesseract path) on pages spread through the book, and prints the labels read per page and per book. |
+| `cdx URL_PREFIX [--from 2020] [--to 2022] [--mime image/] [--status 200] [--collapse urlkey] [--limit N] [--match prefix\|exact\|domain] [--min-length BYTES] [--pattern REGEX]` | Wayback CDX search. Prints each capture's timestamp, mime type, length and original URL, and under it the **original-bytes URL** `https://web.archive.org/web/<timestamp>id_/<original>`, which is what a modern plan records as its source. Defaults are the project's: captures of 2020 to 2022, status 200, images. `--collapse urlkey` keeps one capture per URL. `--pattern` is a regular expression on the original URL, host included. `--min-length` drops small rows (thumbnails); the index cuts at `--limit` before that filter, so the command reads 10 times the limit (`--scan N` changes it) and keeps what passes. |
+| `fetch URL [--name N]` | Downloads any archive.org URL (an `id_` capture URL, a page URL) into the cache; prints its path, mime type and pixel size. A response that is not an image (a login page, an error page, JSON) is refused and nothing is cached. `--name` also keeps a copy as `named/N.<ext>` (never over a different image). |
+| `log plan\|reject\|book ...` | Appends an event to the sourcing log (below). |
+| `report` | Rewrites `sources.md` from the log and prints the counts per book or site and per era, and every cap broken: a book, name stem or `--unit` over 12 plans (with the spellings it was typed as), a site over 60. |
+
+**`screen` is for finding, never for dropping.** The label count may help find
+books that print their room sizes in type. It must never be used to drop a page
+that qualifies: pages the app reads badly are the point (integrity rule 6: the
+dataset is chosen blind to the tracer). The command prints this warning before
+and after its result. It runs one scan at a time on the machine (a lock in the
+cache folder), because a scan that loses a CPU race drops labels silently: never
+run it beside a benchmark or a draft. Tesseract's own messages appear between
+its lines.
+
+**The rules of the road** are enforced by the code, not requested.
+
+- *Only archive.org.* Every fetch, and every redirect it follows, must be to
+  `archive.org` or a subdomain of it (`web.archive.org`, `ia801505.us.archive.org`).
+  Any other host, a URL with credentials or a port, or a redirect off the list is
+  refused with a message, and no request is made.
+- *One request at a time, machine-wide.* A lock file in the cache folder is held
+  for each request, so two agents running the tool at once cannot fire two
+  requests together. It waits 1,000 ms after the last request to
+  `web.archive.org` and 300 ms after one elsewhere. A 429, a 5xx, a timeout or a
+  body cut short backs off (`Retry-After` honoured, otherwise 2 s and doubling to
+  a minute); the wait is recorded beside the lock, so every process keeps it. After
+  four tries, or when the server asks for more than two minutes, the command fails
+  with a message. A lock whose process has died, or that is over five minutes old,
+  is taken over; a normal exit or a signal releases it. A process waiting for the
+  lock sleeps between looks (it never spins), and fails with a message after about
+  six minutes, or after 30 seconds of being unable to create the lock file or move
+  a stale one aside (Google Drive or an antivirus holding it: the cache folder is
+  on Drive). A trailing dot on the host (`web.archive.org.`) is the same host, with
+  the same gap and the same cache entry. `realDrafts.mjs` (and
+  `realKeys.mjs apply`) fetch an archive.org URL through the same client, so a
+  draft neither fires beside another request nor downloads a page `leaf` already
+  holds; a URL on any other host is fetched as it always was.
+- *Nothing is fetched twice.* Pages are cached under `datasets/archive-cache/`
+  of the main checkout, whatever worktree runs the tool (git ignores it):
+  `items/<id>/n<leaf>.jpg` for a page (`page/n12` and `page/n12.jpg` are one
+  entry), `urls/<hash>.<ext>` for any other URL, `named/`, and `api/` for search,
+  metadata and CDX answers, kept a day (`--refresh` asks again). An entry counts
+  only if its file is non-empty and starts with an image's magic bytes, so an HTML
+  error page is never cached as an image, and one found there is fetched again.
+  A process that waited for the lock looks in the cache again before it asks, so
+  two agents wanting one page at once download it once.
+- *What it writes.* The cache, `datasets/zz-scratch/views/<TAG>/` of the checkout
+  (`contact` and `grid`; use your own tag), and the set folder's `orchestration/`
+  (`log`, `report`). Writes retry while Google Drive holds a file. It never
+  deletes anything.
+
+`FLOORTRACE_ARCHIVE_CACHE` and `FLOORTRACE_REAL_DIR` point the cache and the set
+folder somewhere else (a scratch run of `log`). `FLOORTRACE_SOURCE_GAP_WAYBACK_MS`
+and `FLOORTRACE_SOURCE_GAP_MS` set the gaps; `FLOORTRACE_SOURCE_TRIES`,
+`_TIMEOUT_MS`, `_BACKOFF_MS`, `_BACKOFF_MAX_MS` and `_MAX_WAIT_MS` the retries;
+`FLOORTRACE_SOURCE_LOCK_WAIT_MS` and `_LOCK_FAULT_MS` how long a process waits for the lock;
+`FLOORTRACE_SOURCE_TRACE=1` prints when each request began and ended, to see that
+two processes never overlap.
+
+**The log.** `log` appends one JSON object per line to
+`datasets/real/orchestration/sources.jsonl` under a lock (sourcers log at once)
+and regenerates `sources.md` beside it: plans by book or site with their leaf or
+URL, crop, size, labels and builder line, then the rejected pages and their
+reasons, then totals. The three events:
+
+```
+node scripts/realSource.mjs log plan --name NAME --book BOOK --era vintage|2020-2022 --year YYYY --url URL \
+  --crop X,Y,W,H --line "<the builder line realDrafts printed>" [--publisher P] [--leaf L] [--size W,H] [--decade D] [--tag T] \
+  [--unit CODE] [--site NAME] [--replace] [--no-verify]
+node scripts/realSource.mjs log reject --book BOOK (--leaf L | --url URL) --reason REASON [--tag T]
+node scripts/realSource.mjs log book --book BOOK [--id ID] [--publisher P] [--year Y] [--leaves N] [--note "..."]
+```
+
+- A `plan` line is `{event, at, name, book, publisher, era, year, decade, leaf,
+  url, crop: [x,y,w,h], size: [w,h], unit, site, labels, scale, cutOff, line, tag}`; labels,
+  cut-off regions and scale are read from the builder line. It is refused
+  unless: the name is `<book><yy>-n<leaf>[a|b]` (vintage) or `<site><yy>-<plan id>`
+  (modern), with `yy` the year's and the leaf the `--leaf`; era and year agree
+  (a modern year is 2020 to 2022, and `--url` is the capture's
+  `https://web.archive.org/web/<timestamp>id_/...` in that year); `--crop` is four
+  whole numbers; `--url` is on archive.org; and the name is new. `--replace` logs
+  a plan again and marks the old line `superseded` (it stays in the file). When
+  the plan is in the set folder, its recorded source (URL, crop, size) must match
+  the log (`--no-verify` skips that); `--size` defaults to what the plan records.
+  A plan under about 1,000 px across, cut-off regions, no labels or no scale
+  print a `WARNING` and are still logged.
+- **One book, one spelling.** The 12-plan cap is only as good as the count, and
+  many sourcers log at once. So `--book` must look like the name's stem
+  (`pacific25` for "Pacific 1925": it holds the stem's letters, or they are its
+  initials) or name a `log book` entry (log the book first when the stem is an
+  abbreviation, `hpn21` for "houseplans.net"); and a stem already logged under one
+  spelling is refused under another. A vintage `--leaf` at or past the book's leaf
+  count (the cached metadata, else the latest `log book --leaves` for that item or
+  book) is refused: archive.org answers such a leaf with the last page, so the entry
+  would name a page that is not there.
+- **The caps.** At most 12 plans from one *unit* and no site above 60. The unit is
+  the book (the exact `--book` text), the name's stem, or `--unit`: the designer
+  code of a plan on an aggregator site such as houseplans.net (its designers draw
+  in different styles), scoped to its site, so 12 plans from designer 940 and 12
+  from designer 110 of one site are fine. A plan with a `--unit` does not count
+  toward its `--book`'s 12. `--site` (default: the book) groups a site's plans for
+  the cap of 60. `log plan` prints a `WARNING` when a plan takes its book, unit or
+  site over a cap (the lock makes the count exact, whoever else is logging), and
+  `report` prints every violation.
+- A `reject` needs one reason from a closed list: `3d`, `elevation`, `site-plan`,
+  `too-small`, `hand-lettered`, `not-us-home`, `duplicate-house`, `not-a-plan`, or
+  `other:<text>`. **How well the app traces a page is not on the list**, and an
+  `other:` text about the tracer, the scan or the labels is refused: a page
+  qualifies before it is drafted, never by how the app handles it (integrity rule
+  6). A `book` line names a book or site looked at, for the report's headings.
+- `report` lists every cap broken: a book, a name stem or a `--unit` over 12
+  plans (with the spellings it was typed as when there are several), a site over
+  60.
+
+**Exit status.** 0 on success; 1 for a well formed request that fails (the network,
+a refused URL, a book whose pages are not viewable, a log entry the validators
+refuse), with one line saying why; 2 for a command line that cannot be read: an
+unknown command or option, a missing argument, or a value of the wrong form
+(`cdx --from soon`, `--match banana`, `grid --crop 1,2,3`, a bad `--tag`).
+
 ### Drawing and checking keys (`realKeyTool`)
 
 ```
@@ -176,14 +451,14 @@ the final key; a reviewer who drew none of it records `review`; `apply` freezes 
 
 | Command | What it does |
 |---|---|
-| `view IMAGE\|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels]` | A PNG of the page or the crop (long side ~1,400 px) with a grid labelled in image pixels on all four edges, a legend, and any outlines; prints the path and `crop x0,y0→x1,y1  scale N.NN px/px  grid S`. Each `--poly` file (a spec, a snapped file, or a bare ring) has its own line style and its vertices are numbered `outline.vertex`. A plan `NAME` is drawn bare. |
+| `view IMAGE\|NAME [--crop X0,Y0,X1,Y1] [--grid STEP] [--poly FILE]... [--tag T] [--labels] [--bare]` | A PNG of the page or the crop (long side ~1,400 px) with a grid labelled in image pixels on all four edges, a legend, and any outlines; prints the path and `crop x0,y0→x1,y1  scale N.NN px/px  grid S`. Each `--poly` file (a spec, a snapped file, or a bare ring) has its own line style and its vertices are numbered `outline.vertex`. A plan `NAME` is drawn bare. `--bare` is accepted because the protocol's line reads `view --bare`, and does nothing more; with `--keys` or `--trace` it is an error. A crop that misses the page, or shows under 2 px of it, is an error; one that reaches past the page is cut back to it, with a note on stderr. |
 | `view NAME --keys` / `--trace` | Also the plan's stored key (by type) and the app's own trace (dashed red). For the orchestrator, the app checker and engineers, **never for a role that draws or checks a key blind.** |
 | `blind NAME` | The annotator's packet, `keys-wip/packets/NAME/`: `image.<ext>` (the plan's exact bytes, so coordinates are the key's), `labels.json`, `meta.json {name, width, height}`. |
 | `labels NAME` | The packet's labels as a table, for an agent that cannot open the set folder. |
-| `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. |
-| `snap NAME --role a\|b\|final --spec FILE` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. |
+| `probe IMAGE\|NAME --from X,Y --to X,Y [--step 0.5]` or `--across X,Y,ANGLE --half N` | The luminance along a segment at pixel centres, the page's ink threshold and the dark and light runs (`dark 12.0–17.5 (5.5 px)`), with where each run lies on the page. A segment that leaves the image is an error, not the border's pixels read again. |
+| `snap NAME --role a\|b\|final --spec FILE [--replace]` | Validates the spec, keeps it as `keys-wip/NAME.<role>.json`, snaps it, prints each edge's move and flag, writes `NAME.<role>.snapped.json`. Never writes into the plan and never reads its trace or key. A vertex more than 2 px outside the image is an error. Role `a` or `b` already written by another `author` (or by a spec with none) is not replaced unless you add `--replace`; snapping your own spec again is the normal loop; a replaced spec is always said so. |
 | `compare NAME` or `compare A B [--draw OUT.png --tag T --image IMAGE]` | Per-type IoU, the largest and 95th-percentile boundary distance, the protocol's verdict and the disagreement regions. |
-| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. |
+| `check NAME [--role R] [--feet-per-pixel X]` | The automatic checks; `CHECK PASS` or `CHECK FAIL (n)`, non-zero exit on a fail. It prints the plan's scale (the app's own vote) and each outline's sq ft to whoever runs it, blind roles included: accepted, since the stated-area check needs it. |
 | `review NAME --approve\|--reject --agent ID [--region … --reason …]` | The final reviewer's decision, `keys-wip/NAME.review-<n>.json`. |
 | `apply NAME [--dispute ID]` | The freeze for one plan; the only command that writes into a plan. |
 | `sheet NAME... --out FILE [--per N]` | Review sheets: each plan whole with its stored key, its record and its notes. |
@@ -198,7 +473,13 @@ breezeway, balcony, screened space…; `labelKind` in `scripts/lib/keyPacket.mjs
 the one definition `blind` and `check` share) or `level`. A size printed directly
 under an exterior name is that space's own size: it is `nonGla` too, and says
 which name it is under (`nameLabel`). There is no trace, no rooms, no scale, no
-quality figure in it, and no other key.
+quality figure in it, and no other key. `check` (and so `apply`) judges a key
+against the packet's labels, the ids and kinds the annotators saw, and not against
+a scan of the plan read again: a plan drafted again can read other labels under
+one image, so ids would name other labels, and a change to the app's exterior
+feature words would move the kinds under a key already frozen. It warns when the
+plan's scan now differs from the packet (run `blind` again, then check again).
+A plan with no packet is checked against its own scan, kinds by `labelKind`.
 
 **A spec** is what an annotator writes:
 
@@ -229,13 +510,31 @@ over 4 px. `reaches-end`: the band runs to the end of the search on the side tha
 decides the face. `ink-beyond`: another band within 10 px past the face used that
 is nearly as continuous along the edge as the face band itself, as the second
 stroke of a hatched or double-line wall and a dimension line are (window boxes
-drawn proud of a long wall can do it too: look, and move on). `unstable`:
+drawn proud of a long wall can do it too: look, and move on), or a stroke that was
+refused a join for covering too little of the edge (below). `bridged`: the face
+is the end of a stroke joined across a gap (the `bridge`, default 2.5 px), and not of
+the stroke nearest the line you drew: it says by how many px. `partial`: the stroke
+the face is read from covers under 60% as much of the edge as the strongest stroke
+on it, as a window frame does when the line was drawn on it. A gap is bridged only
+between strokes that are each at least 60% as continuous along the edge as the
+wall (their best dark fraction against the edge's peak): a window frame drawn proud
+of the wall covers a part of the edge, and joined to the wall's line it would carry
+the face out to it with nothing to show it. A frame that covers most of an edge is
+indistinguishable from a wall line by ink alone: that is what `bridged` and the
+probe are for, and `"bridge": 0` on the outline (or `fix` on the edge) is the
+answer when the nearer stroke is the face. `unstable`:
 read again from where it landed, the face moves over 1 px more, as along a run of
 windows and doors where the wall is less of the edge than the strokes drawn in it.
 It also warns of an edge drawn a hair off level or plumb, of a wall whose face
 leans over 2 px along an edge (a scan tilted on the page: say `tilt`), and of a
 vertex whose two edges are nearly parallel. Look at every flagged edge at full
 zoom; probe the ink where the doubt is; `fix` an edge you have read by hand.
+`check` shows these flags again: a snapped key lies on its bands, so a second snap
+cannot tell the wall from a thin line beside it (a garage door) that captured the
+edge, and only the first snap's flags say so. They are kept in the snapped file
+(`flagged`), and `check` warns of every edge not in `fix` that was flagged `far`,
+`reaches-end`, `ink-beyond`, `bridged`, `partial` or `unstable`, until the edge is
+drawn on the face or listed in `fix`.
 
 **Faces.** The face is the band's outer end, never its centre. Where a solid band
 sits inside a hatched one, it is the hatched band's outer line. Window sills and
@@ -245,9 +544,14 @@ garage door between two thick piers, can capture a snap: `fix` there.
 **What `compare` calls agreement** (the protocol's step 3): the same outline
 types; the building outlines (gla and below-grade) at IoU 99% or better; garage
 and porch each at 97% or better; and no boundary point more than 3 px from the
-other key's boundary of the same class. IoU is the union of a type's outlines on
-a 0.5 px raster, filled as `bench:real` fills its truth mask. The 95th-percentile
-distance pools both directions, sampled about every pixel.
+other key's boundary of the same class. IoU is exact: the area two keys' outlines
+of a type share over the area of their union, worked out edge by edge with no
+raster (a 0.5 px raster was off by 0.2% on a house of 600-900 px and 0.8% on one of
+100-200 px, and the 99% line falls where it does). It can differ from a
+`bench:real` score by the sub-pixel a truth mask rounds away. The boundary distance
+is measured from each key to the other, so a spike on one key is found by the key
+it is on; the 95th-percentile distance pools both directions, sampled about every
+pixel.
 
 **What `check` tests** (step 5), each `pass`, `warn`, `waived` or `fail`:
 
@@ -261,6 +565,10 @@ distance pools both directions, sampled about every pixel.
   is `waived`, with its reason, for the reviewer), and inside none at all is a warn;
 - every edge not in `fix` (and not a shared boundary) moves no more than 2 px, and
   finds a band, when snapped again; more than half an outline's edges in `fix` warns;
+  an edge the first snap flagged (above) warns;
+- the page the key was snapped on (the snapped file records its size) is the size
+  of the plan's image: a plan drafted again is another page, and a key drawn on the
+  old one is a fail;
 - a stated area, from the spec's `stated` or a sq ft figure a level label carries,
   against the key's area at the plan's scale (`--feet-per-pixel` overrides it): over
   5% apart fails unless the entry says why (`explained`, then a warn). An `of` that
@@ -294,14 +602,18 @@ on one plan never overwrite each other.
 | `disputeId` | Present when the key was changed after the freeze, through a dispute (`apply NAME --dispute ID`). |
 
 `apply` needs the final snapped key, a passing `check`, the record file, and a
-latest review that approved this very key (the review stores the key's hash, so a
-key changed after its approval needs a fresh review). A reviewer may not be one of
-the key's annotators or its adjudicator. A plan whose record already has `checked`
+latest review that approved this very key (the review stores the hash of the
+snapped key and of the final spec, that is of its notes, waivers and stated figures
+too, so a key or a note changed after its approval needs a fresh review). A
+reviewer may not be one of the key's annotators or its adjudicator. Reviews are
+created exclusively, so two reviewers who run `review` at once get two numbers and
+neither replaces the other. A plan whose record already has `checked`
 is frozen: `apply` refuses it unless `--dispute ID` names the dispute that
-changes it. `apply` leaves the plan otherwise as it was (image, labels,
-calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
-command, which judges outlines against a key by the verdict code `bench:real` uses,
-arrives with the benchmark's shared library.
+changes it, and refuses a dispute whose final key is the key the plan already holds
+(a dispute id marks a change; a dispute the key survived is logged, not applied).
+`apply` leaves the plan otherwise as it was (image, labels, calibration); run `node scripts/realKeys.mjs export` afterwards. A `score`
+command, which would judge outlines against a key by the verdict code `bench:real`
+uses (`scripts/lib/realScore.mjs`), is not part of this tool yet: a follow-up adds it.
 
 ### Moving keys without their plans
 
