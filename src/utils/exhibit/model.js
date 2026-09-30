@@ -15,7 +15,7 @@ import {
   areaDisplayValue, formatAreaValue,
 } from '../unitConverter';
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
-import { qualitySummary, rankedWarnings, scaleQualitySummary } from '../boundaryQuality';
+import { qualitySummary, rankedWarnings, scaleQualitySummary, NOTE_ONLY_CODES } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
 import { scaleProvenance } from '../scaleProvenance';
 
@@ -191,7 +191,11 @@ const buildFlags = (state, areas, outlines, measured = true) => {
   for (const outline of outlines) {
     const q = outline.quality;
     if (!q) continue;
-    const reasons = rankedWarnings(q.warnings).filter((w) => w.severity !== 'info');
+    const ranked = rankedWarnings(q.warnings);
+    const reasons = ranked.filter((w) => w.severity !== 'info');
+    // A note-only finding (label outside) is not flagged, but it is why the
+    // score is low, so the score row below must not appear in its place.
+    const noted = ranked.some((w) => NOTE_ONLY_CODES.has(w.code));
 
     // The score rides on the first row for this outline rather than in a row
     // of its own: a reviewer needs the reason and the number together, and
@@ -212,7 +216,7 @@ const buildFlags = (state, areas, outlines, measured = true) => {
     }
 
     // Nothing explained why, so the score has to speak for itself.
-    if (!reasons.length && q.level !== 'good' && !q.edited) {
+    if (!reasons.length && !noted && q.level !== 'good' && !q.edited) {
       flags.push({
         severity: q.level === 'fair' ? 'warn' : 'error',
         text: `${outline.name}: ${score}`
