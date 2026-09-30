@@ -7,10 +7,11 @@ import { warning } from '../../utils/detection/scoring.js';
 import { WARNING_CODES, warningLabel, detailText } from '../../utils/boundaryQuality';
 
 /**
- * The one card that says how much of the panel above it to believe. What is
- * asserted here is the property that made it worth building: the count beside
- * the chip is the number of things actually listed, and every reason is on the
- * page rather than in a `title` a phone can never show.
+ * The one card that says how much of the panel to believe. What is asserted
+ * here is the property that made it worth building: the count beside the title
+ * is the number of things actually listed, every reason is on the page rather
+ * than in a `title` a phone can never show — and nothing on it reads as a score
+ * the detector does not have.
  */
 const square = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
@@ -33,7 +34,16 @@ const base = {
   detectedDimensions: [],
   calibration: null,
   focusedWarning: null,
+  lastTraceOutcome: null,
 };
+
+// The rows of issues the chip counts, excluding the Details drawer.
+const issueRows = (view) => {
+  const details = view.getByText('Details').closest('div');
+  return [...view.container.querySelectorAll('.grid')].filter((row) => !details.contains(row));
+};
+
+const openDetails = (view) => fireEvent.click(view.getByText('Details'));
 
 beforeEach(() => useAppStore.setState(base));
 afterEach(cleanup);
@@ -45,26 +55,35 @@ describe('ChecksCard with nothing to say', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('says nothing has been measured, rather than that everything is fine', () => {
-    const view = render(<ChecksCard />);
-    expect(view.getByText('Nothing yet')).toBeTruthy();
-    expect(view.getByText(/Nothing measured yet/)).toBeTruthy();
+  // Before anything is measured there is nothing to call clean — and nothing
+  // to list, so the card stands aside rather than saying "All clear".
+  it('stands aside before anything is measured, rather than calling it clean', () => {
+    const { container } = render(<ChecksCard />);
+    expect(container.firstChild).toBeNull();
   });
 
-  it('reads clean once the work is done and the detector had no doubts', () => {
+  it('still speaks up about a trace that produced nothing', () => {
+    useAppStore.setState({ lastTraceOutcome: { level: 'failed', reason: null, floors: 0 } });
+    const view = render(<ChecksCard />);
+    expect(view.getByText('1 to check')).toBeTruthy();
+    expect(view.getByText('The last trace found no outline')).toBeTruthy();
+  });
+
+  it('reads clean once the work is done, without a score beside it', () => {
     useAppStore.setState({
       calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
       perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
     });
     const view = render(<ChecksCard />);
     expect(view.getByText('All clear')).toBeTruthy();
-    expect(view.getByText(/Nothing to check/)).toBeTruthy();
-    expect(view.getByText('92% wall match')).toBeTruthy();
+    expect(view.getByText(/No problems found/)).toBeTruthy();
+    // The wall-match percentage reads as "92% accurate", which it is not.
+    expect(view.container.textContent).not.toMatch(/%/);
   });
 });
 
 describe('ChecksCard statistics', () => {
-  it('counts what the plan is measured from, read off the live store', () => {
+  it('keeps them in Details, read off the live store', () => {
     useAppStore.setState({
       rooms: [{}, {}, {}, {}, {}],
       detectedDimensions: [{}, {}, {}],
@@ -72,22 +91,26 @@ describe('ChecksCard statistics', () => {
       perimeterTraces: [outline(), outline({ id: 'trace-2', name: '2nd Floor', vertices: [] })],
     });
     const view = render(<ChecksCard />);
-    expect(view.getByText('Dimension labels read').nextSibling.textContent).toBe('3');
+    expect(view.queryByText('Rooms measured')).toBeNull();
+
+    openDetails(view);
+    expect(view.getByText('Room sizes read on the plan').nextSibling.textContent).toBe('3');
     expect(view.getByText('Rooms measured').nextSibling.textContent).toBe('5');
-    // An outline that exists but has never been traced is said as a fraction
+    // An outline that exists but has never been drawn is said as a fraction
     // rather than quietly dropped from the count.
-    expect(view.getByText('Outlines traced').nextSibling.textContent).toBe('1 of 2');
-    expect(view.getByText('Corners plotted').nextSibling.textContent).toBe('4');
+    expect(view.getByText('Outlines drawn').nextSibling.textContent).toBe('1 of 2');
+    expect(view.getByText('Corners').nextSibling.textContent).toBe('4');
   });
 
-  it('separates the voids the user punched from the ones it found', () => {
+  it('separates the areas the user cut out from the ones it found', () => {
     useAppStore.setState({
       perimeterTraces: [outline({
         holes: [{ ring: square, source: 'user' }, { ring: square }],
       })],
     });
     const view = render(<ChecksCard />);
-    expect(view.getByText('Voids subtracted').nextSibling.textContent).toBe('2 (1 yours)');
+    openDetails(view);
+    expect(view.getByText('Areas cut out').nextSibling.textContent).toBe('2 (1 yours)');
   });
 });
 
@@ -106,7 +129,7 @@ describe('ChecksCard on the scale', () => {
     expect(view.getByText('1 to check')).toBeTruthy();
   });
 
-  it('states a scale that agrees too, without counting it as a problem', () => {
+  it('files a scale that agrees under Details, without counting it', () => {
     useAppStore.setState({
       calibration: {
         calibrated: true,
@@ -116,8 +139,10 @@ describe('ChecksCard on the scale', () => {
       perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
     });
     const view = render(<ChecksCard />);
-    expect(view.getByText('Scale from 5 rooms')).toBeTruthy();
     expect(view.getByText('All clear')).toBeTruthy();
+    expect(view.queryByText(/Scale from 5 rooms/)).toBeNull();
+    openDetails(view);
+    expect(view.getByText('Scale from 5 rooms.')).toBeTruthy();
   });
 });
 
@@ -127,28 +152,32 @@ describe('ChecksCard on the outlines', () => {
     warnings: [warning('bridged-opening', { px: 34 }), warning('no-inner', { floor: 0 })],
   };
 
-  it('counts every reason it lists', () => {
+  it('lists every reason it counts, on the page', () => {
     useAppStore.setState({ perimeterTraces: [outline({ quality: doubtful })] });
     const view = render(<ChecksCard />);
     expect(view.getByText('2 to check')).toBeTruthy();
-    expect(view.getByText(/2 to check · a 34px opening was bridged/)).toBeTruthy();
-  });
-
-  it('keeps its reasons folded until asked, then names each one', () => {
-    useAppStore.setState({ perimeterTraces: [outline({ quality: doubtful })] });
-    const view = render(<ChecksCard />);
-    expect(view.queryByText('A gap was closed for you')).toBeNull();
-    fireEvent.click(view.getByText(/2 to check · /));
+    expect(issueRows(view)).toHaveLength(2);
     expect(view.getByText('A gap was closed for you')).toBeTruthy();
-    expect(view.getByText('No interior outline')).toBeTruthy();
+    expect(view.getByText('No inside-wall outline')).toBeTruthy();
   });
 
-  // The card exists to be turned to when something is wrong; an outline the
-  // detector could not stand behind should not need a click to be readable.
-  it('opens the outline the detector could not stand behind', () => {
+  // After a rejected trace that is kept on the plan, the count included a row
+  // for the rejection that the old card never drew.
+  it('draws a row for the rejected trace it counts, even with the outline kept', () => {
+    useAppStore.setState({
+      lastTraceOutcome: { level: 'poor', reason: 'the outline crosses itself' },
+      perimeterTraces: [outline({ quality: { confidence: 0.3, warnings: [] } })],
+    });
+    const view = render(<ChecksCard />);
+    const count = Number(view.getByText(/\d+ to check/).textContent.match(/\d+/)[0]);
+    expect(issueRows(view)).toHaveLength(count);
+    expect(view.getByText('The last trace was rejected')).toBeTruthy();
+  });
+
+  it('names which outline a reason belongs to when there are several', () => {
     useAppStore.setState({
       perimeterTraces: [
-        outline({ quality: { confidence: 0.9, warnings: [warning('no-inner', { floor: 0 })] } }),
+        outline({ quality: { confidence: 0.9, warnings: [] } }),
         outline({
           id: 'trace-2',
           name: '2nd Floor',
@@ -158,10 +187,10 @@ describe('ChecksCard on the outlines', () => {
     });
     const view = render(<ChecksCard />);
     expect(view.getByText('Outline never closed')).toBeTruthy();
-    expect(view.queryByText('No interior outline')).toBeNull();
+    expect(view.getByText('2nd Floor')).toBeTruthy();
   });
 
-  it('says when a void is no longer subtracted, which no detector warning does', () => {
+  it('says when a cut-out is no longer subtracted, which no detector warning does', () => {
     useAppStore.setState({
       perimeterTraces: [outline({
         holes: [{ ring: square, stale: true }],
@@ -170,8 +199,9 @@ describe('ChecksCard on the outlines', () => {
     });
     const view = render(<ChecksCard />);
     expect(view.getByText('1 to check')).toBeTruthy();
-    expect(view.getByText(/1 void is no longer inside this outline/)).toBeTruthy();
-    expect(view.getByText('Voids left outside').nextSibling.textContent).toBe('1');
+    expect(view.getByText('A cut-out is no longer inside this outline')).toBeTruthy();
+    openDetails(view);
+    expect(view.getByText('Cut-outs left outside').nextSibling.textContent).toBe('1');
   });
 
   it('offers the plan a warning can point at, and toggles the highlight', () => {
@@ -181,7 +211,6 @@ describe('ChecksCard on the outlines', () => {
       })],
     });
     const view = render(<ChecksCard />);
-    fireEvent.click(view.getByText(/1 to check · /));
     fireEvent.click(view.getByText('Show'));
     expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
     fireEvent.click(view.getByText('Show'));
@@ -223,19 +252,14 @@ describe('every warning code the detector can emit', () => {
         perimeterTraces: [outline({ quality: { confidence: 0.6, warnings: [emitted] } })],
       });
       const view = render(<ChecksCard />);
-      // The collapsed headline is the toggle. An `info` code produces the
-      // "N notes" line instead of "N to check", so accept either.
-      const toggle = view.queryByText(/\d+ to check · /) ?? view.queryByText(/^\d+ notes?$/);
-      if (toggle) fireEvent.click(toggle);
       // `info` codes describe how the outline was reached rather than a reason
-      // to doubt it, so they sit behind a second toggle. Still rendered, and
-      // still required to say something.
-      const notes = view.queryByText(/· \d+ notes?$/);
-      if (notes) fireEvent.click(notes);
+      // to doubt it, so they sit in Details. Still rendered, and still
+      // required to say something.
+      const label = warningLabel(code);
+      if (!view.queryAllByText(label).length) openDetails(view);
 
       // The headline is never the raw code, and the detail is never empty —
       // both are how a missing entry shows itself.
-      const label = warningLabel(code);
       expect(label).not.toBe(code);
       expect(view.getAllByText(label).length).toBeGreaterThan(0);
       // Built by the real emitter, so a code with no `WARNING_TEXT` entry and

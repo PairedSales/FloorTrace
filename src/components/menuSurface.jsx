@@ -28,32 +28,33 @@ export const MenuItem = ({ label, keys, checked, disabled, danger, external, onS
     disabled={disabled}
     aria-label={external ? `${label} — opens in a new tab` : undefined}
     onClick={() => { close(); onSelect?.(); }}
-    className={`flex w-full items-center justify-between gap-6 px-2.5 py-1.5 rounded text-[12.5px]
+    className={`flex w-full items-center justify-between gap-6 px-3 py-[7px] rounded text-[13.5px]
       text-left transition-colors disabled:opacity-40 disabled:cursor-default cursor-pointer
       ${danger ? 'text-crit hover:bg-crit/10' : 'text-fg-2 hover:bg-accent/12 hover:text-fg'}
       disabled:hover:bg-transparent`}
   >
-    <span className="flex items-center gap-1.5 min-w-0">
+    <span className="flex items-center gap-2 min-w-0">
       {checked !== undefined && (
         <Check
-          className={`w-3.5 h-3.5 shrink-0 text-accent ${checked ? '' : 'invisible'}`}
+          className={`w-4 h-4 shrink-0 text-accent ${checked ? '' : 'invisible'}`}
           aria-hidden="true"
         />
       )}
       <span className="truncate">{label}</span>
     </span>
-    {keys && <span className="font-mono text-[11px] text-fg-dim shrink-0">{keys}</span>}
-    {!keys && external && <ArrowUpRight className="w-3.5 h-3.5 text-fg-dim shrink-0" aria-hidden="true" />}
+    {keys && <span className="text-[12px] text-fg-dim shrink-0">{keys}</span>}
+    {!keys && external && <ArrowUpRight className="w-4 h-4 text-fg-dim shrink-0" aria-hidden="true" />}
   </button>
 );
 
 export const Sep = () => <div className="h-px bg-line-soft my-1 mx-1.5" />;
 
 /**
- * `top-[calc(100%+3px)]` drops the panel clear of a trigger that is 32 px tall
- * in a 40 px band, rather than 4 px up inside it.
+ * `top-[calc(100%+4px)]` drops the panel clear of its trigger rather than up
+ * inside it. `align="right"` hangs it off the trigger's right edge, for a
+ * trigger near the right of the window.
  */
-export const Popover = ({ open, labelledBy, children }) => (
+export const Popover = ({ open, labelledBy, align = 'left', children }) => (
   open ? (
     <div
       role="menu"
@@ -62,8 +63,9 @@ export const Popover = ({ open, labelledBy, children }) => (
       // before the `click` that would have chosen an item — so without this the
       // panel unmounts out from under the pointer and the item is never picked.
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute left-0 top-[calc(100%+3px)] z-[60] min-w-[248px] p-1
-                 bg-panel-2 border border-line rounded-md shadow-xl animate-fade-in"
+      className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+4px)]
+                  z-[60] min-w-[264px] p-1
+                  bg-panel-2 border border-line rounded-md shadow-xl animate-fade-in`}
     >
       {children}
     </div>

@@ -56,7 +56,8 @@ describe('shortcuts that would invalidate work in flight', () => {
   // was computed from, and the rail's own buttons are not gated at all.
   it('stops the digits that rewrite the image, and only those', () => {
     useAppStore.setState({ isProcessing: true });
-    for (const code of ['Digit8', 'Digit9']) {
+    // Crop is 7 and Erase is 8 since the rare tools moved behind "More".
+    for (const code of ['Digit7', 'Digit8']) {
       seen.length = 0;
       press({ key: code.slice(5), code });
       expect(reaches(), `${code} reached the app`).toBe(false);
@@ -66,7 +67,8 @@ describe('shortcuts that would invalidate work in flight', () => {
     // outline through it takes nothing away from it.
     press({ key: '1', code: 'Digit1' });
     press({ key: '5', code: 'Digit5' });
-    expect(seen).toHaveLength(2);
+    press({ key: '9', code: 'Digit9' });
+    expect(seen).toHaveLength(3);
   });
 
   // Switching plans mid-trace is supported on purpose: the result is held and

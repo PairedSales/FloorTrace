@@ -1,113 +1,151 @@
 import { X } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useIsTouch, useIsMobile } from '../hooks/useViewport';
 import { TOOL_GROUPS } from './toolCatalog';
 
 import { MOD as mod, ALT as alt } from '../utils/keySymbols';
 
-const shortcuts = [
-  { keys: 'O', description: 'Show or hide the measurement panel' },
-  { keys: 'L', description: 'Toggle show lengths' },
-  { keys: 'F', description: 'Fit plan to window' },
-  { keys: '[ / ]', description: 'Resize the active brush' },
-  { keys: 'R', description: 'Rotate canvas 45° clockwise' },
-  { keys: 'Shift + R', description: 'Rotate canvas 45° counter-clockwise' },
-  // Read off the catalogue rather than retyped. Same order as the tool rail
-  // reads, top to bottom — that is what the digits follow, so the two can be
-  // learned as one thing — and one fewer hand-maintained printing of a map that
-  // is already written down twice.
-  { keys: '1 – 9', description: TOOL_GROUPS.flatMap((g) => g.tools).filter((t) => t.digit).map((t) => t.short).join(', ') },
-  { keys: 'Alt / Shift + 1 – 7', description: 'Switch outline within this plan' },
-  // Ctrl+Alt rather than the obvious chords: Ctrl+Tab, Ctrl+W and Ctrl+1–9 all
-  // belong to the browser's own tab strip and cannot be taken from a page.
-  { keys: `${mod} + ${alt} + 1 – 6`, description: 'Switch to a plan by number' },
-  { keys: `${mod} + ${alt} + ← / →`, description: 'Previous or next plan' },
-  { keys: `${mod} + ${alt} + N`, description: 'New plan' },
-  { keys: 'Enter', description: 'Finish drawing the exterior, or close a void' },
-  { keys: 'Esc', description: 'Cancel the current stroke or tool' },
-  { keys: 'Delete', description: 'Delete the selected line, shape, void or vertex' },
-  { keys: 'Right-click', description: 'Delete a vertex' },
-  { keys: `${mod} + E`, description: 'Export an image for your workfile' },
-  { keys: `${mod} + ${alt} + C`, description: 'Copy that image straight to the clipboard' },
-  { keys: `${mod} + S`, description: 'Save an editable project file' },
-  { keys: `${mod} + O`, description: 'Open image' },
-  { keys: `${mod} + V`, description: 'Paste image from clipboard' },
-  { keys: `${mod} + Z`, description: 'Undo' },
-  { keys: `${mod} + Shift + Z`, description: 'Redo' },
-  { keys: `${mod} + Y`, description: 'Redo' },
-  { keys: 'Mouse Back / Forward', description: 'Undo / Redo' },
-  { keys: 'Scroll Wheel', description: 'Zoom in / out' },
-  { keys: 'Ctrl + Scroll Wheel', description: 'Larger / smaller labels and vertices' },
-  { keys: 'Click + Drag', description: 'Pan canvas' },
+/**
+ * Help, in two pages: how to use the app, and the keyboard shortcuts.
+ *
+ * It used to open on twenty-six shortcuts, with the advice a stuck user came
+ * for behind them, and its tips had drifted from the app: "Click on a room to
+ * auto-detect its boundary" described a mode that no longer exists, and two
+ * more named panels that had been renamed. The guide now walks the job in the
+ * order it happens and names every control exactly as the screen does — the
+ * rail's tools by their labels, the panel's actions by their buttons.
+ */
+
+// ── the guide ────────────────────────────────────────────────────────────
+// Names here must match the screen: the rail labels in `toolCatalog.js`, the
+// dock's button text in `MeasurementDock.jsx` and the menu items in `TopBar.jsx`.
+const GUIDE = [
+  {
+    title: 'The basics',
+    ordered: true,
+    items: [
+      'Open your floor plan: click Open, drag the file onto this window, or paste an image. Pictures and PDFs both work.',
+      'FloorTrace reads the room sizes printed on the plan, works out the scale from them, and outlines the outside walls. It takes a few seconds.',
+      'Compare the outline with the plan. If a corner is off, drag it into place.',
+      'Click Export to save an image of the plan with its measurements, ready for your report or workfile.',
+    ],
+  },
+  {
+    title: 'If the outline is wrong',
+    items: [
+      'Drag any corner to move it. Right-click a corner to delete it.',
+      'Choose Paint in the tools on the right, paint roughly over the outside walls, then click “Draw the outline”. It only needs to be close — FloorTrace follows the walls.',
+      'Or choose Corners and click each outside corner of the house in turn.',
+      'Notes or a legend drawn inside the house can confuse FloorTrace. Use Erase to white them out, or Crop to just the house, then choose “Find the outline again” in the Outline section.',
+    ],
+  },
+  {
+    title: 'If the area looks wrong',
+    items: [
+      'The area depends on the scale, and the Scale section says where it came from.',
+      'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Measure a length you know” and type in the length.',
+      'Anything FloorTrace is unsure about is listed under “Things to check”. Click Show to see where it is on the plan.',
+    ],
+  },
+  {
+    title: 'Garages, porches and other levels',
+    items: [
+      'Choose “Add another outline” in the Outline section, then set what it counts as — living area (GLA), garage, porch and so on. Only living area counts toward GLA.',
+      'A level drawn on a separate sheet: open it with File ▸ New plan tab. The panel adds the levels together for the whole property.',
+    ],
+  },
+  {
+    title: 'Saving your work',
+    items: [
+      'Your plans are kept in this browser as you work, so they are still here if you close the tab.',
+      'Export saves an image for your report. To keep a copy you can open again and change later, choose File ▸ Save project file.',
+    ],
+  },
 ];
 
-// The same section, for a device with no keyboard. Not a translation of the
-// list above — most of those rows have no touch equivalent at all, and the
-// three gestures that matter are ones the desktop never has to teach.
-const gestures = [
-  { keys: 'Drag', description: 'Pan the plan' },
-  { keys: 'Pinch', description: 'Zoom in and out' },
-  { keys: 'Tap', description: 'Place a corner, a measure point or a room' },
-  { keys: 'Double-tap', description: 'Add a corner to an outline you have traced' },
-  { keys: 'Press & hold', description: 'Delete an outline corner' },
-  { keys: 'Two fingers', description: 'Zoom while a brush tool is active' },
+// ── keyboard shortcuts ───────────────────────────────────────────────────
+const SHORTCUTS = [
+  {
+    title: 'Files',
+    rows: [
+      [`${mod} + O`, 'Open a floor plan'],
+      [`${mod} + V`, 'Paste a floor plan image'],
+      [`${mod} + E`, 'Export an image for your report'],
+      [`${mod} + ${alt} + C`, 'Copy that image to the clipboard'],
+      [`${mod} + S`, 'Save a project file'],
+      [`${mod} + Z`, 'Undo'],
+      [`${mod} + Shift + Z`, 'Redo'],
+    ],
+  },
+  {
+    title: 'Viewing the plan',
+    rows: [
+      ['Scroll wheel', 'Zoom in and out'],
+      ['Drag the plan', 'Move around'],
+      ['F', 'Fit the plan in the window'],
+      ['R / Shift + R', 'Rotate right / left 45°'],
+      ['O', 'Show or hide the measurement panel'],
+      ['L', 'Show or hide wall lengths'],
+      [`${mod} + Scroll wheel`, 'Larger or smaller labels and corners'],
+    ],
+  },
+  {
+    title: 'Tools',
+    rows: [
+      // Read off the catalogue rather than retyped, in the order the rail
+      // shows them, which is the order the digits follow.
+      ...TOOL_GROUPS.flatMap((g) => g.tools)
+        .filter((t) => t.digit)
+        .map((t) => [t.digit, t.label]),
+      ['[ / ]', 'Smaller / larger brush'],
+      ['Enter', 'Finish what you are drawing'],
+      ['Esc', 'Cancel the current tool'],
+      ['Delete', 'Delete the selected corner, line or shape'],
+      ['Right-click', 'Delete a corner'],
+    ],
+  },
+  {
+    title: 'Plans and outlines',
+    rows: [
+      // Ctrl+Alt rather than the obvious chords: Ctrl+Tab, Ctrl+W and Ctrl+1–9
+      // all belong to the browser's own tab strip and cannot be taken from a page.
+      [`${mod} + ${alt} + N`, 'Open a new plan tab'],
+      [`${mod} + ${alt} + 1 – 6`, 'Go to a plan tab by number'],
+      [`${mod} + ${alt} + ← / →`, 'Previous or next plan tab'],
+      ['Alt + 1 – 7', 'Switch between outlines on this plan'],
+    ],
+  },
 ];
 
-// Names here must match the command bar and the tool rail. They drifted once
-// already: the shell renamed every command and this list kept describing the
-// old one.
-// What to do when automatic tracing disappoints you, in the order worth
-// trying. Written against the causes the detector actually reports — a legend
-// or dimension string it read as wall, a plan too small for its strokes to
-// survive, an opening it had to bridge — rather than as general advice.
-const recovery = [
-  'Automatic tracing works best on a clean plan with white space around the drawing. '
-    + 'It struggles with legends and notes inside the building, low-resolution scans, '
-    + 'and plans photographed at an angle.',
-  '"Paint outline" is the answer to most failures: drag roughly over the exterior walls '
-    + 'and FloorTrace snaps to them. It only needs to be close.',
-  'Painted the outline and it still came back wrong? Paint again — your strokes are kept, '
-    + 'so you can add one more pass rather than starting over.',
-  'A legend, title block or note inside the building confuses the tracer. Erase it from the '
-    + 'plan image, or crop to the building, then trace again.',
-  'Read the dimensions before tracing. The rooms it finds are evidence the tracer uses, and '
-    + 'on some plans they are the difference between an outline and nothing.',
-  'The area looks wrong but the outline looks right? Check the scale — it is a separate step, '
-    + 'and area changes with the square of it.',
-  'Stats & warnings at the foot of the measurement panel lists everything the app doubts, '
-    + 'with a "Show" button that points at the spot on the plan.',
+// The same page for a device with no keyboard. Not a translation of the list
+// above — most of those rows have no touch equivalent at all.
+const GESTURES = [
+  ['Drag', 'Move around the plan'],
+  ['Pinch', 'Zoom in and out'],
+  ['Tap', 'Place a corner, a measure point or a room'],
+  ['Double-tap', 'Add a corner to an outline'],
+  ['Press & hold', 'Delete an outline corner'],
+  ['Two fingers', 'Zoom while a brush tool is on'],
 ];
 
-const tips = [
-  'Click on a room to auto-detect its boundary.',
-  'Use "Find outline" to detect the exterior walls automatically.',
-  'If that fails, "Paint outline" lets you paint roughly over the walls — FloorTrace snaps the outline to them.',
-  'Drag outline corners to adjust what the detector found.',
-  'Click a corner to select it, then press Delete to remove it.',
-  'Measure draws a measurement line; Draw an area makes a custom polygon.',
-  'No printed dimensions? Use Scale — drag a line along a wall whose length you know and type it in.',
-  'Use Cut out to punch a courtyard or light well out of an outline; it is subtracted from the area and survives a re-trace.',
-  'The Outlines list shows how confident the detector was, and why.',
-  'Drag & drop an image file onto the canvas to open it.',
-  'Export gives you one image with the plan, the outlines and every number on '
-    + 'it — that is the thing to put in a workfile. The .floorplan file is only '
-    + 'needed if you mean to come back and edit the trace.',
-];
+const Tab = ({ active, onClick, children }) => (
+  <button
+    type="button"
+    role="tab"
+    aria-selected={active}
+    onClick={onClick}
+    className={`h-9 px-3 text-[14px] font-medium border-b-2 -mb-px transition-colors cursor-pointer
+      ${active ? 'border-accent text-fg' : 'border-transparent text-fg-3 hover:text-fg'}`}
+  >
+    {children}
+  </button>
+);
 
-const touchTips = [
-  'Photograph the plan straight from the menu — the whole sheet, square on, in good light.',
-  'Tap “Read dimensions” first. It reads the printed room sizes and sets the scale from them.',
-  'Tap a room on the plan to detect its walls and pin the scale to that room.',
-  'If auto-detection cannot read the plan, use Paint outline: drag roughly over the exterior walls and FloorTrace snaps to them.',
-  'Drag an outline corner to adjust it; press and hold one to delete it.',
-  'Zoom in before adjusting corners — the whole plan on one screen is smaller than a fingertip.',
-  'The number at the bottom right is the area. Tap it for the scale, the breakdown and anything the detector was unsure about.',
-  'Export gives you one image with the plan and every number on it — that is what goes in a workfile.',
-];
-
-const HelpModal = ({ onClose }) => {
+const HelpModal = ({ onClose, initialTab = 'guide' }) => {
   const isTouch = useIsTouch();
   const isMobile = useIsMobile();
+  // Keyed on the page it was opened at (see App), so this only seeds it.
+  const [tab, setTab] = useState(initialTab === 'shortcuts' ? 'shortcuts' : 'guide');
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -119,107 +157,100 @@ const HelpModal = ({ onClose }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const rows = isTouch ? gestures : shortcuts;
-  const rowsTitle = isTouch ? 'Gestures' : 'Keyboard Shortcuts';
-  const shownTips = isTouch ? touchTips : tips;
-
   return (
     <div
       // `fixed`, not `absolute`: the shell is a static flex column, so an
       // absolute child was already resolving against the viewport — this just
       // says so, and keeps the sheet out of the mobile shell's overflow clip.
       className={`fixed inset-0 z-50 flex bg-black/50 pointer-events-auto
-                  ${isMobile ? 'items-end' : 'items-center justify-center'}`}
+                  ${isMobile ? 'items-end' : 'items-center justify-center p-6'}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={`bg-panel border border-line shadow-2xl overflow-y-auto overscroll-contain
-                    animate-fade-in
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-title"
+        className={`flex flex-col bg-panel border border-line shadow-2xl animate-fade-in
           ${isMobile
             ? 'w-full max-h-[88%] rounded-t-2xl pb-safe'
-            : 'rounded-xl w-[360px] max-h-[80vh]'}`}
+            : 'rounded-xl w-[560px] max-w-full max-h-[85vh]'}`}
       >
-        {/* Header */}
-        <div className="sticky top-0 flex items-center justify-between px-4 py-3 border-b border-line bg-panel">
-          <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-sm'}`}>
-            How it works
-          </h2>
-          <button
-            onClick={onClose}
-            className={`rounded-md text-fg-3 hover:text-white hover:bg-line/70 transition-colors
-                        cursor-pointer ${isMobile ? 'tap-target -mr-2' : 'p-1'}`}
-            title="Close"
-            aria-label="Close"
-          >
-            <X className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} />
-          </button>
+        <div className="shrink-0 border-b border-line">
+          <div className="flex items-center justify-between px-5 pt-3.5">
+            <h2 id="help-title" className="text-[16px] font-semibold text-fg">
+              Help
+            </h2>
+            <button
+              onClick={onClose}
+              className={`rounded-md text-fg-3 hover:text-fg hover:bg-sunken transition-colors
+                          cursor-pointer ${isMobile ? 'tap-target -mr-2' : 'grid place-items-center w-8 h-8'}`}
+              title="Close"
+              aria-label="Close"
+            >
+              <X className={isMobile ? 'w-5 h-5' : 'w-[18px] h-[18px]'} aria-hidden="true" />
+            </button>
+          </div>
+          <div role="tablist" aria-label="Help pages" className="flex gap-2 px-4 mt-1.5">
+            <Tab active={tab === 'guide'} onClick={() => setTab('guide')}>How to use FloorTrace</Tab>
+            <Tab active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')}>
+              {isTouch ? 'Gestures' : 'Keyboard shortcuts'}
+            </Tab>
+          </div>
         </div>
 
-        {/* First, deliberately. This panel used to open with 24 keyboard
-            shortcuts and bury the one thing a stuck user is looking for as the
-            third of eleven tips — and automatic tracing failing is the single
-            most likely reason anybody opens it. */}
-        <section className="px-4 py-3">
-          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
-            When tracing goes wrong
-          </h3>
-          <ul className="space-y-1.5">
-            {recovery.map((item) => (
-              <li
-                key={item}
-                className={`text-fg-3 leading-relaxed flex gap-1.5
-                            ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}
-              >
-                <span className="text-accent shrink-0">•</span>
-                {item}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <div className="panel-divider mx-4" />
-
-        <section className="px-4 py-3">
-          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
-            {rowsTitle}
-          </h3>
-          <div className="space-y-1.5">
-            {rows.map((s) => (
-              <div key={s.keys} className="flex items-center justify-between gap-3">
-                <span className={`text-fg-3 ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}>
-                  {s.description}
-                </span>
-                <kbd className={`shrink-0 font-mono text-fg-2 bg-panel-2/80 border border-line
-                                 rounded px-1.5 py-0.5 ${isMobile ? 'text-[12px]' : 'text-[10px]'}`}>
-                  {s.keys}
-                </kbd>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <div className="panel-divider mx-4" />
-
-        {/* Tips */}
-        <section className="px-4 py-3">
-          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider mb-2">
-            Tips
-          </h3>
-          <ul className="space-y-1.5">
-            {shownTips.map((tip) => (
-              <li
-                key={tip}
-                className={`text-fg-3 leading-relaxed flex gap-1.5
-                            ${isMobile ? 'text-[13px]' : 'text-[11px]'}`}
-              >
-                <span className="text-accent shrink-0">•</span>
-                {tip}
-              </li>
-            ))}
-          </ul>
-        </section>
+        <div className="overflow-y-auto overscroll-contain px-5 py-4" role="tabpanel">
+          {tab === 'guide' ? (
+            GUIDE.map((section) => {
+              const List = section.ordered ? 'ol' : 'ul';
+              return (
+                <section key={section.title} className="mb-5 last:mb-1">
+                  <h3 className="text-[14.5px] font-semibold text-fg mb-2">{section.title}</h3>
+                  <List className="space-y-2">
+                    {section.items.map((item, i) => (
+                      <li key={item} className={`flex gap-2.5 text-[14px] leading-relaxed text-fg-2`}>
+                        <span className={`shrink-0 ${section.ordered
+                          ? 'grid place-items-center w-6 h-6 mt-px rounded-full bg-accent/12 text-accent-strong text-[12.5px] font-semibold'
+                          : 'text-accent mt-px'}`}>
+                          {section.ordered ? i + 1 : '•'}
+                        </span>
+                        <span className="min-w-0">{item}</span>
+                      </li>
+                    ))}
+                  </List>
+                </section>
+              );
+            })
+          ) : isTouch ? (
+            <div className="space-y-2">
+              {GESTURES.map(([keys, description]) => (
+                <div key={keys} className="flex items-center justify-between gap-4">
+                  <span className="text-[14px] text-fg-2">{description}</span>
+                  <kbd className="shrink-0 text-[13px] text-fg-2 bg-panel-2 border border-line rounded px-2 py-0.5">
+                    {keys}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+          ) : (
+            SHORTCUTS.map((group) => (
+              <section key={group.title} className="mb-5 last:mb-1">
+                <h3 className="text-[14.5px] font-semibold text-fg mb-2">{group.title}</h3>
+                <div className="space-y-1.5">
+                  {group.rows.map(([keys, description]) => (
+                    <div key={`${keys}-${description}`} className="flex items-center justify-between gap-4">
+                      <span className="text-[14px] text-fg-2">{description}</span>
+                      <kbd className="shrink-0 text-[12.5px] text-fg-2 bg-panel-2 border border-line rounded px-2 py-0.5 whitespace-nowrap">
+                        {keys}
+                      </kbd>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

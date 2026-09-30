@@ -17,13 +17,15 @@ const ConfirmDialog = () => {
   const request = useWorkspaceStore((s) => s.confirmRequest);
   const resolve = useWorkspaceStore((s) => s.resolveConfirm);
   const isTouch = useIsTouch();
-  const confirmRef = useRef(null);
+  const cancelRef = useRef(null);
   const previouslyFocused = useRef(null);
 
   useEffect(() => {
     if (!request) return;
     previouslyFocused.current = document.activeElement;
-    confirmRef.current?.focus();
+    // The safe answer has the focus. Every one of these dialogs discards
+    // work, and Enter pressed out of habit should keep it rather than lose it.
+    cancelRef.current?.focus();
 
     const onKey = (e) => {
       if (e.key === 'Escape') {
@@ -73,19 +75,19 @@ const ConfirmDialog = () => {
             next?.focus();
           }
         }}
-        className="w-[420px] max-w-[calc(100vw-32px)] rounded-lg border border-line
-                   bg-panel-2 shadow-2xl p-5"
+        className="w-[460px] max-w-[calc(100vw-32px)] rounded-lg border border-line
+                   bg-panel-2 shadow-2xl p-6"
       >
         <div className="flex gap-3">
           <span className="grid place-items-center w-9 h-9 shrink-0 rounded-full bg-warn/15">
             <AlertTriangle className="w-[18px] h-[18px] text-warn" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <h2 id="confirm-title" className="text-[14px] font-semibold text-fg leading-snug">
+            <h2 id="confirm-title" className="text-[16px] font-semibold text-fg leading-snug">
               {message}
             </h2>
             {detail && (
-              <p id="confirm-detail" className="mt-1.5 text-[12.5px] leading-snug text-fg-3">
+              <p id="confirm-detail" className="mt-1.5 text-[14px] leading-snug text-fg-2">
                 {detail}
               </p>
             )}
@@ -98,16 +100,16 @@ const ConfirmDialog = () => {
             failure a confirmation exists to prevent. */}
         <div className="flex justify-end gap-2 mt-5">
           <button
+            ref={cancelRef}
             type="button"
             onClick={() => resolve(false)}
             className={`rounded-md border border-line bg-panel-2 text-fg-2 font-medium
                         hover:text-fg hover:border-accent/50 transition-colors cursor-pointer
-                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-8 px-3.5 text-[12.5px]'}`}
+                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-10 px-4 text-[14px]'}`}
           >
             {cancelLabel}
           </button>
           <button
-            ref={confirmRef}
             type="button"
             onClick={() => resolve(true)}
             // `accent-ink`, not `white`: dark `--crit` is a light salmon tuned to
@@ -115,7 +117,7 @@ const ConfirmDialog = () => {
             // token is already white in the light theme, where crit is dark.
             className={`rounded-md border border-crit bg-crit font-semibold text-accent-ink
                         hover:brightness-110 transition-[filter] cursor-pointer
-                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-8 px-3.5 text-[12.5px]'}`}
+                        ${isTouch ? 'flex-1 h-11 text-[14px]' : 'h-10 px-4 text-[14px]'}`}
           >
             {confirmLabel}
           </button>

@@ -7,117 +7,111 @@ import {
  * The tool inventory, in the order the digit shortcuts assign.
  *
  * Its own module — like `toolModes.js`, and for the same reason: two components
- * render this list now (the desktop rail as a 48 px icon column, the mobile
- * sheet as a grid of named tiles) and a shared constant living inside one of
- * them makes that file stop being a component-only export.
+ * render this list (the desktop rail as a labelled column, the mobile sheet as
+ * a grid of named tiles) and a shared constant living inside one of them makes
+ * that file stop being a component-only export.
  *
- * **The digits run 1–9 straight down this list.** Both this file and
- * useKeyboardShortcuts used to claim they matched and they did not: the rail
- * read 7, 4, 8, 9, 1, 3, 2, 5, 6 top to bottom, because digits had been handed
- * out in the order the tools were built and the rail was later regrouped
- * around them. Nothing derives a digit from an index — a mapping that moves
- * with app state is the thing being avoided, not a mapping written down twice
- * — so renumbering means editing both lists together.
+ * **The digits run 1–9 straight down this list.** Nothing derives a digit from
+ * an index — a mapping that moves with app state is the thing being avoided,
+ * not a mapping written down once — so renumbering means editing the `digit`
+ * fields here; `useKeyboardShortcuts`, `keyboardGuard` and the help page all
+ * read them from this list.
  *
- * There are ten tools and nine digits, so two of them carry none. Both sit
- * **last in their own group**, which is what keeps the run reading straight
- * down the list rather than skipping a number in the middle of one. `rotate`
- * has always been one; `cornerEraser` is the other, and it is the right one to
- * go without: it is a correction reached from the outline you are correcting,
- * not a mode anyone reaches for blind.
+ * **The rail shows the tools an appraiser actually reaches for, with words.**
+ * It used to be twelve bare icons whose only explanation appeared in the status
+ * bar on hover — a compass, a waypoint chain and a dashed square mean nothing to
+ * someone who has not already learned them. The rail now labels every button,
+ * and the three tools almost nobody needs (an angle, deleting corners in bulk,
+ * turning the plan) sit in the `overflow` group behind a "More" button, where
+ * they stop competing with the ones that do the job. They keep their order and
+ * the run still reads straight down: the overflow group is last, so the digit
+ * it carries is the last one.
  *
- * Group order is the core job first and the utilities last: Select is the rest
+ * Group order is the core job first and the utilities last: Adjust is the rest
  * state, Outline is what the app is for, Measure needs an outline to act on,
- * and the image tools are prep you reach for occasionally. Within a group,
- * whatever must happen first comes first — Set scale above the measurements it
- * gives meaning to, Cut out below the outline it punches a hole in.
+ * and the plan clean-up tools are prep you reach for occasionally. Within a
+ * group, whatever must happen first comes first — Scale above the measurements
+ * it gives meaning to, Cut out below the outline it takes an area out of.
  *
- * `short` is the compact, imperative name of the *tool* ("Place corners").
- * `label` stays the fuller phrase and stays the accessible name at every
- * density. Neither is what the status bar prints once the tool is running: that
- * is `TOOL_MODES[id].name`, which names the *state* ("Placing corners"), and the
- * two are deliberately worded differently — one is a thing you pick, the other
- * is a thing you are doing.
+ * `short` is the rail's label — one word where one will do, because it sits
+ * under the icon in a 72 px column. `label` is the fuller phrase and the
+ * accessible name. Neither is what the status bar prints once the tool is
+ * running: that is `TOOL_MODES[id].name`, which names the *state* ("Painting
+ * the outline") — one is a thing you pick, the other a thing you are doing.
  *
- * **Every tool carries a `hint`.** The rail is icon-only, so hovering or
- * focusing a button prints `short` and `hint` in the status bar — that is the
- * only place a tool says what it does now that the labelled density is gone.
- * `line`, `area` and `crop` had no hint while the words could be switched on
- * beside the icon; a missing one is now a tool that answers nothing. It says
- * what the tool is *for*, in contrast to `TOOL_MODES[id].hint`, which says what
- * to do once the tool is running.
+ * **Every tool carries a `hint`**: what the tool is *for*, shown in the status
+ * bar and the button's tooltip when the pointer rests on it, in contrast to
+ * `TOOL_MODES[id].hint`, which says what to do once the tool is running.
  *
  * `needsArea` doubles as the disabled reason. Every tool disables in place
- * rather than disappearing, so a button never moves out from under the pointer
- * — the old ToolsPanel gated four of these behind `hasArea` and reflowed a
- * two-column grid the moment a trace landed.
+ * rather than disappearing, so a button never moves out from under the pointer.
  */
 export const TOOL_GROUPS = [
   {
     id: 'edit',
-    title: 'Edit',
+    title: 'Adjust',
     tools: [
-      { id: 'select',  digit: null, icon: MousePointer2,      short: 'Select', label: 'Select & adjust',
-        hint: 'Drag corners, voids and shapes' },
+      { id: 'select',  digit: null, icon: MousePointer2,      short: 'Adjust', label: 'Adjust the outline',
+        hint: 'Drag a corner, a cut-out or a shape to move it' },
     ],
   },
   {
     id: 'outline',
     title: 'Outline',
     tools: [
-      { id: 'draw',    digit: '1',  icon: Brush,              short: 'Paint outline', label: 'Paint the outline',
-        hint: 'Paint over the exterior walls and let FloorTrace read them' },
-      { id: 'vertex',  digit: '2',  icon: Waypoints,          short: 'Place corners', label: 'Place corners',
-        hint: 'Place the exterior outline corner by corner' },
-      { id: 'void',    digit: '3',  icon: SquareDashedBottom, short: 'Cut out', label: 'Cut out a void',
-        hint: 'Punch a courtyard or light well out of an outline',
-        needsArea: 'Cutting a void needs a traced outline first.' },
-      // This is the tool that used to be called "Erase clutter" and sit in the
-      // Plan image group. It never touched the image: it deletes the outline's
-      // own corners, and with no outline on the canvas it did nothing at all
-      // and said nothing about why. Named and grouped for what it does, and
-      // gated so the reason shows.
-      { id: 'cornerEraser', digit: null, icon: CircleMinus, short: 'Remove corners', label: 'Remove outline corners',
-        hint: 'Drag over corners of the outline to delete them',
-        needsArea: 'Removing corners needs a traced outline first.' },
+      { id: 'draw',    digit: '1',  icon: Brush,              short: 'Paint', label: 'Paint the outline',
+        hint: 'Paint roughly over the outside walls and FloorTrace draws the outline' },
+      { id: 'vertex',  digit: '2',  icon: Waypoints,          short: 'Corners', label: 'Click the corners',
+        hint: 'Click each outside corner to draw the outline yourself' },
+      { id: 'void',    digit: '3',  icon: SquareDashedBottom, short: 'Cut out', label: 'Cut out an open area',
+        hint: 'Take a courtyard or an open-to-below area out of the outline',
+        needsArea: 'Draw an outline first, then cut an area out of it.' },
     ],
   },
   {
     id: 'measure',
     title: 'Measure',
     tools: [
-      { id: 'scale',   digit: '4',  icon: Scaling,            short: 'Set scale', label: 'Set the scale',
+      { id: 'scale',   digit: '4',  icon: Scaling,            short: 'Scale', label: 'Set the scale',
         hint: 'Set the scale from a length you know' },
-      { id: 'line',    digit: '5',  icon: Ruler,              short: 'Measure', label: 'Measure a length',
+      { id: 'line',    digit: '5',  icon: Ruler,              short: 'Measure', label: 'Measure a distance',
         hint: 'Measure the distance between two points',
-        needsArea: 'Measuring needs a traced outline first.' },
-      // Area above Angle: this app exists to produce an area, and an angle is
-      // the rarest thing in the rail.
-      { id: 'area',    digit: '6',  icon: Pentagon,           short: 'Area', label: 'Draw an area',
-        hint: 'Measure a patio, deck or any shape you outline',
-        needsArea: 'Drawing an area needs a traced outline first.' },
-      { id: 'angle',   digit: '7',  icon: Compass,            short: 'Angle', label: 'Measure an angle',
-        hint: 'Measure the angle between two walls',
-        needsArea: 'Measuring an angle needs a traced outline first.' },
+        needsArea: 'Measuring needs an outline first.' },
+      { id: 'area',    digit: '6',  icon: Pentagon,           short: 'Area', label: 'Measure an area',
+        hint: 'Measure a deck, a patio or any shape you outline',
+        needsArea: 'Measuring an area needs an outline first.' },
     ],
   },
   {
     id: 'image',
-    title: 'Plan image',
+    title: 'Clean up the plan',
     tools: [
-      { id: 'crop',    digit: '8',  icon: Crop,               short: 'Crop', label: 'Crop the plan',
-        hint: 'Keep only the part of the image you drag over' },
-      // Keeps the id, the digit and the name the old one advertised, and is
-      // the first thing under either of them that actually paints over the
-      // plan. A legend inside the footprint is a documented way to lose a
-      // trace, and until now nothing in the app could take one off the page.
-      { id: 'eraser',  digit: '9',  icon: Eraser,             short: 'Erase', label: 'Erase clutter',
-        hint: 'Remove legends or notes that confuse detection' },
-      // The desktop rail rotates the other way on right-click; the mobile sheet
-      // splits it into two buttons, because a phone has no second button.
-      // Digitless, and last, which is what keeps the 1–9 run unbroken.
-      { id: 'rotate',  digit: null, icon: RotateCw,           short: 'Rotate', label: 'Rotate 45°',
-        hint: 'Right-click to rotate the other way' },
+      { id: 'crop',    digit: '7',  icon: Crop,               short: 'Crop', label: 'Crop the plan',
+        hint: 'Keep only the part of the plan you drag over' },
+      // Paints over the plan itself. A legend or a note inside the building is
+      // a documented way to lose a trace, and this is how it comes off the page.
+      { id: 'eraser',  digit: '8',  icon: Eraser,             short: 'Erase', label: 'Erase marks on the plan',
+        hint: 'White out notes or a legend that confuse the automatic outline' },
+    ],
+  },
+  {
+    id: 'more',
+    title: 'More tools',
+    // Behind the rail's "More" button rather than on it.
+    overflow: true,
+    tools: [
+      { id: 'angle',   digit: '9',  icon: Compass,            short: 'Angle', label: 'Measure an angle',
+        hint: 'Measure the angle between two walls',
+        needsArea: 'Measuring an angle needs an outline first.' },
+      // Deletes the outline's own corners in bulk. A single corner is deleted
+      // by right-clicking it, which is what nearly everyone needs.
+      { id: 'cornerEraser', digit: null, icon: CircleMinus, short: 'Remove corners', label: 'Remove outline corners',
+        hint: 'Drag over corners of the outline to delete them',
+        needsArea: 'Removing corners needs an outline first.' },
+      // One entry here; the rail's overflow and the mobile sheet both offer it
+      // as two explicit directions, since neither can lean on a right-click.
+      { id: 'rotate',  digit: null, icon: RotateCw,           short: 'Rotate', label: 'Rotate the plan 45°',
+        hint: 'Turn the plan 45° at a time' },
     ],
   },
 ];

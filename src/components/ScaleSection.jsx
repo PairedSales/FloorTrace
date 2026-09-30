@@ -5,20 +5,17 @@ import { formatDimensionInput, metersToFeet } from '../utils/unitConverter';
 import { useScaleLine } from '../hooks/useScaleLine';
 import InchesInput from './InchesInput';
 
-// Decimal feet from whatever the Room Size fields' unit toggle is currently
-// showing. Storage is always decimal feet, matching `roomDimensions`; the unit
-// is a display concern and is resolved here, at the input.
+// Decimal feet from whatever the unit toggle is currently showing. Storage is
+// always decimal feet, matching `roomDimensions`; the unit is a display concern
+// and is resolved here, at the input.
 const toFeet = (raw, unit) => {
   const num = parseFloat(raw);
   if (!(num > 0)) return null;
   return unit === 'metric' ? metersToFeet(Math.round(num * 100) / 100) : Math.round(num * 100) / 100;
 };
 
-const lengthPx = (line) => Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
-
-const ScaleLineRow = ({ line, unit, onCommit, onRemove }) => {
+const ScaleLineRow = ({ line, number, unit, onCommit, onRemove }) => {
   const [draft, setDraft] = useState('');
-  const px = Math.round(lengthPx(line));
 
   const commit = (value) => {
     const feet = toFeet(value, unit);
@@ -31,8 +28,8 @@ const ScaleLineRow = ({ line, unit, onCommit, onRemove }) => {
     : '';
 
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[9px] font-mono text-fg-3 w-12 shrink-0">{px} px</span>
+    <div className="flex items-center gap-2">
+      <span className="text-[13px] text-fg-3 w-12 shrink-0">Line {number}</span>
       {unit === 'inches' ? (
         <InchesInput
           value={line.feet ? String(line.feet) : ''}
@@ -47,21 +44,29 @@ const ScaleLineRow = ({ line, unit, onCommit, onRemove }) => {
           onKeyDown={(e) => { if (e.key === 'Enter') { commit(draft); e.currentTarget.blur(); } }}
           onBlur={() => draft && commit(draft)}
           className="panel-input select-text flex-1 min-w-0"
-          placeholder={unit === 'metric' ? 'true length (m)' : 'true length (ft)'}
+          placeholder={unit === 'metric' ? 'Its length in m' : 'Its length in ft'}
+          aria-label={`Length of line ${number}`}
         />
       )}
       <button
         type="button"
         onClick={() => onRemove(line.id)}
-        className="p-0.5 rounded text-fg-3 hover:text-crit hover:bg-panel transition-colors shrink-0"
-        title="Remove this scale line"
+        className="grid place-items-center w-7 h-7 rounded text-fg-3 hover:text-crit hover:bg-crit/12
+                   transition-colors shrink-0 cursor-pointer"
+        title="Remove this line"
+        aria-label={`Remove line ${number}`}
       >
-        <Trash2 className="w-3.5 h-3.5" />
+        <Trash2 className="w-4 h-4" aria-hidden="true" />
       </button>
     </div>
   );
 };
 
+/**
+ * The lengths the user drew to set the scale by hand, inside the Scale card.
+ * Only while the scale tool is on or there are lines to show: a scale taken
+ * from the plan's own room sizes has nothing to list here.
+ */
 const ScaleSection = ({ unit }) => {
   const scaleLines = useAppStore((s) => s.scaleLines) || [];
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
@@ -72,58 +77,42 @@ const ScaleSection = ({ unit }) => {
     return null;
   }
 
-  const fpp = calibration?.feetPerPixel;
-  const pxPerFoot = calibration?.calibrated && fpp?.x > 0 && fpp?.y > 0
-    ? { x: 1 / fpp.x, y: 1 / fpp.y }
-    : null;
-  const anisotropic = pxPerFoot && Math.abs(pxPerFoot.x - pxPerFoot.y) > 1e-6;
-
   return (
-    <>
-      <div className="panel-divider mx-3" />
-      <section className="px-3 py-3 pointer-events-auto">
-        <div className="flex items-center justify-between mb-1.5">
-          <h3 className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider">
-            Scale
-          </h3>
-          {(scaleLines.length > 0 || calibration?.source === 'line-calibration') && (
-            <button
-              onClick={clearAll}
-              className="text-[11px] font-semibold text-crit uppercase tracking-wider hover:text-crit cursor-pointer transition-colors duration-200"
-              title="Remove the scale lines and the scale they set"
-            >
-              CLEAR
-            </button>
-          )}
+    <section className="mt-3 pt-3 border-t border-line-soft">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[13px] font-semibold text-fg-2">Lengths you measured</p>
+        {(scaleLines.length > 0 || calibration?.source === 'line-calibration') && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="text-[13px] font-medium text-crit hover:underline cursor-pointer"
+            title="Remove these lines and the scale they set"
+          >
+            Remove all
+          </button>
+        )}
+      </div>
+
+      {scaleLines.length === 0 ? (
+        <p className="text-[13px] leading-snug text-fg-3">
+          On the plan, click both ends of something whose length you know — a wall with a
+          printed length is ideal. Then type the length here.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {scaleLines.map((line, i) => (
+            <ScaleLineRow
+              key={line.id}
+              line={line}
+              number={i + 1}
+              unit={unit}
+              onCommit={setLength}
+              onRemove={removeLine}
+            />
+          ))}
         </div>
-
-        {scaleLines.length === 0 ? (
-          <p className="text-[11px] text-fg-3 italic py-1">
-            Click both ends of a length you know on the canvas.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {scaleLines.map((line) => (
-              <ScaleLineRow
-                key={line.id}
-                line={line}
-                unit={unit}
-                onCommit={setLength}
-                onRemove={removeLine}
-              />
-            ))}
-          </div>
-        )}
-
-        {pxPerFoot && (
-          <p className="mt-2 text-[10px] font-mono text-fg-3 text-center">
-            {anisotropic
-              ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
-              : `${pxPerFoot.x.toFixed(2)} px/ft`}
-          </p>
-        )}
-      </section>
-    </>
+      )}
+    </section>
   );
 };
 

@@ -27,10 +27,10 @@ const SKIPPED_REASON = {
 
 const Row = ({ label, value, tone, strong }) => (
   <div className="flex items-baseline justify-between gap-3 py-[3px]">
-    <span className={`text-[12px] leading-snug min-w-0 ${strong ? 'text-fg font-semibold' : 'text-fg-3'}`}>
+    <span className={`text-[13px] leading-snug min-w-0 ${strong ? 'text-fg font-semibold' : 'text-fg-3'}`}>
       {label}
     </span>
-    <span className={`font-mono tabular-nums text-[12.5px] shrink-0
+    <span className={`tabular-nums text-[13px] shrink-0
                       ${strong ? 'text-fg font-semibold' : (tone ?? 'text-fg-2')}`}>
       {value}
     </span>
@@ -39,7 +39,7 @@ const Row = ({ label, value, tone, strong }) => (
 
 const Section = ({ title, children }) => (
   <div className="mt-3 pt-2.5 border-t border-line first:mt-0 first:pt-0 first:border-t-0">
-    <p className="text-[10.5px] font-bold uppercase tracking-[.07em] text-fg-dim">{title}</p>
+    <p className="text-[13px] font-semibold text-fg-2">{title}</p>
     <div className="mt-1.5">{children}</div>
   </div>
 );
@@ -48,12 +48,12 @@ const Section = ({ title, children }) => (
 // for a right triangle, which is how the trade writes one.
 const Piece = ({ piece, unit }) => (
   <div className="flex items-baseline gap-2 py-[1px]">
-    <span className="flex-1 min-w-0 truncate font-mono tabular-nums text-[11.5px] text-fg-3">
+    <span className="flex-1 min-w-0 truncate tabular-nums text-[12.5px] text-fg-3">
       {piece.kind === 'void'
-        ? 'a void, taken off whole'
+        ? 'a cut-out, taken off whole'
         : `${piece.half ? '0.5 × ' : ''}${piece.lengths[0]} × ${piece.lengths[1]}`}
     </span>
-    <span className={`shrink-0 font-mono tabular-nums text-[11.5px]
+    <span className={`shrink-0 tabular-nums text-[12.5px]
                       ${piece.deducted ? 'text-warn' : 'text-fg-2'}`}>
       = {piece.deducted ? '−' : ''}{formatAreaTenths(piece.displayed, unit).value}
     </span>
@@ -71,11 +71,11 @@ const Level = ({ level, unit, single }) => (
           <span className="w-2.5 h-2.5 rounded-sm shrink-0"
                 style={{ backgroundColor: level.color || '#BD93F9' }} />
         )}
-        <span className="min-w-0 truncate text-[12.5px] font-medium text-fg-2">
+        <span className="min-w-0 truncate text-[13.5px] font-medium text-fg-2">
           {single ? 'Outline' : level.name}
         </span>
       </span>
-      <span className="shrink-0 font-mono tabular-nums text-[12.5px] font-semibold text-fg">
+      <span className="shrink-0 tabular-nums text-[13.5px] font-semibold text-fg">
         {formatAreaTenths(level.subtotal, unit).value} {formatAreaTenths(0, unit).suffix}
       </span>
     </div>
@@ -84,7 +84,7 @@ const Level = ({ level, unit, single }) => (
         the outline came apart into one rectangle, because that piece is
         already this sentence with an area on the end of it. */}
     {level.dimensions && level.working?.pieces.length !== 1 && (
-      <p className="mt-0.5 text-[11.5px] leading-snug text-fg-dim">
+      <p className="mt-0.5 text-[12.5px] leading-snug text-fg-dim">
         overall {formatLength(level.dimensions.width, unit)}
         {' × '}{formatLength(level.dimensions.height, unit)}
       </p>
@@ -98,7 +98,7 @@ const Level = ({ level, unit, single }) => (
         {/* The pieces are lengths along the walls, not across the page, so the
             reader is told why they do not match a ruler held to the image. */}
         {level.working.rotation > 0 && (
-          <p className="mt-1 text-[11px] leading-snug text-fg-dim">
+          <p className="mt-1 text-[12px] leading-snug text-fg-dim">
             Measured along the walls, which run {level.working.rotation.toFixed(0)}° off the page.
           </p>
         )}
@@ -106,7 +106,7 @@ const Level = ({ level, unit, single }) => (
     ) : (
       // An outline that crosses itself has an area but no partition. Saying so
       // beats printing a column that cannot reach the figure above it.
-      <p className="mt-1 text-[11.5px] leading-snug text-warn">
+      <p className="mt-1 text-[12.5px] leading-snug text-warn">
         This outline cannot be broken into pieces — it crosses itself, so the
         area above is the shoelace of the whole ring.
       </p>
@@ -116,8 +116,8 @@ const Level = ({ level, unit, single }) => (
         the user's assertion, but it is not deducted — so it is named here
         rather than left to look like an omission. */}
     {level.holes.filter((h) => !h.subtracted).map((hole) => (
-      <p key={hole.key} className="mt-1 text-[11.5px] leading-snug text-warn">
-        A void outside this outline was not deducted.
+      <p key={hole.key} className="mt-1 text-[12.5px] leading-snug text-warn">
+        A cut-out outside this outline was not taken off.
       </p>
     ))}
   </div>
@@ -160,35 +160,35 @@ const WorkCard = ({ unit }) => {
 
   const copy = () => {
     navigator.clipboard.writeText(derivationText(d));
-    flashStatus('Working copied to the clipboard');
+    flashStatus('Calculation copied');
   };
 
   return (
     <div id="dock-work">
       <Card title="How this area was calculated">
         <Section title="Scale">
-          <p className="text-[12px] leading-snug text-fg-2">{scale.provenance}</p>
+          <p className="text-[13px] leading-snug text-fg-2">{scale.provenance}</p>
           {/* With no scale set the app falls back to a foot per pixel and goes
               on printing areas, so the assumption is named rather than denied.
               Saying "the figures are pixels only" over a column that is not
               pixels — and in metric is not the pixel count either — put two
               contradictory claims on the one card that must be checkable. */}
           {!scale.calibrated && (
-            <p className="mt-1.5 text-[12px] leading-snug text-warn">
+            <p className="mt-1.5 text-[13px] leading-snug text-warn">
               The figures below therefore assume 1 pixel = 1 foot. They are not a
               measurement of the building.
             </p>
           )}
           <div className="mt-1.5">
             <Row
-              label="Scale in force"
+              label="Scale"
               value={scale.anisotropic
                 ? `${scale.display.pxPerUnit.x.toFixed(2)} × ${scale.display.pxPerUnit.y.toFixed(2)} px/${scale.display.lengthUnit}`
                 : `1 ${scale.display.lengthUnit} = ${scale.display.pxPerUnit.x.toFixed(2)} px`}
             />
           </div>
           {scale.note?.level === 'check' && (
-            <p className="mt-2 text-[12px] leading-snug text-warn">{scale.note.detail}</p>
+            <p className="mt-2 text-[13px] leading-snug text-warn">{scale.note.detail}</p>
           )}
         </Section>
 
@@ -226,7 +226,7 @@ const WorkCard = ({ unit }) => {
         {d.skipped.length > 0 && (
           <Section title="Not counted">
             {d.skipped.map((o) => (
-              <p key={o.id ?? o.name} className="text-[12px] leading-snug text-fg-dim py-[3px]">
+              <p key={o.id ?? o.name} className="text-[13px] leading-snug text-fg-dim py-[3px]">
                 {o.name} — {SKIPPED_REASON[o.skipped]}.
               </p>
             ))}
@@ -235,17 +235,17 @@ const WorkCard = ({ unit }) => {
 
         <div className="mt-3 pt-2.5 border-t border-line">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[12.5px] font-semibold text-fg">
+            <span className="text-[13.5px] font-semibold text-fg">
               {gla.measured
                 ? 'Total living area (rounded)'
                 : 'Total · no living-area outline'}
             </span>
-            <span className="font-mono tabular-nums text-[15px] font-bold text-fg">
+            <span className="tabular-nums text-[16px] font-semibold text-fg">
               {headline.value} {headline.suffix}
             </span>
           </div>
           {levelsDisagree && (
-            <p className="mt-1.5 text-[11.5px] leading-snug text-fg-dim">
+            <p className="mt-1.5 text-[12.5px] leading-snug text-fg-dim">
               The levels above add to {formatAreaTenths(gla.sumOfSubtotals, unit).value}. The
               figure reported is the unrounded sum, {gla.unrounded.toFixed(1)}, rounded once —
               that is the one the Area card states.
@@ -256,12 +256,10 @@ const WorkCard = ({ unit }) => {
         <button
           type="button"
           onClick={copy}
-          className="mt-3 w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-md
-                     border border-line bg-panel-2 text-[12.5px] text-fg-2 font-medium
-                     hover:text-fg hover:border-accent/50 transition-colors cursor-pointer"
+          className="mt-3 w-full btn btn-secondary"
         >
-          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-          Copy the working as text
+          <Copy className="w-4 h-4" aria-hidden="true" />
+          Copy the calculation as text
         </button>
       </Card>
     </div>

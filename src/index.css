@@ -182,10 +182,11 @@
     @apply border-t border-line-soft my-1;
   }
 
-  /* Command-bar button. 32px tall — Windows command bars want 32, the old
-     toolbar shipped 28. */
+  /* Command-bar button. 34px tall with 13.5px type: the people this app is for
+     read it at arm's length on a laptop, and the old 32/12.5 band read as a
+     developer tool before anything in it had been used. */
   .toolbar-btn {
-    @apply inline-flex h-8 items-center gap-1.5 px-2.5 text-[12.5px] font-medium rounded-md
+    @apply inline-flex h-[34px] items-center gap-2 px-3 text-[13.5px] font-medium rounded-md
            transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
            text-fg-2 hover:text-fg hover:bg-sunken;
   }
@@ -219,23 +220,26 @@
     @apply border-accent/55 text-accent hover:bg-accent/12 hover:text-accent-strong;
   }
 
+  /* Figures are set in the text face with tabular digits, not in the code
+     face. Fira Code on every number made the panel read like a terminal; the
+     columns still line up, because it is the digits that are fixed-width. */
   .panel-input {
-    @apply w-full px-2.5 py-1.5 text-[13px] font-mono rounded-md text-center
+    @apply w-full px-2.5 py-1.5 text-[14px] tabular-nums rounded-md text-center
            bg-panel-2 border border-line text-fg
            placeholder-fg-dim
            focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent
            transition-colors duration-150 select-text;
   }
 
-  /* The room size, which is the one measurement on the panel a person reads off
-     the plan and checks. It carries the weight the scale figure used to. */
+  /* The size of the room the scale is taken from — the one figure on the
+     panel a person reads off the plan and checks by eye. */
   .panel-input-lg {
-    @apply py-2 text-[19px];
+    @apply py-2 text-[18px];
   }
 
-  /* Segmented control option. 26px — nothing in the shell goes below that. */
+  /* Segmented control option. 28px tall — nothing in the shell goes below it. */
   .unit-pill {
-    @apply h-[26px] px-2.5 text-[12px] font-medium rounded
+    @apply h-7 px-2.5 text-[12.5px] font-medium rounded
            transition-colors duration-150 cursor-pointer select-none;
   }
   .unit-pill-active {
@@ -245,19 +249,76 @@
     @apply text-fg-2 hover:text-fg;
   }
 
-  /* Section heading shared by every dock card. */
+  /* Section heading shared by every dock card. Sentence case at reading size:
+     11px spaced capitals made every card title look like a form field label. */
   .card-heading {
-    @apply text-[11px] font-bold uppercase tracking-[.07em] text-fg-3;
+    @apply text-[14px] font-semibold text-fg;
   }
 
   .dock-card {
     @apply bg-panel-2 border border-line rounded-md shadow-sm;
   }
 
+  /* The panel's buttons, stated once. Every dock action used to spell out its
+     own dozen classes, and they had already drifted in height and weight. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-md
+           text-[13.5px] font-medium transition duration-150 cursor-pointer select-none
+           disabled:opacity-40 disabled:cursor-default;
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-ink font-semibold hover:brightness-110
+           disabled:hover:brightness-100;
+  }
+  .btn-secondary {
+    @apply border border-line bg-panel-2 text-fg-2 hover:text-fg hover:border-accent/50
+           disabled:hover:text-fg-2 disabled:hover:border-line;
+  }
+  .btn-quiet {
+    @apply text-fg-3 hover:text-fg hover:bg-sunken disabled:hover:bg-transparent;
+  }
+
+  /* The status band, which is also the instruction bar for a running tool.
+     One row where it fits. When the band is narrow — a small window, or a
+     browser zoomed in, which is common with the people this app is for — a
+     running tool's instruction takes a row of its own so it can be read in
+     full, and its brush, Cancel and Done move to a second row rather than
+     being pushed off the end. A container query rather than a media query:
+     the band's width is the window less a panel that can be open or closed. */
+  .status-band {
+    container-type: inline-size;
+  }
+  @container (max-width: 639.98px) {
+    .status-row-running {
+      flex-wrap: wrap;
+    }
+    .status-row-running > .status-lead {
+      flex-basis: 100%;
+      flex-wrap: wrap;
+    }
+    /* The instruction wraps rather than being cut short — it is the one line
+       the user needs to read in full. */
+    .status-row-running .status-hint {
+      white-space: normal;
+      height: auto;
+      min-height: 2.25rem;
+      padding-block: 0.4rem;
+    }
+    .status-row-running .status-hint > span {
+      white-space: normal;
+      overflow: visible;
+    }
+    /* What can go so the controls share one row: the brush's word label and
+       the key hints inside Cancel and Done. */
+    .status-row-running .status-optional {
+      display: none;
+    }
+  }
+
   /* Status chip — state is readable as form and colour, not colour alone. */
   .chip {
-    @apply inline-flex items-center gap-1.5 h-5 px-2 rounded-full
-           text-[11px] font-semibold whitespace-nowrap border;
+    @apply inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full
+           text-[12px] font-semibold whitespace-nowrap border;
   }
   .chip-dot {
     @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
@@ -320,9 +381,6 @@
   }
   .touch-dense .chip {
     @apply h-6 px-2.5 text-[12px];
-  }
-  .touch-dense .card-heading {
-    @apply text-[12px];
   }
   /* The trace list's delete button is `opacity-0 group-hover:opacity-100` —
      permanently invisible where there is no hover. */

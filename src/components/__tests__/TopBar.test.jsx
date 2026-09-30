@@ -5,19 +5,18 @@ import TopBar from '../TopBar';
 import useWorkspaceStore from '../../store/workspaceStore';
 
 /**
- * The band's two contracts, neither of which the old two-component row could
- * state, let alone hold.
+ * The band's contracts.
  *
- * **The accent means one thing** — "this is the step you are on" — so exactly
- * one control may carry it, it must never be a control you cannot press, and it
- * must never be Export. The row it replaces hard-wired the fill onto *Find
- * outline*, so first paint over an empty canvas showed a filled accent button
- * at `opacity-40`, which is 1.76:1.
+ * **It never fills a button.** Export is the end of the job and earns an
+ * outline once there is an area, never the fill: a filled accent over a
+ * doubtful trace is a wrong answer that looks green.
  *
- * **Every command that left the row still has a home.** Five labelled verbs
- * became three, and the two that went are only redesigned rather than removed
- * if a test says where they landed. `commandHomes` below is that landing
- * checklist, and it is the reason a caret exists at all.
+ * **Every command has a home.** The band gave up its two pipeline buttons and
+ * their carets; the menus below are the landing checklist for everything a
+ * user reaches from here, and the dock owns the outline's and the scale's
+ * corrections.
+ *
+ * **One dropdown at a time, and the keyboard knows about it.**
  */
 const noop = () => {};
 
@@ -25,9 +24,6 @@ const baseProps = {
   image: 'data:image/png;base64,AAA',
   isProcessing: false,
   hasArea: false,
-  calibrated: false,
-  perimeterTraces: [],
-  drawModeActive: false,
   planCount: 1,
   canOpenPlan: true,
   onFileOpen: noop,
@@ -38,46 +34,23 @@ const baseProps = {
   onSaveProjectAs: noop,
   onSaveAllProjects: noop,
   onNewPlan: noop,
-  onNextPlan: noop,
-  onPrevPlan: noop,
   onCloseActivePlan: noop,
   onCloseAllPlans: noop,
+  onOpenSettings: noop,
   onHelpOpen: noop,
-  onFindRoomSize: noop,
-  onSelectRoom: noop,
-  canSelectRoom: true,
-  onScaleTool: noop,
-  onTracePerimeter: noop,
-  onPaintOutline: noop,
-  onPlaceCorners: noop,
-  onAddOutline: noop,
   onFitToWindow: noop,
+  onZoomIn: noop,
+  onZoomOut: noop,
+  onRotate: noop,
   dockOpen: true,
   onDockToggle: noop,
-  showSideLengths: false,
+  showSideLengths: true,
   onShowSideLengthsChange: noop,
   autoSnapEnabled: true,
   onAutoSnapChange: noop,
-  saveOnExit: true,
-  onSaveOnExitChange: noop,
-  enhancedOcr: false,
-  onEnhancedOcrChange: noop,
-  theme: 'system',
-  onCycleTheme: noop,
 };
 
-const traced = (n = 1) => Array.from({ length: n }, (_, i) => ({
-  id: `t${i}`,
-  vertices: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }],
-}));
-
 const bar = (props = {}) => render(<TopBar {...baseProps} {...props} />);
-// A split button is one control in two halves, and both halves take the fill
-// together — so the caret is not a second primary. Counted by the labelled half.
-const primaries = (view) =>
-  [...view.container.querySelectorAll('.toolbar-btn-primary')]
-    .filter((b) => !b.getAttribute('aria-haspopup'))
-    .map((b) => b.textContent.trim());
 
 // Opens a dropdown by the accessible name of the control that owns it.
 const openMenu = (view, name) => {
@@ -85,93 +58,82 @@ const openMenu = (view, name) => {
   return view.getByRole('menu');
 };
 
-beforeEach(() => useWorkspaceStore.setState({ menuOpen: false }));
+const itemsOf = (menu) => within(menu).getAllByRole('menuitem')
+  .map((i) => (i.getAttribute('aria-label') ?? i.textContent).replace(/\s+/g, ' ').trim());
+
+beforeEach(() => useWorkspaceStore.setState({ menuOpen: null }));
 afterEach(cleanup);
 
-describe('the primary is the step you are on', () => {
-  it('puts no accent on the row before a plan is open', () => {
-    const view = bar({ image: null });
-    expect(primaries(view)).toEqual([]);
-  });
-
-  it('moves from Read dimensions to Find outline when a scale lands', () => {
-    expect(primaries(bar()).map((t) => t.trim())).toEqual(['Read dimensions']);
-    cleanup();
-    expect(primaries(bar({ calibrated: true }))).toEqual(['Find outline']);
-  });
-
-  it('stands down once an outline exists, rather than promoting Export', () => {
-    const view = bar({ calibrated: true, perimeterTraces: traced(), hasArea: true });
-    expect(primaries(view)).toEqual([]);
-    // Export earns the outlined treatment and never the fill: a filled accent
-    // over a `fair` trace is a wrong answer that looks green.
+describe('the band never fills a button', () => {
+  it('outlines Export once there is an area, and never fills it', () => {
+    const view = bar({ hasArea: true });
     const exportBtn = view.getByRole('button', { name: 'Export' });
     expect(exportBtn.className).toContain('toolbar-btn-ready');
-    expect(exportBtn.className).not.toContain('toolbar-btn-primary');
+    expect(view.container.querySelectorAll('.toolbar-btn-primary')).toHaveLength(0);
   });
 
-  it('never marks a control you cannot press', () => {
-    // The state the old row got wrong on first paint, plus the two that follow.
-    for (const props of [{ image: null }, { isProcessing: true }, { calibrated: true, isProcessing: true }]) {
-      const view = bar(props);
-      const marked = [...view.container.querySelectorAll('.toolbar-btn-primary')];
-      expect(marked.filter((b) => b.disabled)).toEqual([]);
-      cleanup();
-    }
-  });
-
-  it('fills both halves of a split button, so it reads as one object', () => {
+  it('leaves Export plain before there is anything to export', () => {
     const view = bar();
-    const caret = view.getByRole('button', { name: 'More ways to set the scale' });
-    expect(caret.className).toContain('toolbar-btn-primary');
-    // ...and the other split stays quiet, or there would be two primaries.
-    expect(view.getByRole('button', { name: 'More ways to make an outline' }).className)
-      .not.toContain('toolbar-btn-primary');
+    expect(view.getByRole('button', { name: 'Export' }).className).not.toContain('toolbar-btn-ready');
   });
 
-  it('says which step it is in the accessibility tree, not only in colour', () => {
+  it('shows only the name, the menus and Open before a plan is open', () => {
+    const view = bar({ image: null });
+    const labelled = view.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent.trim());
+    expect(labelled).toEqual(['File', 'View', 'Help', 'Open']);
+    expect(view.getByText('FloorTrace')).toBeTruthy();
+  });
+
+  it('asks the pipeline for nothing — reading dimensions and finding the outline happen on their own', () => {
     const view = bar();
-    expect(view.getByRole('button', { name: 'Read dimensions' }).getAttribute('aria-current')).toBe('step');
-    expect(view.getByRole('button', { name: 'Find outline' }).getAttribute('aria-current')).toBeNull();
-  });
-
-  it('keeps every verb the same shape in every stage, so the row cannot reflow', () => {
-    // The weight and the border box live on `-stage`, permanently; `-primary`
-    // and `-ready` only recolour. If either moves back onto a state class, the
-    // row changes width the moment the stage advances.
-    for (const props of [{}, { calibrated: true }, { calibrated: true, perimeterTraces: traced(), hasArea: true }]) {
-      const view = bar(props);
-      for (const name of ['Read dimensions', 'Find outline', 'Export']) {
-        expect(view.getByRole('button', { name }).className).toContain('toolbar-btn-stage');
-      }
-      cleanup();
-    }
+    expect(view.queryByRole('button', { name: /Read dimensions/ })).toBeNull();
+    expect(view.queryByRole('button', { name: /Find outline/ })).toBeNull();
   });
 });
 
-describe('every command that left the row still has a home', () => {
-  const commandHomes = [
-    ['More ways to set the scale', ['Read dimensions', 'Select room to scale from', 'Set the scale by hand']],
-    ['More ways to make an outline', ['Find outline', 'Paint outline', 'Place corners', 'Add another outline']],
+describe('every command has a home', () => {
+  const homes = [
+    ['File', ['Open floor plan…', 'Paste floor plan', 'Export image…', 'Copy image',
+      'Save project file', 'Save project file as…', 'New plan tab', 'Close plan', 'Settings…']],
+    ['View', ['Fit plan to window', 'Zoom in', 'Zoom out', 'Rotate right 45°', 'Rotate left 45°',
+      'Measurement panel', 'Wall lengths on the plan', 'Snap corners to walls']],
+    ['Help', ['How to use FloorTrace…', 'Keyboard shortcuts…', 'How automatic tracing works — opens in a new tab']],
   ];
 
-  it.each(commandHomes)('%s lists %j', (caret, expected) => {
-    const view = bar({ calibrated: true, perimeterTraces: traced() });
-    const menu = openMenu(view, caret);
-    const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent.replace(/\s+/g, ' ').trim());
-    for (const label of expected) expect(items.some((t) => t.startsWith(label))).toBe(true);
+  it.each(homes)('%s lists %j', (title, expected) => {
+    const menu = openMenu(bar(), title);
+    const items = itemsOf(menu);
+    for (const label of expected) expect(items.some((t) => t.startsWith(label)), label).toBe(true);
   });
 
-  it('offers no eighth outline — the cap the old menu item ignored', () => {
-    const view = bar({ calibrated: true, perimeterTraces: traced(7) });
-    const menu = openMenu(view, 'More ways to make an outline');
-    expect(within(menu).getByRole('menuitem', { name: 'Add another outline' }).disabled).toBe(true);
+  it('lists the several-plan commands only when there are several plans', () => {
+    let items = itemsOf(openMenu(bar({ planCount: 1 }), 'File'));
+    expect(items.some((t) => t.startsWith('Save all plans'))).toBe(false);
+    expect(items.some((t) => t.startsWith('Close all plans'))).toBe(false);
+    cleanup();
+    items = itemsOf(openMenu(bar({ planCount: 3 }), 'File'));
+    expect(items.some((t) => t.startsWith('Save all plans'))).toBe(true);
+    expect(items.some((t) => t.startsWith('Close all plans'))).toBe(true);
   });
 
-  it('offers nothing to pick from until a scan has read something', () => {
-    const view = bar({ canSelectRoom: false });
-    const menu = openMenu(view, 'More ways to set the scale');
-    expect(within(menu).getByRole('menuitem', { name: 'Select room to scale from' }).disabled).toBe(true);
+  it('opens Help on the page it names', () => {
+    const opened = [];
+    const view = bar({ onHelpOpen: (page) => opened.push(page) });
+    fireEvent.click(within(openMenu(view, 'Help')).getByText('Keyboard shortcuts…'));
+    fireEvent.click(within(openMenu(view, 'Help')).getByText('How to use FloorTrace…'));
+    expect(opened).toEqual(['shortcuts', 'guide']);
+  });
+
+  it('rotates both ways from View, where the rail used to hide one behind a right-click', () => {
+    const turned = [];
+    const view = bar({ onRotate: (d) => turned.push(d) });
+    fireEvent.click(within(openMenu(view, 'View')).getByText('Rotate left 45°'));
+    expect(turned).toEqual(['counterclockwise']);
+  });
+
+  it('does not make the mark a button — closing everything lives in File', () => {
+    const view = bar();
+    expect(view.queryByRole('button', { name: /Start fresh/ })).toBeNull();
   });
 });
 
@@ -183,11 +145,11 @@ describe('every command that left the row still has a home', () => {
  */
 describe('the walkthrough opens out of the app', () => {
   const item = (view) =>
-    within(openMenu(view, 'View')).getByRole('menuitem', { name: /How the outline is traced/ });
+    within(openMenu(view, 'Help')).getByRole('menuitem', { name: /How automatic tracing works/ });
 
-  it('sits in View, and says it leaves', () => {
+  it('sits in Help, and says it leaves', () => {
     expect(item(bar()).getAttribute('aria-label')).toBe(
-      'How the outline is traced — opens in a new tab',
+      'How automatic tracing works — opens in a new tab',
     );
   });
 
@@ -213,22 +175,22 @@ describe('the walkthrough opens out of the app', () => {
 });
 
 describe('one dropdown, and the keyboard knows about it', () => {
-  it('tells the keyboard guard while any of the four is open', () => {
+  it('tells the keyboard guard while a menu is open', () => {
     // `shortcutsBlocked` reads this. Without it `1` entered draw mode behind an
     // open menu and `O` toggled the very panel the open View menu was offering.
     const view = bar();
-    expect(useWorkspaceStore.getState().menuOpen).toBe(false);
-    openMenu(view, 'More ways to make an outline');
-    expect(useWorkspaceStore.getState().menuOpen).toBe(true);
+    expect(useWorkspaceStore.getState().menuOpen).toBeFalsy();
+    openMenu(view, 'View');
+    expect(useWorkspaceStore.getState().menuOpen).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(view.queryByRole('menu')).toBeNull();
-    expect(useWorkspaceStore.getState().menuOpen).toBe(false);
+    expect(useWorkspaceStore.getState().menuOpen).toBeFalsy();
   });
 
-  it('opens one at a time — a caret closes a title', () => {
+  it('opens one at a time', () => {
     const view = bar();
     openMenu(view, 'File');
-    openMenu(view, 'More ways to set the scale');
+    openMenu(view, 'Help');
     expect(view.getAllByRole('menu')).toHaveLength(1);
     expect(view.getByRole('button', { name: 'File' }).getAttribute('aria-expanded')).toBe('false');
   });
@@ -237,9 +199,9 @@ describe('one dropdown, and the keyboard knows about it', () => {
     // The band closes on a window `mousedown`, so the trigger and its panel have
     // to swallow theirs or the menu would close on the very press that opened it.
     const view = bar();
-    const caret = view.getByRole('button', { name: 'More ways to make an outline' });
-    fireEvent.mouseDown(caret);
-    fireEvent.click(caret);
+    const title = view.getByRole('button', { name: 'View' });
+    fireEvent.mouseDown(title);
+    fireEvent.click(title);
     expect(view.getByRole('menu')).toBeTruthy();
     fireEvent.mouseDown(window);
     expect(view.queryByRole('menu')).toBeNull();
@@ -261,9 +223,9 @@ describe('one dropdown, and the keyboard knows about it', () => {
   it('gives the flag back when the band unmounts', () => {
     const view = bar();
     openMenu(view, 'View');
-    expect(useWorkspaceStore.getState().menuOpen).toBe(true);
+    expect(useWorkspaceStore.getState().menuOpen).toBeTruthy();
     view.unmount();
-    expect(useWorkspaceStore.getState().menuOpen).toBe(false);
+    expect(useWorkspaceStore.getState().menuOpen).toBeFalsy();
   });
 });
 
@@ -274,11 +236,11 @@ describe('the row names each thing once', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('labels only the three pipeline verbs, and leaves the utilities as icons', () => {
+  it('labels Open and Export, and leaves the universal utilities as icons', () => {
     const view = bar();
     const labelled = view.getAllByRole('button')
       .filter((b) => b.textContent.trim() && !b.getAttribute('aria-haspopup'))
       .map((b) => b.textContent.trim());
-    expect(labelled).toEqual(['Read dimensions', 'Find outline', 'Export']);
+    expect(labelled).toEqual(['Open', 'Export']);
   });
 });

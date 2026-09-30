@@ -66,22 +66,22 @@ class ErrorBoundary extends Component {
     return (
       <div role="alert" className="fixed inset-0 flex items-center justify-center p-6 bg-shell">
         <div className="max-w-md text-center">
-          <p className="text-base font-semibold text-fg mb-2">
+          <p className="text-[18px] font-semibold text-fg mb-2">
             {stale ? 'Updating to the latest version…' : 'FloorTrace hit an error'}
           </p>
           {!stale && (
             <>
-              <p className="text-[13px] text-fg-2 leading-relaxed mb-4">
+              <p className="text-[14px] text-fg-2 leading-relaxed mb-5">
                 {promise}
               </p>
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                className="px-3 py-1.5 text-[13px] rounded border border-line bg-panel-2 text-fg hover:bg-panel"
+                className="btn btn-primary px-5"
               >
                 Reload FloorTrace
               </button>
-              <pre className="mt-4 text-[11px] text-fg-3 whitespace-pre-wrap text-left">
+              <pre className="mt-5 text-[12px] text-fg-3 whitespace-pre-wrap text-left">
                 {String(error?.message || error)}
               </pre>
             </>

@@ -1,21 +1,19 @@
 import { qualitySummary } from './boundaryQuality';
 
 // traceManager hands out seven trace colours, so seven is the ceiling. Written
-// here because three surfaces gate on it and two of them used to disagree: the
-// command bar refused an eighth outline, the Trace menu offered it, and the
-// dock's `+` hid itself.
+// here because every surface that offers "add an outline" gates on it, and they
+// used to disagree: one refused an eighth outline while another offered it.
 export const MAX_TRACES = 7;
 
 /**
- * One derivation of "where is this plan in the pipeline", read by the top bar
- * — which decides which verb carries the primary weight — and by the dock's
- * StageSpine, which prints the same four stages.
+ * One derivation of "where is this plan in the pipeline", read by the mobile
+ * shell's action bar to decide which single verb to offer. (The desktop shell
+ * no longer names pipeline stages at all: the pipeline runs by itself when a
+ * plan opens, and its corrections live on the dock card each one corrects.)
  *
- * They used to disagree about the outline stage in a way that mattered. The
- * command bar called a plan outlined when `perimeterOverlay` held vertices,
- * which is the *detector's* most recent overlay; the dock counted
- * `perimeterTraces`, which is what the area is computed from. The area is the
- * number on the report, so it is the one that decides.
+ * The outline stage counts `perimeterTraces`, which is what the area is
+ * computed from, rather than the detector's most recent overlay. The area is
+ * the number on the report, so it is the one that decides.
  *
  * **A stage has four outcomes, not three.** `todo`/`done`/`warn` could not tell
  * "nobody has tried" from "it ran and produced nothing", so after a failed

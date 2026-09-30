@@ -3,11 +3,11 @@
 // different app half a panel down.
 const Card = ({ title, action, children, id }) => (
   <section className="dock-card" id={id}>
-    <header className="flex items-center gap-2 px-2.5 py-2 border-b border-line-soft">
+    <header className="flex items-center gap-2 min-h-[42px] px-3 py-2 border-b border-line-soft">
       <h3 className="card-heading flex-1">{title}</h3>
       {action}
     </header>
-    <div className="p-2.5">{children}</div>
+    <div className="p-3">{children}</div>
   </section>
 );
 

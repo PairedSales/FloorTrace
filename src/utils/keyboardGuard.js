@@ -9,16 +9,17 @@ import { TOOL_GROUPS } from '../components/toolCatalog';
 export const isTypingInField = (target) =>
   !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
-// The export dialog is here for the same reason the help modal is: it is a
-// focused surface over the plan, and a key that both drives it and reaches the
-// canvas behind it does two things at once. Delete is the sharp case — it would
-// close a plan and delete a vertex in the same press.
+// The export and settings dialogs are here for the same reason the help modal
+// is: each is a focused surface over the plan, and a key that both drives it
+// and reaches the canvas behind it does two things at once. Delete is the
+// sharp case — it would close a plan and delete a vertex in the same press.
 export const shortcutsBlocked = (target) => {
   if (isTypingInField(target)) return true;
   const workspace = useWorkspaceStore.getState();
   // An open menu owns the keyboard for the same reason a modal does — and it
   // is the sharper case, because the menu *prints* the keys it is swallowing.
-  return workspace.showHelpModal || workspace.showExportDialog || workspace.menuOpen;
+  return !!(workspace.showHelpModal || workspace.showExportDialog
+    || workspace.showSettings || workspace.menuOpen);
 };
 
 // ── Work in flight owns the drawing it started from ─────────────────────────
