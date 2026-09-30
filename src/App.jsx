@@ -1134,8 +1134,13 @@ function App() {
       undoManager.save();
       setPerimeterOverlay({ vertices: currentVertices });
       setPerimeterVertices(null); // Exit vertex placement mode
+      // An outline drawn corner by corner answers a failed automatic trace.
+      // Only a trace writes this record, so without clearing it "The last
+      // trace found no outline" stood beside the user's finished outline,
+      // counted as a thing to check, for as long as the plan was open.
+      setLastTraceOutcome(null);
     }
-  }, [setPerimeterOverlay, setPerimeterVertices]);
+  }, [setPerimeterOverlay, setPerimeterVertices, setLastTraceOutcome]);
 
   // Delete a specific perimeter vertex by index (right-click, or Delete on a
   // selected vertex). The floor of three needs a voice: with a visible

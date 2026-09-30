@@ -30,6 +30,8 @@ const CHIP_TONE = {
   ok: 'text-ok bg-ok/12 border-ok/35',
   warn: 'text-warn bg-warn/12 border-warn/35',
   error: 'text-crit bg-crit/12 border-crit/35',
+  // Not a verdict: a step not taken yet.
+  pending: 'text-fg-3 bg-sunken border-line',
 };
 
 /* ── one row ──────────────────────────────────────────────────────────────
@@ -103,12 +105,14 @@ const ChecksCard = () => {
   const areas = useAppStore(selectActiveAreaByType);
   const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
   const areaRatio = useAppStore((s) => s.calibration?.quality?.areaRatio);
-  // The app's only signal that a calibration was deliberately refused. It was
-  // a 12px `aria-hidden` triangle on the tab strip — which does not render at
-  // one plan, and does not exist at all on the mobile shell. Here it is a
-  // row on the one surface both shells share.
+  const calibrated = useAppStore((s) => s.calibration?.calibrated);
+  // The app's only signal that a calibration was deliberately refused (a
+  // scale measured while the plan was parked; area goes as scale squared, so
+  // a late one is a wrong number that looks right). It was a 12px triangle on
+  // the tab strip, which does not render at one plan. Here it is one of the
+  // counted issues, on the one surface both shells share.
   const activeDocumentId = useAppStore((s) => s.activeDocumentId);
-  const needsRescale = useAppStore((s) => s.documents?.[activeDocumentId]?.needsRescale);
+  const needsRescale = useAppStore((s) => Boolean(s.documents?.[activeDocumentId]?.needsRescale));
   const focusedWarning = useAppStore((s) => s.focusedWarning);
   const setFocusedWarning = useAppStore((s) => s.setFocusedWarning);
 
@@ -117,7 +121,7 @@ const ChecksCard = () => {
   if (!image) return null;
 
   const scaleNote = scaleQualitySummary(scaleQuality);
-  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome);
+  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome, needsRescale);
 
   const traced = perimeterTraces.filter((t) => t.vertices?.length >= 3);
   const corners = traced.reduce((n, t) => n + t.vertices.length, 0);
@@ -134,8 +138,14 @@ const ChecksCard = () => {
   // used to sit between the area and the outline saying "Nothing yet", in the
   // one state where the user's next step is on the card below it.
   const nothingMeasured = traced.length === 0;
-  if (nothingMeasured && issues.count === 0 && !needsRescale) return null;
-  const chipLabel = issues.count === 0 ? 'All clear' : `${issues.count} to check`;
+  if (nothingMeasured && issues.count === 0) return null;
+  // An outline with no scale has nothing wrong with it and no area either;
+  // "All clear" beside an Area card asking for a scale says two things at once.
+  const unscaled = !calibrated && !nothingMeasured;
+  const chipLabel = issues.count > 0 ? `${issues.count} to check`
+    : unscaled ? 'No scale yet' : 'All clear';
+  const chipTone = issues.count > 0 ? (CHIP_TONE[issues.level] ?? CHIP_TONE.warn)
+    : unscaled ? CHIP_TONE.pending : CHIP_TONE.ok;
 
   // Notes: how an outline was reached rather than a reason to doubt it, and
   // warnings a person has already checked against the plan and accepted.
@@ -190,7 +200,8 @@ const ChecksCard = () => {
         );
       default:
         return (
-          <IssueRow key={key} severity={issue.severity} label={issue.label} detail={issue.detail} where={where} />
+          <IssueRow key={key} severity={issue.severity} label={issue.label} detail={issue.detail}
+                    remedy={issue.remedy} where={where} />
         );
     }
   };
@@ -200,7 +211,7 @@ const ChecksCard = () => {
       <Card
         title="Things to check"
         action={(
-          <span className={`chip ${CHIP_TONE[issues.level] ?? CHIP_TONE.ok}`}>
+          <span className={`chip ${chipTone}`}>
             <span className="chip-dot" />
             {chipLabel}
           </span>
@@ -210,25 +221,13 @@ const ChecksCard = () => {
           <p className="text-[13.5px] leading-snug text-fg-2">
             {nothingMeasured
               ? 'Nothing measured yet.'
-              : 'No problems found. It’s still worth comparing the outline with the plan before you use the area.'}
+              : unscaled
+                ? 'Nothing wrong with the outline, but there is no scale yet, so there is no area to check. Set it in the Scale section.'
+                : 'No problems found. It’s still worth comparing the outline with the plan before you use the area.'}
           </p>
         )}
 
         {issues.count > 0 && <div>{issues.issues.map(row)}</div>}
-
-        {/* A scale this plan measured while it was parked was refused rather
-            than applied, because area goes as scale squared and a late one is
-            a wrong number that looks right. */}
-        {needsRescale && (
-          <div className={issues.count > 0 ? 'border-t border-line-soft pt-2.5 mt-0' : 'mt-2.5'}>
-            <IssueRow
-              severity="warn"
-              label="This plan’s scale was not applied"
-              detail="Room sizes were read while you were on another plan, so the scale they give was held back rather than applied late."
-              remedy="Choose “Read the room sizes again” in the Scale section to measure this plan now."
-            />
-          </div>
-        )}
 
         <div className="mt-3 pt-2 border-t border-line-soft">
           <button

@@ -73,6 +73,20 @@ describe('StatusBar at rest', () => {
     expect(onFitToWindow).toHaveBeenCalled();
   });
 
+  // Closing the last plan takes the band away, and that close is itself a
+  // flash — which the next plan's band used to show and announce on mount.
+  it('does not replay a confirmation from before it was on screen', () => {
+    useWorkspaceStore.setState({ statusFlash: { text: 'Plan closed', at: Date.now() - 60000 } });
+    const view = render(<StatusBar {...props} />);
+    expect(view.queryByText('Plan closed')).toBeNull();
+  });
+
+  it('shows a fresh confirmation', () => {
+    const view = render(<StatusBar {...props} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
+    expect(view.getByText('Area copied')).toBeTruthy();
+  });
+
   it('gives the hint cell to whichever tool the pointer is on', () => {
     const view = render(<StatusBar {...props} />);
     useWorkspaceStore.setState({ toolHint: { id: 'crop', name: 'Crop the plan', detail: 'Keep only the part you drag over', digit: '7' } });
@@ -225,6 +239,18 @@ describe('StatusBar while work is running', () => {
 
   // Same rule as the vertex count: the region is aria-atomic, so a number that
   // changes every second would re-announce the whole band every second.
+  // The lead's words give way; the Stop does not. It lived inside the lead,
+  // which could not shrink past it, and a narrow band painted the zoom over it.
+  it('keeps Stop outside the part of the band that gives way', () => {
+    const work = beginWork('trace');
+    const view = render(<StatusBar {...props} />);
+    act(() => { vi.advanceTimersByTime(6000); });
+    const stop = view.getByText('Stop');
+    expect(stop.closest('.status-lead')).toBeNull();
+    expect(view.container.querySelector('.status-row-processing')).toBeTruthy();
+    settleWork(work);
+  });
+
   it('keeps the ticking clock out of the live region', () => {
     const work = beginWork('trace');
     const view = render(<StatusBar {...props} />);

@@ -34,8 +34,11 @@ export function usePlanAreaIndex() {
 
       const area = computeAreaByType(state);
       // Null rather than a bag of zeroes, so "this plan contributes nothing"
-      // is one value and every consumer tests it the same way.
-      const next = area.total > 0
+      // is one value and every consumer tests it the same way. Nothing, too,
+      // for a plan with no scale: its area is the one-foot-per-pixel fallback,
+      // a pixel count, and added to a property total it is a wrong number that
+      // looks like a second level.
+      const next = state.calibration?.calibrated && area.total > 0
         ? { byType: area.byType, counts: area.counts, gla: area.gla, total: area.total }
         : null;
 

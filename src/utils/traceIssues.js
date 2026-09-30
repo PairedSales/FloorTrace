@@ -37,9 +37,14 @@ const isVisible = (trace) => trace?.visible !== false;
  * count people stop reading — and the only other way down is destroying the
  * evidence.
  *
+ * `needsRescale` is a scale this plan measured while it was parked and that
+ * was held back rather than applied late. It is a reason to doubt the area
+ * like any other, so it counts: it used to be a row drawn under a chip that
+ * said "All clear", beside an Export button that filled.
+ *
  * @returns {{count:number, level:'ok'|'warn'|'error', issues:Array}}
  */
-export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutcome) => {
+export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutcome, needsRescale = false) => {
   const issues = [];
   let level = 'ok';
   const bump = (issue) => {
@@ -50,6 +55,16 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
 
   if (scaleNote?.level === 'check') {
     bump({ kind: 'scale', severity: 'warn', label: scaleNote.short, detail: scaleNote.detail });
+  }
+
+  if (needsRescale) {
+    bump({
+      kind: 'rescale',
+      severity: 'warn',
+      label: 'This plan’s scale was not applied',
+      detail: 'Room sizes were read while you were on another plan, so the scale they give was held back rather than applied late.',
+      remedy: 'Choose “Read the room sizes again” in the Scale section to measure this plan now.',
+    });
   }
 
   for (const pair of doubleCounted ?? []) {
@@ -137,10 +152,14 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
         kind: 'low-confidence',
         severity: q.level === 'fair' ? 'warn' : 'error',
         traceId: trace.id,
-        label: 'Little of this outline sits on a drawn wall',
+        // In words, not the detector's percentage: "only 62%" beside a
+        // coloured dot reads as an accuracy score, which it is not.
+        label: q.level === 'fair'
+          ? 'Parts of this outline are not on a drawn wall'
+          : 'Little of this outline sits on a drawn wall',
         detail: q.percent === null
-          ? 'The detector could not say how much of this outline follows wall that is actually drawn.'
-          : `Only ${q.percent}% of this outline sits on wall the plan actually draws. Compare it to the plan before you use the area.`,
+          ? 'FloorTrace could not tell how much of this outline follows a wall drawn on the plan. Compare it to the plan before you use the area.'
+          : `${q.level === 'fair' ? 'Parts' : 'Much'} of this outline do not follow a wall drawn on the plan. Compare it to the plan before you use the area.`,
       });
     }
   }

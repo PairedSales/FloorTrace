@@ -313,6 +313,10 @@
     .status-row-running .status-optional {
       display: none;
     }
+    /* While a job runs, its message and its Stop outrank the zoom. */
+    .status-row-processing .status-zoom {
+      display: none;
+    }
   }
 
   /* Status chip — state is readable as form and colour, not colour alone. */

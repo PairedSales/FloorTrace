@@ -71,6 +71,19 @@ describe('usePlanAreaIndex', () => {
     expect(app().documents[docA].area).toBeNull();
   });
 
+  // With no scale the area is the one-foot-per-pixel fallback — a pixel
+  // count, which a property total would add in as a second level.
+  it('records nothing for a plan with no scale', () => {
+    mount();
+    act(() => {
+      useAppStore.setState({
+        perimeterTraces: [trace(30)],
+        calibration: { calibrated: false, feetPerPixel: { x: 1, y: 1 } },
+      });
+    });
+    expect(app().documents[docA].area).toBeNull();
+  });
+
   it('clears the record when the last outline goes', () => {
     mount();
     act(() => { useAppStore.setState({ perimeterTraces: [trace(30)] }); });

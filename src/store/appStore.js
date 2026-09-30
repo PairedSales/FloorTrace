@@ -959,7 +959,9 @@ export const computeWorkspaceArea = (state, activeArea) => {
   state.documentOrder.forEach((docId, index) => {
     const isActive = docId === state.activeDocumentId;
     const meta = state.documents[docId] ?? {};
-    const area = isActive ? live : meta.area;
+    // A plan with no scale measures pixels, not feet, and contributes nothing —
+    // the same rule `usePlanAreaIndex` records the parked plans by.
+    const area = isActive ? (state.calibration?.calibrated ? live : null) : meta.area;
     if (!area || !(area.total > 0)) return;
 
     plans.push({
@@ -1014,7 +1016,10 @@ let lastWorkspaceDeps = null;
  */
 export const selectWorkspaceArea = (state) => {
   const activeArea = selectActiveAreaByType(state);
-  const deps = [activeArea, state.documents, state.documentOrder, state.projectName, state.activeDocumentId];
+  const deps = [
+    activeArea, state.documents, state.documentOrder, state.projectName,
+    state.activeDocumentId, state.calibration?.calibrated,
+  ];
   if (lastWorkspaceDeps && deps.every((d, i) => d === lastWorkspaceDeps[i])) {
     return lastWorkspaceArea;
   }
