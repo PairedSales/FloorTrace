@@ -77,6 +77,8 @@ beforeEach(() => {
     documents: {},
     documentOrder: [],
     activeDocumentId: null,
+    drawModeActive: false,
+    perimeterVertices: null,
   });
   useWorkspaceStore.setState({ showWork: false });
 });
@@ -93,12 +95,22 @@ describe('the area', () => {
 
   it('never prints a pixel count as square feet when there is no scale', () => {
     useAppStore.setState({ perimeterTraces: [outline()] });
+    // Even with the calculation switched on — it is a saved preference, so a
+    // plan with no scale can open with it already showing.
+    useWorkspaceStore.setState({ showWork: true });
     // With no scale the store falls back to a foot per pixel: 500,000 "ft²".
     const view = render(<MeasurementDock {...props({ area: 500000 })} />);
+    expect(view.queryByText(/how the area was calculated/)).toBeNull();
     expect(view.container.textContent).not.toMatch(/500,000/);
     expect(card(view, 'report').getByText('Set the scale to see the area.')).toBeTruthy();
     // Nor in the outline list beside it.
     expect(card(view, 'outline').queryByText(/ft²/)).toBeNull();
+  });
+
+  it('says the outlines are hidden, rather than that there is none', () => {
+    useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline({ visible: false })] });
+    const view = render(<MeasurementDock {...props({ area: 0 })} />);
+    expect(card(view, 'report').getByText(/Every outline is hidden/)).toBeTruthy();
   });
 
   it('says why when the room sizes could not be read', () => {
@@ -152,6 +164,49 @@ describe('the outline', () => {
     expect(card(view, 'outline').queryByRole('button', { name: /Find the outline again/ })).toBeNull();
     fireEvent.click(card(view, 'outline').getByText('Outline not right?'));
     expect(card(view, 'outline').getByRole('button', { name: /Find the outline again/ })).toBeTruthy();
+  });
+});
+
+describe('commands that start work', () => {
+  // The top band used to disable these while a job ran. On the dock they did
+  // not, and a second scan started during the first one's automatic run cleared
+  // the busy state in the middle of the second's trace.
+  it('wait for a running job', () => {
+    useAppStore.setState({
+      calibration: calibrated,
+      perimeterTraces: [outline({ holes: [{ ring: square, stale: true }] })],
+      detectedDimensions: [{ text: '12x14' }],
+    });
+    const view = render(<MeasurementDock {...props({ area: 800, isProcessing: true, alternativeCount: 1 })} />);
+    expect(view.getByRole('button', { name: /Read the room sizes again/ }).disabled).toBe(true);
+    expect(view.getByRole('button', { name: /Find the outline again/ }).disabled).toBe(true);
+    expect(view.getByRole('button', { name: /Try another outline/ }).disabled).toBe(true);
+    expect(view.getByRole('button', { name: /Use a different room/ }).disabled).toBe(true);
+    // Modes are not work: the rail's own buttons never wait either.
+    expect(view.getByRole('button', { name: /Paint over the outside walls/ }).disabled).toBe(false);
+  });
+
+  it('wait while an outline is being painted', () => {
+    useAppStore.setState({
+      calibration: calibrated,
+      drawModeActive: true,
+      perimeterTraces: [outline({ holes: [{ ring: square, stale: true }] })],
+    });
+    const view = render(<MeasurementDock {...props({ area: 800, alternativeCount: 1 })} />);
+    expect(view.getByRole('button', { name: /Find the outline again/ }).disabled).toBe(true);
+    expect(view.getByRole('button', { name: /Try another outline/ }).disabled).toBe(true);
+  });
+});
+
+describe('a shell that offers no drawing', () => {
+  // The phone passes none of the outline's fixes.
+  it('does not end the empty card on a colon over nothing', () => {
+    useAppStore.setState({ calibration: calibrated });
+    const view = render(
+      <MeasurementDock {...props({ onFindOutline: undefined, onPaintOutline: undefined, onPlaceCorners: undefined })} />,
+    );
+    expect(card(view, 'outline').getByText('No outline yet.')).toBeTruthy();
+    expect(card(view, 'outline').queryByText(/draw it yourself/)).toBeNull();
   });
 });
 

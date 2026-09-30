@@ -5,6 +5,9 @@ import useWorkspaceStore from '../store/workspaceStore';
 import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
 import { TOOL_MODES } from './toolModes';
 
+// How long a confirmation stays in the band.
+const FLASH_MS = 3200;
+
 // How long a job may run before this band admits how long it has been running.
 // A trace is usually under a second and a scan is usually a few, and a counter
 // that flickers up and vanishes on every one of them is noise; past this it is
@@ -127,9 +130,18 @@ const StatusBar = ({
   const flash = useWorkspaceStore((s) => s.statusFlash);
   const [shownFlash, setShownFlash] = useState(null);
   useEffect(() => {
-    if (!flash) return;
+    if (!flash) return undefined;
+    // Only for what is left of its window. The band is not always on screen —
+    // closing the last plan takes it away, and that close is itself a flash —
+    // so on mount the store can hold a message from before the band existed,
+    // which would otherwise be shown and announced over the next plan.
+    const left = FLASH_MS - (Date.now() - (flash.at ?? 0));
+    if (left <= 0) {
+      setShownFlash(null);
+      return undefined;
+    }
     setShownFlash(flash.text);
-    const t = setTimeout(() => setShownFlash(null), 3200);
+    const t = setTimeout(() => setShownFlash(null), left);
     return () => clearTimeout(t);
   }, [flash]);
 
@@ -182,11 +194,15 @@ const StatusBar = ({
     <div className={`status-row flex items-center w-full min-w-0 min-h-9
                      text-[13px] text-fg-3 select-none
                      ${running ? 'status-row-running' : 'h-9 overflow-hidden'}
+                     ${isProcessing ? 'status-row-processing' : ''}
                      ${tinted ? 'bg-accent/10 border-b border-accent/40' : 'bg-panel border-b border-line-soft'}`}>
       {/* The lead: what is happening and what to do about it. It takes the
           room left by the controls in one row, and a row of its own when the
-          band is too narrow for both. */}
-      <div className="status-lead flex items-center flex-1 min-w-0">
+          band is too narrow for both. Its words give way before any control
+          does: every cell in it truncates, and it clips rather than painting
+          over the controls beside it — which is how a long job's Stop button
+          once ended up underneath the zoom. */}
+      <div className="status-lead flex items-center flex-1 min-w-0 overflow-hidden">
       {/* The one live region in the app. Acknowledgements moved off toasts and
           into `flash`, and sonner announces its own toasts but this channel had
           nothing — so confirmation of a user's own action was the one thing a
@@ -194,9 +210,9 @@ const StatusBar = ({
           rather than cutting across whatever is being read. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="contents">
         {isProcessing ? (
-          <Cell className="text-accent-strong font-semibold">
-            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-            {processingMessage || 'Working…'}
+          <Cell grow className="text-accent-strong font-semibold">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{processingMessage || 'Working…'}</span>
           </Cell>
         ) : running && (
           // The name shrinks before anything on the right of the band does;
@@ -208,11 +224,37 @@ const StatusBar = ({
           </Cell>
         )}
 
-        {shownFlash && <Cell className="text-ok font-semibold">{shownFlash}</Cell>}
+        {shownFlash && (
+          <Cell grow className="text-ok font-semibold">
+            <span className="min-w-0 truncate">{shownFlash}</span>
+          </Cell>
+        )}
       </div>
 
-      {/* How long this has been going, and the way out of it — deliberately
-          *outside* the live region above: that region is `aria-atomic`, so a
+      {/* One cell, three claimants, in this order: a flash the user just earned
+          beats a tool they are only pointing at, and both beat the standing
+          instruction. Working… suppresses all three — the progress message is
+          already saying what is happening. */}
+      {!isProcessing && !shownFlash && (toolHint ? (
+        <Cell grow aria-hidden="true">
+          <b className="shrink-0 font-semibold text-fg-2">{toolHint.name}</b>
+          {toolHint.detail && <span className="min-w-0 truncate">{toolHint.detail}</span>}
+          {toolHint.digit && (
+            <kbd className="shrink-0 px-1.5 text-[11.5px] border border-line rounded text-fg-3">
+              {toolHint.digit}
+            </kbd>
+          )}
+        </Cell>
+      ) : hasImage && hint && (
+        <Cell grow className={`status-hint ${running ? 'text-fg' : ''}`}>
+          <span className="min-w-0 truncate">{hint}</span>
+        </Cell>
+      ))}
+      </div>
+
+      {/* How long this has been going, and the way out of it — outside the
+          lead, so its Stop can never be covered, and deliberately outside the
+          live region above: that region is `aria-atomic`, so a
           number changing every second would re-announce the whole band once a
           second for as long as the job runs.
 
@@ -238,26 +280,6 @@ const StatusBar = ({
         </Cell>
       )}
 
-      {/* One cell, three claimants, in this order: a flash the user just earned
-          beats a tool they are only pointing at, and both beat the standing
-          instruction. Working… suppresses all three — the progress message is
-          already saying what is happening. */}
-      {!isProcessing && !shownFlash && (toolHint ? (
-        <Cell grow aria-hidden="true">
-          <b className="shrink-0 font-semibold text-fg-2">{toolHint.name}</b>
-          {toolHint.detail && <span className="min-w-0 truncate">{toolHint.detail}</span>}
-          {toolHint.digit && (
-            <kbd className="shrink-0 px-1.5 text-[11.5px] border border-line rounded text-fg-3">
-              {toolHint.digit}
-            </kbd>
-          )}
-        </Cell>
-      ) : hasImage && hint && (
-        <Cell grow className={`status-hint ${running ? 'text-fg' : ''}`}>
-          <span className="min-w-0 truncate">{hint}</span>
-        </Cell>
-      ))}
-      </div>
 
       {running && count > 0 && (
         <Cell className="tabular-nums text-fg-2">
@@ -284,7 +306,7 @@ const StatusBar = ({
       )}
 
       {!running && hasImage && (
-        <Cell className="gap-1">
+        <Cell className="status-zoom gap-1">
           <ZoomButton label="Zoom out" onClick={onZoomOut} disabled={!hasImage}>
             <Minus className="w-3.5 h-3.5" aria-hidden="true" />
           </ZoomButton>

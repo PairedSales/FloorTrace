@@ -73,6 +73,15 @@ describe('computeWorkspaceArea', () => {
     expect(w.total).toBeCloseTo(2000, 6);
   });
 
+  it('leaves out a live plan with no scale — its area is pixels', () => {
+    livePlan(30);
+    useAppStore.setState({ calibration: { calibrated: false, feetPerPixel: { x: 1, y: 1 } } });
+    remembered(gla(700));
+    const w = computeWorkspaceArea(app());
+    expect(w.total).toBeCloseTo(700, 6);
+    expect(w.isMultiPlan).toBe(false);
+  });
+
   it('ignores a plan that contributes nothing', () => {
     livePlan(30);
     remembered(null);

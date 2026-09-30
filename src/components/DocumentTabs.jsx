@@ -62,6 +62,11 @@ const TAB_MAX = 220;
 const NEW_BUTTON_PX = 34;
 const CHEVRON_PX = 40;
 
+// The overflow's id in `workspaceStore.menuOpen`, the one-open-menu slot the
+// top band and the tool rail share: opening any of them closes the others, and
+// an open one keeps digit shortcuts from firing behind it.
+const TABS_MENU_ID = 'tabs-overflow';
+
 const PlanTab = ({
   docId, label, index, isActive, isBusy, needsRescale, canClose, isDragging,
   onSelect, onClose, onRename, onDragStart,
@@ -180,7 +185,12 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   const dockOpen = useWorkspaceStore((s) => s.dockOpen);
   const hasImage = useAppStore((s) => !!s.image);
 
-  const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowOpen = useWorkspaceStore((s) => s.menuOpen === TABS_MENU_ID);
+  const setMenuOpen = useWorkspaceStore((s) => s.setMenuOpen);
+  const setOverflowOpen = useCallback((open) => {
+    if (open) setMenuOpen(TABS_MENU_ID);
+    else if (useWorkspaceStore.getState().menuOpen === TABS_MENU_ID) setMenuOpen(null);
+  }, [setMenuOpen]);
   const [stripWidth, setStripWidth] = useState(0);
   const [draggingId, setDraggingId] = useState(null);
   const stripRef = useRef(null);
@@ -252,9 +262,18 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   useEffect(() => {
     if (!overflowOpen) return undefined;
     const dismiss = () => setOverflowOpen(false);
+    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
+    window.addEventListener('keydown', onKey);
     window.addEventListener('mousedown', dismiss);
-    return () => window.removeEventListener('mousedown', dismiss);
-  }, [overflowOpen]);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', dismiss);
+    };
+  }, [overflowOpen, setOverflowOpen]);
+
+  // The strip goes with the second-to-last plan; the slot must not stay taken
+  // by a menu that no longer exists, or shortcuts stay blocked behind it.
+  useEffect(() => () => setOverflowOpen(false), [setOverflowOpen]);
 
   const labelFor = useCallback((docId, index) => {
     const meta = documents[docId] ?? {};
@@ -358,7 +377,7 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
               aria-label={`${hidden.length} more plans`}
               title={`${hidden.length} more`}
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => setOverflowOpen((v) => !v)}
+              onClick={() => setOverflowOpen(!overflowOpen)}
               className="flex items-center gap-1 h-[30px] px-2 text-[13px]
                          text-fg-3 hover:text-fg hover:bg-sunken cursor-pointer"
             >
@@ -368,6 +387,9 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
             {overflowOpen && (
               <div
                 role="menu"
+                // The window `mousedown` that dismisses this lands before the
+                // `click` that picks an item, and would unmount it first.
+                onMouseDown={(e) => e.stopPropagation()}
                 className="absolute right-0 top-[calc(100%+2px)] z-[60] min-w-[200px] p-1
                            bg-panel-2 border border-line rounded-md shadow-xl"
               >

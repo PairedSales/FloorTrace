@@ -56,11 +56,12 @@ const SectionLabel = ({ children }) => (
 );
 
 // A quiet full-width choice, for the lists of ways to fix something.
-const FixButton = ({ icon: Icon, children, onClick, primary = false, title }) => (
+const FixButton = ({ icon: Icon, children, onClick, primary = false, title, disabled = false }) => (
   <button
     type="button"
     onClick={onClick}
     title={title}
+    disabled={disabled}
     className={`btn w-full justify-start ${primary ? 'btn-primary' : 'btn-secondary'}`}
   >
     {Icon && <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />}
@@ -69,12 +70,14 @@ const FixButton = ({ icon: Icon, children, onClick, primary = false, title }) =>
 );
 
 // A small text-link button, for the secondary way out of a card.
-const LinkButton = ({ children, onClick, icon: Icon }) => (
+const LinkButton = ({ children, onClick, icon: Icon, disabled = false }) => (
   <button
     type="button"
     onClick={onClick}
+    disabled={disabled}
     className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent-strong
-               hover:underline cursor-pointer"
+               hover:underline cursor-pointer
+               disabled:opacity-40 disabled:cursor-default disabled:hover:no-underline"
   >
     {Icon && <Icon className="w-3.5 h-3.5" aria-hidden="true" />}
     {children}
@@ -258,6 +261,9 @@ const MeasurementDock = ({
   const showWork = useWorkspaceStore((s) => s.showWork);
   const setShowWork = useWorkspaceStore((s) => s.setShowWork);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
+  // A scale this plan measured while parked was held back — a reason to doubt
+  // the area like any other, so it counts with the rest.
+  const needsRescale = useAppStore((s) => Boolean(s.documents?.[s.activeDocumentId]?.needsRescale));
 
   const scrollRef = useRef(null);
   const [fixOpen, setFixOpen] = useState(null);
@@ -298,7 +304,7 @@ const MeasurementDock = ({
   // Whether this area can be trusted is counted once, here and on the Checks
   // card below, from the same summary the exhibit prints.
   const scaleNote = scaleQualitySummary(scaleQuality);
-  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome);
+  const issues = summariseIssues(perimeterTraces, scaleNote, areas.doubleCounted, lastTraceOutcome, needsRescale);
 
   const traced = perimeterTraces.filter((t) => t.vertices?.length >= 3);
   const traceFailed = lastTraceOutcome?.level === 'failed' || lastTraceOutcome?.level === 'poor';
@@ -313,7 +319,8 @@ const MeasurementDock = ({
       }
       return area > 0 ? 'Set the scale to see the area.' : 'No area yet.';
     }
-    return traceFailed && traced.length === 0
+    if (traced.length > 0) return 'Every outline is hidden. Show one in the Outline section to see the area.';
+    return traceFailed
       ? 'FloorTrace couldn’t find the outline on its own. Draw it in the Outline section below.'
       : 'No outline yet.';
   })();
@@ -354,6 +361,10 @@ const MeasurementDock = ({
   const showRoomFields = !!roomOverlay && calibrationSource !== 'line-calibration';
   const canRestore = !!onRestoreAutoScale && !!calibrationSource
     && calibrationSource !== 'room-calibration' && rooms?.length > 0;
+
+  // Whether this shell offers any way to draw an outline by hand. The phone
+  // passes none, and the empty card must not end on a colon over nothing.
+  const canDraw = !!(onPaintOutline || onPlaceCorners);
 
   // ── the outline's fixes ──
   // Open by themselves when there is something to check; closed by hand, they
@@ -595,7 +606,7 @@ const MeasurementDock = ({
             {/* An appraisal report has to show its working for the area
                 sketch, and the way into it belongs under the figure it
                 explains rather than in a menu. Off until asked for. */}
-            {area > 0 && (
+            {measured && (
               <button
                 type="button"
                 onClick={() => setShowWork(!showWork)}
@@ -615,7 +626,10 @@ const MeasurementDock = ({
 
         {/* ── How this area was calculated ── directly under the figure it
             explains. Renders nothing while the preference is off. */}
-        <WorkCard unit={unit} />
+        {/* Only for a measured area. With no scale its figures would be the
+            one-foot-per-pixel fallback — the pixel count the headline above
+            refuses to print. */}
+        {measured && <WorkCard unit={unit} />}
 
         {/* ── Things to check ── every verdict on the plan, in one place,
             directly under the number it qualifies. */}
@@ -640,8 +654,8 @@ const MeasurementDock = ({
                 <>
                   <p className="text-[13.5px] leading-snug text-fg-2">
                     {traceFailed
-                      ? 'FloorTrace couldn’t find the outline on its own. Draw it yourself — it only takes a minute:'
-                      : 'No outline yet. Let FloorTrace find it, or draw it yourself:'}
+                      ? `FloorTrace couldn’t find the outline on its own.${canDraw ? ' Draw it yourself — it only takes a minute:' : ''}`
+                      : `No outline yet.${canDraw ? ' Let FloorTrace find it, or draw it yourself:' : ''}`}
                   </p>
                   <div className="mt-3 flex flex-col gap-2">
                     {!traceFailed && onFindOutline && (
@@ -809,7 +823,7 @@ const MeasurementDock = ({
                         </p>
                         <div className="mt-2.5 flex flex-col gap-2">
                           {alternativeCount > 0 && onUseAlternative && (
-                            <FixButton icon={Shuffle} onClick={onUseAlternative}
+                            <FixButton icon={Shuffle} onClick={onUseAlternative} disabled={isProcessing || painting}
                                        title="FloorTrace found more than one possible outline; this swaps in the next one">
                               {alternativeCount > 1
                                 ? `Try another outline FloorTrace found (${alternativeCount})`
@@ -829,7 +843,7 @@ const MeasurementDock = ({
                             </FixButton>
                           )}
                           {onFindOutline && (
-                            <FixButton icon={ScanSearch} onClick={onFindOutline}
+                            <FixButton icon={ScanSearch} onClick={onFindOutline} disabled={isProcessing || painting}
                                        title="Useful after erasing notes or cropping the plan">
                               Find the outline again
                             </FixButton>
@@ -890,7 +904,7 @@ const MeasurementDock = ({
                   room re-uses what the scan already read, which is cheaper and
                   usually right. */}
               {detectedDimensions.length > 0 && (
-                <FixButton icon={MousePointerClick} onClick={onSelectRoom}
+                <FixButton icon={MousePointerClick} onClick={onSelectRoom} disabled={isProcessing}
                            title="Show the room sizes FloorTrace read, and click the one to trust">
                   {calibrated ? 'Use a different room' : 'Pick a room to scale from'}
                 </FixButton>
@@ -911,7 +925,7 @@ const MeasurementDock = ({
 
             {onRescan && (
               <div className="mt-2.5">
-                <LinkButton icon={ScanText} onClick={onRescan}>
+                <LinkButton icon={ScanText} onClick={onRescan} disabled={isProcessing}>
                   Read the room sizes again
                 </LinkButton>
               </div>

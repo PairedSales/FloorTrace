@@ -35,6 +35,8 @@ const base = {
   calibration: null,
   focusedWarning: null,
   lastTraceOutcome: null,
+  activeDocumentId: null,
+  documents: {},
 };
 
 // The rows of issues the chip counts, excluding the Details drawer.
@@ -82,6 +84,19 @@ describe('ChecksCard with nothing to say', () => {
   });
 });
 
+describe('ChecksCard on an outline with no scale', () => {
+  it('says the scale is missing rather than that all is clear', () => {
+    useAppStore.setState({
+      calibration: { calibrated: false, feetPerPixel: { x: 1, y: 1 } },
+      perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
+    });
+    const view = render(<ChecksCard />);
+    expect(view.getByText('No scale yet')).toBeTruthy();
+    expect(view.queryByText('All clear')).toBeNull();
+    expect(view.getByText(/there is no scale yet/)).toBeTruthy();
+  });
+});
+
 describe('ChecksCard statistics', () => {
   it('keeps them in Details, read off the live store', () => {
     useAppStore.setState({
@@ -111,6 +126,22 @@ describe('ChecksCard statistics', () => {
     const view = render(<ChecksCard />);
     openDetails(view);
     expect(view.getByText('Areas cut out').nextSibling.textContent).toBe('2 (1 yours)');
+  });
+});
+
+describe('ChecksCard on a scale that was held back', () => {
+  // It used to be a row drawn under a chip that said "All clear".
+  it('counts it with everything else', () => {
+    useAppStore.setState({
+      activeDocumentId: 'doc-1',
+      documents: { 'doc-1': { needsRescale: true } },
+      calibration: { calibrated: true, feetPerPixel: { x: 0.011, y: 0.011 } },
+      perimeterTraces: [outline({ quality: { confidence: 0.92, warnings: [] } })],
+    });
+    const view = render(<ChecksCard />);
+    expect(view.getByText('1 to check')).toBeTruthy();
+    expect(view.getByText('This plan’s scale was not applied')).toBeTruthy();
+    expect(view.queryByText(/No problems found/)).toBeNull();
   });
 });
 
@@ -188,6 +219,19 @@ describe('ChecksCard on the outlines', () => {
     const view = render(<ChecksCard />);
     expect(view.getByText('Outline never closed')).toBeTruthy();
     expect(view.getByText('2nd Floor')).toBeTruthy();
+  });
+
+  // The detector's score, said as a percentage beside a coloured dot, reads
+  // as an accuracy figure. A doubtful outline with no warning to explain it
+  // still gets a row — in words.
+  it('explains a doubtful outline in words, not as a score', () => {
+    useAppStore.setState({
+      perimeterTraces: [outline({ quality: { confidence: 0.62, warnings: [] } })],
+    });
+    const view = render(<ChecksCard />);
+    expect(view.getByText('1 to check')).toBeTruthy();
+    expect(view.getByText('Parts of this outline are not on a drawn wall')).toBeTruthy();
+    expect(view.container.textContent).not.toMatch(/%/);
   });
 
   it('says when a cut-out is no longer subtracted, which no detector warning does', () => {

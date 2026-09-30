@@ -35,7 +35,9 @@ paths:
 ## Async work is owned, not inferred
 
 - `documentRequests.js`: `beginWork` → `deliver` returns `'applied'` (live plan), `'routed'` (parked — held and replayed on adopt), `'stale'` (image replaced) or `'dropped'` (plan gone). Don't infer ownership from `image !== startImage`: two plans opened from one file share a data URL.
-- Calibration must never replay late (area goes as scale squared), so it asks `ownerVerdict(token)` and flags the plan `needsRescale` instead; the tab and the Checks card show it.
+- Calibration must never replay late (area goes as scale squared), so it asks `ownerVerdict(token)` and flags the plan `needsRescale` instead; the tab shows it and `summariseIssues` counts it.
+- A switch writes the incoming plan's state onto the root and *then* its `activeDocumentId`. Anything that reads the root to attribute a figure to a plan must skip while `_swappingDocument` is set (as `useAutosave` and `usePlanAreaIndex` do) and key any memo on `activeDocumentId` (as `selectWorkspaceArea` does); otherwise one plan's area is filed under the other.
+- A plan contributes to the property total only with a scale: without one its area is the 1 px = 1 ft fallback. `usePlanAreaIndex` records `null` for it and `computeWorkspaceArea` leaves the live one out.
 
 ## Three invariants, each broken once
 
