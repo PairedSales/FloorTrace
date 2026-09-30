@@ -1002,10 +1002,19 @@ export const computeWorkspaceArea = (state, activeArea) => {
 let lastWorkspaceArea = null;
 let lastWorkspaceDeps = null;
 
-/** Memoised like its siblings, and for the same reason: it returns an object. */
+/**
+ * Memoised like its siblings, and for the same reason: it returns an object.
+ *
+ * `activeDocumentId` is a dependency because it decides which row is live, and
+ * a plan switch changes it on its own: the incoming plan's outlines land on the
+ * root first and its id second. Keyed without it, the reading taken between
+ * those two writes — the incoming outlines counted under the outgoing plan —
+ * outlived the switch, and an empty second plan showed as a second level of
+ * the same area, doubling the property total.
+ */
 export const selectWorkspaceArea = (state) => {
   const activeArea = selectActiveAreaByType(state);
-  const deps = [activeArea, state.documents, state.documentOrder, state.projectName];
+  const deps = [activeArea, state.documents, state.documentOrder, state.projectName, state.activeDocumentId];
   if (lastWorkspaceDeps && deps.every((d, i) => d === lastWorkspaceDeps[i])) {
     return lastWorkspaceArea;
   }

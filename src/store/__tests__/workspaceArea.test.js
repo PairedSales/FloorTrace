@@ -113,4 +113,32 @@ describe('selectWorkspaceArea', () => {
     expect(selectWorkspaceArea(app())).not.toBe(first);
     expect(selectWorkspaceArea(app()).total).toBeCloseTo(1700, 6);
   });
+
+  // A plan switch writes the incoming plan's outlines onto the root and then
+  // its id. Read in between, the live outlines are counted under the outgoing
+  // plan's id; the id then changes and nothing else does — so a memo that did
+  // not key on it kept that reading, and showed an empty second plan as a
+  // second level of the same area, doubling the property.
+  it('recomputes when only the live plan’s id changes', () => {
+    const docA = livePlan(30); // 900 sq ft
+    const aTraces = app().perimeterTraces;
+    // Plan A has reported itself; plan B, empty, is live.
+    useAppStore.setState((s) => ({
+      documents: { ...s.documents, [docA]: { ...s.documents[docA], area: gla(900) } },
+    }));
+    const docB = remembered(null);
+    useAppStore.setState({ activeDocumentId: docB, perimeterTraces: [] });
+    expect(selectWorkspaceArea(app()).total).toBeCloseTo(900, 6);
+
+    // Switching back to A, first write: A's outlines land, B's id is still live.
+    useAppStore.setState({ perimeterTraces: aTraces });
+    selectWorkspaceArea(app());
+    // Second write: the id. Nothing else changes.
+    useAppStore.setState({ activeDocumentId: docA });
+
+    const after = selectWorkspaceArea(app());
+    expect(after.plans.find((p) => p.isActive)?.docId).toBe(docA);
+    expect(after.total).toBeCloseTo(900, 6);
+    expect(after.isMultiPlan).toBe(false);
+  });
 });

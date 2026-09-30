@@ -19,6 +19,16 @@ export function usePlanAreaIndex() {
   useEffect(() => {
     const record = () => {
       const state = useAppStore.getState();
+      // Never mid-switch. A switch writes the incoming plan's outlines and
+      // scale onto the root and only then its id, so in between the root holds
+      // one plan's geometry under the other plan's id. Recording there filed
+      // the incoming plan's area under the outgoing plan: opening a new plan
+      // erased the first plan's figure, and switching back copied it onto the
+      // plan just left — a property total of two levels and double the area
+      // for a second plan with no outline at all. The autosave subscription
+      // has always honoured this bracket; the index now does too, and records
+      // once when the bracket closes.
+      if (state._swappingDocument) return;
       const docId = state.activeDocumentId;
       if (!docId || !state.documents[docId]) return;
 
@@ -36,9 +46,10 @@ export function usePlanAreaIndex() {
 
     record();
     // Traces and calibration are the only inputs; `activeDocumentId` is here so
-    // an adopted plan reports itself immediately rather than on its next edit.
+    // an adopted plan reports itself immediately rather than on its next edit,
+    // and `_swappingDocument` so the record lands the moment a switch settles.
     const unsub = useAppStore.subscribe(
-      (s) => [s.perimeterTraces, s.calibration, s.activeDocumentId],
+      (s) => [s.perimeterTraces, s.calibration, s.activeDocumentId, s._swappingDocument],
       record,
       { equalityFn: shallow },
     );

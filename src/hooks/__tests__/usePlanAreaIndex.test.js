@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { usePlanAreaIndex } from '../usePlanAreaIndex';
 import useAppStore from '../../store/appStore';
-import { app, oneDocument, IMAGE_A } from './harness';
+import { app, oneDocument, addParkedDocument, IMAGE_A } from './harness';
 import { newTraceId } from '../../store/ids';
 
 const square = (n) => [{ x: 0, y: 0 }, { x: n, y: 0 }, { x: n, y: n }, { x: 0, y: n }];
@@ -83,5 +83,43 @@ describe('usePlanAreaIndex', () => {
     act(() => { useAppStore.setState({ perimeterTraces: [trace(20)] }); });
     mount();
     expect(app().documents[docA].area.total).toBeCloseTo(400, 6);
+  });
+
+  // A switch writes the incoming plan's outlines onto the root and *then* its
+  // id, in two writes. Recording in between filed one plan's area under the
+  // other: opening a new plan erased the first plan's figure, and switching
+  // back copied it onto the empty plan — a property total of two levels and
+  // double the area, for a second plan with no outline at all.
+  describe('across a plan switch', () => {
+    it('keeps the first plan’s figure when a second plan is opened', () => {
+      mount();
+      act(() => { useAppStore.setState({ perimeterTraces: [trace(30)] }); });
+      let docB;
+      act(() => { docB = app().openDocument(); });
+
+      expect(app().activeDocumentId).toBe(docB);
+      expect(app().documents[docA].area?.total).toBeCloseTo(900, 6);
+      expect(app().documents[docB].area).toBeNull();
+    });
+
+    it('does not copy the live plan’s figure onto the plan it leaves', () => {
+      mount();
+      act(() => { useAppStore.setState({ perimeterTraces: [trace(30)] }); });
+      let docB;
+      act(() => { docB = app().openDocument(); });
+      act(() => { app().switchDocument(docA); });
+
+      expect(app().activeDocumentId).toBe(docA);
+      expect(app().documents[docA].area?.total).toBeCloseTo(900, 6);
+      expect(app().documents[docB].area).toBeNull();
+    });
+
+    it('records the incoming plan under its own id once the switch settles', () => {
+      mount();
+      const docB = addParkedDocument({ perimeterTraces: [trace(20)], calibration: calibrated() });
+      act(() => { app().switchDocument(docB); });
+
+      expect(app().documents[docB].area?.total).toBeCloseTo(400, 6);
+    });
   });
 });
