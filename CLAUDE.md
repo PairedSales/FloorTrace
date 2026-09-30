@@ -23,7 +23,8 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 | `npm run bench:scale` | Project-scale selection on `fixtures/` (CI gate) |
 | `npm run bench:ocr` | OCR accuracy and timing (Node, Tesseract only) |
 | `npm run bench:cubicasa` | The accuracy scoreboard: tracer and scale on CubiCasa5K (local only; see `datasets/README.md`) |
-| `npm run bench:real` | The same scoreboard on real listing plans saved as corrected `.floorplan` files (local only) |
+| `npm run bench:real` | The same scoreboard on real US plans saved as `.floorplan` files: 75 plan-book pages whose keys Claude drew and no person has checked, so a regression guard for tracer changes, not a target (local only; `--only`, `--jobs`, `--draw`, `--compare`; see `datasets/README.md`) |
+| `node scripts/realKeyTool.mjs`, `realSource.mjs`, `realDrafts.mjs` | Draw, check and score answer keys; find and draft plans from archive.org (local only; `datasets/README.md`) |
 | `npm run probe:exterior [draw]` | Synthetic exterior-tracer scenarios with exact truth |
 | `npm run probe:memory` | What the detection memo retains per image |
 | `npm run icons`, `npm run tutorial` | Regenerate committed outputs in `public/` |
