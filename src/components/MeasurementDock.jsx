@@ -407,7 +407,7 @@ const MeasurementDock = ({
         ref={scrollRef}
         className={mobile
           ? 'p-3 pb-6 flex flex-col gap-3'
-          : 'flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3'}
+          : 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 flex flex-col gap-3'}
       >
         {/* ── Area ── */}
         <div id="dock-report">
@@ -541,7 +541,10 @@ const MeasurementDock = ({
                   <tbody>
                     {property.plans.map((plan) => (
                       <tr key={plan.docId}>
-                        <td className="py-1.5 border-t border-line-soft text-fg-2">
+                        {/* A file name is one unbreakable word; without
+                            `anywhere` its min-content width stretches the
+                            table past the panel and the dock scrolls sideways. */}
+                        <td className="py-1.5 border-t border-line-soft text-fg-2 [overflow-wrap:anywhere]">
                           {plan.label}
                           {plan.isActive && (
                             <span className="ml-1.5 text-[12px] text-fg-dim">this plan</span>
@@ -553,7 +556,7 @@ const MeasurementDock = ({
                             <span className="ml-1.5 text-[12px] text-fg-dim">from the last save</span>
                           )}
                         </td>
-                        <td className="py-1.5 border-t border-line-soft text-right tabular-nums text-fg">
+                        <td className="py-1.5 pl-2 border-t border-line-soft text-right tabular-nums text-fg whitespace-nowrap">
                           {formatAreaValue(areaDisplayValue(plan.total, unit), unit).value}
                         </td>
                       </tr>
