@@ -5,7 +5,7 @@
 // `summariseIssues` is now the only producer; everything else renders `issues`.
 
 import { holeRings, isSubtracted } from './areaCalculator';
-import { rankedWarnings, qualitySummary, RESULT_SCOPED_CODES } from './boundaryQuality';
+import { rankedWarnings, qualitySummary, RESULT_SCOPED_CODES, NOTE_ONLY_CODES } from './boundaryQuality';
 
 // A void the outline has moved out from under is no longer subtracted, so the
 // area quietly gained it back. Counted per outline, because one outline is
@@ -106,7 +106,12 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
     let counted = 0;
     let accepted = 0;
     for (const w of rankedWarnings(trace?.quality?.warnings)) {
-      if (w.severity === 'info') continue;
+      if (w.severity === 'info') {
+        // A note-only finding still explains a lowered score, so it must not
+        // leave the low-confidence fallback below to invent a vaguer row.
+        if (NOTE_ONLY_CODES.has(w.code)) accepted += 1;
+        continue;
+      }
       // Scope decides *before* acknowledgement, and that order is load-bearing
       // twice. A whole-drawing finding is one finding wearing N copies, so it
       // is accepted when any copy is — the panel prints one row, and the row a

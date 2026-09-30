@@ -242,6 +242,13 @@ const REMEDIES = new Map(Object.entries({
 
 export const remedyText = (code) => REMEDIES.get(code) ?? null;
 
+// Findings the user sees for themselves on the sketch: the labels and the
+// outline are both on screen, so a label that sits outside the outline is
+// obvious without a flag (and often right — a garage or porch is carved out on
+// purpose). Shown as a note under Details, never counted as a thing to check.
+// The detector still scores them; only what the user is told changes.
+export const NOTE_ONLY_CODES = new Set(['label-outside']);
+
 // Every warning, worst first, in the shape the panel renders. `index` is the
 // position in the source array, not in this one: it is what identifies the
 // warning to focus, so re-ranking can never point the highlight at a different
@@ -250,7 +257,7 @@ export const rankedWarnings = (warnings) => (warnings ?? [])
   .map((w, index) => ({
     index,
     code: w.code,
-    severity: w.severity ?? 'warn',
+    severity: NOTE_ONLY_CODES.has(w.code) ? 'info' : (w.severity ?? 'warn'),
     label: warningLabel(w.code),
     detail: detailText(w),
     remedy: remedyText(w.code),

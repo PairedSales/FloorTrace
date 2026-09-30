@@ -28,6 +28,14 @@ describe('summariseIssues', () => {
     expect(summariseIssues([trace({ quality })], null, [])).toMatchObject({ count: 0, level: 'ok' });
   });
 
+  // The labels and the outline are both on the sketch the user is looking at.
+  // The finding also lowers the score, so it must not come back as the vaguer
+  // "little of this outline sits on a wall" row.
+  it('leaves a label outside the outline to the sketch, even when it lowers the score', () => {
+    const quality = { confidence: 0.35, warnings: [warning('label-outside', { count: 1, of: 3 }, 'error')] };
+    expect(summariseIssues([trace({ quality })], null, [])).toMatchObject({ count: 0, level: 'ok' });
+  });
+
   it('raises the level to error for an error-severity warning', () => {
     const quality = {
       confidence: 0.3,
