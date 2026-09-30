@@ -40,7 +40,7 @@ describe('primaryWarning', () => {
 
   it('reports the detail text when the code has one', () => {
     expect(primaryWarning([warning('bridged-opening', { px: 42 })]))
-      .toBe('a 42px opening was bridged to close the outline');
+      .toBe('a gap in the wall was bridged to close the outline');
   });
 
   it('picks the worst warning through qualitySummary too', () => {

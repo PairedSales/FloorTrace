@@ -9,6 +9,7 @@ import StatusBar from './components/StatusBar';
 import MobileChrome from './components/mobile/MobileChrome';
 import HelpModal from './components/HelpModal';
 import ExportDialog from './components/ExportDialog';
+import SettingsDialog from './components/SettingsDialog';
 import ConfirmDialog from './components/ConfirmDialog';
 import { confirmToast } from './utils/confirmToast';
 import { notify, flash, DURATION } from './utils/notify';
@@ -56,13 +57,12 @@ import { MAX_OPEN_DOCUMENTS } from './store/documentManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import useUnitPreference from './hooks/useUnitPreference';
 
-// The desktop chrome a top-centre toast has to clear: one top band of 40 (the
-// menu titles and the command bar share it) + the status band's 26 + 10 px of
-// air, and the tab strip's 30 only when there is a strip. One plan does not get
-// one, and one plan is the common case — so this went back to a function of
-// what is actually on screen rather than the constant it was while every band
-// was permanent.
-const desktopChromePx = (planCount) => 40 + (planCount > 1 ? 30 : 0) + 26 + 10;
+// The desktop chrome a top-centre toast has to clear: the top band's 48, the
+// status band's 36 when there is a plan to describe, the tab strip's 34 when
+// there is more than one plan, and 10 px of air. A function of what is actually
+// on screen, because each of those bands comes and goes.
+const desktopChromePx = (planCount, hasStatus) =>
+  48 + (planCount > 1 ? 34 : 0) + (hasStatus ? 36 : 0) + 10;
 
 // One string for both trace entry points, matching the button that starts it.
 // The toolbar said "Detecting exterior boundary…" and the post-scan path said
@@ -139,7 +139,6 @@ function App() {
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
-  const lastTraceOutcome = useAppStore((s) => s.lastTraceOutcome);
   const unit = useAppStore((s) => s.unit);
   const lineToolActive = useAppStore((s) => s.lineToolActive);
   const measurementLines = useAppStore((s) => s.measurementLines);
@@ -367,7 +366,7 @@ function App() {
         return;
       }
       
-      setIsProcessing(true, 'Scanning for dimensions…');
+      setIsProcessing(true, 'Reading the room sizes…');
       setMode('manual');
       setOcrFailed(false);
       
@@ -412,7 +411,7 @@ function App() {
         if (verdict !== 'applied') return;
 
         if (dimensions.length === 0) {
-          notify('No printed dimensions found — type a room size, or set the scale from a known length.', { type: 'warning', id: 'scan' });
+          notify('Couldn’t read any room sizes on this plan. Set the scale in the Scale section on the left.', { type: 'warning', id: 'scan' });
           placeCentredOverlay(imgSrc);
         } else {
           const count = dimensions.length;
@@ -427,13 +426,13 @@ function App() {
           // to overrule it — that is the whole point of pinning one.
           if (uiUnit && unit !== uiUnit && useWorkspaceStore.getState().unitPreference === 'auto') {
             setUnit(uiUnit);
-            const label = uiUnit === 'inches' ? 'feet-inches'
+            const label = uiUnit === 'inches' ? 'feet and inches'
               : uiUnit === 'metric' ? 'meters' : 'decimal feet';
-            unitNote = ` Switched to ${label}.`;
+            unitNote = ` Showing ${label}, like the plan.`;
           }
           // One message, not two: the unit change is a consequence of the scan,
           // not a separate event the user needs to weigh.
-          flash(`Read ${count} dimension${count === 1 ? '' : 's'}.${unitNote}`);
+          flash(`Found ${count} room size${count === 1 ? '' : 's'}.${unitNote}`);
           // Everything from here is automatic: every label is measured, the
           // rooms that agree set the scale, the room the scale came from is
           // placed as the overlay, and the exterior is traced. The pills stay
@@ -449,7 +448,7 @@ function App() {
         // plan's own scan had to say.
         deliver(work, () => {
           setOcrFailed(true);
-          notify('Could not read this plan — type a room size, or set the scale from a known length.', { type: 'error', id: 'scan' });
+          notify('Couldn’t read this plan. Set the scale in the Scale section on the left.', { type: 'error', id: 'scan' });
           placeCentredOverlay(imgSrc);
         });
       } finally {
@@ -477,16 +476,21 @@ function App() {
     // which is exactly when it is easiest to press by accident.
     const state = useAppStore.getState();
     const losing = [
-      state.rooms?.length && `${state.rooms.length} room${state.rooms.length === 1 ? '' : 's'} you picked`,
-      state.detectedDimensions?.length && 'the labels already read',
-      (roomOverlay || perimeterOverlay) && 'the room and perimeter overlays',
+      state.rooms?.length && 'the rooms measured so far',
+      state.detectedDimensions?.length && 'the room sizes already read',
+      (roomOverlay || perimeterOverlay) && 'the current outline',
     ].filter(Boolean);
 
     const asking = beginWork('confirm');
     if (losing.length) {
       const confirmed = await confirmToast(
-        `Scanning again will discard ${losing.join(', ')}. Continue?`,
-        { confirmLabel: 'Scan' }
+        'Read the room sizes again?',
+        {
+          detail: 'This starts the plan’s measurement over and replaces '
+            + `${losing.length > 1 ? `${losing.slice(0, -1).join(', ')} and ${losing.at(-1)}` : losing[0]}. `
+            + 'You can undo it.',
+          confirmLabel: 'Read again',
+        }
       );
       if (!confirmed) {
         settleWork(asking);
@@ -552,7 +556,7 @@ function App() {
   const handleOpenExample = useCallback(async () => {
     if (!makeRoomForIncoming()) return;
 
-    setIsProcessing(true, 'Loading the example plan…');
+    setIsProcessing(true, 'Opening the sample plan…');
     try {
       const { dataUrl, mimeType } = await loadExamplePlan();
       perfResetRun();
@@ -747,7 +751,6 @@ function App() {
   // "Perimeter detected" even for a footprint covering 6% of the building.
   const reportTrace = useCallback((traced, floorCount) => {
     const quality = qualitySummary(traced?.quality);
-    const mode = useInteriorWalls ? 'inner' : 'outer';
     const excludedNote = excludedAreasNote(traced ?? {});
     const drawn = traced?.quality?.source === 'drawn';
     // A drawn trace that went wrong is corrected by painting again, not by
@@ -760,24 +763,20 @@ function App() {
 
     if (!floorCount) {
       notify(quality.reason
-        ? `No usable outline — ${quality.reason}. Paint over the exterior walls instead.`
-        : 'No usable outline found. Paint over the exterior walls instead.',
+        ? `FloorTrace couldn’t find the outline — ${quality.reason}. Paint over the outside walls instead.`
+        : 'FloorTrace couldn’t find the outline. Paint over the outside walls instead.',
       { type: 'error', id: 'trace-result', duration: DURATION.LONG, action: drawAction });
       return;
     }
 
-    const noun = drawn ? 'Outline traced from your painting' : 'Outline found';
-    // The wall-face parenthetical is gone from the *warning* branch below: it
-    // is a setting the Area card already shows a toggle for, and stacking it in
-    // front of the reason left the most common failure message reading
-    // "Outline found (outer wall face) (71% confidence): check it" — two
-    // parentheticals and an imperative with no object.
+    // No wall-face parenthetical and no percentage. "Outline found (outer wall
+    // face) (71% confidence): check it" was two parentheticals and an
+    // imperative with no object; the wall face is a setting with its own
+    // switch on the Area card, and the percentage read as an accuracy score it
+    // is not (see the note below).
     const what = floorCount > 1
-      ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels (${mode} wall face)`
-      : `${noun} (${mode} wall face)`;
-    const plain = floorCount > 1
-      ? `${drawn ? 'Traced' : 'Found'} ${floorCount} levels`
-      : noun;
+      ? `${drawn ? 'Drew' : 'Found'} ${floorCount} levels`
+      : (drawn ? 'Outline drawn from your painting' : 'Outline found');
     // The outline on screen is not the one the first search produced, and the
     // area moved with it. By the routing rule that is a toast and not a flash
     // even when the result is clean: the user must know it, and cannot see it —
@@ -785,7 +784,7 @@ function App() {
     const retry = traced?.quality?.remediation;
     const recovered = retry?.accepted ? retry.after.held - retry.before.held : 0;
     const retryNote = recovered > 0
-      ? ` First pass left ${recovered} known room${recovered === 1 ? '' : 's'} out, so it was traced again.`
+      ? ` The first try left ${recovered} room${recovered === 1 ? '' : 's'} outside, so it was traced again.`
       : '';
 
     // A clean trace is visible on the canvas the instant it lands, and its
@@ -800,15 +799,14 @@ function App() {
       }
       return;
     }
-    // "wall match", not "confidence". The number is the share of this outline
-    // that sits on wall the plan actually draws — it is evidence about the
-    // tracing, and it is blind to whether the enclosed area is the right area.
-    // Read as "71% accurate" it is worse than no number: measured across the
-    // results the app presents, its correlation with area error is +0.117, and
-    // the single worst over-count in the fixture set carries the joint-highest
-    // value.
-    const matchNote = quality.percent === null ? '' : ` (${quality.percent}% wall match)`;
-    const reason = quality.reason ? ` — ${quality.reason}` : '';
+    // No percentage. The detector's score is the share of this outline that
+    // sits on wall the plan actually draws — evidence about the tracing, blind
+    // to whether the enclosed area is the right area. Read as "71% accurate" it
+    // is worse than no number: measured across the results the app presents,
+    // its correlation with area error is +0.117, and the single worst
+    // over-count in the fixture set carries the joint-highest value. What the
+    // user can act on is the reason, so that is what is said.
+    const reason = quality.reason ? `: ${quality.reason}` : '';
 
     // A result the detector rates poor is not handed over as an answer, but it
     // is no longer taken away either. The outline stays on the canvas with its
@@ -819,8 +817,8 @@ function App() {
     // had been painted since.
     if (quality.level === 'poor' || quality.level === 'failed') {
       notify(
-        `${plain}${matchNote}, and it is probably wrong${reason}.${retryNote} `
-        + 'It is on the plan so you can see what it got — paint over the exterior walls to replace it.',
+        `${what}, but it is probably wrong${reason}.${retryNote} `
+        + 'It is left on the plan so you can see it — paint over the outside walls to replace it.',
         {
           type: 'error',
           id: 'trace-result',
@@ -834,13 +832,13 @@ function App() {
       return;
     }
 
-    notify(`${plain}${matchNote}: check it${reason}.${retryNote}`, {
+    notify(`${what} — please check it against the plan${reason}.${retryNote}`, {
       type: 'warning',
       id: 'trace-result',
       duration: DURATION.LONG,
       action: drawAction,
     });
-  }, [useInteriorWalls, handleDrawMode]);
+  }, [handleDrawMode]);
 
   // An outline typed from the plan's own words moves its area out of GLA and
   // into another subtotal. The user can see the new type on the outline row,
@@ -854,11 +852,11 @@ function App() {
     if (named.length) {
       const names = named.map((c) => c.name).join(', ');
       const kinds = [...new Set(named.map((c) => traceTypeLabel(c.type).toLowerCase()))];
-      parts.push(`${names} read as ${kinds.join(' / ')} from the plan's labels.`);
+      parts.push(`${names} set to count as ${kinds.join(' / ')}, from the words on the plan.`);
     }
     if (reverted) {
-      parts.push(`${reverted} outline${reverted === 1 ? '' : 's'} back to GLA — `
-        + 'the label the type was read from is gone.');
+      parts.push(`${reverted} outline${reverted === 1 ? '' : 's'} back to counting as GLA — `
+        + 'the words it was read from are gone.');
     }
     notify(parts.join(' '), { type: 'info', id: 'trace-types', duration: DURATION.NORMAL });
   }, []);
@@ -931,8 +929,8 @@ function App() {
       // stopping with no message is indistinguishable from a trace that hung.
       if (verdict === 'stale' || verdict === 'dropped') {
         flash(verdict === 'stale'
-          ? 'The plan changed while it was tracing — trace it again.'
-          : 'That trace finished after its plan was closed.');
+          ? 'The plan changed while the outline was being found — find it again.'
+          : 'That outline finished after its plan was closed.');
       }
       if (verdict !== 'applied') return null;
 
@@ -953,10 +951,10 @@ function App() {
         // user, so they say different things.
         const text = String(error?.message ?? '');
         const message = /timed out|timeout/i.test(text)
-          ? 'Tracing took too long and was stopped. Crop the sheet to the building, or paint the outline instead.'
+          ? 'Finding the outline took too long and was stopped. Crop the plan to the house, or paint the outline instead.'
           : /terminated|worker/i.test(text)
-            ? 'Tracing was interrupted before it finished. Try again, or paint the outline instead.'
-            : 'Could not trace this plan. Paint over the exterior walls instead.';
+            ? 'Finding the outline was interrupted. Try again, or paint the outline instead.'
+            : 'FloorTrace couldn’t find the outline on this plan. Paint over the outside walls instead.';
         setLastTraceOutcome({ at: Date.now(), level: 'failed', reason: message, floors: 0 });
         notify(message, {
           type: 'error',
@@ -996,12 +994,12 @@ function App() {
     const strokes = state.drawStrokes;
     if (!strokes.length) {
       setDrawModeActive(false);
-      flash('Nothing painted — drag over the exterior walls to outline them');
+      flash('Nothing painted — drag over the outside walls first');
       return;
     }
     undoManager.save();
     setDrawModeActive(false);
-    const level = await runTrace('Reading your outline…', {
+    const level = await runTrace('Drawing the outline from your painting…', {
       strokes,
       radius: state.drawBrushSize / 2,
     });
@@ -1210,7 +1208,7 @@ function App() {
       }));
     if (!labels.length) return;
 
-    setIsProcessing(true, 'Measuring rooms…');
+    setIsProcessing(true, 'Measuring the rooms…');
     let decision = null;
     try {
       decision = await measureAndCalibrate(labels);
@@ -1266,7 +1264,7 @@ function App() {
       .filter((d) => d.bbox && labelKeyOf(d) !== labelId)
       .map((d) => ({ x: d.bbox.x + d.bbox.width / 2, y: d.bbox.y + d.bbox.height / 2 }));
 
-    setIsProcessing(true, 'Finding room…');
+    setIsProcessing(true, 'Measuring that room…');
     const work = beginWork('room');
     try {
       detected = await detectRoomFromClick(image, point, {
@@ -1295,7 +1293,7 @@ function App() {
       // A failed room detection used to fall through to a hardcoded 200x200
       // box and calibrate the whole project from it, without a word.
       notify(
-        'Could not find that room’s outline — drag the overlay to match it, '
+        'Couldn’t find that room’s walls — drag the green box to fit the room, '
         + 'then check the area.',
         { type: 'warning', id: 'room-detect' },
       );
@@ -1316,8 +1314,8 @@ function App() {
       // from a certain one at exactly the moment it mattered most.
       if (detected.confidence < 0.5) {
         notify(
-          'This room’s outline is uncertain, and the scale comes from it — '
-          + 'check the overlay before trusting the area.',
+          'FloorTrace isn’t sure it found this room’s walls, and the scale comes from it — '
+          + 'check the green box matches the room before you trust the area.',
           { type: 'warning', id: 'room-detect' },
         );
       }
@@ -1362,10 +1360,14 @@ function App() {
 
   // ── Stable callback wrappers for inline handlers ──────────────────────────
 
-  const handleHelpOpen = useCallback(() => {
+  // The desktop Help menu names a page; the phone menu toggles the guide.
+  const handleHelpOpen = useCallback((page) => {
     const w = useWorkspaceStore.getState();
-    w.setShowHelpModal(!w.showHelpModal);
+    if (page === 'guide' || page === 'shortcuts') w.setShowHelpModal(page);
+    else w.setShowHelpModal(w.showHelpModal ? false : 'guide');
   }, []);
+  const handleOpenSettings = useCallback(() => useWorkspaceStore.getState().setShowSettings(true), []);
+  const handleCloseSettings = useCallback(() => useWorkspaceStore.getState().setShowSettings(false), []);
   // Typing a dimension fires this per keystroke, and half of a typed pair
   // disagrees with the room by construction: 16.7 entered as the width of a
   // room whose height still reads 16.7 is not a mismatch worth reporting. The
@@ -1477,7 +1479,8 @@ function App() {
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
   usePlanAreaIndex();
-  const { theme, cycleTheme } = useTheme();
+  const { theme, cycleTheme, setTheme } = useTheme();
+  const showSettings = useWorkspaceStore((s) => s.showSettings);
   const dockOpen = useWorkspaceStore((s) => s.dockOpen);
   const setDockOpen = useWorkspaceStore((s) => s.setDockOpen);
   const handleDockToggle = useCallback(
@@ -1511,6 +1514,29 @@ function App() {
     handleCancelTool();
     setMode('manual');
   }, [activeTool, handleCancelTool, setMode]);
+
+  // Erasing marks and cropping are done *because* the outline came out wrong —
+  // a legend or a note inside the house is a documented way to lose a trace —
+  // so the next step is nearly always to find the outline again. That used to
+  // be a top-bar button the user had to know to go back to. The edit now
+  // offers it, rather than re-tracing unasked over an outline the user may
+  // have adjusted by hand.
+  const handleImageEdited = useCallback((newImageDataUrl) => {
+    handleImageUpdate(newImageDataUrl);
+    notify('Plan updated. When you have finished, find the outline again so it uses the cleaned-up plan.', {
+      type: 'info',
+      id: 'image-edited',
+      duration: DURATION.LONG,
+      action: {
+        label: 'Find the outline',
+        onClick: () => {
+          if (useAppStore.getState().isProcessing) return;
+          handleCancelTool();
+          handleTracePerimeter();
+        },
+      },
+    });
+  }, [handleImageUpdate, handleCancelTool, handleTracePerimeter]);
 
   // The rail speaks the same tool ids as `TOOL_MODES`, and each maps to the very
   // toggle the keyboard already binds — so the two routes into a tool cannot
@@ -1629,7 +1655,7 @@ function App() {
       eraserBrushSize={eraserBrushSize}
       cropToolActive={cropToolActive}
       onCropToolToggle={handleCropToolToggle}
-      onImageUpdate={handleImageUpdate}
+      onImageUpdate={handleImageEdited}
       angleToolActive={angleToolActive}
       angleToolState={angleToolState}
       onAngleToolStateChange={handleAngleToolStateChange}
@@ -1721,13 +1747,6 @@ function App() {
         image={image}
         isProcessing={isProcessing}
         hasArea={area > 0}
-        calibrated={!!calibration?.calibrated}
-        perimeterTraces={perimeterTraces}
-        drawModeActive={drawModeActive}
-        ocrFailed={ocrFailed}
-        lastTraceOutcome={lastTraceOutcome}
-        alternativeCount={alternativeCount}
-        onUseAlternative={handleUseAlternative}
         planCount={documentOrder.length}
         canOpenPlan={documentOrder.length < MAX_OPEN_DOCUMENTS}
         onFileOpen={handleFileOpen}
@@ -1738,37 +1757,28 @@ function App() {
         onSaveProjectAs={handleSaveProjectAs}
         onSaveAllProjects={handleSaveAllProjects}
         onNewPlan={openPlan}
-        onNextPlan={() => stepPlan(1)}
-        onPrevPlan={() => stepPlan(-1)}
         onCloseActivePlan={handleClosePlan}
         onCloseAllPlans={handleCloseAllPlans}
+        onOpenSettings={handleOpenSettings}
         onHelpOpen={handleHelpOpen}
-        onFindRoomSize={handleFindRoomSize}
-        onSelectRoom={handleSelectRoom}
-        canSelectRoom={detectedDimensions.length > 0}
-        onScaleTool={handleScaleToolToggle}
-        onTracePerimeter={handleTracePerimeter}
-        onPaintOutline={handlePaintOutline}
-        onPlaceCorners={handleDrawExterior}
-        onAddOutline={addPerimeterTrace}
         onFitToWindow={handleFitToWindow}
+        onZoomIn={() => handleZoom(1)}
+        onZoomOut={() => handleZoom(-1)}
+        onRotate={handleRotateCanvas}
         dockOpen={dockOpen}
         onDockToggle={handleDockToggle}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={handleShowSideLengthsChange}
         autoSnapEnabled={autoSnapEnabled}
         onAutoSnapChange={handleAutoSnapChange}
-        onUnitChange={handleUnitChange}
-        saveOnExit={saveOnExit}
-        onSaveOnExitChange={handleSaveOnExitChangeWithToast}
-        enhancedOcr={enhancedOcr}
-        onEnhancedOcrChange={handleEnhancedOcrChange}
-        theme={theme}
-        onCycleTheme={cycleTheme}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {dockOpen && (
+        {/* Only once there is a plan to measure. Before that it was a column of
+            empty cards — a Room size of 0.0 ft, an Area of 0 ft² over a
+            disabled Export, a Scale "not set" — beside a welcome screen that
+            is the whole job at that moment. */}
+        {dockOpen && image && (
           <MeasurementDock
             roomDimensions={roomDimensions}
             onDimensionsChange={handleDimensionsChange}
@@ -1786,6 +1796,12 @@ function App() {
             onSelectRoom={handleSelectRoom}
             onRestoreAutoScale={restoreAutoScale}
             onExport={openExport}
+            onFindOutline={handleTracePerimeter}
+            onPaintOutline={handlePaintOutline}
+            onPlaceCorners={handleDrawExterior}
+            onUseAlternative={handleUseAlternative}
+            alternativeCount={alternativeCount}
+            onRescan={handleFindRoomSize}
           />
         )}
 
@@ -1802,18 +1818,23 @@ function App() {
             Canvas' root is `absolute inset-0`, so it would paint over them and
             the Konva stage would swallow their clicks. */}
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          <StatusBar
-            tool={activeTool}
-            count={contextCount}
-            brushSize={contextBrush}
-            onBrushSizeChange={onContextBrushChange}
-            onCancel={handleCancelTool}
-            onDone={contextDone}
-            hasImage={!!image}
-            onZoomIn={() => handleZoom(1)}
-            onZoomOut={() => handleZoom(-1)}
-            onExport={openExport}
-          />
+          {/* With no plan it has nothing to describe, except the plan being
+              opened — the sample plan announces itself here while it loads. */}
+          {(image || isProcessing) && (
+            <StatusBar
+              tool={activeTool}
+              count={contextCount}
+              brushSize={contextBrush}
+              onBrushSizeChange={onContextBrushChange}
+              onCancel={handleCancelTool}
+              onDone={contextDone}
+              hasImage={!!image}
+              onZoomIn={() => handleZoom(1)}
+              onZoomOut={() => handleZoom(-1)}
+              onFitToWindow={handleFitToWindow}
+              onExport={openExport}
+            />
+          )}
 
           {/* Under the status band rather than over it: a tab addresses the
               plan, so it sits on the plan. Above the band it was separated
@@ -1848,7 +1869,28 @@ function App() {
       </>
       )}
 
-      {showHelpModal && <HelpModal onClose={handleHelpClose} />}
+      {/* Keyed on the page, so choosing Keyboard shortcuts while the guide
+          is open lands on the shortcuts rather than keeping the old tab. */}
+      {showHelpModal && (
+        <HelpModal
+          key={String(showHelpModal)}
+          initialTab={showHelpModal === 'shortcuts' ? 'shortcuts' : 'guide'}
+          onClose={handleHelpClose}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsDialog
+          onClose={handleCloseSettings}
+          onUnitChange={handleUnitChange}
+          theme={theme}
+          onThemeChange={setTheme}
+          saveOnExit={saveOnExit}
+          onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+          enhancedOcr={enhancedOcr}
+          onEnhancedOcrChange={handleEnhancedOcrChange}
+        />
+      )}
 
       {showExportDialog && (
         <ExportDialog
@@ -1899,11 +1941,11 @@ function App() {
         style={{
           top: isMobile
             ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : `${desktopChromePx(documentOrder.length)}px`,
+            : `${desktopChromePx(documentOrder.length, !!image || isProcessing)}px`,
         }}
         toastOptions={{
           classNames: {
-            toast: 'group !bg-raised !border-line !text-fg rounded-lg shadow-xl font-medium text-[12.5px] font-sans select-none flex items-center gap-2 p-3 !w-fit !max-w-md',
+            toast: 'group !bg-raised !border-line !text-fg rounded-lg shadow-xl font-medium text-[14px] leading-snug font-sans select-none flex items-center gap-2.5 p-3.5 !w-fit !max-w-lg',
             title: '!text-fg',
             description: '!text-fg-3',
             success: '!text-ok',

@@ -143,11 +143,14 @@ const DEMO_CSS = `
 @media (max-width: 819.98px) and (max-height: 640px) { .ft-demo { display: none; } }
 `;
 
+// The job in the user's words, not the pipeline's. This used to be the four
+// stages the dock's progress strip printed (PLAN, SCALE, OUTLINE, REPORT), with
+// lines like "reads the printed room sizes to get feet per pixel" — the app
+// describing its internals to someone who wanted a square footage.
 const STEPS = [
-  { label: 'Plan', line: 'Open, drop, or paste a floorplan image.' },
-  { label: 'Scale', line: 'Reads the printed room sizes to get feet per pixel.' },
-  { label: 'Outline', line: 'Traces the exterior walls around the building.' },
-  { label: 'Report', line: 'Totals the area and exports a workfile exhibit.' },
+  { title: 'Open a floor plan', line: 'A picture or a PDF of the sketch.' },
+  { title: 'FloorTrace measures it', line: 'It reads the room sizes and outlines the house for you.' },
+  { title: 'Check it and export', line: 'Save an image with the square footage for your report.' },
 ];
 
 // One building, drawn twice: grey as walls while it is being read, accent as
@@ -161,9 +164,9 @@ const PARTITIONS = 'M118 44 V104 M36 104 H204 M204 104 V156';
    does not add up. At 4.17 units per foot the labelled rooms measure 19'6",
    14'6" and 12'6" to within an inch, and the enclosed 21,520 units² come to
    1,238 ft² — the figure the count lands on.
-   The scale chip is the exception and is not checkable against this drawing:
-   it reports px per foot of the *source image*, which is a photograph of a
-   plan several thousand pixels across, not this schematic's unit grid. */
+   The chip says only that the scale is set: a "1 ft = 15 px" here described
+   the source image rather than this schematic, and pixels are the one unit no
+   user of this app ever needs to read. */
 const PipelineDemo = () => (
   <div className="ft-demo" aria-hidden="true">
     <style>{DEMO_CSS}</style>
@@ -212,8 +215,8 @@ const PipelineDemo = () => (
 
         <g className="ft-a ft-ruler">
           <rect className="ft-chip" x="218" y="12" width="90" height="21" rx="4" strokeWidth="1" />
-          <text className="ft-label" x="263" y="27" fontSize="10.5"
-            fontFamily="Fira Code, ui-monospace, monospace" textAnchor="middle">1 ft = 15 px</text>
+          <text className="ft-label" x="263" y="27" fontSize="11" fontWeight="600"
+            textAnchor="middle">Scale set &#10003;</text>
         </g>
 
         <g className="ft-area" textAnchor="middle" fontWeight="700" fontSize="18">
@@ -227,11 +230,65 @@ const PipelineDemo = () => (
   </div>
 );
 
-/* The compact state, unchanged: what every run after the first one shows. */
-const CompactEmpty = ({ isTouch, onFileOpen }) => (
-  <div className="text-center max-w-sm">
-    <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-panel-2 border border-line flex items-center justify-center">
-      <svg className="w-7 h-7 text-fg-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+// The way in, shared by both sizes. A button, not two keybindings: this is the
+// whole screen at the one moment the app has nothing else to say, and it used
+// to answer with a pair of chords — a dead end for anyone who does not read
+// them. On touch the route in is the action bar at the bottom of the screen,
+// which already carries Open and the camera, so only the sample is offered.
+const WayIn = ({ isTouch, onFileOpen, onTryExample }) => (
+  <>
+    <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+      {!isTouch && (
+        <button
+          type="button"
+          onClick={onFileOpen}
+          className="btn btn-primary h-11 px-5 text-[15px]"
+        >
+          <FolderOpen className="w-[18px] h-[18px]" aria-hidden="true" />
+          Open a floor plan…
+        </button>
+      )}
+      {onTryExample && (
+        <button
+          type="button"
+          onClick={onTryExample}
+          className="btn btn-secondary h-11 px-5 text-[15px]"
+        >
+          Try a sample plan
+        </button>
+      )}
+    </div>
+
+    {isTouch ? (
+      <p className="mt-3 text-[14px] text-fg-2 leading-relaxed">
+        Photograph a plan, or open an image, with the buttons below.
+      </p>
+    ) : (
+      <p className="mt-3 text-[13.5px] text-fg-3">
+        You can also drag a file onto this window, or paste an image with{' '}
+        <kbd className="px-1.5 py-0.5 text-[12px] bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd>.
+      </p>
+    )}
+  </>
+);
+
+// Said before the first plan is open, not after a trace disappoints. The
+// failure this app is most prone to is a wrong answer that looks confident,
+// and a user who was promised "automatic" is the one least equipped to catch
+// it — so "automatic" is never offered unqualified, and the way out is named.
+const Caveat = () => (
+  <p className="mt-6 pt-4 border-t border-line text-[13.5px] text-fg-3 leading-relaxed">
+    Works best on a clean plan with the room sizes printed on it. If the outline
+    isn’t quite right, drag its corners — or paint roughly over the walls and
+    FloorTrace redraws it.
+  </p>
+);
+
+/* The compact state: what every run after the first one shows. */
+const CompactEmpty = ({ isTouch, onFileOpen, onTryExample }) => (
+  <div className="text-center max-w-md">
+    <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-panel-2 border border-line flex items-center justify-center">
+      <svg className="w-8 h-8 text-fg-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <path d="M9 3v18" />
         <path d="M15 3v18" />
@@ -239,50 +296,14 @@ const CompactEmpty = ({ isTouch, onFileOpen }) => (
         <path d="M3 15h18" />
       </svg>
     </div>
-    <p className="text-base font-semibold text-fg mb-1">
-      No floor plan loaded
+    <p className="text-[18px] font-semibold text-fg">
+      No floor plan open
     </p>
-    {/* Two keybindings are the whole instruction on a desktop and a dead
-        end on a phone, where the route in is the button at the bottom of
-        the screen — or the camera, which is the fastest way to get a
-        paper plan into this app and does not exist on the desktop. */}
-    {isTouch ? (
-      <p className="text-[13.5px] text-fg-2 leading-relaxed">
-        Photograph a plan, or open an image, with the buttons below.
-      </p>
-    ) : (
-      <>
-        {/* A button, not two keybindings. This is the whole screen at
-            the one moment the app has nothing else to say, and it used
-            to answer with a pair of chords — which is a dead end for
-            anyone who does not read them, and the reason Open had to
-            keep a label up in the top row. It has one here instead. */}
-        <button
-          type="button"
-          onClick={onFileOpen}
-          className="mt-1 inline-flex items-center gap-2 h-9 px-3.5 rounded-md
-                     bg-accent text-accent-ink text-[12.5px] font-semibold
-                     hover:brightness-110 transition-[filter] cursor-pointer"
-        >
-          <FolderOpen className="w-4 h-4" aria-hidden="true" />
-          Open a plan
-        </button>
-        <p className="mt-3 text-[13px] text-fg-3">
-          or drop one here, or paste with <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd>
-        </p>
-      </>
-    )}
-    {/* What the app is about to attempt, and the honest caveat. Three
-        spinners used to run in sequence with nothing having said what
-        they were for or that the last of them can be wrong — so a bad
-        trace arrived as a surprise rather than as the expected case it
-        is. Both shells, because the surprise is the same on a phone. */}
-    <p className="mt-5 pt-4 border-t border-line text-[12.5px] text-fg-3 leading-relaxed">
-      FloorTrace reads the printed room sizes, works out the scale from them, and
-      traces the exterior walls to get the area. Automatic tracing works best on a
-      clean plan with space around the drawing — when it struggles, you paint
-      roughly over the walls instead and it snaps to them.
+    <p className="mt-1.5 text-[14px] text-fg-2 leading-relaxed">
+      Open a floor plan and FloorTrace works out its square footage for you.
     </p>
+    <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
+    <Caveat />
   </div>
 );
 
@@ -298,80 +319,37 @@ const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample }) => {
     // makes that reachable at all: the canvas wrapper above this sets
     // `touch-action: none` so a drag never becomes a page scroll.
     <div className="absolute inset-0 overflow-y-auto overscroll-contain touch-pan-y">
-      <div className="min-h-full flex items-center justify-center p-4">
+      <div className="min-h-full flex items-center justify-center p-6">
         {!showWelcome ? (
-          <CompactEmpty isTouch={isTouch} onFileOpen={onFileOpen} />
+          <CompactEmpty isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
         ) : (
-          <div className="w-full max-w-[26rem] text-center">
+          <div className="w-full max-w-[30rem] text-center">
             <PipelineDemo />
 
-            <p className="mt-3 text-[15px] font-semibold text-fg">
-              Measure a floorplan
+            <h1 className="mt-4 text-[22px] font-semibold text-fg">
+              Measure a floor plan
+            </h1>
+            <p className="mt-1.5 text-[15px] text-fg-2 leading-relaxed">
+              Open a floor plan sketch and FloorTrace finds its gross living area for you.
             </p>
 
-            {/* The same four stages the dock's StageSpine prints, in the same
-                words and the same marks — the first thing a user sees names
-                the pipeline they will be reading for the rest of the session. */}
-            <ol className="mt-3 grid grid-cols-2 gap-x-3.5 gap-y-2.5 text-left">
-              {STEPS.map((s) => (
-                <li key={s.label} className="flex flex-col gap-1">
-                  <span className="h-[3px] rounded-full bg-accent/45" />
-                  <span className="text-[10.5px] font-semibold uppercase tracking-[.05em] text-fg-2">
-                    {s.label}
+            <ol className="mt-5 flex flex-col gap-3 text-left">
+              {STEPS.map((s, i) => (
+                <li key={s.title} className="flex items-start gap-3">
+                  <span className="grid place-items-center w-7 h-7 shrink-0 rounded-full
+                                   bg-accent/12 text-accent-strong text-[14px] font-semibold">
+                    {i + 1}
                   </span>
-                  <span className="text-[12px] leading-snug text-fg-3">{s.line}</span>
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-semibold text-fg leading-snug">{s.title}</span>
+                    <span className="block text-[14px] text-fg-3 leading-snug">{s.line}</span>
+                  </span>
                 </li>
               ))}
             </ol>
 
-            {/* Said before the first plan is open, not after a trace disappoints.
-                The failure this app is most prone to is a wrong answer that looks
-                confident, and a user who was promised "automatic" is the one
-                least equipped to catch it. */}
-            <p className="mt-4 pt-3.5 border-t border-line text-[12.5px] text-fg-3 leading-relaxed">
-              Automatic tracing works best on a clean plan with space around the drawing —
-              when it struggles, you paint roughly over the walls and it snaps to them.
-            </p>
-
-            {/* On touch the route in is the action bar at the bottom of the
-                screen, which already carries Open and the camera. A second large
-                Open button here would compete with it and win, from the wrong
-                side of the reach. */}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {!isTouch && (
-                <button
-                  type="button"
-                  onClick={onFileOpen}
-                  className="inline-flex items-center gap-2 h-9 px-3.5 rounded-md
-                             bg-accent text-accent-ink text-[12.5px] font-semibold
-                             hover:brightness-110 transition-[filter] cursor-pointer"
-                >
-                  <FolderOpen className="w-4 h-4" aria-hidden="true" />
-                  Open a plan
-                </button>
-              )}
-              {onTryExample && (
-                <button
-                  type="button"
-                  onClick={onTryExample}
-                  className="inline-flex items-center h-9 px-3.5 rounded-md border border-line
-                             bg-panel-2 text-fg-2 text-[12.5px] font-semibold
-                             hover:text-fg hover:border-accent/55 transition-colors cursor-pointer"
-                >
-                  Try an example plan
-                </button>
-              )}
-            </div>
-
-            {isTouch ? (
-              <p className="mt-3 text-[13.5px] text-fg-2 leading-relaxed">
-                Photograph a plan, or open an image, with the buttons below.
-              </p>
-            ) : (
-              <p className="mt-3 text-[13px] text-fg-3">
-                or drop one here, or paste with <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd>
-              </p>
-            )}
+            <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
+            <Caveat />
           </div>
         )}
       </div>

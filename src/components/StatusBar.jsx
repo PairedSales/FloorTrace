@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Check, Loader2, Minus, Plus, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Check, Loader2, Minus, Plus, CloudOff, RefreshCw, AlertTriangle, Maximize } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
@@ -16,29 +16,34 @@ const ELAPSED_AFTER_MS = 5000;
 // never checked against anything, and the wrong one to get wrong in an app
 // whose work exists only in this browser.
 const DRAFT_CELL = {
+  // "Saved" rather than a sentence: it shares a band with the zoom and the
+  // standing tip, and the reassurance is the word. Where it is saved is the
+  // tooltip's job, and Help's.
   saved: {
-    Icon: Check, tone: 'text-ok', label: 'Draft saved', ok: true,
-    title: 'Your work is kept in this browser. Export an image, or save a project file, to keep it anywhere else.',
+    Icon: Check, tone: 'text-ok', label: 'Saved', ok: true,
+    title: 'Your work is saved in this browser as you go. Export an image, or save a project file, to keep it anywhere else.',
   },
   pending: {
-    Icon: RefreshCw, tone: 'text-fg-3', label: 'Saving draft…', ok: true,
-    title: 'Writing the latest changes to this browser’s storage.',
+    Icon: RefreshCw, tone: 'text-fg-3', label: 'Saving…', ok: true,
+    title: 'Saving your latest changes in this browser.',
   },
   error: {
-    Icon: AlertTriangle, tone: 'text-crit', label: 'Draft not saved', ok: false,
-    title: 'This browser refused to store the draft. Export an image, or save a project file, before you close the tab.',
+    Icon: AlertTriangle, tone: 'text-crit', label: 'Not saved', ok: false,
+    title: 'This browser would not store your work. Export an image, or save a project file, before you close the tab.',
   },
   off: {
-    Icon: CloudOff, tone: 'text-warn', label: 'Not kept', ok: false,
-    title: '“Save work on exit” is off, so nothing is stored. Export an image, or save a project file, before you close the tab.',
+    Icon: CloudOff, tone: 'text-warn', label: 'Autosave is off', ok: false,
+    title: 'Autosave is turned off in Settings, so nothing is kept. Export an image, or save a project file, before you close the tab.',
   },
 };
 
 // The resting state. Every other mode is a `TOOL_MODES` entry; this one is not
-// a tool, has nothing to cancel and no instruction beyond "you can drag things",
-// so it is deliberately not in that table — `MobileToolContext` reads the same
-// table and treats a miss as "no mode is running".
-const IDLE = { name: 'Select', hint: 'Drag a corner to adjust an outline' };
+// a tool, has nothing to cancel, and needs no name — the band says nothing about
+// a mode when you are not in one. What it does say is the one thing a newcomer
+// cannot find out by looking: that the outline's corners move. Short enough to
+// fit beside the zoom at a 1024 px window; deleting a corner is taught on the
+// Outline card and in Help.
+const IDLE_HINT = 'Drag any corner to reshape the outline.';
 
 // `grow` marks a cell whose text is expendable, and only two ever are: the mode
 // name and the instruction beside it. **Everything to their right is `shrink-0`**,
@@ -48,14 +53,10 @@ const IDLE = { name: 'Select', hint: 'Drag a corner to adjust an outline' };
 // The instruction is one slot with several claimants rather than a cell each.
 // Two competing instruction cells would both truncate and neither would be
 // readable, which is why the hover hint takes this cell over rather than
-// claiming another.
-//
-// Nothing here scrolls. The band is 26 px and a horizontal scrollbar would eat
-// it — and inset between the dock and the tool rail it has *less* room than it
-// did in the menu bar, not more.
+// claiming another. Nothing here scrolls.
 const Cell = ({ children, grow = false, className = '', ...rest }) => (
   <span
-    className={`inline-flex items-center gap-1.5 h-[26px] px-2.5 whitespace-nowrap
+    className={`inline-flex items-center gap-2 h-9 px-3 whitespace-nowrap
                 border-l border-line-soft first:border-l-0
                 ${grow ? 'min-w-0 shrink' : 'shrink-0'} ${className}`}
     {...rest}
@@ -64,42 +65,42 @@ const Cell = ({ children, grow = false, className = '', ...rest }) => (
   </span>
 );
 
+const ZoomButton = ({ label, onClick, disabled, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={label}
+    title={label}
+    className="w-7 h-7 grid place-items-center rounded text-fg-2
+               hover:bg-sunken hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent
+               cursor-pointer disabled:cursor-default"
+  >
+    {children}
+  </button>
+);
+
 /**
- * The desktop convention the app was missing entirely: one place that always
- * answers "what mode am I in, how big is the view, what scale is in force,
- * is my work saved". Before this, mode lived only in eight `duration: Infinity`
- * toasts over the canvas and zoom was not displayed anywhere at all.
+ * One place that always answers "what is happening, how big is the view, is my
+ * work saved" — directly above the plan it describes, inset between the
+ * measurement panel and the tool rail so it spans the plan and nothing else.
  *
- * It is a band of its own, directly under the tab strip and directly above the
- * plan it describes — inset between the measurement dock and the tool rail, so
- * it spans the plan and nothing else.
+ * **It is also the instruction bar.** While a tool runs, the band tints and
+ * carries the tool's name, what to do next, its brush size and its way out.
+ * That is the most important text in any correction the user makes, so it is
+ * set at reading size in a 36 px band — it was 11.5 px in a 26 px strip, which
+ * is where the one instruction a stuck user needs was hardest to read.
  *
- * **It is also the context bar.** A running tool used to get a second 36 px band
- * of its own under the command bar, which said the same thing twice in different
- * words: "Select room / Click a dimension label to use that room" sat two rows
- * above "Choosing a room / Click a dimension label to measure that room and take
- * the scale from it". One bar states the mode now, in the `TOOL_MODES` copy,
- * and carries that mode's brush size and its way out. Two consequences:
- *
- *  - **The standing cells stand down while a tool runs.** Scale, zoom and a
- *    healthy draft are facts you read between actions, and they cannot share
- *    452 px — the narrowest this band ever is — with an instruction, a brush
- *    slider and two buttons. A draft that is *not* being kept still shows,
- *    because that one is a warning rather than a fact.
- *  - **The band tints `accent` while a tool is running**, which is what the
- *    separate bar was really for: at a glance, the app is in a mode.
+ * What it no longer shows: the scale as "px/ft" — a number that means nothing
+ * to anyone measuring a house, stated in plain words on the panel's Scale
+ * card — and the word "Select" at rest, a mode name for not being in a mode.
  *
  * The tool the pointer is resting on (`toolHint`, written by the rail) takes the
  * hint cell, and renders **outside** the live region below — `aria-atomic`
  * re-announces the whole region on any change, so a pointer crossing twelve rail
  * buttons would fire two dozen announcements. The rail's own `aria-describedby`
- * says the same thing to a screen reader, once, on focus. The vertex count is
+ * says the same thing to a screen reader, once, on focus. The corner count is
  * outside it for the same reason: it changes on every click.
- *
- * Live cursor coordinates are deliberately absent. `currentMousePos` is local
- * state inside useToolRouter, and lifting it here would put a store write on
- * every mousemove — a 60 Hz re-render of the whole shell to display a number
- * nobody is reading while they drag.
  */
 const StatusBar = ({
   tool,
@@ -110,14 +111,16 @@ const StatusBar = ({
   onDone,
   onZoomIn,
   onZoomOut,
+  onFitToWindow,
   hasImage,
   onExport,
 }) => {
   const zoomScale = useAppStore((s) => s.zoomScale);
-  const calibration = useAppStore((s) => s.calibration);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
   const draftState = useAppStore((s) => s.draftState);
+  // The resting tip is about the outline's corners, so it waits for one.
+  const hasOutline = useAppStore((s) => (s.perimeterTraces ?? []).some((t) => t.vertices?.length >= 3));
   const toolHint = useWorkspaceStore((s) => s.toolHint);
 
   // Low-stakes confirmations land here rather than as a toast over the plan.
@@ -126,7 +129,7 @@ const StatusBar = ({
   useEffect(() => {
     if (!flash) return;
     setShownFlash(flash.text);
-    const t = setTimeout(() => setShownFlash(null), 2600);
+    const t = setTimeout(() => setShownFlash(null), 3200);
     return () => clearTimeout(t);
   }, [flash]);
 
@@ -165,24 +168,25 @@ const StatusBar = ({
 
   const mode = TOOL_MODES[tool];
   const running = !!mode;
-  const { Icon, name, hint } = running
-    ? { Icon: mode.icon, name: mode.name, hint: mode.hint }
-    : { Icon: null, name: IDLE.name, hint: IDLE.hint };
-
-  const fpp = calibration?.feetPerPixel;
-  const pxPerFoot = calibration?.calibrated && fpp?.x > 0 && fpp?.y > 0
-    ? { x: 1 / fpp.x, y: 1 / fpp.y }
-    : null;
-  const anisotropic = pxPerFoot && Math.abs(pxPerFoot.x - pxPerFoot.y) > 1e-6;
+  const hint = running ? mode.hint : (hasOutline ? IDLE_HINT : null);
   const zoomPct = zoomScale > 0 ? Math.round(zoomScale * 100) : 100;
 
   const draft = DRAFT_CELL[draftState] ?? DRAFT_CELL.off;
   const showDraft = hasImage && (!running || !draft.ok);
+  const tinted = running || isProcessing;
 
   return (
-    <div className={`flex items-center w-full min-w-0 h-[26px] shrink-0 overflow-hidden
-                     text-[11.5px] text-fg-3 select-none
-                     ${running ? 'bg-accent/10 border-b border-accent/40' : 'bg-panel border-b border-line-soft'}`}>
+    // `status-band` is the query container; the row inside it wraps onto a
+    // second line only while a tool runs in a narrow band (see index.css).
+    <div className="status-band w-full min-w-0 shrink-0">
+    <div className={`status-row flex items-center w-full min-w-0 min-h-9
+                     text-[13px] text-fg-3 select-none
+                     ${running ? 'status-row-running' : 'h-9 overflow-hidden'}
+                     ${tinted ? 'bg-accent/10 border-b border-accent/40' : 'bg-panel border-b border-line-soft'}`}>
+      {/* The lead: what is happening and what to do about it. It takes the
+          room left by the controls in one row, and a row of its own when the
+          band is too narrow for both. */}
+      <div className="status-lead flex items-center flex-1 min-w-0">
       {/* The one live region in the app. Acknowledgements moved off toasts and
           into `flash`, and sonner announces its own toasts but this channel had
           nothing — so confirmation of a user's own action was the one thing a
@@ -191,17 +195,16 @@ const StatusBar = ({
       <div role="status" aria-live="polite" aria-atomic="true" className="contents">
         {isProcessing ? (
           <Cell className="text-accent-strong font-semibold">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             {processingMessage || 'Working…'}
           </Cell>
-        ) : (
-          // The name shrinks before anything on the right of the band does. At
-          // 452 px — the narrowest this band is — a brush mode wants a slider,
-          // a Cancel and a Done, and something has to give; the icon and the
-          // accent tint still say which mode this is when the words run out.
+        ) : running && (
+          // The name shrinks before anything on the right of the band does;
+          // the icon and the tint still say which mode this is when the words
+          // run out.
           <Cell grow className="text-accent-strong font-semibold">
-            {Icon && <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
-            <span className="min-w-0 truncate">{name}</span>
+            <mode.icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{mode.name}</span>
           </Cell>
         )}
 
@@ -209,20 +212,17 @@ const StatusBar = ({
       </div>
 
       {/* How long this has been going, and the way out of it — deliberately
-          *outside* the live region above, for the reason the vertex count is:
-          that region is `aria-atomic`, so a number changing every second would
-          re-announce the whole band once a second for as long as the job runs.
-          `aria-live="off"` on the seconds says the same thing again for a
-          reader that reaches this cell some other way.
+          *outside* the live region above: that region is `aria-atomic`, so a
+          number changing every second would re-announce the whole band once a
+          second for as long as the job runs.
 
           Both appear only after five seconds. A trace that returns in 300 ms
-          would otherwise flash a counter and a button through the band, and a
-          Stop the user cannot hit is a Stop that only makes the app look
-          twitchy. Past five seconds it is the opposite: with no elapsed time
-          and no control, a 30 s trace and a hung one are the same screen. */}
+          would otherwise flash a counter and a button through the band. Past
+          five seconds it is the opposite: with no elapsed time and no control,
+          a 30 s trace and a hung one are the same screen. */}
       {showElapsed && (
         <Cell className="text-fg-3">
-          <span className="font-mono tabular-nums" aria-live="off">
+          <span className="tabular-nums" aria-live="off">
             {Math.round(elapsedMs / 1000)}s
           </span>
           {cancellable && (
@@ -230,9 +230,7 @@ const StatusBar = ({
               type="button"
               onClick={handleStop}
               title="Stop this and leave the plan as it is"
-              className="inline-flex items-center h-[18px] px-1.5 rounded border border-line
-                         bg-panel-2 text-[11px] text-fg-2 hover:text-fg hover:border-accent/50
-                         transition-colors cursor-pointer"
+              className="btn btn-secondary h-7 px-2.5 text-[13px]"
             >
               Stop
             </button>
@@ -242,91 +240,70 @@ const StatusBar = ({
 
       {/* One cell, three claimants, in this order: a flash the user just earned
           beats a tool they are only pointing at, and both beat the standing
-          instruction for the mode. Working… suppresses all three — the progress
-          message is already saying what is happening. */}
+          instruction. Working… suppresses all three — the progress message is
+          already saying what is happening. */}
       {!isProcessing && !shownFlash && (toolHint ? (
         <Cell grow aria-hidden="true">
           <b className="shrink-0 font-semibold text-fg-2">{toolHint.name}</b>
           {toolHint.detail && <span className="min-w-0 truncate">{toolHint.detail}</span>}
           {toolHint.digit && (
-            <span className="shrink-0 font-mono text-fg-dim">{toolHint.digit}</span>
+            <kbd className="shrink-0 px-1.5 text-[11.5px] border border-line rounded text-fg-3">
+              {toolHint.digit}
+            </kbd>
           )}
         </Cell>
-      ) : hint && (
-        <Cell grow className={running ? 'text-fg-2' : ''}>
+      ) : hasImage && hint && (
+        <Cell grow className={`status-hint ${running ? 'text-fg' : ''}`}>
           <span className="min-w-0 truncate">{hint}</span>
         </Cell>
       ))}
+      </div>
 
       {running && count > 0 && (
-        <Cell className="font-mono tabular-nums text-fg-2">
+        <Cell className="tabular-nums text-fg-2">
           {count} {count === 1 ? 'corner' : 'corners'}
         </Cell>
       )}
 
       {running && mode.brush && (
         <Cell>
-          <input
-            type="range"
-            aria-label="Brush size"
-            min={mode.brush === 'draw' ? 8 : 4}
-            max={mode.brush === 'draw' ? 400 : 200}
-            step={mode.brush === 'draw' ? 6 : 4}
-            value={brushSize}
-            onChange={(e) => onBrushSizeChange(Number(e.target.value))}
-            className="w-20 h-[14px] accent-accent cursor-pointer"
-          />
-          <span className="font-mono tabular-nums text-fg-2 min-w-[42px]">{brushSize} px</span>
-          <span className="text-fg-dim">
-            <kbd className="font-mono border border-line rounded px-1">[</kbd>
-            {' '}
-            <kbd className="font-mono border border-line rounded px-1">]</kbd>
-          </span>
+          <label className="inline-flex items-center gap-2 text-fg-2">
+            <span className="status-optional">Brush size</span>
+            <input
+              type="range"
+              aria-label="Brush size"
+              min={mode.brush === 'draw' ? 8 : 4}
+              max={mode.brush === 'draw' ? 400 : 200}
+              step={mode.brush === 'draw' ? 6 : 4}
+              value={brushSize}
+              onChange={(e) => onBrushSizeChange(Number(e.target.value))}
+              className="w-24 h-4 accent-accent cursor-pointer"
+            />
+          </label>
         </Cell>
       )}
 
-      <span className="flex-1 min-w-[10px]" />
-
-      {!running && (
-        <Cell>
-          <b className="text-fg-2 font-semibold">Scale</b>
-          <span className="font-mono tabular-nums text-fg-2">
-            {pxPerFoot
-              ? (anisotropic
-                ? `${pxPerFoot.x.toFixed(2)} × ${pxPerFoot.y.toFixed(2)} px/ft`
-                : `${pxPerFoot.x.toFixed(2)} px/ft`)
-              : 'not set'}
-          </span>
-        </Cell>
-      )}
-
-      {!running && (
-        <Cell>
-          <button
-            type="button"
-            onClick={onZoomOut}
-            disabled={!hasImage}
-            aria-label="Zoom out"
-            title="Zoom out"
-            className="w-[18px] h-[18px] grid place-items-center rounded text-fg-3
-                       hover:bg-sunken hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent
-                       cursor-pointer disabled:cursor-default"
-          >
-            <Minus className="w-3 h-3" aria-hidden="true" />
-          </button>
-          <span className="font-mono tabular-nums text-fg-2 min-w-[38px] text-center">{zoomPct}%</span>
-          <button
-            type="button"
-            onClick={onZoomIn}
-            disabled={!hasImage}
-            aria-label="Zoom in"
-            title="Zoom in"
-            className="w-[18px] h-[18px] grid place-items-center rounded text-fg-3
-                       hover:bg-sunken hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent
-                       cursor-pointer disabled:cursor-default"
-          >
-            <Plus className="w-3 h-3" aria-hidden="true" />
-          </button>
+      {!running && hasImage && (
+        <Cell className="gap-1">
+          <ZoomButton label="Zoom out" onClick={onZoomOut} disabled={!hasImage}>
+            <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+          </ZoomButton>
+          <span className="tabular-nums text-fg-2 min-w-[44px] text-center">{zoomPct}%</span>
+          <ZoomButton label="Zoom in" onClick={onZoomIn} disabled={!hasImage}>
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+          </ZoomButton>
+          {onFitToWindow && (
+            <button
+              type="button"
+              onClick={onFitToWindow}
+              title="Fit the whole plan in the window (F)"
+              className="ml-1 inline-flex items-center gap-1.5 h-7 px-2 rounded text-fg-2
+                         hover:bg-sunken hover:text-fg cursor-pointer"
+            >
+              <Maximize className="w-3.5 h-3.5" aria-hidden="true" />
+              Fit
+            </button>
+          )}
         </Cell>
       )}
 
@@ -342,7 +319,7 @@ const StatusBar = ({
                        transition-colors cursor-pointer"
           >
             <draft.Icon
-              className={`w-3 h-3 ${draft.tone} ${draftState === 'pending' ? 'animate-spin' : ''}`}
+              className={`w-3.5 h-3.5 ${draft.tone} ${draftState === 'pending' ? 'animate-spin' : ''}`}
               aria-hidden="true"
             />
             {draft.label}
@@ -353,32 +330,29 @@ const StatusBar = ({
       {/* The way out, last, where the eye ends up — and the only two controls
           in this band that are not always here, so they never move the rest. */}
       {running && (
-        <Cell>
+        <Cell className="gap-2 ml-auto">
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex items-center gap-1.5 h-[20px] px-2 rounded border border-line
-                       bg-panel-2 text-[11px] text-fg-2 hover:text-fg hover:border-accent/50
-                       transition-colors cursor-pointer"
+            className="btn btn-secondary h-7 px-3 text-[13px]"
           >
             Cancel
-            <kbd className="font-mono text-[10px] opacity-70">Esc</kbd>
+            <kbd className="status-optional text-[11.5px] opacity-70">Esc</kbd>
           </button>
 
           {onDone && mode.doneLabel && (
             <button
               type="button"
               onClick={onDone}
-              className="inline-flex items-center gap-1.5 h-[20px] px-2 rounded border border-accent
-                         bg-accent text-accent-ink text-[11px] font-semibold hover:brightness-110
-                         transition-[filter] cursor-pointer"
+              className="btn btn-primary h-7 px-3 text-[13px]"
             >
               {mode.doneLabel}
-              {mode.doneKey && <kbd className="font-mono text-[10px] opacity-80">{mode.doneKey}</kbd>}
+              {mode.doneKey && <kbd className="status-optional text-[11.5px] opacity-80">{mode.doneKey}</kbd>}
             </button>
           )}
         </Cell>
       )}
+    </div>
     </div>
   );
 };

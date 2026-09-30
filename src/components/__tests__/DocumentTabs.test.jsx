@@ -6,7 +6,7 @@ import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
 
 /**
- * The band costs the plan 30 px, so the cases here are the two that decide
+ * The band costs the plan 34 px, so the cases here are the two that decide
  * whether it is worth them: whether it renders at all, and whether what it
  * renders is tabs or empty panel.
  */
@@ -55,7 +55,7 @@ describe('DocumentTabs', () => {
     const view = render(<DocumentTabs {...props} />);
     const [first] = [...view.container.querySelectorAll('[data-tab-id]')];
     expect(first.style.flex).toBe('0 1 auto');
-    expect(first.style.maxWidth).toBe('200px');
+    expect(first.style.maxWidth).toBe('220px');
 
     // The button is inside the strip, so the strip's own element is its parent
     // rather than a sibling pinned to the row's far end.

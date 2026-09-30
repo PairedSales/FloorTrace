@@ -28,7 +28,9 @@ export const qualityLevel = (confidence, edited = false) => {
 export const detailText = (warning) => {
   const d = warning.detail;
   if (!d) return warning.message;
-  if (warning.code === 'bridged-opening') return `a ${d.px}px opening was bridged to close the outline`;
+  // In words, not pixels: an image-pixel width means nothing to the person
+  // reading it, and the Show button points at the gap itself.
+  if (warning.code === 'bridged-opening') return 'a gap in the wall was bridged to close the outline';
   // Every missed room, not the first one. These used to be emitted one per
   // room and then de-duplicated by code, so three rooms outside read as one.
   if (warning.code === 'room-outside') {
@@ -46,7 +48,7 @@ export const detailText = (warning) => {
     return `${d.count} part${d.count === 1 ? '' : 's'} of the drawing were skipped before tracing, so any area there is not counted`;
   }
   if (warning.code === 'low-resolution') {
-    return `the walls are about ${d.px}px thick at the size this was traced, which is too thin to follow reliably`;
+    return 'the walls are drawn too thin at this image size to be followed reliably';
   }
   if (warning.code === 'plan-skewed') {
     return `the drawing sits about ${d.degrees}° off square, and the outline was straightened onto the page's axes`;
@@ -60,7 +62,7 @@ export const detailText = (warning) => {
     return 'an enclosed space inside this outline was not subtracted — if it is a courtyard or light well, cut it out';
   }
   if (warning.code === 'void-superseded') {
-    return 'the detector found a void where you had already cut one; yours is the one in use';
+    return 'FloorTrace found an open area where you had already cut one out; yours is the one in use';
   }
   // No square footage, deliberately. The detector has no scale — nothing under
   // `detection/` knows px per foot — so a figure here would have been a
@@ -173,31 +175,31 @@ const LABELS = new Map(Object.entries({
   'bridged-opening': 'A gap was closed for you',
   'heavy-closing': 'Large gaps were closed',
   annexation: 'Reaches past its walls',
-  'wall-left-outside': 'Wall left outside',
-  'thin-structure-excluded': 'Thin structure excluded',
-  'incomplete-enclosure': 'Incomplete enclosure',
+  'wall-left-outside': 'A wall is left outside the outline',
+  'thin-structure-excluded': 'A thin part of the building was left out',
+  'incomplete-enclosure': 'The walls don’t close',
   'floors-rejected': 'Outlines discarded',
   'no-boundary': 'No outline traced',
   'floor-empty': 'One outline came back empty',
   'self-intersecting': 'Outline crosses itself',
   'covers-page': 'Outline covers the whole page',
   'tiny-floor': 'Very small outline',
-  'inner-not-nested': 'Interior not nested',
-  'inner-over-inset': 'Interior inset far',
-  'no-inner': 'No interior outline',
+  'inner-not-nested': 'The inside-wall outline doesn’t fit',
+  'inner-over-inset': 'The inside-wall outline is far from the walls',
+  'no-inner': 'No inside-wall outline',
   'floors-overlap': 'Two outlines overlap',
-  'room-outside': 'Room outside',
-  'label-outside': 'Label outside',
+  'room-outside': 'A measured room is outside the outline',
+  'label-outside': 'A labelled area is outside the outline',
   'no-alternative': 'Nothing to compare against',
-  'brush-mismatch': 'Does not match your outline',
-  'drawn-freehand': 'Traced from your stroke',
+  'brush-mismatch': 'Doesn’t follow your painting',
+  'drawn-freehand': 'Drawn from your painting',
   remediated: 'Traced again',
   'low-resolution': 'This image is too small to trace reliably',
   'plan-skewed': 'The plan is not square to the page',
   'non-gla-not-removed': 'A garage or porch may not have been removed',
   'enclosed-void': 'An enclosed space was not subtracted',
   'outlines-dropped': 'Parts of the drawing were skipped',
-  'void-superseded': 'The detector found a void you had already cut',
+  'void-superseded': 'An area you cut out was found again',
   'area-excluded': 'Area removed from the total',
   'spanned-walls': 'Part of this outline follows no drawn wall',
 }));
@@ -226,11 +228,11 @@ const REMEDIES = new Map(Object.entries({
   'label-outside': 'If those areas belong to the building, paint the outline to include them.',
   'floors-rejected': 'If one of those was a real building, paint its outline by hand and it will be measured.',
   'outlines-dropped': 'If part of the building is missing, paint its outline by hand.',
-  'no-inner': 'No interior face could be measured here, so this outline reports its exterior in both settings.',
+  'no-inner': 'The inside of these walls could not be found, so this outline is measured to the outside of the walls either way.',
   'low-resolution': 'Open a larger copy of the plan if you have one — at this size the area cannot be trusted.',
   'plan-skewed': 'Rotate the plan square to the page and trace again.',
   'non-gla-not-removed': 'If it is a garage or porch, add an outline for it and set its type, or cut it out.',
-  'enclosed-void': 'Use Cut out to punch it out of the outline if it is not living area.',
+  'enclosed-void': 'If it is a courtyard or an open area, choose Cut out in the tools and take it out of the outline.',
   'tiny-floor': 'Check this is a building and not a legend or a title block. Delete it if not.',
   'brush-mismatch': 'The traced outline does not follow what you painted. Paint it again, more tightly.',
   'no-boundary': 'Paint over the exterior walls and FloorTrace will read them.',

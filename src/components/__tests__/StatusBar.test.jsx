@@ -7,10 +7,10 @@ import useWorkspaceStore from '../../store/workspaceStore';
 import { beginWork, settleWork, ownerVerdict, resetRequests } from '../../store/documentRequests';
 
 /**
- * One band says both things now: what mode the app is in, and — while a tool is
- * running — that tool's instruction, its brush and its way out. The cases here
- * are the ones where those two jobs compete for 452 px, which is the narrowest
- * this band ever is.
+ * One band says both things: what is happening, and — while a tool is running —
+ * that tool's instruction, its brush and its way out. The cases here are the
+ * ones where those two jobs compete for the width of the plan, and the ones
+ * that keep it saying nothing technical at rest.
  */
 const props = {
   tool: 'select',
@@ -22,6 +22,7 @@ const props = {
   hasImage: true,
   onZoomIn: () => {},
   onZoomOut: () => {},
+  onFitToWindow: () => {},
   onExport: () => {},
 };
 
@@ -32,28 +33,52 @@ beforeEach(() => {
     isProcessing: false,
     processingMessage: '',
     draftState: 'saved',
+    perimeterTraces: [{ id: 't1', vertices: [{ x: 0, y: 0 }, { x: 9, y: 0 }, { x: 9, y: 9 }] }],
   });
   useWorkspaceStore.setState({ toolHint: null, statusFlash: null });
 });
 afterEach(cleanup);
 
 describe('StatusBar at rest', () => {
-  it('reports the mode, the scale, the zoom and the draft', () => {
+  it('gives a tip, the zoom and whether the work is saved — and no mode name', () => {
     const view = render(<StatusBar {...props} />);
-    expect(view.getByText('Select')).toBeTruthy();
-    expect(view.getByText('Drag a corner to adjust an outline')).toBeTruthy();
-    expect(view.getByText('not set')).toBeTruthy();
+    expect(view.getByText(/Drag any corner to reshape the outline/)).toBeTruthy();
     expect(view.getByText('100%')).toBeTruthy();
-    expect(view.getByText('Draft saved')).toBeTruthy();
+    expect(view.getByText('Fit')).toBeTruthy();
+    expect(view.getByText('Saved')).toBeTruthy();
+    // "Select" was a mode name for not being in a mode.
+    expect(view.queryByText('Select')).toBeNull();
     expect(view.queryByText('Cancel')).toBeNull();
+  });
+
+  it('keeps the corner tip until there is an outline to drag', () => {
+    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
+    const view = render(<StatusBar {...props} />);
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
+    expect(view.getByText('100%')).toBeTruthy();
+  });
+
+  it('never states the scale in pixels', () => {
+    useAppStore.setState({
+      calibration: { calibrated: true, feetPerPixel: { x: 0.1, y: 0.1 } },
+    });
+    const view = render(<StatusBar {...props} />);
+    expect(view.container.textContent).not.toMatch(/px/);
+  });
+
+  it('fits the plan from beside the zoom', () => {
+    const onFitToWindow = vi.fn();
+    const view = render(<StatusBar {...props} onFitToWindow={onFitToWindow} />);
+    fireEvent.click(view.getByText('Fit'));
+    expect(onFitToWindow).toHaveBeenCalled();
   });
 
   it('gives the hint cell to whichever tool the pointer is on', () => {
     const view = render(<StatusBar {...props} />);
-    useWorkspaceStore.setState({ toolHint: { id: 'crop', name: 'Crop', detail: 'Keep only the part you drag over', digit: '8' } });
+    useWorkspaceStore.setState({ toolHint: { id: 'crop', name: 'Crop the plan', detail: 'Keep only the part you drag over', digit: '7' } });
     view.rerender(<StatusBar {...props} />);
     expect(view.getByText('Keep only the part you drag over')).toBeTruthy();
-    expect(view.queryByText('Drag a corner to adjust an outline')).toBeNull();
+    expect(view.queryByText(/Drag any corner to reshape the outline/)).toBeNull();
   });
 });
 
@@ -61,48 +86,47 @@ describe('StatusBar while a tool is running', () => {
   it('states the mode and its instruction from TOOL_MODES', () => {
     const view = render(<StatusBar {...props} tool="pick" />);
     expect(view.getByText('Choosing a room')).toBeTruthy();
-    expect(view.getByText(/take the scale from it/)).toBeTruthy();
+    expect(view.getByText(/set the scale from that room/)).toBeTruthy();
   });
 
   it('stands the standing cells down to make room', () => {
     const view = render(<StatusBar {...props} tool="vertex" onDone={() => {}} />);
-    // Scale and zoom are facts you read between actions; they cannot share this
-    // band with an instruction and two buttons.
-    expect(view.queryByText('not set')).toBeNull();
+    // Zoom and the save state are facts you read between actions; they cannot
+    // share this band with an instruction and two buttons.
     expect(view.queryByText('100%')).toBeNull();
-    expect(view.queryByText('Draft saved')).toBeNull();
+    expect(view.queryByText('Saved')).toBeNull();
     expect(view.getByText('Cancel')).toBeTruthy();
-    expect(view.getByText('Close outline')).toBeTruthy();
+    expect(view.getByText('Finish outline')).toBeTruthy();
   });
 
-  it('keeps a draft warning, because that one is not a fact but a risk', () => {
+  it('keeps a save warning, because that one is not a fact but a risk', () => {
     useAppStore.setState({ draftState: 'off' });
     const view = render(<StatusBar {...props} tool="vertex" />);
-    expect(view.getByText('Not kept')).toBeTruthy();
+    expect(view.getByText('Autosave is off')).toBeTruthy();
   });
 
   it('offers Cancel always and Done only when the mode commits', () => {
     const onCancel = vi.fn();
     const onDone = vi.fn();
     const view = render(<StatusBar {...props} tool="crop" onCancel={onCancel} onDone={onDone} />);
-    // `crop` has no doneLabel: there is nothing to close, only a drag to make.
-    expect(view.queryByText(/Close/)).toBeNull();
+    // `crop` has no doneLabel: there is nothing to finish, only a drag to make.
+    expect(view.queryByText(/Finish|Draw the outline/)).toBeNull();
     fireEvent.click(view.getByText('Cancel'));
     expect(onCancel).toHaveBeenCalled();
 
     view.rerender(<StatusBar {...props} tool="draw" onCancel={onCancel} onDone={onDone} />);
-    fireEvent.click(view.getByText('Trace my outline'));
+    fireEvent.click(view.getByText('Draw the outline'));
     expect(onDone).toHaveBeenCalled();
   });
 
-  it('carries the brush only for the modes that paint', () => {
+  it('carries the brush only for the modes that paint, in words rather than pixels', () => {
     const onBrushSizeChange = vi.fn();
     const view = render(<StatusBar {...props} tool="vertex" />);
     expect(view.queryByLabelText('Brush size')).toBeNull();
 
     view.rerender(<StatusBar {...props} tool="draw" onBrushSizeChange={onBrushSizeChange} />);
     const slider = view.getByLabelText('Brush size');
-    expect(view.getByText('24 px')).toBeTruthy();
+    expect(view.queryByText('24 px')).toBeNull();
     fireEvent.change(slider, { target: { value: '80' } });
     expect(onBrushSizeChange).toHaveBeenCalledWith(80);
   });
@@ -116,16 +140,16 @@ describe('StatusBar while a tool is running', () => {
 
   it('lets a hover and then Working… take the instruction in that order', () => {
     const view = render(<StatusBar {...props} tool="draw" />);
-    expect(view.getByText(/Paint roughly over the exterior walls/)).toBeTruthy();
+    expect(view.getByText(/Paint roughly over the outside walls/)).toBeTruthy();
 
-    useWorkspaceStore.setState({ toolHint: { id: 'eraser', name: 'Erase', detail: 'Remove clutter' } });
+    useWorkspaceStore.setState({ toolHint: { id: 'eraser', name: 'Erase marks', detail: 'White out notes' } });
     view.rerender(<StatusBar {...props} tool="draw" />);
-    expect(view.getByText('Remove clutter')).toBeTruthy();
+    expect(view.getByText('White out notes')).toBeTruthy();
 
     useAppStore.setState({ isProcessing: true, processingMessage: 'Tracing…' });
     view.rerender(<StatusBar {...props} tool="draw" />);
     expect(view.getByText('Tracing…')).toBeTruthy();
-    expect(view.queryByText('Remove clutter')).toBeNull();
+    expect(view.queryByText('White out notes')).toBeNull();
   });
 
   // The count changes on every click, so it must not sit in the live region —
@@ -133,7 +157,7 @@ describe('StatusBar while a tool is running', () => {
   it('keeps the changing count out of the live region', () => {
     const view = render(<StatusBar {...props} tool="vertex" count={3} />);
     const live = view.container.querySelector('[role="status"]');
-    expect(live.textContent).toContain('Placing corners');
+    expect(live.textContent).toContain('Clicking corners');
     expect(live.textContent).not.toContain('3 corners');
   });
 });

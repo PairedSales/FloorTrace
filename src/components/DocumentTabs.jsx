@@ -30,9 +30,9 @@ import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
  * tab strip exists to prevent.
  *
  * **The chevron is reachable**, which it was not while this band spanned the
- * window: inset, the strip is the window less a 320 px dock and a 48 px rail, so
- * at the 819.98 px breakpoint it has ~452 px and fits four tabs at the floor —
- * five or six open plans overflow. It is a real path with real users in it, not
+ * window: inset, the strip is the window less a 340 px dock and a 76 px rail, so
+ * at the 819.98 px breakpoint it has ~404 px and fits three tabs at the floor —
+ * four to six open plans overflow. It is a real path with real users in it, not
  * the dead-code guard it used to be.
  *
  * That is also why the width is re-measured three ways, none of them redundant:
@@ -54,13 +54,13 @@ import { documentLabel, MAX_OPEN_DOCUMENTS } from '../store/documentManager';
 // Below this a tab is a truncated word and a close button, which is the least
 // that still reads as a tab. Above the ceiling they stop growing, so two plans
 // do not each take half the window.
-const TAB_MIN = 96;
-const TAB_MAX = 200;
+const TAB_MIN = 110;
+const TAB_MAX = 220;
 
 // The two controls that share the strip with the tabs, reserved out of the
 // width before the tabs are counted.
-const NEW_BUTTON_PX = 30;
-const CHEVRON_PX = 34;
+const NEW_BUTTON_PX = 34;
+const CHEVRON_PX = 40;
 
 const PlanTab = ({
   docId, label, index, isActive, isBusy, needsRescale, canClose, isDragging,
@@ -91,8 +91,8 @@ const PlanTab = ({
   return (
     <div
       data-tab-id={docId}
-      className={`group relative flex items-center gap-1.5 h-[26px] pl-2.5 pr-1
-                  border-r border-line-soft text-[12px] select-none
+      className={`group relative flex items-center gap-1.5 h-[30px] pl-3 pr-1
+                  border-r border-line-soft text-[13px] select-none
                   ${isActive
         ? 'bg-panel-2 text-fg font-medium'
         : 'bg-panel text-fg-3 hover:text-fg-2 hover:bg-sunken'}`}
@@ -119,13 +119,13 @@ const PlanTab = ({
         title={label}
         className="flex items-center gap-1.5 flex-1 min-w-0 h-full text-left cursor-pointer"
       >
-        {isBusy && <Loader2 className="w-3 h-3 shrink-0 animate-spin text-accent" aria-hidden="true" />}
+        {isBusy && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-accent" aria-hidden="true" />}
         {/* A scale this plan's own work would have set was refused because the
             plan was not live at the time — see documentRequests. Shown here
             because a plan that is silently un-scaled reports an area from a
             scale nobody chose. */}
         {needsRescale && !isBusy && (
-          <AlertTriangle className="w-3 h-3 shrink-0 text-warn" aria-hidden="true" />
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-warn" aria-hidden="true" />
         )}
         {renaming ? (
           <input
@@ -140,7 +140,7 @@ const PlanTab = ({
             }}
             onClick={(e) => e.stopPropagation()}
             className="w-full min-w-0 bg-transparent border-none outline-none
-                       text-[12px] text-fg p-0 m-0"
+                       text-[13px] text-fg p-0 m-0"
           />
         ) : (
           <span className="truncate">{label}</span>
@@ -156,12 +156,12 @@ const PlanTab = ({
         title={`Close ${label}`}
         disabled={!canClose}
         onClick={(e) => { e.stopPropagation(); onClose(docId); }}
-        className={`w-[18px] h-[18px] shrink-0 grid place-items-center rounded
+        className={`w-5 h-5 shrink-0 grid place-items-center rounded
                     text-fg-dim hover:text-fg hover:bg-line-soft cursor-pointer
                     ${isActive ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}
                     disabled:opacity-0 disabled:cursor-default`}
       >
-        <X className="w-3 h-3" aria-hidden="true" />
+        <X className="w-3.5 h-3.5" aria-hidden="true" />
       </button>
     </div>
   );
@@ -175,8 +175,8 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
   const setProjectName = useAppStore((s) => s.setProjectName);
 
   // Not read, deliberately: they are what the strip's width is made of, so they
-  // are the layout effect's dependencies. The dock is 320 px of the inset and
-  // the tool rail is the other 48.
+  // are the layout effect's dependencies. The dock is 340 px of the inset and
+  // the tool rail is the other 76.
   const dockOpen = useWorkspaceStore((s) => s.dockOpen);
   const hasImage = useAppStore((s) => !!s.image);
 
@@ -319,7 +319,7 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
     // that class is also the selector the dark theme re-applies the *light*
     // palette through (`:root[data-theme='dark'] .canvas-grid-bg`), so wearing
     // it here would hand every tab inside the light theme's tokens.
-    <div ref={stripRef} className="flex items-stretch h-[30px] shrink-0 bg-surface">
+    <div ref={stripRef} className="flex items-stretch h-[34px] shrink-0 bg-surface">
       <div className="flex items-stretch min-w-0 bg-panel border-b border-r border-line-soft">
         <div
           role="tablist"
@@ -359,10 +359,10 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
               title={`${hidden.length} more`}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setOverflowOpen((v) => !v)}
-              className="flex items-center gap-0.5 h-[26px] px-1.5 text-[11px]
+              className="flex items-center gap-1 h-[30px] px-2 text-[13px]
                          text-fg-3 hover:text-fg hover:bg-sunken cursor-pointer"
             >
-              <ChevronDown className="w-3 h-3" aria-hidden="true" />
+              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
               {hidden.length}
             </button>
             {overflowOpen && (
@@ -377,7 +377,7 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
                     type="button"
                     role="menuitem"
                     onClick={() => { setOverflowOpen(false); onSelect(docId); }}
-                    className="flex w-full items-center px-2.5 py-1.5 rounded text-[12.5px]
+                    className="flex w-full items-center px-3 py-[7px] rounded text-[13.5px]
                                text-left text-fg-2 hover:bg-accent/12 hover:text-fg"
                   >
                     <span className="truncate">
@@ -397,12 +397,12 @@ const DocumentTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
           aria-label="New plan"
           title={documentOrder.length >= MAX_OPEN_DOCUMENTS
             ? `${MAX_OPEN_DOCUMENTS} plans is the maximum`
-            : 'New plan'}
-          className="w-[30px] shrink-0 grid place-items-center text-fg-3
+            : 'New plan tab'}
+          className="w-[34px] shrink-0 grid place-items-center text-fg-3
                      hover:text-fg hover:bg-sunken cursor-pointer
                      disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
         >
-          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+          <Plus className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
     </div>

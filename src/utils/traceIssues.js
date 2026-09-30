@@ -83,8 +83,8 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
         traceId: trace.id,
         count: stale,
         label: stale === 1
-          ? 'A void is no longer inside this outline'
-          : `${stale} voids are no longer inside this outline`,
+          ? 'A cut-out is no longer inside this outline'
+          : `${stale} cut-outs are no longer inside this outline`,
       });
     }
 

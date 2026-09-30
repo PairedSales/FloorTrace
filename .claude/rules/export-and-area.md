@@ -16,7 +16,7 @@ paths:
 
 ## Exhibit (`src/utils/exhibit/`)
 
-- The exhibit PNG — the plan with its outlines burned in plus a summary block — is the primary output; users trace once for one appraisal workfile. The `.floorplan` file is secondary ("Save editable project").
+- The exhibit PNG — the plan with its outlines burned in plus a summary block — is the primary output; users trace once for one appraisal workfile. The `.floorplan` file is secondary ("Save project file").
 - `model.js` decides what the page says → `compose.js` turns it into a display list of `{op}` records → `index.js` paints it and delivers the file. Test layout by asserting on `layout.ops`, not pixels.
 - The exhibit describes the state it is handed: it uses `computeAreaByType(state)`, never the live-store memo.
 - It must look like the screen the user approved: wall-length labels sit inside the polygon exactly as `PerimeterLayer` draws them, and overlays are placed into page space through `project()` rather than a rotated canvas context, so labels stay upright under `canvasRotation`.

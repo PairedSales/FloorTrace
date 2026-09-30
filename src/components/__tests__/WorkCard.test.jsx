@@ -119,7 +119,7 @@ describe('WorkCard shows the math', () => {
     });
     const view = render(<WorkCard unit="decimal" />);
     expect(view.getByText('= −1.0')).toBeTruthy();
-    expect(view.getByText(/A void outside this outline was not deducted/)).toBeTruthy();
+    expect(view.getByText(/A cut-out outside this outline was not taken off/)).toBeTruthy();
     // 5000 − 100 px² at 0.01 ft² per px² = 49 sq ft.
     expect(view.getAllByText('49 ft²').length).toBeGreaterThan(0);
   });

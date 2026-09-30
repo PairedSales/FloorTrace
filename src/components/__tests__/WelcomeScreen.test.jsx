@@ -25,13 +25,19 @@ const props = (over = {}) => ({
 });
 
 describe('WelcomeScreen', () => {
-  it('shows the pipeline demo and the four stages on a first run', () => {
+  it('shows the demo and the job in three plain steps on a first run', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeTruthy();
-    for (const stage of ['Plan', 'Scale', 'Outline', 'Report']) {
-      expect(view.getByText(stage)).toBeTruthy();
+    for (const step of ['Open a floor plan', 'FloorTrace measures it', 'Check it and export']) {
+      expect(view.getByText(step)).toBeTruthy();
     }
+    // The pipeline's own vocabulary stays off the first screen anyone sees.
+    expect(view.queryByText(/feet per pixel/i)).toBeNull();
+    // What is on screen, not the demo's embedded stylesheet.
+    const visible = [...view.container.querySelectorAll('h1, p, li, button, text')]
+      .map((el) => el.textContent).join(' ');
+    expect(visible).not.toMatch(/\bpx\b/);
     // The caveat is the reason this screen exists rather than a splash: the
     // app's worst failure is a confident wrong answer, so "automatic" is never
     // offered unqualified.
@@ -43,8 +49,10 @@ describe('WelcomeScreen', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeNull();
-    expect(view.getByText('No floor plan loaded')).toBeTruthy();
-    expect(view.queryByRole('button', { name: /try an example/i })).toBeNull();
+    expect(view.getByText('No floor plan open')).toBeTruthy();
+    // Still the one clear way in, and still the honest caveat.
+    expect(view.getByRole('button', { name: /open a floor plan/i })).toBeTruthy();
+    expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
   it('markWelcomed is what flips it, and survives a re-mount', () => {
@@ -63,8 +71,8 @@ describe('WelcomeScreen', () => {
     const onTryExample = vi.fn();
     const view = render(<WelcomeScreen {...props({ onFileOpen, onTryExample })} />);
 
-    fireEvent.click(view.getByRole('button', { name: /open a plan/i }));
-    fireEvent.click(view.getByRole('button', { name: /try an example plan/i }));
+    fireEvent.click(view.getByRole('button', { name: /open a floor plan/i }));
+    fireEvent.click(view.getByRole('button', { name: /try a sample plan/i }));
 
     expect(onFileOpen).toHaveBeenCalledTimes(1);
     expect(onTryExample).toHaveBeenCalledTimes(1);
@@ -73,16 +81,16 @@ describe('WelcomeScreen', () => {
   it('offers no Open button on touch — the action bar below is the route in', () => {
     const view = render(<WelcomeScreen {...props({ isTouch: true })} />);
 
-    expect(view.queryByRole('button', { name: /open a plan/i })).toBeNull();
-    expect(view.getByRole('button', { name: /try an example plan/i })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /open a floor plan/i })).toBeNull();
+    expect(view.getByRole('button', { name: /try a sample plan/i })).toBeTruthy();
     expect(view.getByText(/photograph a plan/i)).toBeTruthy();
   });
 
-  it('hides the example button until a handler exists', () => {
+  it('hides the sample button until a handler exists', () => {
     const view = render(<WelcomeScreen {...props({ onTryExample: undefined })} />);
 
-    expect(view.queryByRole('button', { name: /try an example/i })).toBeNull();
-    expect(view.getByRole('button', { name: /open a plan/i })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /try a sample/i })).toBeNull();
+    expect(view.getByRole('button', { name: /open a floor plan/i })).toBeTruthy();
   });
 });
 

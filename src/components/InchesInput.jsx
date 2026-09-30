@@ -81,11 +81,11 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false }) =>
 
   return (
     <div
-      className={`relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line font-mono
+      className={`relative flex items-center justify-center w-full px-2.5 py-1.5 rounded-md bg-panel-2 border border-line tabular-nums
                  focus-within:ring-2 focus-within:ring-accent focus-within:border-accent transition-colors duration-150 cursor-text pointer-events-auto select-text
                  ${large
-                   ? (isTouch ? 'min-h-[52px] text-[21px]' : 'py-2 text-[19px]')
-                   : (isTouch ? 'min-h-[44px] text-[15px]' : 'text-[13px]')}`}
+                   ? (isTouch ? 'min-h-[52px] text-[21px]' : 'py-2 text-[18px]')
+                   : (isTouch ? 'min-h-[44px] text-[15px]' : 'text-[14px]')}`}
       // The whole box is the target, not just the two number fields. Each is
       // `1ch` wide when empty — 9 px, which a fingertip cannot land on — and the
       // guard used to be `e.target === e.currentTarget`, so a tap that hit the
@@ -134,8 +134,8 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false }) =>
         <span className="text-fg-3">&Prime;</span>
       </div>
       {inchesPrompt && (
-        <span className="absolute -bottom-5 right-0 text-xs text-warn whitespace-nowrap pointer-events-none">
-          Inches: 0–11 only
+        <span className="absolute -bottom-5 right-0 text-[12px] text-warn whitespace-nowrap pointer-events-none">
+          Inches go from 0 to 11
         </span>
       )}
     </div>

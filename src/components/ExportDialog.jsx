@@ -17,19 +17,19 @@ import { useIsMobile } from '../hooks/useViewport';
  */
 
 const Toggle = ({ checked, onChange, label, hint, disabled }) => (
-  <label className={`flex items-start gap-2.5 py-1.5 group
+  <label className={`flex items-start gap-3 py-1.5 group
     ${disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`}>
     <input
       type="checkbox"
       checked={checked}
       disabled={disabled}
       onChange={(e) => onChange(e.target.checked)}
-      className="mt-[3px] w-[15px] h-[15px] accent-accent shrink-0
+      className="mt-[3px] w-4 h-4 accent-accent shrink-0
                  cursor-pointer disabled:cursor-default"
     />
     <span className="min-w-0">
-      <span className="block text-[12.5px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
-      {hint && <span className="block text-[11.5px] leading-snug text-fg-dim mt-px">{hint}</span>}
+      <span className="block text-[13.5px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
+      {hint && <span className="block text-[12.5px] leading-snug text-fg-3 mt-px">{hint}</span>}
     </span>
   </label>
 );
@@ -182,7 +182,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
         if (cancelled) return;
         setShareFile(canShareExhibit(file) ? file : null);
       } catch {
-        // Sharing is an extra route out, never the only one — Save PNG stands.
+        // Sharing is an extra route out, never the only one — Save image stands.
         if (!cancelled) setShareFile(null);
       }
     })();
@@ -193,7 +193,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     const { shareExhibit } = await import('../utils/exhibit');
     const shared = await shareExhibit(shareFile, projectName || 'FloorTrace measurement');
     if (shared) {
-      flash('Measurement image shared');
+      flash('Image shared');
       onClose();
     }
   });
@@ -201,7 +201,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const handleCopy = () => withBusy('copy', async () => {
     const { copyExhibit } = await import('../utils/exhibit');
     await copyExhibit(result.canvas);
-    flash('Measurement image copied to the clipboard');
+    flash('Image copied — paste it into your report');
     onClose();
   });
 
@@ -209,13 +209,12 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     const { saveExhibit, exhibitFilename } = await import('../utils/exhibit');
     const saved = await saveExhibit(result.canvas, exhibitFilename(result.model));
     if (saved) {
-      flash('Measurement image saved');
+      flash('Image saved');
       onClose();
     }
   });
 
   const ready = !!result && !rendering && !error;
-  const size = result ? `${result.canvas.width} × ${result.canvas.height} px` : '—';
 
   return (
     <div
@@ -230,7 +229,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Export for your workfile"
+        aria-label="Export image"
         className={`flex flex-col bg-panel animate-fade-in overflow-hidden
           ${isMobile
             ? 'w-full h-app pt-safe'
@@ -238,11 +237,11 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
       >
         <header className="flex items-center gap-3 px-4 py-3 border-b border-line shrink-0">
           <div className="min-w-0 flex-1">
-            <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-[13.5px]'}`}>
-              Export for your workfile
+            <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-[16px]'}`}>
+              Export image
             </h2>
-            <p className="text-[11.5px] text-fg-3 mt-px">
-              One image with the plan, the outlines and every number on it.
+            <p className="text-[13px] text-fg-3 mt-0.5">
+              The plan with its outline and every measurement on it, ready for your report.
             </p>
           </div>
           <button
@@ -252,9 +251,9 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
             title="Close"
             className={`grid place-items-center rounded-md text-fg-3
                         hover:bg-sunken hover:text-fg transition-colors cursor-pointer
-                        ${isMobile ? 'w-11 h-11 -mr-2' : 'w-7 h-7'}`}
+                        ${isMobile ? 'w-11 h-11 -mr-2' : 'w-8 h-8'}`}
           >
-            <X className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} aria-hidden="true" />
+            <X className={isMobile ? 'w-5 h-5' : 'w-[18px] h-[18px]'} aria-hidden="true" />
           </button>
         </header>
 
@@ -269,7 +268,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
             {error ? (
               <div className="max-w-[320px] text-center">
                 <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-crit" aria-hidden="true" />
-                <p className="text-[12.5px] text-fg-2">{error}</p>
+                <p className="text-[13.5px] text-fg-2">{error}</p>
               </div>
             ) : (
               <canvas
@@ -280,10 +279,10 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
             )}
             {rendering && (
               <span className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5
-                               px-2.5 h-6 rounded-full bg-panel-2 border border-line
-                               text-[11.5px] text-fg-3">
-                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                Drawing the page…
+                               px-3 h-7 rounded-full bg-panel-2 border border-line
+                               text-[13px] text-fg-3">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                Preparing the image…
               </span>
             )}
           </div>
@@ -293,9 +292,9 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
             className={`shrink-0 overflow-y-auto overscroll-contain p-3.5 touch-dense
               ${isMobile
                 ? 'border-t border-line max-h-[42%]'
-                : 'w-[286px] border-l border-line'}`}
+                : 'w-[310px] border-l border-line'}`}
           >
-            <label htmlFor="export-subject" className="card-heading block mb-1.5">Subject</label>
+            <label htmlFor="export-subject" className="card-heading block mb-1.5">Title</label>
             <input
               id="export-subject"
               type="text"
@@ -309,20 +308,21 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
               // over the preview the dialog exists to show, before the user has
               // decided they want to type anything.
               autoFocus={!projectName && !isMobile}
-              className="w-full px-2.5 py-1.5 text-[12.5px] rounded-md bg-panel-2 border border-line
+              className="w-full px-3 py-2 text-[14px] rounded-md bg-panel-2 border border-line
                          text-fg placeholder-fg-dim select-text
                          focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
             />
-            <p className="mt-1.5 text-[11.5px] leading-snug text-fg-dim">
-              Titles the image and names the file. Saved with the project.
+            <p className="mt-1.5 text-[12.5px] leading-snug text-fg-3">
+              Usually the property address. It is printed at the top of the image and
+              used as the file name.
             </p>
 
-            <h3 className="card-heading mt-4 mb-1">On the page</h3>
+            <h3 className="card-heading mt-5 mb-1">Show on the image</h3>
             <Toggle
               checked={options.summary}
               onChange={(v) => setOption('summary', v)}
-              label="Measurement summary"
-              hint="Area, breakdown, scale and every outline"
+              label="Summary of the measurements"
+              hint="The area, its breakdown and where the scale came from"
             />
             <Toggle
               checked={options.outlineLabels}
@@ -333,32 +333,24 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
               checked={options.sideLengths}
               onChange={(v) => setOption('sideLengths', v)}
               label="Wall lengths"
-              hint={calibrated ? undefined : 'Needs a scale'}
+              hint={calibrated ? undefined : 'Needs a scale first'}
               disabled={!calibrated}
             />
             <Toggle
               checked={options.annotations}
               onChange={(v) => setOption('annotations', v)}
-              label="Your measure lines and areas"
-              hint={hasAnnotations ? undefined : 'None drawn'}
+              label="Your own measurements"
+              hint={hasAnnotations ? 'Distances and areas you measured' : 'You haven’t measured anything'}
               disabled={!hasAnnotations}
             />
 
-            <div className="mt-4 pt-3 border-t border-line-soft">
-              <h3 className="card-heading mb-1.5">Image</h3>
-              <p className="text-[12px] text-fg-3 font-mono tabular-nums">{size}</p>
-              <p className="mt-1 text-[11.5px] leading-snug text-fg-dim">
-                PNG at the plan’s own resolution.
-              </p>
-            </div>
-
             {result?.model?.flags?.length > 0 && (
-              <div className="mt-4 p-2.5 rounded-md bg-warn/12 border border-warn/35">
-                <p className="text-[11.5px] leading-snug text-fg-2">
+              <div className="mt-5 p-3 rounded-md bg-warn/12 border border-warn/35">
+                <p className="text-[13px] leading-snug text-fg-2">
                   <b className="text-warn font-semibold">
                     {result.model.flags.length} thing{result.model.flags.length === 1 ? '' : 's'} to check
                   </b>
-                  {' — printed on the page so the workfile carries them too.'}
+                  {' — they are printed on the image too, so whoever reads it sees them.'}
                 </p>
               </div>
             )}
@@ -368,7 +360,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
         {/* On a phone the share sheet leads: it is the one route that reaches
             mail, Files and a messaging app in one tap, where the clipboard
             usually refuses PNGs outright and a download lands somewhere the
-            user then has to go and find. Save PNG stays, demoted, and Copy
+            user then has to go and find. Save image stays, demoted, and Copy
             drops off the row entirely rather than sitting there failing. */}
         <footer
           className={`border-t border-line bg-panel-2 shrink-0
@@ -407,7 +399,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
                   {busy === 'save'
                     ? <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />
                     : <Download className="w-[18px] h-[18px]" aria-hidden="true" />}
-                  {shareFile ? 'Save' : 'Save PNG'}
+                  {shareFile ? 'Save' : 'Save image'}
                 </button>
               </div>
               <button
@@ -417,7 +409,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
                            text-[13px] text-fg-3 active:bg-sunken active:text-fg"
               >
                 <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
-                Save editable project instead
+                Save a project file instead
               </button>
             </>
           ) : (
@@ -425,12 +417,11 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
               <button
                 type="button"
                 onClick={() => { onClose(); onSaveProject(); }}
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px]
-                           text-fg-3 hover:text-fg hover:bg-sunken transition-colors cursor-pointer"
-                title="Save a .floorplan file you can reopen and keep editing"
+                className="btn btn-quiet px-3"
+                title="Save a file you can open in FloorTrace later and keep editing"
               >
-                <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
-                Save editable project instead
+                <FileJson className="w-4 h-4" aria-hidden="true" />
+                Save a project file instead
               </button>
 
               <div className="flex-1" />
@@ -439,14 +430,11 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
                 type="button"
                 onClick={handleCopy}
                 disabled={!ready || !!busy}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-line
-                           bg-panel-2 text-[12.5px] font-medium text-fg-2 hover:text-fg
-                           hover:border-accent/50 transition-colors cursor-pointer
-                           disabled:opacity-40 disabled:cursor-default"
+                className="btn btn-secondary"
               >
                 {busy === 'copy'
-                  ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
-                  : <Copy className="w-[15px] h-[15px]" aria-hidden="true" />}
+                  ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  : <Copy className="w-4 h-4" aria-hidden="true" />}
                 Copy image
               </button>
 
@@ -455,14 +443,12 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
                 onClick={handleSave}
                 disabled={!ready || !!busy}
                 autoFocus={!!projectName}
-                className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-accent
-                           text-accent-ink text-[12.5px] font-semibold hover:brightness-110
-                           transition-[filter] cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                className="btn btn-primary px-4"
               >
                 {busy === 'save'
-                  ? <Loader2 className="w-[15px] h-[15px] animate-spin" aria-hidden="true" />
-                  : <Download className="w-[15px] h-[15px]" aria-hidden="true" />}
-                Save PNG
+                  ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  : <Download className="w-4 h-4" aria-hidden="true" />}
+                Save image
               </button>
             </>
           )}

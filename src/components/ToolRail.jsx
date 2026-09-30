@@ -1,26 +1,25 @@
-import { Fragment, useEffect, useMemo } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo } from 'react';
+import { Trash2, Ellipsis, RotateCw, RotateCcw } from 'lucide-react';
 import { TOOL_GROUPS } from './toolCatalog';
 import useWorkspaceStore from '../store/workspaceStore';
 
 /**
- * The tool rail. Three rules the old ToolsPanel broke:
+ * The tool rail: a labelled column down the right of the plan.
  *
- *  1. Nothing is hidden. Line/Area/Angle/Void used to be gated behind
- *     `hasArea`, so four buttons appeared the moment a trace landed and the
- *     two-column grid reflowed under the cursor. They now disable in place,
- *     with the reason in the status bar.
- *  2. The order matches the digit map in useKeyboardShortcuts exactly. That
- *     hook already refuses to renumber itself by app state; the panel used to
- *     disagree with it.
- *  3. **A 48 px icon column says nothing until it is pointed at, so pointing at
- *     it is what makes it talk.** Hover or keyboard focus writes the tool's
- *     name and what it does into the status bar; the rail is one width, always.
- *     This replaces a `showLabels` preference that put the words beside every
- *     icon at the cost of 108 px of plan, a toggle in two places and a stored
- *     choice — and that still left the *description* to a floating tooltip.
- *     The status bar is a fixed place to look, which a tooltip that opens
- *     wherever the pointer happens to be is not.
+ * **Every button says what it is.** The rail used to be twelve bare icons that
+ * explained themselves only in the status bar, and only while hovered. That is
+ * a fine instrument panel for someone who already knows it and a wall of
+ * puzzles for everyone else — and this app is for appraisers, not for people
+ * who learn icon sets. Each button now carries a one-word label under its icon,
+ * a tooltip, and (while hovered or focused) its full description in the status
+ * bar, which is also where a disabled tool says why.
+ *
+ * **Fewer buttons.** The tools almost nobody reaches for — measuring an angle,
+ * deleting corners in bulk, turning the plan — sit behind a "More" button at
+ * the foot of the rail (`overflow` in `TOOL_GROUPS`). When one of them is the
+ * running tool, the More button wears its icon and label, so the rail never
+ * hides which mode you are in. Rotation is two explicit items there, left and
+ * right, where it used to be one button with a right-click secret.
  *
  * Disabled tools are `aria-disabled`, not `disabled`. A `disabled` button
  * dispatches no pointer events in Chrome, so the one control whose reason a
@@ -31,42 +30,64 @@ import useWorkspaceStore from '../store/workspaceStore';
  * no timeout and stays until something takes it back:
  *
  *  - **It can unmount under the pointer**, which fires no `mouseleave`. Clicking
- *    "Clear tools" is exactly that: it removes the last measurement, which
- *    removes the button. Each button clears its own hint on unmount, by id, so a
- *    late cleanup cannot wipe the hint the next button just set.
+ *    Clear is exactly that: it removes the last measurement, which removes the
+ *    button. Each button clears its own hint on unmount, by id, so a late
+ *    cleanup cannot wipe the hint the next button just set.
  *  - **Its text can change while the pointer rests on it.** The disabled reason
  *    is replaced by the tool's description the moment an outline lands, and
- *    nothing would re-write it — the status bar would keep saying a tool needs a
- *    traced outline while the outline sits on the canvas.
- *
- * `short` is the rail's own name for a tool; `label` stays the fuller phrase and
- * stays the accessible name, and `hint` is both the visible description and the
- * button's `aria-describedby`, so a screen reader hears what a pointer is shown.
- * Once a tool is *running*, the status bar stops printing the hover hint and
- * prints `TOOL_MODES[id]` instead — the name of the state and its instruction.
+ *    nothing would re-write it — the status bar would keep saying a tool needs
+ *    an outline while the outline sits on the canvas.
  */
-const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
+
+const MORE_MENU_ID = 'tools-more';
+
+// The hint plumbing every rail button shares: write on hover/focus, give it
+// back on leave/blur and on unmount, and re-state it if its text changes while
+// this button owns it.
+const useRailHint = (hint) => {
   const setToolHint = useWorkspaceStore((s) => s.setToolHint);
   const clearToolHint = useWorkspaceStore((s) => s.clearToolHint);
+
+  useEffect(() => {
+    if (useWorkspaceStore.getState().toolHint?.id === hint.id) setToolHint(hint);
+  }, [hint, setToolHint]);
+
+  useEffect(() => () => clearToolHint(hint.id), [clearToolHint, hint.id]);
+
+  return {
+    onMouseEnter: () => setToolHint(hint),
+    onMouseLeave: () => clearToolHint(hint.id),
+    onFocus: () => setToolHint(hint),
+    onBlur: () => clearToolHint(hint.id),
+  };
+};
+
+const railButtonClass = (active, tone = 'accent') => `
+  group relative shrink-0 flex flex-col items-center justify-center gap-1
+  w-[64px] h-[54px] px-1 border rounded-md transition-colors cursor-pointer
+  aria-disabled:opacity-40 aria-disabled:cursor-default
+  ${active
+    ? 'bg-accent text-accent-ink border-accent'
+    : `border-transparent text-fg-2 ${tone === 'crit'
+      ? 'hover:bg-crit/12 hover:text-crit'
+      : 'hover:bg-sunken hover:text-fg'}
+       aria-disabled:hover:bg-transparent aria-disabled:hover:text-fg-2`}`;
+
+const RailLabel = ({ children }) => (
+  <span className="max-w-full truncate text-[11.5px] leading-tight font-medium">{children}</span>
+);
+
+const ToolButton = ({ tool, active, disabled, onSelect }) => {
   const Icon = tool.icon;
   // Disabled, the reason it is disabled is the only description worth having.
   const detail = disabled ? tool.needsArea : tool.hint;
   const describedBy = detail ? `tool-hint-${tool.id}` : undefined;
 
   const hint = useMemo(
-    () => ({ id: tool.id, name: tool.short, detail, digit: tool.digit }),
-    [tool.id, tool.short, tool.digit, detail],
+    () => ({ id: tool.id, name: tool.label, detail, digit: tool.digit }),
+    [tool.id, tool.label, tool.digit, detail],
   );
-  const show = () => setToolHint(hint);
-  const clear = () => clearToolHint(tool.id);
-
-  // Re-state it if the text changed while this button owns it.
-  useEffect(() => {
-    if (useWorkspaceStore.getState().toolHint?.id === hint.id) setToolHint(hint);
-  }, [hint, setToolHint]);
-
-  // ...and give it up if the button goes away while the pointer is on it.
-  useEffect(() => () => clearToolHint(tool.id), [clearToolHint, tool.id]);
+  const hover = useRailHint(hint);
 
   return (
     <button
@@ -76,35 +97,13 @@ const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
       aria-label={tool.label}
       aria-describedby={describedBy}
       aria-keyshortcuts={tool.digit ?? undefined}
-      onClick={() => {
-        if (disabled) return;
-        if (tool.id === 'rotate') onRotate('clockwise');
-        else onSelect(tool.id);
-      }}
-      onContextMenu={tool.id === 'rotate'
-        ? (e) => { e.preventDefault(); onRotate('counterclockwise'); }
-        : undefined}
-      onMouseEnter={show}
-      onMouseLeave={clear}
-      onFocus={show}
-      onBlur={clear}
-      className={`group relative shrink-0 grid place-items-center w-9 h-9
-        border rounded-md transition-colors cursor-pointer
-        aria-disabled:opacity-40 aria-disabled:cursor-default
-        ${active
-          ? 'bg-accent text-accent-ink border-accent'
-          : `border-transparent text-fg-2 hover:bg-sunken hover:text-fg
-             aria-disabled:hover:bg-transparent aria-disabled:hover:text-fg-2`}`}
+      title={detail}
+      onClick={() => { if (!disabled) onSelect(tool.id); }}
+      {...hover}
+      className={railButtonClass(active)}
     >
-      <Icon className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
-
-      {tool.digit && (
-        <span className={`absolute right-0.5 bottom-0 font-mono text-[10px] leading-none
-          opacity-0 group-hover:opacity-100 transition-opacity
-          ${active ? 'text-accent-ink' : 'text-fg-dim'}`}>
-          {tool.digit}
-        </span>
-      )}
+      <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
+      <RailLabel>{tool.short}</RailLabel>
 
       {/* The same sentence the status bar prints, for a reader that is not
           looking at the status bar. `aria-label` above still supplies the name,
@@ -114,36 +113,153 @@ const ToolButton = ({ tool, active, disabled, onSelect, onRotate }) => {
   );
 };
 
+const OVERFLOW = TOOL_GROUPS.find((g) => g.overflow);
+const MAIN_GROUPS = TOOL_GROUPS.filter((g) => !g.overflow);
+
+const MORE_HINT = {
+  id: 'more',
+  name: 'More tools',
+  detail: 'Measure an angle, remove corners, or turn the plan',
+};
+
+// One row of the overflow menu. Wider than a rail button, so it can say what
+// the tool is for — or, disabled, why not — under its name.
+const MoreItem = ({ icon, label, detail, keys, active, disabled, onSelect }) => {
+  const Icon = icon;
+  return (
+  <button
+    type="button"
+    role="menuitem"
+    aria-disabled={disabled || undefined}
+    aria-pressed={active ?? undefined}
+    onClick={() => { if (!disabled) onSelect(); }}
+    className={`flex w-full items-start gap-3 px-3 py-2 rounded text-left transition-colors
+      aria-disabled:opacity-45 aria-disabled:cursor-default cursor-pointer
+      ${active ? 'bg-accent/12 text-fg' : 'text-fg-2 hover:bg-accent/12 hover:text-fg'}
+      aria-disabled:hover:bg-transparent`}
+  >
+    <Icon className="w-[18px] h-[18px] mt-0.5 shrink-0" aria-hidden="true" />
+    <span className="min-w-0 flex-1">
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="text-[13.5px] font-medium">{label}</span>
+        {keys && <span className="text-[12px] text-fg-dim">{keys}</span>}
+      </span>
+      {detail && <span className="block text-[12.5px] leading-snug text-fg-3 mt-0.5">{detail}</span>}
+    </span>
+  </button>
+  );
+};
+
+const MoreMenu = ({ activeTool, hasArea, onSelect, onRotate }) => {
+  const menuOpen = useWorkspaceStore((s) => s.menuOpen);
+  const setMenuOpen = useWorkspaceStore((s) => s.setMenuOpen);
+  const open = menuOpen === MORE_MENU_ID;
+  const close = useCallback(() => {
+    if (useWorkspaceStore.getState().menuOpen === MORE_MENU_ID) setMenuOpen(null);
+  }, [setMenuOpen]);
+  const hover = useRailHint(MORE_HINT);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open, close]);
+
+  // Gives the flag back if the rail goes while its menu is open.
+  useEffect(() => close, [close]);
+
+  // A running overflow tool is shown on the button, so the rail still says
+  // which mode you are in while its tool is out of sight.
+  const running = OVERFLOW.tools.find((t) => t.id === activeTool && t.id !== 'rotate');
+  const Icon = running?.icon ?? Ellipsis;
+
+  const pick = (fn) => { close(); fn(); };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        id="tools-more"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={running ? `More tools — ${running.label} is on` : 'More tools'}
+        title={MORE_HINT.detail}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => setMenuOpen(open ? null : MORE_MENU_ID)}
+        {...hover}
+        className={`${railButtonClass(!!running)} ${open && !running ? 'bg-sunken text-fg' : ''}`}
+      >
+        <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
+        <RailLabel>{running?.short ?? 'More'}</RailLabel>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-labelledby="tools-more"
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute right-[calc(100%+8px)] bottom-0 z-[60] w-[300px] p-1
+                     bg-panel-2 border border-line rounded-md shadow-xl animate-fade-in"
+        >
+          {OVERFLOW.tools.map((tool) => {
+            if (tool.id === 'rotate') {
+              return (
+                <Fragment key={tool.id}>
+                  <MoreItem icon={RotateCw} label="Rotate right" detail="Turn the plan 45° clockwise"
+                    keys="R" onSelect={() => pick(() => onRotate('clockwise'))} />
+                  <MoreItem icon={RotateCcw} label="Rotate left" detail="Turn the plan 45° the other way"
+                    keys="Shift+R" onSelect={() => pick(() => onRotate('counterclockwise'))} />
+                </Fragment>
+              );
+            }
+            const disabled = !!tool.needsArea && !hasArea;
+            return (
+              <MoreItem
+                key={tool.id}
+                icon={tool.icon}
+                label={tool.label}
+                detail={disabled ? tool.needsArea : tool.hint}
+                keys={tool.digit}
+                active={activeTool === tool.id}
+                disabled={disabled}
+                onSelect={() => pick(() => onSelect(tool.id))}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CLEAR_HINT = {
   id: 'clear',
-  name: 'Clear tools',
-  detail: 'Remove every measurement and shape drawn on this plan',
+  name: 'Clear',
+  detail: 'Remove every measurement and shape you drew on this plan',
 };
 
 // Its own component so it can own the unmount cleanup: clicking it is what
 // takes it off screen, and that is the one hover in the rail guaranteed to end
 // without a mouseleave.
 const ClearButton = ({ onClearTools }) => {
-  const setToolHint = useWorkspaceStore((s) => s.setToolHint);
-  const clearToolHint = useWorkspaceStore((s) => s.clearToolHint);
-
-  useEffect(() => () => clearToolHint(CLEAR_HINT.id), [clearToolHint]);
-
+  const hover = useRailHint(CLEAR_HINT);
   return (
     <button
       type="button"
       onClick={onClearTools}
       aria-label="Clear all measurements and shapes"
       aria-describedby="tool-hint-clear"
-      onMouseEnter={() => setToolHint(CLEAR_HINT)}
-      onMouseLeave={() => clearToolHint(CLEAR_HINT.id)}
-      onFocus={() => setToolHint(CLEAR_HINT)}
-      onBlur={() => clearToolHint(CLEAR_HINT.id)}
-      className="group relative shrink-0 grid place-items-center w-9 h-9
-                 border border-transparent rounded-md cursor-pointer
-                 text-fg-2 hover:bg-crit/12 hover:text-crit transition-colors"
+      title={CLEAR_HINT.detail}
+      {...hover}
+      className={railButtonClass(false, 'crit')}
     >
-      <Trash2 className="w-[17px] h-[17px] shrink-0" aria-hidden="true" />
+      <Trash2 className="w-5 h-5 shrink-0" aria-hidden="true" />
+      <RailLabel>Clear</RailLabel>
       <span id="tool-hint-clear" className="sr-only">{CLEAR_HINT.detail}</span>
     </button>
   );
@@ -165,12 +281,12 @@ const ToolRail = ({
       role="toolbar"
       aria-label="Tools"
       aria-orientation="vertical"
-      className="flex w-12 shrink-0 flex-col bg-panel-2 border-l border-line select-none"
+      className="flex w-[76px] shrink-0 flex-col bg-panel-2 border-l border-line select-none"
     >
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-0.5 py-1.5">
-        {TOOL_GROUPS.map((group, gi) => (
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-0.5 py-2">
+        {MAIN_GROUPS.map((group, gi) => (
           <Fragment key={group.id}>
-            {gi > 0 && <span className="w-6 h-px bg-line my-1.5 shrink-0" />}
+            {gi > 0 && <span className="w-9 h-px bg-line my-1.5 shrink-0" />}
             <div
               role="group"
               aria-label={group.title}
@@ -183,7 +299,6 @@ const ToolRail = ({
                   active={activeTool === tool.id}
                   disabled={!!tool.needsArea && !hasArea}
                   onSelect={onSelect}
-                  onRotate={onRotate}
                 />
               ))}
             </div>
@@ -191,14 +306,13 @@ const ToolRail = ({
         ))}
       </div>
 
-      {/* Pinned to the foot, so clearing sits in the same place however long the
-          tool list grows — and the whole strip goes when there is nothing to
-          clear, rather than leaving its rule across an empty row. */}
-      {hasToolData && (
-        <div className="shrink-0 flex flex-col items-center gap-0.5 border-t border-line py-1.5">
-          <ClearButton onClearTools={onClearTools} />
-        </div>
-      )}
+      {/* Outside the scrolling list, so the overflow menu is never clipped by
+          it, and pinned to the foot so it sits in the same place however tall
+          the window is. Clear goes when there is nothing to clear. */}
+      <div className="shrink-0 flex flex-col items-center gap-0.5 border-t border-line py-2">
+        <MoreMenu activeTool={activeTool} hasArea={hasArea} onSelect={onSelect} onRotate={onRotate} />
+        {hasToolData && <ClearButton onClearTools={onClearTools} />}
+      </div>
     </div>
   );
 };
