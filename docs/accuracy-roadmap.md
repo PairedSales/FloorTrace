@@ -158,11 +158,13 @@ list, measured on dev, then train and val.
 
 ## Beyond CubiCasa
 
-- CubiCasa5K is Finnish plans; the app sees US listing plans. The last word on
-  the scoreboard should come from 50–100 real listing plans, scored the same
-  way by `npm run bench:real`, with the truth drawn by correcting the app's own
-  outline. The nine fixtures score perfect there, but they are the plans the
-  tracer was developed on; only fresh plans are a fair test.
+- CubiCasa5K is Finnish plans; the app sees US listing plans. `npm run
+  bench:real` scores real US plans (below), but their truth was drawn by Claude
+  and no person has checked it, and the set stayed at 75 old plan-book pages,
+  so it is a regression guard and a source of failure mechanisms, not a
+  scoreboard with a target. The five fixtures with polygon truth score perfect
+  there, but they are the plans the tracer was developed on; only fresh plans
+  are a fair test.
 - The dataset is CC BY-NC-SA 4.0: measure with it, ship nothing derived from
   it. A model trained on it would carry the non-commercial terms into the app.
 
@@ -171,6 +173,19 @@ list, measured on dev, then train and val.
 75 pages of US house-plan books, 1914 to 1963 (`datasets/README.md`). Claude
 drew every answer key and no person has checked one yet, so these numbers are
 provisional: a key corrected later moves them.
+
+A plan to grow this to 400 plans, with a blind test split, double-annotated
+keys and a 90% perfect target, was started in September 2026 and stopped: the
+owner reports the app accurate on their own work plans, and the key protocol
+alone would have taken an estimated 1,400 agent runs. What it left in the
+repository is the tooling (the key tool, the sourcing tool, the manifest and
+split gate in `bench:real`, all in `datasets/README.md`); no manifest exists, so
+`bench:real` scores every keyed plan as before. The plan-book pages are probably
+the hard end of the distribution (drives, planting and terraces drawn around the
+house), which may be part of why these numbers sit far below CubiCasa's
+listing-like plans; the owner's report on their own work plans is not something
+these numbers measure. The way forward is reactive: when the app gets a real
+plan wrong, add that plan and fix that mechanism.
 
 | Date | Tracer | Plans | Near-perfect | Perfect | Wrong, shown good |
 |---|---|---|---|---|---|

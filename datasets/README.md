@@ -91,8 +91,9 @@ both as you review; keep test plans out of them.
 
 ## Real plans: `npm run bench:real`
 
-The same scoreboard on real listing plans, where the answer key is an outline a
-person checked. To add one:
+The same scoreboard on real listing plans, where the answer key is an outline
+saved in a `.floorplan` file (a person's, once checked; the 75 keyed plans so far
+are Claude's drafts). To add one:
 
 1. Open the plan in FloorTrace and let it scan and trace.
 2. Correct each outline to the exterior face of the walls, and set its type:
@@ -107,6 +108,18 @@ overlay per plan and `--compare` shows verdict moves. `--fixtures` adds the
 plans in `fixtures/` that have polygon truth — but those are the plans the
 tracer was developed on, so only fresh plans are a fair test. Listing plans
 belong to whoever drew them: keep them in `datasets/real/`, which git ignores.
+
+**Where this stands.** The keyed set is the 75 plan-book pages under "The set so
+far", with keys Claude drew and no person has checked: a regression guard for
+tracer changes, not a target. An effort to grow it to 400 plans (a blind test
+split, double-annotated keys, a 90% perfect goal) was started and stopped. Its
+tools are documented below, but no manifest or watch list exists, so `bench:real`
+scores every keyed plan as it always did: `--split dev` and `--split test` refuse
+to run (exit 2, there is no manifest), `--watch LIST` refuses (exit 2, no
+`watch.json`), and only `--split all`, the default, runs. `datasets/real/` also
+holds about 90 drafts sourced from archive.org and the Wayback Machine that have
+no key; `bench:real` lists them and does not score them. When the app gets a real
+plan wrong, add that plan and fix that mechanism.
 
 ### Splits, the manifest and the run files
 
@@ -173,7 +186,7 @@ npm run bench:real -- [--split dev|test|all] [--only NAME,NAME…] [--watch LIST
 
 - `--split`: which plans, read from the manifest. The default is `dev` when a
   manifest exists and `all` when there is none (every plan in the folder, as
-  before; a split cannot be named without a manifest). `all` with a manifest is
+  before; a split other than `all` cannot be named without a manifest). `all` with a manifest is
   dev and test. A plan in the folder but not in the manifest is never scored:
   it is listed as "not in the manifest". A plan the manifest lists and the folder
   lacks is an ERROR row. `--split dev` does not open a test plan's file.
