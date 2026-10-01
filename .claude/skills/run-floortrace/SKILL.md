@@ -13,7 +13,7 @@ description: Launch FloorTrace's dev server and drive the app in the Browser pan
 
 ## Load a plan
 
-- Simplest: click **Try the sample plan** on the start screen (`public/example-plan.png`, the same image as `fixtures/ExampleFloorplan8.png`).
+- Simplest: click **Try the sample plan** on the start screen (`public/example-plan.png`, the same image as `fixtures/ExampleFloorplan.png`: two outlines, a garage left out, about 1,900 ft²).
 - Any fixture: Vite serves `fixtures/` at `/FloorTrace/fixtures/<name>.png`. Fetch it, wrap it in a `File` inside a `DataTransfer`, and dispatch `new DragEvent('drop', { dataTransfer, bubbles: true })` on `#app-container` — that element owns `onDrop`; dispatching on `#root` does nothing.
 - A drop onto an open plan opens a second plan beside it (six at most), and a reload restores every plan that was open. To start clean, clear `localStorage`, delete the IndexedDB database `floortrace-db` (drafts; `keyval-store` is Tesseract's cache and is worth keeping) and reload. Close other tabs on the same origin first, or `deleteDatabase` blocks and autosave never initialises.
 - A new port is a new origin, with empty storage and a cold Tesseract cache.

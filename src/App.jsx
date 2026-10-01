@@ -114,13 +114,15 @@ const tracedAreaPx = (traced) => {
 
 // What the trace left out of the outline on purpose, as the second half of
 // the one line a trace ends in. Said because an outline that stops short of the
-// garage otherwise reads as a mistake.
+// garage otherwise reads as a mistake — and said in few words, because the bar
+// is one line and the sample plan's own ending was being cut off in a window
+// 1024 px wide.
 const excludedAreasNote = (traced) => {
   const garages = traced.excludedGarages ?? 0;
   const others = (traced.excludedRegions ?? 0) - garages;
-  if (garages && others > 0) return 'The garage and the porch or patio were left out';
-  if (garages) return 'The garage was left out';
-  if (others > 0) return 'The porch or patio was left out';
+  if (garages && others > 0) return 'garage and porch or patio left out';
+  if (garages) return 'garage left out';
+  if (others > 0) return 'porch or patio left out';
   return null;
 };
 
@@ -756,7 +758,7 @@ function App() {
       return;
     }
     const leftOut = excludedAreasNote(traced ?? {});
-    flash(leftOut ? `${what}. ${leftOut}.` : what);
+    flash(leftOut ? `${what} — ${leftOut}` : what);
   }, []);
 
   // Returns the quality level of the applied trace, so the caller can decide

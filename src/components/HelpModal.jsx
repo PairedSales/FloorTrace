@@ -200,8 +200,8 @@ const HelpModal = ({ onClose, initialTab = 'guide' }) => {
             })}
 
             {/* The one thing here that leaves the app: a walkthrough of the
-                tracer, built from the real pipeline against the same drawing
-                the start screen offers as its sample. */}
+                tracer, built from the real pipeline against one small drawing
+                (`fixtures/ExampleFloorplan8.png`). */}
             <button
               type="button"
               onClick={openTracingTutorial}

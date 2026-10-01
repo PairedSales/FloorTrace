@@ -14,9 +14,13 @@ const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
 /**
  * The bundled example floorplan, in the shape the image loaders hand back.
  *
- * Deliberately not run through `prepareDataUrl`: this file is 600 px wide and
- * would trip the low-resolution warning, which is advice for a plan the user
- * chose — not for the one we shipped and know traces cleanly.
+ * The drawing is `fixtures/ExampleFloorplan.png`: two levels and a garage, so
+ * the first plan a newcomer sees shows two outlines, a garage left out of the
+ * living area and a scale taken from several rooms — more of what the app does
+ * than the single small storey it used to be.
+ *
+ * Not run through `prepareDataUrl`: that is the size check and the downscale
+ * for a file the user chose, and this is one we shipped and know the size of.
  *
  * @returns {Promise<{dataUrl: string, mimeType: string}>}
  */
