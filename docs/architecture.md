@@ -5,7 +5,7 @@
 FloorTrace is a single-page React app with all image processing in-browser. The architecture separates UI interaction from compute-heavy geometry extraction:
 
 - `src/App.jsx`: application state orchestration and workflow control.
-- `src/components/*`: rendering and interactions — the header and its plan tabs (`AppHeader.jsx`, `PlanTabs.jsx`), the results panel (`ResultsPanel.jsx`, shared with the mobile shell), the status line over the plan (`ActionBar.jsx`), and the canvas overlays under `canvas/`.
+- `src/components/*`: rendering and interactions — the header and its plan tabs (`AppHeader.jsx`, `PlanTabs.jsx`), the results panel (`ResultsPanel.jsx`, shared with the mobile shell), the action bar over the plan (`ActionBar.jsx`, whose menus come from `toolCatalog.js`), and the canvas overlays under `canvas/`.
 - `src/utils/DimensionsOCR.js`: public API for room-dimension extraction (detect, warm-up, parser re-exports).
 - `src/utils/dimensions/*`: the dimension-OCR engine — text parsing (`parse.js`), raster preprocessing (`raster.js`), glyph-cluster spatial analysis (`regions.js`), Tesseract/PaddleOCR/OpenCV wrappers, and the multi-pass pipeline (`pipeline.js`). PaddleOCR models are served locally from `public/models/`. `scripts/ocrBenchmark.mjs` runs the pipeline in Node against ground-truth images.
 - `src/utils/detection/*`: wall/region/boundary extraction pipeline (pure-JS cores shared by the worker and the Node benchmark `scripts/detectionBenchmark.mjs`; see `.claude/rules/detection.md` for the stage breakdown).
@@ -21,7 +21,7 @@ FloorTrace is a single-page React app with all image processing in-browser. The 
 6. The perimeter trace runs automatically, with the confirmed rooms and the parsed dimension labels passed in as constraints.
 7. Worker generates several candidate footprints per wall network, scores them against wall evidence and those constraints, and returns the winner with `quality: {confidence, warnings[]}` alongside the inner and outer polygons and any enclosed voids.
 8. If that winner is doubtful, or leaves a constrained room outside itself, the worker searches again (`remediate.js`) and keeps whichever attempt holds more of what is known without trusting itself less.
-9. App chooses active boundary based on wall mode toggle, computes area, and puts the outline on the plan. It does not grade the outline for the user: the picture is the evidence, and the user checks it by eye. A trace that found nothing is the exception — there is no picture then, so the reason is given under Outline, with the way to try again. There are no manual drawing tools: the outline is read-only, and the scale is the only thing set by hand.
+9. App chooses active boundary based on wall mode toggle, computes area, and puts the outline on the plan. It does not grade the outline for the user: the picture is the evidence, and the user checks it by eye. A trace that found nothing is the exception — there is no picture then, so the reason is given under Outline together with the ways to draw one by hand.
 
 ## Quality Model
 

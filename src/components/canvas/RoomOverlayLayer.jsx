@@ -1,12 +1,27 @@
 import React from 'react';
-import { Rect, Line } from 'react-konva';
+import { Rect, Line, Circle } from 'react-konva';
+import { useIsTouch } from '../../hooks/useViewport';
+import { circleHit } from './canvasUtils';
+
+// Same rule as the perimeter vertex handles: what is drawn stays small enough
+// to read the rectangle under it, what is grabbable is a fingertip wide. This
+// overlay is what the whole project's scale is measured from, so a corner that
+// cannot be adjusted on a phone is a scale that cannot be corrected there.
+const TOUCH_HIT_RADIUS = 24;
+
 
 /**
- * The room the scale was taken from, as a green box. Shown, not edited: a
- * different room is picked from the room sizes on the plan, and a misread size
- * is corrected in the panel.
+ * RoomOverlayLayer renders the room detection rectangle, its corner drag handles,
+ * and the optional polygon outline.
  */
-const RoomOverlayLayer = ({ roomOverlay, scale }) => {
+const RoomOverlayLayer = ({
+  roomOverlay,
+  scale,
+  onRoomMouseDown,
+  onRoomCornerMouseDown,
+}) => {
+  const isTouch = useIsTouch();
+
   if (!roomOverlay) return null;
 
   return (
@@ -30,9 +45,31 @@ const RoomOverlayLayer = ({ roomOverlay, scale }) => {
         stroke="#50FA7B"
         strokeWidth={2 / scale}
         fill="rgba(80, 250, 123, 0.15)"
-        listening={false}
+        onMouseDown={onRoomMouseDown}
+        onTouchStart={onRoomMouseDown}
         perfectDrawEnabled={false}
       />
+
+      {/* Room Corner Handles */}
+      {[
+        { x: roomOverlay.x1, y: roomOverlay.y1, corner: 'tl' },
+        { x: roomOverlay.x2, y: roomOverlay.y1, corner: 'tr' },
+        { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
+        { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
+      ].map((handle, i) => (
+        <Circle
+          key={i}
+          x={handle.x}
+          y={handle.y}
+          radius={(isTouch ? 8 : 5) / scale}
+          fill="#50FA7B"
+          stroke="#fff"
+          strokeWidth={1.5 / scale}
+          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
+          onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
+          onTouchStart={(e) => onRoomCornerMouseDown(handle.corner, e)}
+        />
+      ))}
     </>
   );
 };

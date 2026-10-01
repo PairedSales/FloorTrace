@@ -96,7 +96,7 @@ const ScaleLines = ({ unit }) => {
   return (
     <div className="mt-3.5">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-[14px] font-semibold text-fg">Lengths you know</p>
+        <p className="text-[14px] font-semibold text-fg">Lengths you measured</p>
         {(scaleLines.length > 0 || calibration?.source === 'line-calibration') && (
           <button
             type="button"

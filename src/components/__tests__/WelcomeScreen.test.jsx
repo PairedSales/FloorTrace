@@ -45,7 +45,7 @@ describe('WelcomeScreen', () => {
     // The caveat is the reason this screen exists rather than a splash: the
     // app's worst failure is a confident wrong answer, so "automatic" is never
     // offered unqualified.
-    expect(view.getByText(/compare\s+the outline with the plan/i)).toBeTruthy();
+    expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
   // The introduction never stands between a user and the button.
@@ -65,7 +65,7 @@ describe('WelcomeScreen', () => {
     expect(view.getByRole('heading', { name: 'Open a floor plan' })).toBeTruthy();
     expect(view.getByText('Drop a floor plan here')).toBeTruthy();
     expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
-    expect(view.getByText(/compare\s+the outline with the plan/i)).toBeTruthy();
+    expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
   it('markWelcomed is what flips it, and survives a re-mount', () => {

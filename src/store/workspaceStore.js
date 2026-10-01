@@ -71,6 +71,7 @@ const readShowWork = () => {
  * switch to another plan?" is no, it belongs in this file.
  *
  * Deliberately NOT moved:
+ *  - `errorAnchor` is per-plan — it names a place on one drawing.
  *  - `draftState` reads as global today only because there is one draft; it
  *    becomes per-plan the moment there is more than one.
  *
@@ -99,6 +100,13 @@ const useWorkspaceStore = create((set, get) => ({
   // How the slower reader for room sizes is getting on — 'idle' | 'starting' |
   // 'ready' | 'failed' — for the switch that turns it on to say in its own line.
   enhancedOcrStatus: 'idle',
+
+  // The plan whose image was edited after its outline was found, by id, or
+  // null. The bar offers to find the outline again while it stands — erasing a
+  // legend or cropping to the house is nearly always done *because* the outline
+  // came out wrong. Cleared by the next trace.
+  retraceOfferFor: null,
+
   // Whether the results panel is open. A panel put away is a view preference,
   // not a fact about the project, so it must never ride along in a
   // `.floorplan` or be restored by an undo.
@@ -170,6 +178,7 @@ const useWorkspaceStore = create((set, get) => ({
     notice: { text, tone: tone === 'warn' ? 'warn' : 'crit', action, at: Date.now() },
   }),
   dismissNotice: () => set({ notice: null }),
+  setRetraceOfferFor: (docId) => set({ retraceOfferFor: docId ?? null }),
   setEnhancedOcrStatus: (v) => set({ enhancedOcrStatus: v }),
   setPanelOpen: (v) => set({ panelOpen: v }),
   setScaleRoomShown: (v) => set({ scaleRoomShown: !!v }),

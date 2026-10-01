@@ -1,12 +1,29 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Line, Rect, Text, Group } from 'react-konva';
+import { Line, Circle, Rect, Text, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
 import {
-  measureSideLenWidth, pointToLineDistance,
+  circleHit, measureSideLenWidth, pointToLineDistance,
   SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
 } from './canvasUtils';
 import { calculateArea, getCentroid, holeRings, holeKey } from '../../utils/areaCalculator';
+import { useIsTouch } from '../../hooks/useViewport';
+
+/* ── touch ────────────────────────────────────────────────────────────────
+   A vertex handle is 5 px of drawn radius. That is a fine mouse target and an
+   impossible finger one — the contact patch is ~9 mm, so on a phone the corner
+   the user is trying to nudge is entirely under their own fingertip.
+
+   Two separate numbers, because they answer different questions: the drawn
+   radius is "can I see which corner this is" and the hit radius is "can I
+   grab it". Inflating the drawn one to 22 px would bury the outline it is
+   supposed to annotate under a row of dots. */
+const TOUCH_HIT_RADIUS = 22;
+const LONG_PRESS_MS = 500;
+// A press that wanders this far (screen px) was a drag attempt, not a hold.
+const LONG_PRESS_SLOP = 10;
+
+/** Enlarge a circular handle's hit region without touching what is drawn. */
 
 /* ── Animation helpers ──────────────────────────────────────────────────── */
 
@@ -49,8 +66,8 @@ const resamplePolygon = (vertices, n) => {
 };
 
 /**
- * Detect whether a vertex change is a whole new polygon (many vertices moved
- * at once) rather than a one-corner difference.
+ * Detect whether a vertex change is a "mode toggle" (many vertices moved at
+ * once) rather than a single-vertex drag or single vertex add/remove.
  */
 const detectSignificantChange = (prev, next) => {
   if (!prev || !next || prev.length < 3 || next.length < 3) return false;
@@ -76,6 +93,7 @@ const detectSignificantChange = (prev, next) => {
 /**
  * Hook that smoothly interpolates polygon vertices when a bulk change is
  * detected (e.g. toggling between interior / exterior boundary mode).
+ * Single-vertex drags are applied immediately without animation.
  *
  * Returns { displayVertices, isAnimating }.
  */
@@ -157,7 +175,7 @@ const useAnimatedVertices = (targetVertices) => {
  * Compute label layout data for every edge of the perimeter polygon.
  * This is extracted into a pure function so it can be memoized via useMemo.
  */
-const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation) => {
+const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex) => {
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
   const rad = ((canvasRotation || 0) * Math.PI) / 180;
   const cos = Math.abs(Math.cos(rad));
@@ -236,30 +254,34 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
     const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
 
     let edgeShift = 0;
+    
+    // Lightweight mode: skip collision detection if we are actively dragging any vertex.
+    // This keeps the 60fps interaction smooth, and layout snaps to correct position on drag end.
+    if (draggingVertex === null || draggingVertex === undefined) {
+      // Find candidate vertices to check for collision.
+      // We always check the endpoints, and check other vertices only if they are close.
+      const maxPerpDistance = Math.abs(offsetDistance) + labelHeight / 2 + vertexClearance;
+      const candidateVertices = vertices.filter(v => {
+        const isEndpoint = (v.x === vertex.x && v.y === vertex.y) || 
+                           (v.x === nextVertex.x && v.y === nextVertex.y);
+        if (isEndpoint) return true;
+        const dist = pointToLineDistance(v, vertex, nextVertex);
+        return dist < (maxPerpDistance + 5 / scale);
+      });
 
-    // Find candidate vertices to check for collision.
-    // We always check the endpoints, and check other vertices only if they are close.
-    const maxPerpDistance = Math.abs(offsetDistance) + labelHeight / 2 + vertexClearance;
-    const candidateVertices = vertices.filter(v => {
-      const isEndpoint = (v.x === vertex.x && v.y === vertex.y) || 
-                         (v.x === nextVertex.x && v.y === nextVertex.y);
-      if (isEndpoint) return true;
-      const dist = pointToLineDistance(v, vertex, nextVertex);
-      return dist < (maxPerpDistance + 5 / scale);
-    });
-
-    for (const v of candidateVertices) {
-      const pcx = cx0 + edgeShift * ex;
-      const pcy = cy0 + edgeShift * ey;
-      const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
-      const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
-      const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
-      if (dist2 < vertexClearance * vertexClearance) {
-        const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
-        const required = halfAlong + vertexClearance - Math.abs(projEdge);
-        if (required > 0) {
-          const dir = projEdge > 0 ? -1 : 1;
-          edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
+      for (const v of candidateVertices) {
+        const pcx = cx0 + edgeShift * ex;
+        const pcy = cy0 + edgeShift * ey;
+        const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
+        const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
+        const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
+        if (dist2 < vertexClearance * vertexClearance) {
+          const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
+          const required = halfAlong + vertexClearance - Math.abs(projEdge);
+          if (required > 0) {
+            const dir = projEdge > 0 ? -1 : 1;
+            edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
+          }
         }
       }
     }
@@ -286,9 +308,8 @@ const hexToRgba = (hex, opacity) => {
 };
 
 /**
- * PerimeterLayer renders all visible perimeter traces, their cut-outs, the
- * active trace's wall lengths, and centroid name/area badges. Nothing here
- * listens to the pointer: the outline is looked at, not edited.
+ * PerimeterLayer renders all visible perimeter traces, draggable vertices for
+ * the active trace, and centroid name/area badges.
  */
 const PerimeterLayer = ({
   perimeterTraces,
@@ -298,32 +319,184 @@ const PerimeterLayer = ({
   feetPerPixel,
   detectedDimensions,
   unit,
+  draggingVertex,
+  selectedVertexIndex = null,
+  onVertexSelect,
+  onVertexDragStart,
+  onVertexDragMove,
+  onVertexDragEnd,
+  onDeletePerimeterVertex,
+  isSelfIntersecting = false,
+  voidToolActive = false,
+  voidCandidate = null,
+  selectedHole = null,
+  onHoleSelect,
 }) => {
   const activeTrace = (perimeterTraces || []).find((t) => t.id === activeTraceId);
   const targetVertices = activeTrace?.vertices;
 
+  const isTouch = useIsTouch();
   const canvasRotation = useAppStore((s) => s.canvasRotation);
-  const strokeColor = activeTrace?.color || '#BD93F9';
-  const fillColor = hexToRgba(strokeColor, 0.12);
+
+  /* A vertex handle is the topmost thing on the canvas and it is draggable, so
+     while another drag tool is running it steals that tool's gesture: a crop
+     rectangle, an erase stroke or a void that happens to start on a corner
+     moves the outline instead. Read off the store rather than threaded down as
+     props — `canvasRotation` above sets that precedent, and the alternative is
+     five more props through CanvasStage for a fact none of the other layers
+     need. The corner eraser is in the list for the same reason as the rest: its
+     whole gesture is dragging *over* the handles.
+
+     The click-to-place modes below are the same bug through the other event:
+     each of them places geometry from `useToolRouter`'s stage `onClick`, and
+     this handle's own `onClick` sets `cancelBubble`, so a scale-line end, a
+     measurement end, a shape corner or a *replacement outline corner* dropped
+     on top of an existing one is swallowed and selects that corner instead.
+     Placing corners by hand is the documented rescue for a trace that came back
+     wrong, and it is precisely over the wrong outline that it gets used. */
+  const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const cornerEraserActive = useAppStore((s) => s.cornerEraserActive);
+  const drawModeActive = useAppStore((s) => s.drawModeActive);
+  const scaleToolActive = useAppStore((s) => s.scaleToolActive);
+  const lineToolActive = useAppStore((s) => s.lineToolActive);
+  const drawAreaActive = useAppStore((s) => s.drawAreaActive);
+  const placingVertices = useAppStore((s) => s.traceInteractionMode === 'drawing');
+  const handlesLocked = cropToolActive || eraserToolActive || cornerEraserActive
+    || drawModeActive || voidToolActive
+    || scaleToolActive || lineToolActive || drawAreaActive || placingVertices;
+  const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
+  const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
+
+  // Ref tracking drag coordinates, current drag index, and animation frame ID
+  const draggingVertexIndexRef = useRef(null);
+  const dragCoordsRef = useRef(null);
+  const dragRafRef = useRef(null);
+
+  // Local state for dragging vertices of the active trace
+  const [localVertices, setLocalVertices] = useState(targetVertices);
+  const [prevTargetVertices, setPrevTargetVertices] = useState(targetVertices);
+
+  // Derived state from props synchronization, strictly guarded against active drags
+  if (targetVertices !== prevTargetVertices) {
+    setPrevTargetVertices(targetVertices);
+    if (draggingVertexIndexRef.current === null) {
+      setLocalVertices(targetVertices);
+    }
+  }
+
+  // Cancel any pending RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+      }
+    };
+  }, []);
+
+  // ── long press ───────────────────────────────────────────────────────────
+  // Right-click deletes a vertex, and touch has no right-click. A press-and-
+  // hold is the touch idiom for "the other action on this thing", so it maps
+  // to the same handler. Cancelled by movement (that press was a drag) and by
+  // release (that press was a selection), which is what keeps it from firing
+  // on the way to nudging a corner.
+  const pressRef = useRef(null);
+
+  const cancelLongPress = () => {
+    if (pressRef.current?.timer) clearTimeout(pressRef.current.timer);
+    pressRef.current = null;
+  };
+
+  const startLongPress = (index, e) => {
+    const touch = e.evt?.touches?.[0];
+    if (!touch) return;
+    cancelLongPress();
+    const origin = { x: touch.clientX, y: touch.clientY };
+    pressRef.current = {
+      origin,
+      timer: setTimeout(() => {
+        pressRef.current = null;
+        // Confirmation is the deletion being undoable and the outline visibly
+        // changing; a dialog on a hold gesture teaches the user to fear it.
+        navigator.vibrate?.(18);
+        onDeletePerimeterVertex?.(index);
+      }, LONG_PRESS_MS),
+    };
+  };
+
+  const moveLongPress = (e) => {
+    const press = pressRef.current;
+    const touch = e.evt?.touches?.[0];
+    if (!press || !touch) return;
+    if (Math.hypot(touch.clientX - press.origin.x, touch.clientY - press.origin.y) > LONG_PRESS_SLOP) {
+      cancelLongPress();
+    }
+  };
+
+  useEffect(() => cancelLongPress, []);
+  // ── end long press ───────────────────────────────────────────────────────
+
+  const handleDragStart = (index) => {
+    cancelLongPress();
+    draggingVertexIndexRef.current = index;
+    onVertexDragStart?.(index);
+  };
+
+  const handleDragMove = (index, e) => {
+    const newX = e.target.x();
+    const newY = e.target.y();
+
+    dragCoordsRef.current = { index, x: newX, y: newY };
+
+    if (dragRafRef.current === null) {
+      dragRafRef.current = requestAnimationFrame(() => {
+        dragRafRef.current = null;
+        if (dragCoordsRef.current) {
+          const { index: idx, x, y } = dragCoordsRef.current;
+          setLocalVertices((prev) => {
+            if (!prev) return prev;
+            const next = [...prev];
+            next[idx] = { x, y };
+            return next;
+          });
+          // Report the position upward so the self-intersection check can run
+          // against it. Inside the rAF, not per mousemove: the parent stores
+          // this in state, and the frame is already the update rate for the
+          // local vertices below it.
+          onVertexDragMove?.(idx, { x, y });
+        }
+      });
+    }
+  };
+
+  const handleDragEnd = (index, e) => {
+    if (dragRafRef.current !== null) {
+      cancelAnimationFrame(dragRafRef.current);
+      dragRafRef.current = null;
+    }
+    draggingVertexIndexRef.current = null;
+    dragCoordsRef.current = null;
+    onVertexDragEnd?.(index, e);
+  };
 
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
-  const { displayVertices } = useAnimatedVertices(targetVertices);
+  const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
 
-  // During animation, render the interpolated path.
-  const renderVertices = displayVertices || targetVertices;
+  // During animation, render the interpolated path; otherwise the local/drag state.
+  const renderVertices = displayVertices || localVertices;
 
   // Memoize label layout so we don't recompute O(n²) collision avoidance
   // on every pan/zoom/render unless the actual data changes.
   const labelLayouts = useMemo(
     () => (showSideLengths && feetPerPixel && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation)
+      ? computeLabelLayouts(renderVertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex)
       : [],
-    [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation]
+    [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
   );
 
-  // Enclosed voids (courtyards, light wells, and any a saved plan carries from
-  // when they could be cut by hand) are drawn as dashed inner rings and are
-  // already subtracted from the trace's area. Shapes go through the shared `holeRings` normalizer so a tagged hole
+  // Enclosed voids (courtyards, light wells, and anything punched by hand) are
+  // drawn as dashed inner rings and are already subtracted from the trace's
+  // area. Shapes go through the shared `holeRings` normalizer so a tagged hole
   // and a v1 file's bare ring cannot render differently.
   const holeShapes = (perimeterTraces || []).flatMap((trace) => {
     if (!trace.visible) return [];
@@ -345,6 +518,7 @@ const PerimeterLayer = ({
         staleReason: stale ? hole.staleReason : null,
         points: ring.flatMap((v) => [v.x, v.y]),
         color: stale ? '#FF5555' : (trace.color || '#BD93F9'),
+        selected: selectedHole?.traceId === trace.id && selectedHole?.holeId === id,
       }];
     });
   });
@@ -392,13 +566,22 @@ const PerimeterLayer = ({
       {holeShapes.map((hole) => (
         <Line
           key={hole.key}
+          name="void-hole"
           points={hole.points}
-          stroke={hole.color}
-          strokeWidth={1.5 / scale}
+          stroke={hole.selected ? '#FF79C6' : hole.color}
+          strokeWidth={(hole.selected ? 3 : 1.5) / scale}
           dash={[6 / scale, 4 / scale]}
           closed={true}
           fill="rgba(40, 42, 54, 0.55)"
-          listening={false}
+          listening={voidToolActive}
+          onClick={voidToolActive ? (e) => {
+            e.cancelBubble = true;
+            onHoleSelect?.({ traceId: hole.traceId, holeId: hole.holeId });
+          } : undefined}
+          onTap={voidToolActive ? (e) => {
+            e.cancelBubble = true;
+            onHoleSelect?.({ traceId: hole.traceId, holeId: hole.holeId });
+          } : undefined}
           perfectDrawEnabled={false}
         />
       ))}
@@ -450,7 +633,84 @@ const PerimeterLayer = ({
         );
       })}
 
-      {/* 3. Render active trace side length labels */}
+      {/* 2d. The void being drawn, in the invalid colour when the candidate
+              already fails validation — so the rejection is visible before the
+              mouse comes up. */}
+      {voidCandidate?.ring?.length >= 2 && (
+        <>
+          <Line
+            points={voidCandidate.ring.flatMap((v) => [v.x, v.y])}
+            stroke={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+            strokeWidth={2 / scale}
+            dash={[6 / scale, 4 / scale]}
+            closed={voidCandidate.ring.length >= 3}
+            fill={voidCandidate.ring.length >= 3
+              ? (voidCandidate.valid ? 'rgba(40, 42, 54, 0.45)' : 'rgba(255, 85, 85, 0.18)')
+              : undefined}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          {!voidCandidate.closed && voidCandidate.ring.map((v, i) => (
+            <Circle
+              key={`void-corner-${i}`}
+              x={v.x}
+              y={v.y}
+              radius={3.5 / scale}
+              fill={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+              listening={false}
+              perfectDrawEnabled={false}
+            />
+          ))}
+        </>
+      )}
+
+      {/* 3. Render active trace draggable vertex handles */}
+      {activeTrace && activeTrace.visible && !isAnimating && localVertices && localVertices.map((vertex, i) => (
+        <Circle
+          key={`active-vertex-${activeTrace.id}-${i}`}
+          x={vertex.x}
+          y={vertex.y}
+          radius={((selectedVertexIndex === i ? 7 : 5) + (isTouch ? 2.5 : 0)) / scale}
+          fill={activeTrace.color || '#BD93F9'}
+          stroke={selectedVertexIndex === i ? '#8BE9FD' : '#fff'}
+          strokeWidth={(selectedVertexIndex === i ? 2.5 : 1.5) / scale}
+          draggable={!handlesLocked}
+          // Both, not just `draggable`: a non-draggable handle still swallows
+          // the press, so the crop or erase stroke would start nowhere at all.
+          listening={!handlesLocked}
+          // The grabbable region, separate from the drawn one. `/scale` keeps
+          // it a constant *screen* size, so a corner is no harder to hit when
+          // the plan is zoomed out — which is exactly when it is smallest.
+          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
+          onClick={(e) => {
+            // Konva fires click for every button, and right-click already means
+            // delete on this handle.
+            if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+            e.cancelBubble = true;
+            onVertexSelect?.(i);
+          }}
+          onTap={(e) => {
+            e.cancelBubble = true;
+            onVertexSelect?.(i);
+          }}
+          onDragStart={() => handleDragStart(i)}
+          onDragMove={(e) => handleDragMove(i, e)}
+          onDragEnd={(e) => handleDragEnd(i, e)}
+          // Deliberately allowed to bubble, matching what `mousedown` does on
+          // the same handle: the stage still needs the event to start a pinch
+          // whose first finger happened to land on a corner.
+          onTouchStart={(e) => startLongPress(i, e)}
+          onTouchMove={moveLongPress}
+          onTouchEnd={cancelLongPress}
+          onContextMenu={(e) => {
+            e.evt.preventDefault();
+            e.cancelBubble = true;
+            if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
+          }}
+        />
+      ))}
+
+      {/* 4. Render active trace side length labels */}
       {activeTrace && activeTrace.visible && labelLayouts.map((layout, i) => (
         <React.Fragment key={`active-label-${activeTrace.id}-${i}`}>
           <Rect
@@ -487,11 +747,11 @@ const PerimeterLayer = ({
         </React.Fragment>
       ))}
 
-      {/* 4. Render Centroid Area Badges for all visible closed traces (only if multiple are active/visible) */}
+      {/* 5. Render Centroid Area Badges for all visible closed traces (only if multiple are active/visible) */}
       {feetPerPixel && (perimeterTraces || []).filter(t => t.visible && t.closed && t.vertices && t.vertices.length >= 3).length > 1 && (perimeterTraces || []).map((trace) => {
         if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
 
-        // Use renderVertices for the active trace so the badge moves with the animation
+        // Use renderVertices for active trace to move badge in real time during drag/animation
         const vertices = trace.id === activeTraceId ? renderVertices : trace.vertices;
         if (!vertices || vertices.length < 3) return null;
 

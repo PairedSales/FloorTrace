@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { createTraceSlice, recordAttempt } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
-import { calculateArea, mergeHoles } from '../utils/areaCalculator';
+import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import { retireOnEdit } from '../utils/boundaryQuality';
 import {
@@ -33,6 +33,7 @@ const workingStateDefaults = () => {
   imageMimeType: 'image/png',
   roomOverlay: null,
   perimeterTraces: [makeTrace({ id: defaultTraceId })],
+  traceInteractionMode: 'idle',
   activeTraceId: defaultTraceId,
   roomDimensions: { width: '', height: '' },
   calibration: {
@@ -58,14 +59,24 @@ const workingStateDefaults = () => {
   rooms: [],
   showSideLengths: true,
   useInteriorWalls: false,
+  autoSnapEnabled: true,
   ocrFailed: false,
   unit: 'decimal',
+  lineToolActive: false,
+  angleToolActive: false,
+  angleToolState: null,
+  measurementLines: [],
+  currentMeasurementLine: null,
   scaleToolActive: false,
   // The lines the scale was asserted from, in original image px. Kept rather
   // than just their result: a hand-set scale must stay inspectable and
   // re-editable, and a second line has to be scored against the first.
   scaleLines: [],
   currentScaleLine: null,
+  drawAreaActive: false,
+  customShapes: [],
+  currentCustomShape: null,
+  perimeterVertices: null,
   tracedBoundaries: null,
   // What the last trace did, whatever it did — `{ at, level, reason, floors,
   // source }`. Document content, because "this plan was traced and produced
@@ -74,6 +85,25 @@ const workingStateDefaults = () => {
   // all, so the panel read exactly as it does on a plan nobody had tried — and
   // offered the automatic trace that had just failed as the next thing to do.
   lastTraceOutcome: null,
+  eraserToolActive: false,
+  // The outline-corner eraser, which is a different tool from the image
+  // eraser above it: one deletes vertices from a trace, the other paints the
+  // plan white. They shared a name and a flag until the rail's "Erase
+  // clutter" was found to do neither of the things it advertised.
+  cornerEraserActive: false,
+  eraserBrushSize: 60,
+  cropToolActive: false,
+  voidToolActive: false,
+  // Draw mode: rough brush strokes over the exterior walls, which the tracer
+  // then reads as a corridor constraint. Document content, and the exception
+  // proves why: on a plan the detector cannot read, the stroke is the only
+  // statement of the user's intent that exists, it is the input to the
+  // keep-strokes re-trace, and it is a few hundred coordinates beside an
+  // embedded image. Excluding it made reopening a rescued plan strictly worse
+  // than restoring its draft, which inverts the rule the projections exist for.
+  drawModeActive: false,
+  drawBrushSize: 48,
+  drawStrokes: [],
   // Viewport transforms (stage scale/zoom, position, rotation)
   zoomScale: null,      // null means needs fitToWindow
   stageX: 0,
@@ -107,10 +137,14 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'viewportSyncToken',   // camera sync signal
   'isDirty',             // project tracking, not document content
   'projectId',           // project tracking
-  'scaleToolActive',     // transient tool toggle
-  'currentScaleLine',    // the length in progress, not a committed one
-  // activeTraceId IS snapshotted: undoing a deleted outline must restore the
-  // previous selection.
+  'traceInteractionMode', // transient input mode (drawing/idle)
+  'angleToolActive',     // transient tool toggle
+  'drawModeActive',      // transient tool toggle
+  // drawStrokes IS snapshotted: each brush stroke must be undoable, which is
+  // the only correction available while painting.
+  // activeTraceId and angleToolState ARE snapshotted: undoing "Add Floor"
+  // must restore the previous selection, and protractor edits must be
+  // undoable (AngleOverlay syncs itself back from the store).
 ];
 const SNAPSHOT_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_SNAPSHOT_FIELDS.includes(k)
@@ -148,6 +182,8 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
   'isProcessing',
   'processingMessage',
   'isDirty',
+  'traceInteractionMode',
+  'drawModeActive',
   // A fresh `Math.random()` per `setViewportTransform` call, whose only reader
   // compares it against a ref that is null on mount — so a persisted value can
   // never match anything. Persisting it only guaranteed that every camera
@@ -162,19 +198,28 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * What a plan carries when it is set aside so another can take the store root.
  *
  * Deliberately NOT `AUTOSAVE_FIELDS`, and the difference is the whole point.
- * A draft is written to disk and read back at startup; a park is a round trip
- * within one session, where `isDirty` is a live fact about the plan being set
- * aside. It is set by nearly every mutation and cleared in exactly one place,
- * and `checkUnsavedChanges` reads it. Parking through the autosave projection
- * would silently clear it on the way back — switching away and back would
- * launder away the fact that a plan has unsaved changes.
+ * A draft is written to disk and read back at startup, when three of these are
+ * meaningless — nobody is mid-gesture across a page load. A park is a
+ * round trip within one session, where all three are live facts about the plan
+ * being set aside:
+ *
+ *  - `isDirty` says the plan has unsaved work. It is set by nearly every
+ *    mutation and cleared in exactly one place, and `checkUnsavedChanges`
+ *    reads it. Parking through the autosave projection would silently clear it
+ *    on the way back — switching away and back would launder away the fact
+ *    that a plan has unsaved changes.
+ *  - `drawModeActive` is excluded from autosave as a "transient tool toggle",
+ *    but `drawStrokes` is NOT — so parking one without the other returns a plan
+ *    with brush strokes on it and no brush in the user's hand.
+ *  - `traceInteractionMode` pairs with `perimeterVertices` the same way: the
+ *    vertices come back, the fact that the user was placing them does not.
  *
  * Excluded on purpose: `isProcessing` / `processingMessage`, because a plan's
  * in-flight work is abandoned when it is parked, so returning to a spinner
  * would be a lie; and `viewportSyncToken`, which is a fresh random per camera
  * write whose only reader compares it against a ref that is null on mount.
  */
-const PARK_ONLY_FIELDS = ['isDirty'];
+const PARK_ONLY_FIELDS = ['isDirty', 'drawModeActive', 'traceInteractionMode'];
 const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
 
 /**
@@ -184,7 +229,15 @@ const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
  * project silently degraded every later trace to geometry-only.
  */
 const EXCLUDED_PERSISTENT_FIELDS = [
-  'isProcessing', 'processingMessage',
+  'isProcessing', 'processingMessage', 'traceInteractionMode',
+  'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
+  'cornerEraserActive',
+  'cropToolActive', 'eraserBrushSize', 'voidToolActive',
+  'drawModeActive', 'drawBrushSize',
+  // `drawStrokes` is deliberately absent, like `scaleLines` above and for the
+  // same reason: on a plan auto-detection cannot read, the stroke is the
+  // evidence the outline rests on.
+  'currentMeasurementLine', 'currentCustomShape', 'perimeterVertices',
   // `scaleLines` is deliberately absent: it is document content, the evidence
   // a hand-set scale rests on.
   'scaleToolActive', 'currentScaleLine',
@@ -250,6 +303,11 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // a hardcoded "Saved", which was the one claim in it that was true by
   // coincidence and never checked.
   draftState: 'off',
+  // A transient canvas highlight for a refusal that has a place on the plan —
+  // a self-intersection knows which two edges cross. Declared here rather than
+  // in the working state so it cannot reach a snapshot, a draft or a
+  // `.floorplan`: undoing an edit must not restore a highlight.
+  errorAnchor: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
   _hasRestoredState: false,
@@ -342,8 +400,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
           // The opposite rule, and for the same reason as `holes`: the wall-face
           // pair describes the detection, not the vertices, so a corner nudge
           // keeps it and the exterior/interior switch still works afterwards.
-          // `setPerimeterOverlay(null)` — how a re-read clears the outline —
-          // is what drops it.
+          // `setPerimeterOverlay(null)` — how manual and draw modes hand the
+          // outline back to the user — is what drops it.
           wallFaces: v ? ('wallFaces' in v ? v.wallFaces : (t.wallFaces ?? null)) : null,
           closed: true,
         };
@@ -351,7 +409,16 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       return t;
     });
 
-    set({ perimeterTraces: updatedTraces, isDirty: true });
+    const patch = {
+      perimeterTraces: updatedTraces,
+      isDirty: true,
+    };
+
+    if (state.perimeterVertices !== null) {
+      patch.perimeterVertices = v ? (v.vertices || []) : null;
+    }
+
+    set(patch);
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
@@ -423,8 +490,14 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
+  setAutoSnapEnabled: (v) => set({ autoSnapEnabled: v }),
   setOcrFailed: (v) => set({ ocrFailed: v }),
   setUnit: (v) => set({ unit: v }),
+  setLineToolActive: (v) => set({ lineToolActive: v }),
+  setAngleToolActive: (v) => set({ angleToolActive: v }),
+  setAngleToolState: (v) => set({ angleToolState: v }),
+  setMeasurementLines: (v) => set({ measurementLines: v }),
+  setCurrentMeasurementLine: (v) => set({ currentMeasurementLine: v }),
   setScaleToolActive: (v) => set({ scaleToolActive: v }),
   setScaleLines: (v) => set({ scaleLines: v }),
   setCurrentScaleLine: (v) => set({ currentScaleLine: v }),
@@ -445,14 +518,65 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       : state.calibration,
     isDirty: true,
   })),
+  setDrawAreaActive: (v) => set({ drawAreaActive: v }),
+  setCustomShapes: (v) => set({ customShapes: v }),
+  setCurrentCustomShape: (v) => set({ currentCustomShape: v }),
+  setPerimeterVertices: (v) => set((state) => {
+    const patch = { perimeterVertices: v };
+    if (v !== null) {
+      patch.traceInteractionMode = 'drawing';
+    } else if (state.traceInteractionMode === 'drawing') {
+      patch.traceInteractionMode = 'idle';
+    }
+    return patch;
+  }),
   setTracedBoundaries: (v) => set({ tracedBoundaries: v }),
   setLastTraceOutcome: (v) => set({ lastTraceOutcome: v }),
+  setEraserToolActive: (v) => set({ eraserToolActive: v }),
+  setCornerEraserActive: (v) => set({ cornerEraserActive: v }),
+  setEraserBrushSize: (v) => set({ eraserBrushSize: v }),
+  setCropToolActive: (v) => set({ cropToolActive: v }),
+  setVoidToolActive: (v) => set({ voidToolActive: v }),
+  /**
+   * Punch a void out of a trace by hand. Tagged `source: 'user'` so a later
+   * re-trace keeps it; callers save the undo point before calling.
+   */
+  addHole: (traceId, ring) => set((state) => {
+    if (!ring || ring.length < 3) return {};
+    const hole = {
+      id: `hole-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      ring,
+      source: 'user',
+    };
+    return {
+      perimeterTraces: (state.perimeterTraces || []).map((t) => (
+        t.id === traceId ? { ...t, holes: [...(t.holes ?? []), hole] } : t
+      )),
+      isDirty: true,
+    };
+  }),
+  removeHole: (traceId, holeId) => set((state) => ({
+    perimeterTraces: (state.perimeterTraces || []).map((t) => (
+      t.id === traceId
+        ? { ...t, holes: (t.holes ?? []).filter((h, i) => holeKey(h, i) !== holeId) }
+        : t
+    )),
+    isDirty: true,
+  })),
+  setDrawModeActive: (v) => set({ drawModeActive: v }),
+  setDrawBrushSize: (v) => set({ drawBrushSize: v }),
+  setDrawStrokes: (v) => set({ drawStrokes: v }),
+  addDrawStroke: (stroke) => set((state) => (
+    stroke?.points?.length ? { drawStrokes: [...state.drawStrokes, stroke] } : {}
+  )),
   setViewportTransform: (scale, pos, token) => set({ zoomScale: scale, stageX: pos.x, stageY: pos.y, viewportSyncToken: token }),
   setCanvasRotation: (v) => set({ canvasRotation: v }),
   setIsDirty: (v) => set({ isDirty: v }),
   loadProject: (projectState) => set({
     ...workingStateDefaults(),
     ...projectState,
+    traceInteractionMode: 'idle',
+    perimeterVertices: null,
     isProcessing: false,
     processingMessage: '',
   }),
@@ -460,6 +584,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // Dirty like any other document edit: the subject line is what a saved
   // project is filed under, so losing it is losing work.
   setProjectName: (v) => set({ projectName: v, isDirty: true }),
+  setErrorAnchor: (v) => set({ errorAnchor: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
   // ── snapshots ──────────────────────────────────────────────────────────────

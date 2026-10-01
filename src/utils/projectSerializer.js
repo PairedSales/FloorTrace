@@ -223,6 +223,11 @@ const roomSchema = z.object({
   feetPerPixel: z.object({ x: z.number(), y: z.number() }).nullable().optional(),
 }).catchall(z.any());
 
+const measurementLineSchema = z.object({
+  start: vertexSchema,
+  end: vertexSchema,
+});
+
 // A line the user drew and stated the true length of, in original image px.
 // `feet` is null between placing the line and typing its length.
 const scaleLineSchema = z.object({
@@ -231,6 +236,25 @@ const scaleLineSchema = z.object({
   end: vertexSchema,
   feet: z.number().nullable().optional(),
 });
+
+const customShapeSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  vertices: z.array(vertexSchema),
+  closed: z.boolean(),
+  color: z.string().optional(),
+});
+
+const angleToolStateSchema = z.object({
+  center: vertexSchema,
+  angle1: z.number(),
+  angle2: z.number(),
+  radius1: z.number(),
+  radius2: z.number(),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  snapEnabled: z.boolean().optional(),
+}).nullable().optional();
 
 const bboxSchema = z.object({
   x: z.number(),
@@ -263,9 +287,15 @@ const floorStateSchema = z.object({
   imageMimeType: z.string().optional(),
   showSideLengths: z.boolean().optional(),
   useInteriorWalls: z.boolean().optional(),
+  autoSnapEnabled: z.boolean().optional(),
   ocrFailed: z.boolean().optional(),
   unit: z.string().optional(),
+  measurementLines: z.array(measurementLineSchema).optional(),
   scaleLines: z.array(scaleLineSchema).optional(),
+  // The brush strokes a rescued outline was traced from. Document content for
+  // the same reason `scaleLines` is: on a plan the detector could not read,
+  // this is the evidence the measurement rests on.
+  drawStrokes: z.array(z.any()).optional(),
   // What the last trace did, including when it did nothing. `.catchall` below
   // would carry it either way; declared so it cannot be stripped by a future
   // tightening, which is how `exteriorLabels` was lost once already.
@@ -275,10 +305,12 @@ const floorStateSchema = z.object({
     reason: z.string().nullable().optional(),
     verdict: z.string().optional(),
   }).catchall(z.any()).nullable().optional(),
+  customShapes: z.array(customShapeSchema).optional(),
   tracedBoundaries: z.any().optional(),
   zoomScale: z.number().nullable().optional(),
   stageX: z.number().optional(),
   stageY: z.number().optional(),
+  angleToolState: angleToolStateSchema,
 }).catchall(z.any());
 
 const floorSchema = z.object({
@@ -465,11 +497,6 @@ export function serializeSketch(storeState, historyState = null) {
   };
 }
 
-const LEGACY_STATE_FIELDS = [
-  'measurementLines', 'customShapes', 'angleToolState', 'drawStrokes',
-  'autoSnapEnabled',
-];
-
 /**
  * Deserializes project object, re-hydrating de-duplicated image references.
  */
@@ -477,10 +504,6 @@ export function deserializeSketch(project) {
   const images = project.images || {};
   const floor = project.floors[0];
   const state = { ...floor.state };
-  // What a file saved while the plan could still be drawn on carries and the
-  // app no longer has anywhere to put. Dropped here so it cannot ride into the
-  // store as a stray key.
-  for (const key of LEGACY_STATE_FIELDS) delete state[key];
 
   if (state.imageRef && images[state.imageRef]) {
     state.image = images[state.imageRef];
@@ -524,6 +547,8 @@ export function deserializeSketch(project) {
     projectName: state.projectName ?? metaName,
     perimeterTraces,
     activeTraceId,
+    traceInteractionMode: 'idle',
+    perimeterVertices: null,
     canvasRotation: project.globalSettings?.canvasRotation ?? 0,
     projectId: project.metadata.projectId,
     isDirty: false,

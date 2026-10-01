@@ -44,7 +44,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - `nonGla.js` (+ `garage.js`) — garage/porch/patio candidates from four detectors, merged, removed in one pass under a cumulative bound.
 - `remediate.js` — second-chance trace (`join`, `escalate`) below `REMEDIATION_CONFIDENCE` or when a known-inside constraint is excluded. Never in draw mode.
 - `validate.js` — post-hoc checks, `scaleIsotropy`/`robustScale`, `orientDimsToBox`, `resolveRoomScale`, `constraintFactor`.
-- `room.js` — rectangle growth from a label. `brush.js` — draw mode (a painted corridor; the app no longer offers it, but `probe:exterior draw` and the key-drawing scripts still use it). `scale.js` — project scale. `cache.js` — per-image memo. `labelFrame.js`, `polygon.js`.
+- `room.js` — rectangle growth from a label. `brush.js` — draw mode. `scale.js` — project scale. `cache.js` — per-image memo. `labelFrame.js`, `polygon.js`.
 
 ## Invariants
 
@@ -63,7 +63,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - **Remediation's hold count exempts labels in carves, not in the thin-structure region** (`measureHold`). That region's box is the union of scattered hairline areas and can span the floor; exempting what it covered hid a room lost behind a window from the pass that finds it.
 - **Glazing rescue** only where the grey band lines up with wall at both ends. Don't relax `minFlank` in `bridgeRunsGuarded`: one wall thickness is also what a scan line sees of a diagonal wall.
 - **The room-click clamp (`roomClampBoundary`) is a rail.** It asks for the widest hypothesis (`autoGarage: false`, `autoShaded: false`); a click inside its bbox but outside its mask drops the clamp; a click outside the bbox is refused in words. Too tight means a click that silently does nothing.
-- **`options.foreignPoints`** (every other parsed label) is passed by both room-detection callers: the scan batch and a pill click.
+- **`options.foreignPoints`** (every other parsed label) is passed by all three room-detection callers: the scan batch, a pill click, a manual click.
 - **Room edges seat on the interior wall face**, measured over the final span. Snapping targets wall faces (the white→black transition on the room side), never centrelines — a product rule.
 - **A label's two numbers carry no axis.** Orient them to the box (`orientDimsToBox`) for scale, but never inside the open-plan rescue, which exists because the box is wrong on one axis.
 - **`cache.js` keys on the data URL, not its hash** (`hashDataUrl` can alias two images). The `cacheKey` is minted once per decode; `MAX_DECODED` is 2 so two open plans don't evict each other; `dropCacheKey` drops one image; past the 32 MB budget the memo stops storing but never clears.

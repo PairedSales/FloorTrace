@@ -315,11 +315,12 @@ const WayIn = ({ isTouch, onFileOpen, onTryExample }) => {
 // Said before the first plan is open, not after a trace disappoints. The
 // failure this app is most prone to is a wrong answer that looks confident,
 // and a user who was promised "automatic" is the one least equipped to catch
-// it — so "automatic" is never offered unqualified.
+// it — so "automatic" is never offered unqualified, and the way out is named.
 const Caveat = () => (
   <p className="mt-6 text-[13.5px] text-fg-3 leading-relaxed">
-    Works best on a clean plan with the room sizes printed on it. Always compare
-    the outline with the plan before you use the area.
+    Works best on a clean plan with the room sizes printed on it. If the outline
+    isn’t quite right, drag its corners — or paint roughly over the walls and
+    FloorTrace redraws it.
   </p>
 );
 

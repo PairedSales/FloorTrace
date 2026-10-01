@@ -21,16 +21,16 @@ paths:
 - `undoManager` interns image data URLs by `internKey`, never `hashDataUrl` — a collision would restore the wrong drawing. `setHistoryState` copies and caps what it is given. `parkHistory`/`adoptHistory` hand the stacks over on a plan switch; `cancelLastSave` deliberately does not survive one.
 - `selectActivePerimeterOverlay` and `selectActiveAreaByType` are one-slot module memos for the live store (follow that manual pattern for new derived state; no reselect). The memo is required — the result is an object, so without it every subscriber re-renders on every `set()`. Anything handed a state instead of subscribing (the exhibit, `usePlanAreaIndex`) uses `computeAreaByType`, or alternating callers get each other's numbers.
 - Every printed area breakdown goes through `displayedBreakdownTotal` (`areaCalculator.js`), which sums the rounded rows, so a total never disagrees with the rows above it.
-- `rooms[]` holds only rooms the detector confirmed (a scan adds `decision.contributors`). Fields a saved file carries from the removed manual tools (`measurementLines`, `customShapes`, `drawStrokes`, `angleToolState`, `autoSnapEnabled`) are dropped on load (`LEGACY_STATE_FIELDS`, `projectSerializer.js`); hand-drawn outlines, hand-cut holes (`source: 'user'`) and `quality.edited` in old files still load and count. Perimeter traces carry `holes`, `quality` and `wallFaces` — per trace, because `tracedBoundaries` describes only the last detection run.
+- `rooms[]` holds only rooms the detector confirmed (a scan adds `decision.contributors`). Perimeter traces carry `holes`, `quality` and `wallFaces` — per trace, because `tracedBoundaries` describes only the last detection run.
 - Units: `appStore.unit` is what the live plan displays (per plan; it rides in files, parks and undo). `workspaceStore.unitPreference` is the standing answer, enforced in one place, `useUnitPreference`. Don't add unit checks to individual arrival paths.
 
 ## Plans and parking
 
 - A **plan** (`newDocumentId()`) is one image and everything measured from it; an **outline** (`newTraceId()`) is a polygon within it. Never call the plan level "floor".
 - One plan lives on the store root; the rest are parked as inert records in `documentManager.js`'s module `Map` — never in the store, where a component could subscribe to a plan it isn't showing. Open-plan cap: `MAX_OPEN_DOCUMENTS` = 6, the user's number.
-- `PARK_FIELDS` ≠ `AUTOSAVE_FIELDS`: parking adds `isDirty`, which is a live fact within a session and meaningless in a draft.
+- `PARK_FIELDS` ≠ `AUTOSAVE_FIELDS`: parking adds `isDirty`, `drawModeActive` and `traceInteractionMode`, which are live facts within a session and meaningless in a draft.
 - `adoptParkedState` ≠ `loadProject`: adopting restores, so it neither spreads defaults nor runs `normalizeTraces` (a migration for data off disk that would rebuild every trace and break memo identity).
-- `<Canvas key={activeDocumentId}>` is what discards in-progress gesture state (a scale length being drawn, a selected scale line) on a switch. The key is on `<Canvas>` only.
+- `<Canvas key={activeDocumentId}>` is what discards in-progress gesture state (a mid-drag crop, a half-dragged vertex) on a switch. The key is on `<Canvas>` only.
 
 ## Async work is owned, not inferred
 

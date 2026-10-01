@@ -125,6 +125,8 @@ const AppHeader = ({
   onPanelToggle,
   showSideLengths,
   onShowSideLengthsChange,
+  autoSnapEnabled,
+  onAutoSnapChange,
 }) => {
   const { canUndo, canRedo } = useUndoHistory();
 
@@ -215,6 +217,11 @@ const AppHeader = ({
                 keys="L"
                 checked={showSideLengths}
                 onSelect={() => onShowSideLengthsChange(!showSideLengths)}
+              />
+              <MenuItem
+                label="Snap corners to walls"
+                checked={autoSnapEnabled}
+                onSelect={() => onAutoSnapChange(!autoSnapEnabled)}
               />
               <MenuItem label="Results panel" keys="O" checked={panelOpen} onSelect={onPanelToggle} />
             </>

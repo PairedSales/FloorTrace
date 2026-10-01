@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Eye, EyeOff, Trash2, Copy, Download, Loader2,
+  Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
   ScanSearch, Ruler, MousePointerClick, RotateCcw, ScanText, Check, Minus,
 } from 'lucide-react';
 import useAppStore, {
@@ -11,6 +11,7 @@ import { formatArea, areaDisplayValue, formatAreaValue } from '../utils/unitConv
 import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
 import { scaleProvenance } from '../utils/scaleProvenance';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
+import { MAX_TRACES } from '../utils/planStage';
 import { isUserAsserted } from '../utils/detection/validate';
 import { MEASURE_STEPS, measureStepIndex } from '../utils/progressSteps';
 import { usePlanIssues } from '../hooks/usePlanIssues';
@@ -58,9 +59,9 @@ import WorkSection from './WorkSection';
  * Where things went:
  *
  *  - **Units** are a preference set once, so they are in Settings.
- *  - **Drawing or redrawing the outline by hand** is gone. FloorTrace traces
- *    the plan; with no outline the section offers to look again, and says why
- *    the last look found nothing.
+ *  - **Redrawing the outline** is work done on the plan, so it is in the action
+ *    bar's Outline menu, above the plan. The panel offers the same tools only
+ *    while there is no outline at all, when drawing one is the next step.
  *  - **Changing the scale** stayed here, inside Scale: the scale is a number
  *    this panel states, and it is corrected where it is read.
  *  - **Inside or outside of the walls** moved under Outline, with a sentence
@@ -189,13 +190,16 @@ const ResultsPanel = ({
   onDimensionFocus,
   onDimensionBlur,
   onExport,
-  // The scale's corrections, and the way to look for an outline when there is
+  // The scale's corrections, and the ways to draw an outline when there is
   // none. Optional: a section with no handler simply does not offer the action.
   onScaleTool,
   onSelectRoom,
   onRestoreAutoScale,
   onRescan,
   onFindOutline,
+  onPaintOutline,
+  onPlaceCorners,
+  onAddOutline,
   // Rendered inside the mobile bottom sheet rather than beside the plan.
   // Everything below this line — the area maths, the breakdown, the outline
   // list, the checks and their canvas anchors — is the same code on both,
@@ -228,6 +232,10 @@ const ResultsPanel = ({
   // FloorTrace had just finished measuring by itself.
   const pickingRoom = useAppStore(selectPickingRoom);
   const setScaleRoomShown = useWorkspaceStore((s) => s.setScaleRoomShown);
+  // An outline being drawn by hand right now. The section then says how to
+  // finish it instead of offering three other ways to start.
+  const painting = useAppStore((s) => s.drawModeActive);
+  const placingCorners = useAppStore((s) => s.perimeterVertices !== null);
   // The rooms the detector confirmed — whether there are any is what decides
   // if "go back to the automatic scale" has anything to go back to.
   const rooms = useAppStore((s) => s.rooms);
@@ -296,8 +304,11 @@ const ResultsPanel = ({
       return area > 0 ? 'Set the scale to see the area.' : 'No area yet.';
     }
     if (traced.length > 0) return 'Every outline is hidden. Show one under Outline to see the area.';
+    // Mid-way through drawing one by hand, "No outline yet" reads as the app
+    // having lost it. The figure is on its way, and says so.
+    if (painting || placingCorners) return 'The area will show here once the new outline is drawn.';
     return traceFailed
-      ? 'FloorTrace couldn’t find the outline on this plan.'
+      ? 'FloorTrace couldn’t find the outline on its own. Draw it under Outline.'
       : 'No outline yet.';
   })();
 
@@ -331,17 +342,17 @@ const ResultsPanel = ({
   // drawn line is the scale: the box would then be evidence for nothing.
   const showRoomFields = !!roomOverlay && calibrationSource !== 'line-calibration';
   // The way back from a scale set by hand — a drawn line, or a room the user
-  // picked or retyped — to the one the rooms agreed on. Only where there are
+  // picked or resized — to the one the rooms agreed on. Only where there are
   // measured rooms to go back to.
   const canRestore = !!onRestoreAutoScale && rooms?.length > 0
     && isUserAsserted({ quality: scaleQuality });
   const hasLabels = detectedDimensions.length > 0;
-  // Only with a scale: the box is the room the scale came from, and without a
-  // scale there is no such room.
-  const roomFields = showRoomFields && calibrated && (
+  const roomFields = showRoomFields && (
     <div className="mt-3.5">
       <p className="mb-2 text-[13.5px] leading-snug text-fg-3">
-        Room used for the scale (the green box on the plan). Correct its size if it was misread:
+        {calibrated
+          ? 'Room used for the scale (the green box on the plan). Correct its size if it was misread:'
+          : 'Or use a whole room: drag the green box on the plan over a room you know the size of, then type its size:'}
       </p>
       <RoomSizeFields
         roomDimensions={roomDimensions}
@@ -354,7 +365,11 @@ const ResultsPanel = ({
   );
 
   // ── the outline ──
-  const outlineSummary = traced.length === 0 ? 'Not found yet'
+  // Whether this shell offers any way to draw an outline by hand. The phone
+  // passes none, and the empty section must not end on a colon over nothing.
+  const canDraw = !!(onPaintOutline || onPlaceCorners);
+  const canAddOutline = !!onAddOutline && traced.length > 0 && perimeterTraces.length < MAX_TRACES;
+  const outlineSummary = traced.length === 0 ? 'Not drawn yet'
     : perimeterTraces.length === 1 ? perimeterTraces[0].name
       : `${perimeterTraces.length} outlines`;
 
@@ -371,8 +386,8 @@ const ResultsPanel = ({
 
   // A different plan is a different set of questions.
   useEffect(() => { setByHand({}); }, [activeDocumentId]);
-  // Setting the scale from a known length ends with typing it into Scale, and
-  // picking a room ends with checking its green box and its size there — so starting
+  // Measuring a known length ends with typing it into Scale, and picking a
+  // room ends with checking its green box and its size there — so starting
   // either opens the section wherever it was left.
   // After the reset above, and on a plan switch too: a plan that comes back
   // mid-measurement comes back with Scale open.
@@ -581,32 +596,56 @@ const ResultsPanel = ({
             onToggle={() => toggle('outline')}
           >
             {traced.length === 0 ? (
-              <>
+              painting || placingCorners ? (
                 <p className="text-[14px] leading-snug text-fg-2">
-                  {traceFailed
-                    ? 'FloorTrace couldn’t find the outline on this plan.'
-                    : 'No outline yet.'}
+                  {painting
+                    ? 'Paint roughly over the outside walls on the plan, then click “Draw the outline” above the plan.'
+                    : 'Click each outside corner on the plan. Click the first corner again to finish.'}
                 </p>
-                {/* Why, when the trace said. With no outline there is no
-                    picture to read it from, so this is the one time the
-                    detector's reason is put into words. */}
-                {traceFailed && lastTraceOutcome?.reason && (
-                  <p className="mt-2 text-[13.5px] leading-snug text-fg-3">
-                    {asSentence(lastTraceOutcome.reason)}
+              ) : (
+                <>
+                  <p className="text-[14px] leading-snug text-fg-2">
+                    {traceFailed
+                      ? `FloorTrace couldn’t find the outline on its own.${canDraw ? ' Draw it yourself — it only takes a minute:' : ''}`
+                      : `No outline yet.${canDraw ? ' Let FloorTrace find it, or draw it yourself:' : ''}`}
                   </p>
-                )}
-                {/* One filled button on the panel at a time. With no scale
-                    either, that one is the scale's: it is what the figure
-                    above is asking for. */}
-                {onFindOutline && (
-                  <div className="mt-3">
-                    <ChoiceButton icon={ScanSearch} primary={!!calibrated} onClick={onFindOutline}
-                                  disabled={isProcessing}>
-                      {traceFailed ? 'Try again' : 'Find the outline'}
-                    </ChoiceButton>
+                  {/* Why, when the trace said. With no outline there is no
+                      picture to read it from, so this is the one time the
+                      detector's reason is put into words. */}
+                  {traceFailed && lastTraceOutcome?.reason && (
+                    <p className="mt-2 text-[13.5px] leading-snug text-fg-3">
+                      {asSentence(lastTraceOutcome.reason)}
+                    </p>
+                  )}
+                  {/* One filled button on the panel at a time. With no scale
+                      either, that one is the scale's: it is what the figure
+                      above is asking for. */}
+                  <div className="mt-3 flex flex-col gap-2">
+                    {!traceFailed && onFindOutline && (
+                      <ChoiceButton icon={ScanSearch} primary={!!calibrated} onClick={onFindOutline}>
+                        Find the outline
+                      </ChoiceButton>
+                    )}
+                    {onPaintOutline && (
+                      <ChoiceButton icon={Brush} primary={traceFailed && !!calibrated} onClick={onPaintOutline}
+                                    title="Paint roughly over the outside walls and FloorTrace draws the outline">
+                        Paint over the walls
+                      </ChoiceButton>
+                    )}
+                    {onPlaceCorners && (
+                      <ChoiceButton icon={Waypoints} onClick={onPlaceCorners}
+                                    title="Click each outside corner in turn">
+                        Click the corners
+                      </ChoiceButton>
+                    )}
                   </div>
-                )}
-              </>
+                  {traceFailed && onFindOutline && (
+                    <button type="button" onClick={onFindOutline} className="link-btn mt-3">
+                      Try the automatic outline again
+                    </button>
+                  )}
+                </>
+              )
             ) : (
               <>
                 {overlapNotes.map((issue, i) => (
@@ -718,6 +757,12 @@ const ResultsPanel = ({
                           </p>
                         )}
 
+                        {!drawn && (
+                          <p className="mt-2 pl-5 text-[13.5px] leading-snug text-fg-3">
+                            Not drawn yet — click its corners on the plan, or paint over its walls.
+                          </p>
+                        )}
+
                         {staleByTrace.has(trace.id) && (
                           <p className="mt-2 pl-5 text-[13.5px] leading-snug text-warn">
                             <span className="font-semibold">{staleByTrace.get(trace.id).label}.</span>
@@ -728,6 +773,19 @@ const ResultsPanel = ({
                     );
                   })}
                 </div>
+
+                {canAddOutline && (
+                  <div className="mt-3.5">
+                    <button type="button" onClick={() => onAddOutline()} className="link-btn">
+                      <Plus className="w-4 h-4" aria-hidden="true" />
+                      Add another outline
+                    </button>
+                    <p className="mt-1 text-[13.5px] leading-snug text-fg-3">
+                      For a garage, a porch or another level. Click its corners on the plan,
+                      then choose what it counts as.
+                    </p>
+                  </div>
+                )}
 
                 {/* One setting for every outline, not just the selected one —
                     two outlines measured to different wall faces is an area
@@ -799,21 +857,21 @@ const ResultsPanel = ({
             )}
 
             {/* The lengths drawn with the tool, and the box to type each one
-                into: the second half of setting the scale from a known length,
-                so it leads. */}
+                into: the second half of measuring a known length, so it leads. */}
             <ScaleLines unit={unit} />
 
-            {/* While a length is being drawn the section is that and
+            {/* While a length is being measured the section is that and
                 nothing else: the other ways to set the scale, and the two
                 fields that belong to one of them, stand down until it is done. */}
             {!scaleToolActive && (
             <>
-            {/* The room the scale came from leads, and the ways to change it
-                follow. */}
-            {roomFields}
+            {/* With a scale, the room it came from leads and the ways to
+                change it follow. Without one the order turns over: the way to
+                set it comes first, as the one filled button on the panel. */}
+            {calibrated && roomFields}
 
             <div className="mt-3.5 flex flex-col gap-2">
-              {/* Room sizes first, then the known length: picking a room
+              {/* Room sizes first, then the manual override: picking a room
                   re-uses what was already read, which is cheaper and usually
                   right. */}
               {hasLabels && onSelectRoom && (
@@ -828,7 +886,7 @@ const ResultsPanel = ({
                   <ChoiceButton icon={Ruler} onClick={onScaleTool}
                                 primary={!calibrated && !(hasLabels && onSelectRoom)}
                                 title="Click both ends of something whose length you know, then type the length">
-                    Set scale using known length
+                    Measure a length you know
                   </ChoiceButton>
                   {!calibrated && (
                     <p className="text-[13.5px] leading-snug text-fg-3">
@@ -847,6 +905,8 @@ const ResultsPanel = ({
                 </ChoiceButton>
               )}
             </div>
+
+            {!calibrated && roomFields}
 
             {onRescan && (
               <button type="button" onClick={onRescan} disabled={isProcessing} className="link-btn mt-3">

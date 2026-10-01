@@ -1,13 +1,16 @@
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2, SlidersHorizontal } from 'lucide-react';
 
 /**
  * The bottom of the phone screen, which is the only part of it a thumb reaches
  * without regripping — so it holds the thing the user is most likely to do
  * next, not a row of everything they might.
  *
- * This bar states **one** verb — the next step of the pipeline the app already
- * models (plan → scale → outline → report) — and keeps everything else in the
- * menu, which is where a deliberate choice belongs.
+ * The desktop has a row of menus above the plan and a panel beside it, and
+ * lets the eye choose. That works with a mouse and a 1400 px window; at 390 px
+ * it would be a strip of truncated labels. Instead this bar states **one**
+ * verb — the next step of the pipeline the app already models (plan → scale →
+ * outline → report) — and keeps the other routes to it in the menu and the
+ * tool sheet, which is where a deliberate choice belongs.
  *
  * The area sits on the right at all times. It is the app's output, it changes
  * under the user's edits, and on a phone the panel that would otherwise show
@@ -15,6 +18,8 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
  */
 const MobileActionBar = ({
   primary,
+  onTools,
+  toolsActive,
   onPanel,
   panelOpen,
   areaText,
@@ -30,6 +35,20 @@ const MobileActionBar = ({
       aria-label="Actions"
     >
       <div className="flex items-stretch gap-1.5 h-[60px] px-2">
+        <button
+          type="button"
+          onClick={onTools}
+          aria-pressed={toolsActive}
+          className={`tap-target flex-col gap-0.5 w-[62px] shrink-0 rounded-xl text-[10.5px]
+                      font-semibold transition-colors
+                      ${toolsActive
+                        ? 'bg-accent/12 text-accent-strong'
+                        : 'text-fg-3 active:bg-sunken active:text-fg'}`}
+        >
+          <SlidersHorizontal className="w-[21px] h-[21px]" aria-hidden="true" />
+          Tools
+        </button>
+
         <button
           type="button"
           onClick={primary?.onPress}
