@@ -361,12 +361,19 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           disabled={!hasAnnotations}
         />
 
+        {/* What a picture cannot show — a doubtful scale, an area counted
+            twice — is printed on the image, and said here so it is not a
+            surprise in the report. */}
         {result?.model?.flags?.length > 0 && (
           <p className="note note-warn mt-5 font-normal text-fg-2">
             <b className="text-warn font-semibold">
-              {result.model.flags.length} thing{result.model.flags.length === 1 ? '' : 's'} to check
+              {result.model.flags.length === 1
+                ? 'One note about this measurement'
+                : `${result.model.flags.length} notes about this measurement`}
             </b>
-            {' — they are printed on the image too, so whoever reads it sees them.'}
+            {result.model.flags.length === 1
+              ? ' is printed on the image, so whoever reads it sees it.'
+              : ' are printed on the image, so whoever reads it sees them.'}
           </p>
         )}
       </div>

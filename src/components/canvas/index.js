@@ -7,5 +7,5 @@ export { default as DimensionOverlay } from './DimensionOverlay';
 export { default as PerimeterPlacementLayer } from './PerimeterPlacementLayer';
 export { default as DrawModeLayer } from './DrawModeLayer';
 export { default as AngleOverlay } from './AngleOverlay';
-export { default as WarningHighlightLayer } from './WarningHighlightLayer';
+export { default as RefusalHighlightLayer } from './RefusalHighlightLayer';
 export { getCanvasCoordinates } from './canvasUtils';

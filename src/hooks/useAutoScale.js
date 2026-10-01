@@ -156,9 +156,9 @@ export function useAutoScale() {
       return decision;
     }
 
-    // A 'check' verdict is not announced here: the panel counts it under
-    // Things to check, and keeps showing it for as long as the scale is in
-    // force. A toast said it once and then left the doubt invisible.
+    // A 'check' verdict is not announced here: the panel's Scale section says
+    // it, and keeps saying it for as long as the scale is in force. A message
+    // said it once and then left the doubt invisible.
     return decision;
   }, [applyDecision]);
 

@@ -12,8 +12,9 @@ import { PROGRESS } from '../../utils/progressSteps';
  *  - it leads with the answer, and never prints a pixel count as square feet;
  *  - at rest it is the answer and four folded lines, not forty controls;
  *  - a section opens by itself when it holds the next thing to do;
- *  - it does not dress a doubtful number as finished — Save image fills only
- *    when nothing is left to check;
+ *  - it says what a picture cannot show — a doubtful scale, an area counted
+ *    twice — in the section it is about, and nothing about how well the
+ *    outline follows the walls;
  *  - the scale is said in words, never in pixels per foot.
  */
 const square = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 500 }, { x: 0, y: 500 }];
@@ -77,7 +78,6 @@ beforeEach(() => {
     calibration: { calibrated: false, feetPerPixel: { x: 1, y: 1 }, source: null, quality: null },
     lastTraceOutcome: null,
     roomOverlay: null,
-    focusedWarning: null,
     documents: {},
     documentOrder: [],
     activeDocumentId: null,
@@ -150,8 +150,7 @@ describe('at rest it is the answer and its folded parts', () => {
 
   it('folds every section on a clean plan, each stating its own conclusion', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    for (const id of ['checks', 'outline', 'scale', 'work']) expect(isOpen(view, id), id).toBe(false);
-    expect(part(view, 'checks').getByText('All clear')).toBeTruthy();
+    for (const id of ['outline', 'scale', 'work']) expect(isOpen(view, id), id).toBe(false);
     expect(part(view, 'outline').getByText('1st Floor')).toBeTruthy();
     expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan')).toBeTruthy();
     // Nothing to correct is on show: no fields, no fixes.
@@ -184,14 +183,51 @@ describe('at rest it is the answer and its folded parts', () => {
 });
 
 describe('a section opens by itself when it holds the next thing to do', () => {
-  it('opens the checks when there is something to check', () => {
+  it('opens the scale when the rooms did not agree, and says so there', () => {
+    useAppStore.setState({
+      calibration: {
+        ...calibrated,
+        quality: { source: 'auto', reason: 'rooms-disagree', roomCount: 4, disagreement: 0.3 },
+      },
+      perimeterTraces: [outline()],
+    });
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    expect(isOpen(view, 'scale')).toBe(true);
+    expect(isOpen(view, 'outline')).toBe(false);
+    expect(part(view, 'scale').getByText(/Rooms disagree by/)).toBeTruthy();
+    // What it means for the area, and the way out of it, in the same place.
+    expect(part(view, 'scale').getByText(/imply sizes about .* apart/)).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    // Folded, it still says there is something in it.
+    fireEvent.click(header(view, 'scale'));
+    expect(within(header(view, 'scale')).getByText('Check')).toBeTruthy();
+  });
+
+  it('opens the outline when a cut-out is no longer taken off, and says so on its row', () => {
     useAppStore.setState({
       calibration: calibrated,
       perimeterTraces: [outline({ holes: [{ ring: square, stale: true }] })],
     });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    expect(isOpen(view, 'checks')).toBe(true);
+    expect(isOpen(view, 'outline')).toBe(true);
     expect(isOpen(view, 'scale')).toBe(false);
+    expect(part(view, 'outline').getByText(/A cut-out is no longer inside this outline/)).toBeTruthy();
+    expect(part(view, 'outline').getByText(/no longer taken off the area/)).toBeTruthy();
+  });
+
+  it('says so under Outline when a garage is outlined inside the living area and counted twice', () => {
+    const inner = [{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 300 }, { x: 100, y: 300 }];
+    useAppStore.setState({
+      calibration: calibrated,
+      perimeterTraces: [
+        outline(),
+        outline({ id: 'trace-2', name: 'Garage', type: 'garage', vertices: inner }),
+      ],
+    });
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    expect(part(view, 'outline').getByText('Garage sits inside 1st Floor')).toBeTruthy();
+    expect(part(view, 'outline').getByText(/counted twice/)).toBeTruthy();
+    expect(within(header(view, 'outline')).getByText('Check')).toBeTruthy();
   });
 
   it('opens the scale when there is none', () => {
@@ -320,18 +356,42 @@ describe('while FloorTrace is measuring the plan by itself', () => {
 });
 
 describe('saving the image', () => {
-  it('fills only when nothing is left to check, with the count above it', () => {
+  it('is the filled button as soon as there is an area to save', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
-    let view = render(<ResultsPanel {...props({ area: 800 })} />);
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
     expect(view.getByRole('button', { name: /Save image/ }).className).toContain('btn-primary');
-    cleanup();
+  });
 
+  // The outline is on the plan and the user has looked at it. A button that
+  // waited on the detector's opinion of it never filled on some plans.
+  it('does not wait on what the detector made of the outline', () => {
     useAppStore.setState({
-      perimeterTraces: [outline({ holes: [{ ring: square, stale: true }] })],
+      calibration: calibrated,
+      perimeterTraces: [outline({
+        quality: {
+          source: 'auto',
+          confidence: 0.4,
+          warnings: [
+            { code: 'bridged-opening', severity: 'warn', message: 'a gap was closed' },
+            { code: 'unsealed', severity: 'error', message: 'the outline never closed' },
+          ],
+        },
+      })],
+      lastTraceOutcome: { level: 'poor', reason: 'the outline never closed', floors: 1 },
     });
-    view = render(<ResultsPanel {...props({ area: 800 })} />);
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    expect(view.getByRole('button', { name: /Save image/ }).className).toContain('btn-primary');
+    // …and none of it is narrated: no list, no count, no percentage.
+    expect(view.container.querySelector('#panel-checks')).toBeNull();
+    expect(view.queryByText(/to check/i)).toBeNull();
+    expect(view.queryByText(/gap|never closed|wall match|%/i)).toBeNull();
+    expect(isOpen(view, 'outline')).toBe(false);
+  });
+
+  it('is not the filled button while the area has no scale behind it', () => {
+    useAppStore.setState({ perimeterTraces: [outline()] });
+    const view = render(<ResultsPanel {...props({ area: 500000 })} />);
     expect(view.getByRole('button', { name: /Save image/ }).className).not.toContain('btn-primary');
-    expect(view.getByText(/1 thing to check before you use this area/)).toBeTruthy();
   });
 
   it('is pinned to the foot of the panel, outside what scrolls', () => {
@@ -366,6 +426,38 @@ describe('the outline', () => {
     expect(onPaintOutline).toHaveBeenCalled();
     expect(part(view, 'outline').getByRole('button', { name: /Click the corners/ })).toBeTruthy();
     expect(part(view, 'outline').getByRole('button', { name: /Try the automatic outline again/ })).toBeTruthy();
+  });
+
+  // With no outline there is no picture to read the reason from, so this is the
+  // one time the detector's reason is put into words.
+  it('says why a trace found nothing, when the trace said', () => {
+    useAppStore.setState({
+      calibration: calibrated,
+      lastTraceOutcome: {
+        level: 'failed', floors: 0,
+        reason: 'the walls are drawn too thin at this image size to be followed reliably',
+      },
+    });
+    const view = render(<ResultsPanel {...props()} />);
+    expect(part(view, 'outline').getByText(
+      'The walls are drawn too thin at this image size to be followed reliably.',
+    )).toBeTruthy();
+  });
+
+  it('says where a type FloorTrace chose was read from', () => {
+    useAppStore.setState({
+      calibration: calibrated,
+      perimeterTraces: [
+        outline(),
+        outline({
+          id: 'trace-2', name: 'Basement', type: 'below-grade',
+          typeSource: 'detected', typeEvidence: { text: ' BASEMENT ' },
+          vertices: [{ x: 2000, y: 0 }, { x: 2500, y: 0 }, { x: 2500, y: 500 }, { x: 2000, y: 500 }],
+        }),
+      ],
+    });
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    expect(part(view, 'outline').getByText('Set from “BASEMENT” on the plan.')).toBeTruthy();
   });
 
   it('leads with finding it when nothing has been tried', () => {

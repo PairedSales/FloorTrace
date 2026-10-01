@@ -51,12 +51,12 @@ export function useExhibitExport() {
       ]);
       const { canvas, model } = await renderExhibit(state, { options: readExportOptions() });
       await copyExhibit(canvas);
-      // The fastest way to take the number out of the app carried no caveat at
-      // all, while the slow way carried all of them. The count is the same one
-      // the panel prints, so the two cannot disagree.
-      const flags = model?.flags?.filter((f) => f.severity !== 'reviewed').length ?? 0;
+      // The fastest way to take the number out of the app must not be the one
+      // way that carries no caveat: a doubtful scale is printed on the image,
+      // and the copy says that it is.
+      const flags = model?.flags?.length ?? 0;
       flash(flags > 0
-        ? `Copied — ${flags} ${flags === 1 ? 'thing' : 'things'} to check on this measurement`
+        ? `Image copied, with ${flags} ${flags === 1 ? 'note' : 'notes'} about this measurement printed on it`
         : 'Image copied — paste it into your report');
     } catch (error) {
       console.error('Exhibit copy failed:', error);

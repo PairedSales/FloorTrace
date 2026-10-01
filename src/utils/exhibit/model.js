@@ -1,10 +1,13 @@
 // What a workfile exhibit says, decided here so the renderer only draws.
 //
-// Every number comes from the same selector the Measurement panel reads — the
+// Every number comes from the same selector the results panel reads — the
 // exhibit is the artifact an appraisal workfile keeps, so it must not be able
 // to state a different square footage from the screen it was made on. The same
-// rule applies to doubt: a trace the detector rated poor, a scale the rooms
-// disagreed about and a void that fell outside its outline all reach the page.
+// rule applies to doubt, and to the same doubts the panel states: a scale the
+// rooms disagreed about, an area counted twice and a void that fell outside its
+// outline all reach the page, because none of them can be seen in the picture.
+// How well an outline follows the walls is not said here, as it is not said on
+// screen: the outline is printed over the plan, and its reader can see it.
 
 import { computeAreaByType, computeWorkspaceArea } from '../../store/appStore';
 import {
@@ -15,7 +18,7 @@ import {
   areaDisplayValue, formatAreaValue,
 } from '../unitConverter';
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
-import { qualitySummary, rankedWarnings, scaleQualitySummary, NOTE_ONLY_CODES } from '../boundaryQuality';
+import { scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
 import { scaleProvenance } from '../scaleProvenance';
 
@@ -152,9 +155,9 @@ export const outlineProvenance = (trace) => {
 };
 
 // The doubts, ranked by how much of the reported area they put in question.
-// Report-scoped problems first: a double-counted floor is wrong by a whole
-// storey, which no per-outline confidence figure conveys.
-const buildFlags = (state, areas, outlines, measured = true) => {
+// All of them are about the number rather than the picture: what the outline
+// encloses is printed over the plan for the reader to judge.
+const buildFlags = (state, areas, measured = true) => {
   const flags = [];
 
   // First, because it invalidates everything under it.
@@ -181,48 +184,6 @@ const buildFlags = (state, areas, outlines, measured = true) => {
   const scaleNote = scaleQualitySummary(state.calibration?.quality);
   if (scaleNote?.level === 'check') {
     flags.push({ severity: 'warn', text: `Scale: ${scaleNote.detail}` });
-  }
-
-  // Every warning on every outline, not only those whose score fell below the
-  // good threshold. The `level === 'good'` skip dropped **error-severity**
-  // findings from the exported workfile whenever the score happened to sit
-  // above 0.75 — which is exactly the wrong-answer-that-looks-green case, on
-  // the one surface a third party reads without the app in front of them.
-  for (const outline of outlines) {
-    const q = outline.quality;
-    if (!q) continue;
-    const ranked = rankedWarnings(q.warnings);
-    const reasons = ranked.filter((w) => w.severity !== 'info');
-    // A note-only finding (label outside) is not flagged, but it is why the
-    // score is low, so the score row below must not appear in its place.
-    const noted = ranked.some((w) => NOTE_ONLY_CODES.has(w.code));
-
-    // The score rides on the first row for this outline rather than in a row
-    // of its own: a reviewer needs the reason and the number together, and
-    // repeating "42% wall match" above every one of four findings is noise.
-    const score = q.edited ? 'edited by hand'
-      : q.percent === null ? 'unverified'
-        : `${q.percent}% wall match`;
-
-    for (const w of reasons) {
-      // An acknowledged flag is not dropped, it is re-filed. A workfile that
-      // records a finding was considered is stronger than one that never had
-      // it, and dropping it would make the acknowledge control a way of
-      // quietly cleaning the page.
-      flags.push({
-        severity: w.acknowledged ? 'reviewed' : (w.severity === 'error' ? 'error' : 'warn'),
-        text: `${outline.name} (${score}): ${w.label} — ${w.detail}.`,
-      });
-    }
-
-    // Nothing explained why, so the score has to speak for itself.
-    if (!reasons.length && !noted && q.level !== 'good' && !q.edited) {
-      flags.push({
-        severity: q.level === 'fair' ? 'warn' : 'error',
-        text: `${outline.name}: ${score}`
-          + `${q.reason ? ` — ${q.reason}` : ''}.`,
-      });
-    }
   }
 
   const staleVoids = (state.perimeterTraces ?? [])
@@ -278,7 +239,6 @@ export function buildExhibitModel(state, {
       // reading "Garage / Garage" spends a line saying nothing.
       typeLabel: typeLabel === trace.name ? null : typeLabel,
       areaText: calibrated ? `${value} ${suffix}` : '—',
-      quality: trace.quality ? qualitySummary(trace.quality) : null,
       provenance: outlineProvenance(trace),
       voids: voidNote(trace.holes, feetPerPixel, unit),
     };
@@ -404,7 +364,7 @@ export function buildExhibitModel(state, {
     showBreakdown: rows.length > 1,
     scale: scaleLines(state),
     outlines,
-    flags: buildFlags(state, areas, outlines, measured),
+    flags: buildFlags(state, areas, measured),
     plan,
     disclaimer: 'Areas are grouped in the ANSI Z765 style and are derived from a traced '
       + 'sketch — this is a working measurement, not a certified survey.',

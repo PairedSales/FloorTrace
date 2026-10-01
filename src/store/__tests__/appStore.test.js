@@ -327,30 +327,32 @@ describe('selectActiveAreaByType', () => {
   });
 });
 
-describe('focusedWarning', () => {
+describe('errorAnchor', () => {
+  const anchor = { kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 9, y: 9 }]] };
+
   beforeEach(() => {
     useAppStore.getState().restart();
-    useAppStore.getState().setFocusedWarning(null);
+    useAppStore.getState().setErrorAnchor(null);
   });
 
-  // Which warning is being inspected is a view of the document, not part of it:
+  // Where an edit was refused is a view of the document, not part of it:
   // undoing an edit must not restore a highlight, and reopening a project must
   // not start with one already on the canvas.
   it('reaches neither a snapshot nor a draft', () => {
-    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 2 });
-    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 2 });
+    useAppStore.getState().setErrorAnchor(anchor);
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
 
-    expect(AUTOSAVE_FIELDS).not.toContain('focusedWarning');
-    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('focusedWarning');
-    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('focusedWarning');
+    expect(AUTOSAVE_FIELDS).not.toContain('errorAnchor');
+    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('errorAnchor');
+    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('errorAnchor');
   });
 
   it('survives an undo rather than being reverted by one', () => {
-    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 0 });
+    useAppStore.getState().setErrorAnchor(anchor);
     undoManager.save();
     useAppStore.getState().setUnit('metric');
     undoManager.undo();
-    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
   });
 });
 

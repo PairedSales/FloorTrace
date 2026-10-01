@@ -1083,9 +1083,9 @@ function App() {
     });
     if (!resolved) return;
 
-    // Deliberately silent. The panel's Things to check carries this verdict
-    // for as long as the scale is in force, which is where the question is
-    // actually asked — a toast said it once and then left the doubt invisible.
+    // Deliberately silent. The panel's Scale section carries this verdict for
+    // as long as the scale is in force, which is where the question is
+    // actually asked — a message said it once and then left the doubt invisible.
 
     if (resolved.changed) {
       applyRoomCalibration(resolved.scale, null, 'room-calibration', resolved.quality);
@@ -1118,9 +1118,9 @@ function App() {
       setPerimeterOverlay({ vertices: currentVertices });
       setPerimeterVertices(null); // Exit vertex placement mode
       // An outline drawn corner by corner answers a failed automatic trace.
-      // Only a trace writes this record, so without clearing it "The last
-      // trace found no outline" stood beside the user's finished outline,
-      // counted as a thing to check, for as long as the plan was open.
+      // Only a trace writes this record, so without clearing it the panel
+      // would go back to "FloorTrace couldn’t find the outline" the moment
+      // this outline was deleted, about a trace the user has since replaced.
       setLastTraceOutcome(null);
     }
   }, [setPerimeterOverlay, setPerimeterVertices, setLastTraceOutcome]);

@@ -124,11 +124,11 @@ export function useKeyboardShortcuts({
 
       if (shortcutsBlocked(e.target)) return;
 
-      // Escape drops the warning highlight. Deliberately does not consume the
-      // event: anything else listening for Escape must still see it. Sits after
-      // the guard so an open help modal swallows the key instead.
+      // Escape drops the highlight a refusal left on the plan. Deliberately
+      // does not consume the event: anything else listening for Escape must
+      // still see it. Sits after the guard so an open help modal swallows the
+      // key instead.
       if (e.key === 'Escape') {
-        useAppStore.getState().setFocusedWarning(null);
         useAppStore.getState().setErrorAnchor(null);
       }
 

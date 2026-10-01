@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
 import * as undoManager from '../undoManager';
 import { MAX_TRACE_ATTEMPTS } from '../traceManager';
-import { summariseIssues } from '../../utils/traceIssues';
 import { serializeSketch, importProject } from '../../utils/projectSerializer';
 
 const square = (n) => [
@@ -21,15 +20,10 @@ const store = () => useAppStore.getState();
 const traces = () => store().perimeterTraces;
 const active = () => traces().find((t) => t.id === store().activeTraceId);
 
-// Ranked below `annexation`, so the two are deliberately stored in the reverse
-// of the order the panel prints them — an index into the ranking would
-// acknowledge the wrong one.
 const TWO_WARNINGS = [
   { code: 'bridged-opening', severity: 'warn', message: 'a gap was closed' },
   { code: 'annexation', severity: 'warn', message: 'reaches past its walls' },
 ];
-
-const issueCount = () => summariseIssues(traces(), null, [], null).count;
 
 beforeEach(() => {
   store().resetPerimeterTraces();
@@ -136,95 +130,7 @@ describe('attempt history', () => {
   });
 });
 
-describe('acknowledged warnings', () => {
-  const seed = () => {
-    store().setPerimeterOverlay(result(square(10), 0.9, TWO_WARNINGS));
-    return active().id;
-  };
-
-  it('takes one off the issue count and puts it back', () => {
-    const id = seed();
-    expect(issueCount()).toBe(2);
-
-    expect(store().acknowledgeWarning(id, 1, 'checked against the plan')).toBe(true);
-    expect(issueCount()).toBe(1);
-
-    expect(store().unacknowledgeWarning(id, 1)).toBe(true);
-    expect(issueCount()).toBe(2);
-  });
-
-  it('indexes the trace\'s own warnings, not the ranked order', () => {
-    const id = seed();
-    store().acknowledgeWarning(id, 1);
-
-    const warnings = active().quality.warnings;
-    expect(warnings[1].code).toBe('annexation');
-    expect(warnings[1].acknowledged.at).toBeTypeOf('number');
-    expect(warnings[0].acknowledged ?? null).toBe(null);
-    // `annexation` outranks `bridged-opening`, so acknowledging the ranked
-    // first row by its ranked position would have cleared the wrong one.
-    expect(summariseIssues(traces(), null, [], null).issues[0].code).toBe('bridged-opening');
-  });
-
-  it('keeps the note and no-ops on a warning that was never acknowledged', () => {
-    const id = seed();
-    store().acknowledgeWarning(id, 0, 'the garage door is drawn open');
-    expect(active().quality.warnings[0].acknowledged.note).toBe('the garage door is drawn open');
-    expect(store().unacknowledgeWarning(id, 1)).toBe(false);
-  });
-
-  // `pipeline.js` fans a whole-drawing finding onto every floor and the panel
-  // prints it once, so the row has to name the outline its index belongs to and
-  // one click has to settle every copy.
-  const SHEET_WARNING = { code: 'low-resolution', severity: 'warn', detail: { px: 2 } };
-  const floor = (vertices) => ({
-    vertices, holes: [], quality: { source: 'auto', confidence: 0.9, warnings: [SHEET_WARNING] },
-  });
-
-  it('settles a whole-drawing warning on every outline it was fanned onto', () => {
-    store().applyDetectedTraces([floor(square(10)), floor(square(100))]);
-    const [issue] = summariseIssues(traces(), null, [], null).issues;
-    expect(issueCount()).toBe(1);
-    // Without this the UI has an index and nothing to apply it to.
-    expect(issue.traceId).toBe(traces()[0].id);
-
-    expect(store().acknowledgeWarning(issue.traceId, issue.index)).toBe(true);
-
-    expect(issueCount()).toBe(0);
-    expect(traces()[1].quality.warnings[0].acknowledged).toBeTruthy();
-
-    store().unacknowledgeWarning(issue.traceId, issue.index);
-    expect(issueCount()).toBe(1);
-    expect(traces()[1].quality.warnings[0].acknowledged ?? null).toBe(null);
-  });
-
-  // Accepting a fact about the *sheet* must not delete a doubt about *this
-  // polygon* — that is the count going down by destroying the evidence.
-  it('does not let a whole-drawing warning vouch for one outline', () => {
-    store().setPerimeterOverlay(result(square(10), 0.6, [SHEET_WARNING]));
-    const id = active().id;
-    expect(issueCount()).toBe(2);
-
-    store().acknowledgeWarning(id, 0);
-
-    const { count, issues } = summariseIssues(traces(), null, [], null);
-    expect(count).toBe(1);
-    expect(issues[0].kind).toBe('low-confidence');
-  });
-
-  it('stops a fair outline claiming a reason to doubt it once its warnings are accepted', () => {
-    // Below QUALITY_GOOD, so the low-confidence fallback is live.
-    store().setPerimeterOverlay(result(square(10), 0.6, [TWO_WARNINGS[1]]));
-    const id = active().id;
-    expect(issueCount()).toBe(1);
-
-    store().acknowledgeWarning(id, 0);
-
-    expect(issueCount()).toBe(0);
-  });
-});
-
-describe('the projections carry both', () => {
+describe('the projections carry the attempts and the detector’s findings', () => {
   // Neither is a field of its own: both ride inside `perimeterTraces`, which is
   // in all three projections by not being excluded from any of them. Asserted
   // rather than reasoned about, because that is exactly how `exteriorLabels`
@@ -233,26 +139,25 @@ describe('the projections carry both', () => {
     // `undoManager.save()` no-ops without one.
     store().setImage('data:image/png;base64,AA');
     store().setPerimeterOverlay(result(square(10), 0.9));
+    undoManager.save();
     store().setPerimeterOverlay(result(square(20), 0.4, TWO_WARNINGS));
-    store().acknowledgeWarning(active().id, 0, 'checked');
 
     const draft = store().getAutosaveState();
     expect(draft.perimeterTraces[0].attempts).toHaveLength(1);
-    expect(draft.perimeterTraces[0].quality.warnings[0].acknowledged.note).toBe('checked');
+    // Nothing on screen lists them any more, and they are kept all the same.
+    expect(draft.perimeterTraces[0].quality.warnings).toHaveLength(2);
 
     undoManager.undo();
 
-    expect(active().quality.warnings[0].acknowledged ?? null).toBe(null);
-    expect(active().attempts).toHaveLength(1);
-    expect(active().attempts[0].vertices).toEqual(square(10));
+    expect(active().quality.warnings).toHaveLength(0);
+    expect(active().vertices).toEqual(square(10));
   });
 });
 
 describe('.floorplan round trip', () => {
-  it('carries attempt history and acknowledgements', () => {
+  it('carries attempt history', () => {
     store().setPerimeterOverlay(result(square(10), 0.9, TWO_WARNINGS));
     store().setPerimeterOverlay(result(square(20), 0.4));
-    store().acknowledgeWarning(active().id, 0, 'checked');
 
     const project = serializeSketch(useAppStore.getState());
     const { statePatch } = importProject(JSON.stringify(project));
@@ -265,16 +170,18 @@ describe('.floorplan round trip', () => {
     expect(trace.vertices).toEqual(square(20));
   });
 
-  it('carries an acknowledgement that survives a reopen', () => {
-    store().setPerimeterOverlay(result(square(10), 0.9, TWO_WARNINGS));
-    store().acknowledgeWarning(active().id, 1, 'checked');
+  // Nothing writes an acknowledgement any more — the list it took a finding
+  // off is gone — but files saved while it existed carry one, and must open.
+  it('still opens a file that carries an acknowledged finding', () => {
+    const reviewed = { ...TWO_WARNINGS[1], acknowledged: { at: 1, note: 'checked' } };
+    store().setPerimeterOverlay(result(square(10), 0.9, [TWO_WARNINGS[0], reviewed]));
 
     const project = serializeSketch(useAppStore.getState());
     const { statePatch } = importProject(JSON.stringify(project));
 
     const warnings = statePatch.perimeterTraces[0].quality.warnings;
+    expect(warnings).toHaveLength(2);
     expect(warnings[1].acknowledged.note).toBe('checked');
-    expect(summariseIssues(statePatch.perimeterTraces, null, [], null).count).toBe(1);
   });
 
   it('gives a file written before attempts existed an empty list', () => {

@@ -71,8 +71,7 @@ const readShowWork = () => {
  * switch to another plan?" is no, it belongs in this file.
  *
  * Deliberately NOT moved:
- *  - `focusedWarning` and `errorAnchor` are per-plan — they name a trace and a
- *    place on one drawing.
+ *  - `errorAnchor` is per-plan — it names a place on one drawing.
  *  - `draftState` reads as global today only because there is one draft; it
  *    becomes per-plan the moment there is more than one.
  *

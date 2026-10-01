@@ -44,7 +44,7 @@ const GUIDE = [
     items: [
       'The area depends on the scale. Open Scale, in the panel on the left, to see where it came from.',
       'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Measure a length you know” and type in the length.',
-      'Anything FloorTrace is unsure about is listed under “Things to check”. Click Show to see where it is on the plan.',
+      'If the room sizes on the plan disagree with each other, Scale opens by itself with a note saying so and what to do about it.',
     ],
   },
   {

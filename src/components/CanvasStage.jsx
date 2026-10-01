@@ -13,8 +13,8 @@ import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, WarningHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
-import { resolveAnchor, anchorBounds } from '../utils/warningAnchors';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { anchorBounds } from '../utils/planAnchors';
 import { useCornerEraser } from '../hooks/useEraserTool';
 import { useImageEraser } from '../hooks/useImageEraser';
 import { useCropTool } from '../hooks/useCropTool';
@@ -107,7 +107,6 @@ const CanvasStage = React.memo(({
   const viewportSyncToken = useAppStore((s) => s.viewportSyncToken);
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
-  const focusedWarning = useAppStore((s) => s.focusedWarning);
   const errorAnchor = useAppStore((s) => s.errorAnchor);
   const annotationSize = useWorkspaceStore((s) => s.annotationSize);
 
@@ -455,29 +454,14 @@ const CanvasStage = React.memo(({
     return feetPerPixel;
   }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
 
-  // The warning the panel is showing, resolved against live state every render
-  // rather than read from anything stored — see utils/warningAnchors.js. A
-  // focus left on a deleted trace or a re-traced outline resolves to nothing.
-  const warningAnchor = useMemo(() => {
-    // A refusal the user just triggered outranks a warning they clicked
-    // earlier: it describes the edit in front of them.
-    if (errorAnchor) return errorAnchor;
-    if (!focusedWarning) return null;
-    const trace = (perimeterTraces || []).find((t) => t.id === focusedWarning.traceId);
-    const warning = trace?.quality?.warnings?.[focusedWarning.index];
-    if (!warning) return null;
-    return resolveAnchor(warning, {
-      trace, traces: perimeterTraces, rooms, detectedDimensions,
-    });
-  }, [errorAnchor, focusedWarning, perimeterTraces, rooms, detectedDimensions]);
-
-  // Highlight always; move the camera only when the anchor is not already on
-  // screen with ~15% padding, and never zoom *in* — the user has framed the
-  // plan deliberately, and the anchor is often the whole outline.
+  // `errorAnchor` is where the edit the user just tried was refused — the two
+  // edges that would have crossed. Highlight always; move the camera only when
+  // the anchor is not already on screen with ~15% padding, and never zoom *in*
+  // — the user has framed the plan deliberately.
   useEffect(() => {
     const stage = stageRef.current;
     const layer = contentLayerRef.current;
-    const bounds = anchorBounds(warningAnchor);
+    const bounds = anchorBounds(errorAnchor);
     if (!stage || !layer || !bounds) return;
 
     // Layer-relative, so the canvas rotation is already applied and only the
@@ -519,7 +503,7 @@ const CanvasStage = React.memo(({
       x: vw / 2 - target * (minX + maxX) / 2,
       y: vh / 2 - target * (minY + maxY) / 2,
     }, null);
-  }, [warningAnchor, setViewportTransform]);
+  }, [errorAnchor, setViewportTransform]);
 
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
@@ -607,7 +591,7 @@ const CanvasStage = React.memo(({
               onHoleSelect={router.setSelectedHole}
             />
 
-            <WarningHighlightLayer anchor={warningAnchor} scale={overlayScale} />
+            <RefusalHighlightLayer anchor={errorAnchor} scale={overlayScale} />
 
             <DimensionOverlay
               mode={mode}
