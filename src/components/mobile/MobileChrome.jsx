@@ -3,10 +3,9 @@ import { AlertTriangle, Brush, FolderOpen, ScanSearch, ScanText, Share } from 'l
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
-import { scaleQualitySummary } from '../../utils/boundaryQuality';
-import { summariseIssues } from '../../utils/traceIssues';
 import { planStage } from '../../utils/planStage';
-import MeasurementDock from '../MeasurementDock';
+import { usePlanIssues } from '../../hooks/usePlanIssues';
+import ResultsPanel from '../ResultsPanel';
 import BottomSheet from './BottomSheet';
 import MobilePlansSheet from './MobilePlansSheet';
 import MobileActionBar from './MobileActionBar';
@@ -22,7 +21,7 @@ import MobileTopBar from './MobileTopBar';
  *
  * `App` still owns every workflow decision — this component owns only where
  * those decisions appear on a phone. It reads the store directly for the state
- * it *displays* (the same thing `MeasurementDock` does) and takes handlers as
+ * it *displays* (the same thing `ResultsPanel` does) and takes handlers as
  * props for everything it *does*, so no behaviour forks between the two shells.
  */
 const MobileChrome = ({
@@ -96,7 +95,6 @@ const MobileChrome = ({
   const projectName = useAppStore((s) => s.projectName);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
-  const scaleQuality = useAppStore((s) => s.calibration?.quality);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const perimeterVertices = useAppStore((s) => s.perimeterVertices);
@@ -108,16 +106,15 @@ const MobileChrome = ({
   const areas = useAppStore(selectActiveAreaByType);
   const documentOrder = useAppStore((s) => s.documentOrder);
 
+  // The same count the measurement sheet prints, from the one place it is
+  // gathered: this bar used to call the summary itself and had fallen an
+  // argument behind it, so it called a plan clean that the sheet was counting
+  // a held-back scale against.
+  const issues = usePlanIssues();
   // Read from `planStage`, not re-derived. This shell is the third surface to
   // ask "is this plan outlined", and the first two answering it differently is
   // the reason that helper exists — the seven-outline ceiling it also owns was
   // missing here, so the menu offered an eighth that nothing else would.
-  const issues = summariseIssues(
-    perimeterTraces,
-    scaleQualitySummary(scaleQuality),
-    areas.doubleCounted,
-    lastTraceOutcome,
-  );
   const stage = planStage({
     image, calibrated, perimeterTraces, area: areas.total,
     doubleCounted: areas.doubleCounted?.length ?? 0,
@@ -125,7 +122,7 @@ const MobileChrome = ({
   });
   const { canAddOutline } = stage;
   const noGla = areas.gla === 0 && areas.total > 0;
-  // The same arithmetic the dock and the exhibit do, because the thumb bar and
+  // The same arithmetic the panel and the exhibit do, because the thumb bar and
   // the measurement sheet are on screen together: a total summed from the raw
   // areas here and from the printed rows there put two different square
   // footages a few pixels apart on one phone screen.
@@ -134,7 +131,7 @@ const MobileChrome = ({
     ? formatAreaValue(totalDisplay, unit)
     : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
 
-  // The same count the dock's chip and the exhibit's flags read, not a fourth
+  // The same count the panel's chip and the exhibit's flags read, not a fourth
   // hand-rolled derivation. The three-term boolean this replaces missed stale
   // voids entirely — on the shell with the least room to qualify a number.
   const areaWarn = issues.count > 0;
@@ -148,13 +145,13 @@ const MobileChrome = ({
     if (!image) return { label: 'Open a plan', icon: FolderOpen, onPress: onMenuFileOpen };
     switch (stage.primary) {
       case 'scale':
-        return { label: 'Read dimensions', icon: ScanText, onPress: onFindRoomSize };
+        return { label: 'Read the room sizes', icon: ScanText, onPress: onFindRoomSize };
       // The scan came back empty and is memoised, so offering it again is a
       // guaranteed no-op. The brush and the ruler are the routes that work.
       case 'scale-manual':
         return { label: 'Set the scale by hand', icon: ScanText, onPress: onScaleTool };
       case 'outline':
-        return { label: 'Find outline', icon: ScanSearch, onPress: onTracePerimeter };
+        return { label: 'Find the outline', icon: ScanSearch, onPress: onTracePerimeter };
       case 'outline-paint':
         return { label: 'Paint the outline', icon: Brush, onPress: onDrawExterior };
       default:
@@ -169,7 +166,7 @@ const MobileChrome = ({
         onPress: () => setSheet('panel'),
       };
     }
-    return { label: 'Export for workfile', icon: Share, onPress: onExport };
+    return { label: 'Save image', icon: Share, onPress: onExport };
   }, [image, stage.primary, issues.count, onMenuFileOpen, onFindRoomSize,
     onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
 
@@ -211,7 +208,7 @@ const MobileChrome = ({
       {/* The plan gets everything between the two bars, and `canvas-touch`
           is what stops the browser from treating a pan as a page scroll or a
           pinch as a page zoom before Konva ever sees the gesture. */}
-      <div className="relative flex-1 min-h-0 canvas-grid-bg canvas-touch">
+      <div className={`relative flex-1 min-h-0 canvas-touch ${image || isProcessing ? 'canvas-grid-bg' : ''}`}>
         {children}
         <MobileCanvasOverlay hasImage={!!image} onFitToWindow={onFitToWindow} />
       </div>
@@ -296,13 +293,12 @@ const MobileChrome = ({
         title="Measurement"
         subtitle={calibrated ? 'Area, scale and every outline' : 'No scale set yet'}
       >
-        <MeasurementDock
+        <ResultsPanel
           mobile
           roomDimensions={roomDimensions}
           onDimensionsChange={onDimensionsChange}
           area={areas.total}
           unit={unit}
-          onUnitChange={onUnitChange}
           isProcessing={isProcessing}
           ocrFailed={ocrFailed}
           useInteriorWalls={useInteriorWalls}
@@ -313,6 +309,8 @@ const MobileChrome = ({
           onScaleTool={() => { closeSheet(); onScaleTool(); }}
           onSelectRoom={() => { closeSheet(); onSelectRoom?.(); }}
           onRestoreAutoScale={onRestoreAutoScale}
+          // The sheet covers the plan the corners are about to be tapped on.
+          onAddOutline={() => { closeSheet(); onAddFloor(); }}
           onExport={() => { closeSheet(); onExport(); }}
         />
       </BottomSheet>

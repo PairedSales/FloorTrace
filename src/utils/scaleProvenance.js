@@ -1,16 +1,16 @@
 // Where the project scale came from, in one sentence.
 //
 // A leaf module because three surfaces state it and they may not disagree: the
-// dock's Scale card, the derivation panel and the workfile exhibit. It used to
-// live in `exhibit/model.js` under a comment claiming the Scale card shared it,
-// and the Scale card did not — it counted `state.rooms.length` instead, which
+// panel's Scale section, its calculation and the workfile exhibit. It used to
+// live in `exhibit/model.js` under a comment claiming the panel shared it, and
+// the panel did not — it counted `state.rooms.length` instead, which
 // is every room the detector ever confirmed. So after the user picked one room
 // by hand the panel read "From 6 measured rooms" while the exhibit read "Taken
 // from one room chosen by hand". `quality.roomCount` is what the calibration
 // says about itself, and it is the one that is right.
 //
 // Nothing but `calibration` is read, so the exhibit's lazy graph stays out of
-// the entry chunk when the dock imports this.
+// the entry chunk when the panel imports this.
 export const scaleProvenance = (state) => {
   const cal = state?.calibration;
   if (!cal?.calibrated) return 'No scale was set — areas are not to scale.';

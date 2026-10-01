@@ -35,10 +35,9 @@ export default function useUnitPreference() {
     setUnit(unitPreference);
   }, [unitPreference, unit, setUnit]);
 
-  // Picking a unit from the dock's pill group *is* choosing a preferred unit —
-  // there is no second gesture that says "and mean it". Without this the pills
-  // and the View menu would be two controls for one setting, with the one you
-  // reach for first being the one that does not last.
+  // Picking a unit *is* choosing a preferred unit — there is no second gesture
+  // that says "and mean it". Without this a unit picked in Settings (or the
+  // phone's menu) would last until the next plan was scanned.
   const chooseUnit = useCallback((next) => {
     setUnitPreference(next);
     // Not left to the effect: with the preference already on `next`, a pinned

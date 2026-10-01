@@ -14,7 +14,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
+import { TOOL_GROUPS } from '../../components/toolCatalog';
 import '../keyboardGuard';
+
+// Read off the catalogue rather than written down again: the digits moved when
+// the tools were regrouped, and will again.
+const codeOf = (id) => `Digit${TOOL_GROUPS.flatMap((g) => g.tools).find((t) => t.id === id).digit}`;
 
 const seen = [];
 const listener = (e) => seen.push(e);
@@ -53,11 +58,10 @@ describe('shortcuts that would invalidate work in flight', () => {
 
   // Crop and erase are the two of the nine that rewrite the image, and they are
   // the only two gated: entering any other mode changes nothing the running job
-  // was computed from, and the rail's own buttons are not gated at all.
+  // was computed from, and the menus do not gate the other tools either.
   it('stops the digits that rewrite the image, and only those', () => {
     useAppStore.setState({ isProcessing: true });
-    // Crop is 7 and Erase is 8 since the rare tools moved behind "More".
-    for (const code of ['Digit7', 'Digit8']) {
+    for (const code of [codeOf('crop'), codeOf('eraser')]) {
       seen.length = 0;
       press({ key: code.slice(5), code });
       expect(reaches(), `${code} reached the app`).toBe(false);
@@ -65,9 +69,9 @@ describe('shortcuts that would invalidate work in flight', () => {
     seen.length = 0;
     // The brush, during a scan: the longest wait in the app, and painting an
     // outline through it takes nothing away from it.
-    press({ key: '1', code: 'Digit1' });
-    press({ key: '5', code: 'Digit5' });
-    press({ key: '9', code: 'Digit9' });
+    for (const code of [codeOf('draw'), codeOf('line'), codeOf('angle')]) {
+      press({ key: code.slice(5), code });
+    }
     expect(seen).toHaveLength(3);
   });
 

@@ -11,7 +11,7 @@
 // happens before any geometry: a 45° edge in pixels is not a 45° edge in feet.
 //
 // Pure and node-testable. The area it produces is checked against the shoelace
-// the Area card uses rather than trusted — see `exact`.
+// the panel uses rather than trusted — see `exact`.
 
 import { signedArea, holeRings, isSubtracted } from './areaCalculator';
 
@@ -526,7 +526,7 @@ export function decomposeArea(vertices, feetPerPixel, holes = null) {
   ];
 
   // The authority is the same arithmetic `calculateArea` does, which is what
-  // the Area card prints. This module has to agree with it or say that it
+  // the panel prints. This module has to agree with it or say that it
   // cannot.
   const truth = Math.max(0, ringArea(vertices)
     - liveRings.reduce((sum, r) => sum + ringArea(r), 0)) * fpp.x * fpp.y;

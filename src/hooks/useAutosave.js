@@ -188,7 +188,7 @@ export function useAutosave() {
       useAppStore.getState().setDraftState('saved');
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
-      // Both channels, by the routing rule: the status bar carries it for as
+      // Both channels, by the routing rule: the header carries it for as
       // long as it stays true, and the toast fires once because a storage
       // refusal is the one autosave event the user has to act on.
       useAppStore.getState().setDraftState('error');
@@ -237,7 +237,7 @@ export function useAutosave() {
     }
     // Writes now rather than waiting for the next edit. Switching it on and
     // seeing "Saving draft…" sit there until you happen to touch something is
-    // the status bar telling the truth about the wrong thing.
+    // the header telling the truth about the wrong thing.
     const state = useAppStore.getState();
     if (state._hasRestoredState && state.image) {
       state.setDraftState('pending');
@@ -326,7 +326,7 @@ export function useAutosave() {
       // 'pending' until the read actually finishes, not 'saved' on the way in.
       // Claiming the outcome first meant that a startup which never got past
       // its first read reported the draft as safe for the whole session, which
-      // is the most expensive thing this status bar can say wrongly.
+      // is the most expensive thing the header can say wrongly.
       useAppStore.getState().setDraftState(saveOnExitEnabled ? 'pending' : 'off');
 
       try {
@@ -358,7 +358,7 @@ export function useAutosave() {
           if (legacyHistory) undoManager.setHistoryState(legacyHistory);
           else undoManager.clear();
           setHasRestoredState(true);
-          flash('Autosaved project restored');
+          flash('Your plan is back as you left it');
           return;
         }
 
@@ -383,8 +383,8 @@ export function useAutosave() {
               );
             } else {
               flash(restored.opened === 1
-                ? 'Autosaved project restored'
-                : `Restored ${restored.opened} plans`);
+                ? 'Your plan is back as you left it'
+                : `Your ${restored.opened} plans are back as you left them`);
             }
             return;
           }
@@ -518,7 +518,7 @@ export function useAutosave() {
           .then(() => writeWorkspaceIndex(buildIndex()))
           // Reported, not just on failure: this is the write that saves a plan
           // being switched away from, and the debounced timer it supersedes had
-          // already put the status bar into 'pending'.
+          // already put the header's save state into 'pending'.
           //
           // Only *from* 'pending', the way the timer's own guard below does.
           // `draftState` is one field for the whole window, and this chain is
@@ -597,7 +597,7 @@ export function useAutosave() {
         if (onlyCameraMoved(slice, prevSlice)) return;
 
         // After the camera gate, not before it: a pan schedules no write, and
-        // reporting "saving" for one would leave the status bar spinning for
+        // reporting "saving" for one would leave the header spinning for
         // the rest of the session.
         state.setDraftState('pending');
 

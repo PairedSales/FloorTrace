@@ -1,8 +1,10 @@
 // How much there is to check, derived once — and the list under it, derived
 // from the same pass. Four surfaces used to answer this question separately and
-// disagree in both directions: the Checks card's chip, the Area card's line,
+// disagree in both directions: the panel's chip, the line over its Save button,
 // the exhibit's flag list and the mobile bar's warning triangle.
-// `summariseIssues` is now the only producer; everything else renders `issues`.
+// `summariseIssues` is the only producer; everything else renders `issues`. The
+// live surfaces reach it through `usePlanIssues`, which gathers its arguments
+// in one place.
 
 import { holeRings, isSubtracted } from './areaCalculator';
 import { rankedWarnings, qualitySummary, RESULT_SCOPED_CODES, NOTE_ONLY_CODES } from './boundaryQuality';
@@ -54,7 +56,13 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
   };
 
   if (scaleNote?.level === 'check') {
-    bump({ kind: 'scale', severity: 'warn', label: scaleNote.short, detail: scaleNote.detail });
+    bump({
+      kind: 'scale',
+      severity: 'warn',
+      label: scaleNote.short,
+      detail: scaleNote.detail,
+      remedy: scaleNote.remedy ?? null,
+    });
   }
 
   if (needsRescale) {
@@ -63,7 +71,7 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
       severity: 'warn',
       label: 'This plan’s scale was not applied',
       detail: 'Room sizes were read while you were on another plan, so the scale they give was held back rather than applied late.',
-      remedy: 'Choose “Read the room sizes again” in the Scale section to measure this plan now.',
+      remedy: 'Choose “Read the room sizes again” under Scale to measure this plan now.',
     });
   }
 

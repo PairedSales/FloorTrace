@@ -7,9 +7,9 @@ import MobileMenuSheet from '../MobileMenuSheet';
  * The phone shell cannot be driven in the browser pane — at zero width the app
  * renders it, but nothing has layout to look at, and `MediaQueryList` change
  * events are suppressed there anyway (see the browser-driving notes). So the
- * one thing worth pinning is the rule the two shells share: every View item
- * exists in both, with the same words. A row that only ever appeared on the
- * desktop would be found by a user, not by anything here.
+ * thing worth pinning is the rule the two shells share: what exists in both is
+ * called the same thing in both. A row that only ever appeared on the desktop
+ * would be found by a user, not by anything here.
  */
 const noop = () => {};
 
@@ -50,7 +50,27 @@ const sheet = (props = {}) => render(
 
 afterEach(cleanup);
 
-describe('the phone menu carries the desktop View items', () => {
+// The two shells are two arrangements of one workflow, so a thing has one
+// name. The phone used to call the saved image an "export" and the two
+// preferences by their pre-Settings names, for the same dialog and switches.
+describe('the phone menu speaks the desktop\u2019s words', () => {
+  it.each([
+    'Open a floor plan…', 'Save image…', 'Copy image', 'Save project file',
+    'Wall lengths on the plan', 'Snap corners to walls',
+    'Keep my work in this browser', 'Try harder to read room sizes',
+    'Read the room sizes again', 'Add another outline',
+  ])('says "%s"', (label) => {
+    sheet();
+    expect(screen.getByText(label)).toBeTruthy();
+  });
+
+  it('no longer calls anything an export', () => {
+    sheet();
+    expect(document.body.textContent).not.toMatch(/export/i);
+  });
+});
+
+describe('the phone menu carries the tracer walkthrough', () => {
   it('offers the tracer walkthrough, and says where it goes', () => {
     sheet();
     const row = screen.getByText('How the outline is traced');

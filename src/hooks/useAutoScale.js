@@ -156,9 +156,9 @@ export function useAutoScale() {
       return decision;
     }
 
-    // A 'check' verdict is not announced here: the Scale card shows it as a
-    // chip beside the number, and keeps showing it for as long as the scale is
-    // in force. A toast said it once and then left the doubt invisible.
+    // A 'check' verdict is not announced here: the panel counts it under
+    // Things to check, and keeps showing it for as long as the scale is in
+    // force. A toast said it once and then left the doubt invisible.
     return decision;
   }, [applyDecision]);
 
@@ -193,12 +193,11 @@ export function useAutoScale() {
   /**
    * Back to the scale the rooms agreed on.
    *
-   * Two messages in `boundaryQuality` tell the user how to get here — "Re-scan
-   * to go back to the measured average", "Clear it to go back to the measured
-   * average" — and neither route did that: `applyDecision` refuses to write
-   * over a user-asserted source forever, and clearing a line calibration reset
-   * to *uncalibrated* rather than re-resolving from the rooms still in the
-   * store. There was no `restoreAutoScale` anywhere in the tree.
+   * Two messages in `boundaryQuality` tell the user to choose "Go back to the
+   * automatic scale", and this is what that does. Nothing else can:
+   * `applyDecision` refuses to write over a user-asserted source forever, and
+   * clearing a line calibration resets to *uncalibrated* rather than
+   * re-resolving from the rooms still in the store.
    *
    * It bypasses `isUserAsserted` deliberately: the user is the one asking.
    */

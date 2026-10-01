@@ -5,9 +5,9 @@ import { AlertTriangle, Loader2, SlidersHorizontal } from 'lucide-react';
  * without regripping — so it holds the thing the user is most likely to do
  * next, not a row of everything they might.
  *
- * The desktop command bar offers seven verbs at equal weight and lets the eye
- * choose. That works with a mouse and a 1400 px row; at 390 px it becomes
- * seven 50 px targets with truncated labels. Instead this bar states **one**
+ * The desktop has a row of menus above the plan and a panel beside it, and
+ * lets the eye choose. That works with a mouse and a 1400 px window; at 390 px
+ * it would be a strip of truncated labels. Instead this bar states **one**
  * verb — the next step of the pipeline the app already models (plan → scale →
  * outline → report) — and keeps the other routes to it in the menu and the
  * tool sheet, which is where a deliberate choice belongs.

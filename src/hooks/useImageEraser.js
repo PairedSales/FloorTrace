@@ -6,7 +6,7 @@ import useAppStore from '../store/appStore';
  *
  * A white brush over the plan itself: drag across a legend, a title block or a
  * dimension string and it is gone from the pixels the detector reads. This is
- * what the rail's "Erase clutter" button has always claimed to do — the tool
+ * what the old "Erase clutter" button had always claimed to do — the tool
  * that carried the name deleted outline corners and is now `useCornerEraser`.
  * A legend inside the footprint is a documented way to lose a trace
  * (`legendPlan` in the exterior probe) and nothing in the app could take one
@@ -21,8 +21,8 @@ import useAppStore from '../store/appStore';
  *
  * Unlike the crop it does *not* deactivate itself on commit. A crop is one
  * decision about the page; clearing clutter is several strokes in a row, and
- * turning the brush off after each one would make the second stroke a click on
- * the rail. That one difference is what makes the accumulator below necessary —
+ * turning the brush off after each one would make the second stroke a trip back
+ * to the menu. That one difference is what makes the accumulator below necessary —
  * see `paintTarget`.
  */
 export function useImageEraser({

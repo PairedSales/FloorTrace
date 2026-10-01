@@ -59,7 +59,7 @@ export const detailText = (warning) => {
       : 'an area that looks like a garage or porch was found but not removed';
   }
   if (warning.code === 'enclosed-void') {
-    return 'an enclosed space inside this outline was not subtracted — if it is a courtyard or light well, cut it out';
+    return 'an enclosed space inside this outline was not subtracted';
   }
   if (warning.code === 'void-superseded') {
     return 'FloorTrace found an open area where you had already cut one out; yours is the one in use';
@@ -214,7 +214,7 @@ export const warningLabel = (code) => LABELS.get(code)
 // on. A code with no entry renders no remedy line rather than a filler one —
 // silence is better than "review the outline".
 const REMEDIES = new Map(Object.entries({
-  unsealed: 'Paint the outline over the exterior walls instead.',
+  unsealed: 'Paint the outline over the outside walls instead.',
   'weak-wall-support': 'Compare the outline to the plan before you use the area. Drag any corner that sits off the wall.',
   'bridged-opening': 'Check the gap — if it is a wide doorway the outline is right, if it is a missing wall it is not.',
   'heavy-closing': 'Check the outline where it crosses open space, or paint it by hand.',
@@ -224,18 +224,18 @@ const REMEDIES = new Map(Object.entries({
   'covers-page': 'The outline reached the edge of the sheet. Crop to the building, or paint the outline by hand.',
   'floors-overlap': 'Two outlines cover the same area and it is counted twice. Delete or hide one.',
   'self-intersecting': 'The outline crosses itself, so the area is wrong. Drag the crossing corners apart.',
-  'room-outside': 'Mark the room as inside the building and trace again, or paint the outline to include it.',
+  'room-outside': 'If the room belongs to the building, paint the outline so that it takes the room in.',
   'label-outside': 'If those areas belong to the building, paint the outline to include them.',
   'floors-rejected': 'If one of those was a real building, paint its outline by hand and it will be measured.',
   'outlines-dropped': 'If part of the building is missing, paint its outline by hand.',
   'no-inner': 'The inside of these walls could not be found, so this outline is measured to the outside of the walls either way.',
   'low-resolution': 'Open a larger copy of the plan if you have one — at this size the area cannot be trusted.',
-  'plan-skewed': 'Rotate the plan square to the page and trace again.',
-  'non-gla-not-removed': 'If it is a garage or porch, add an outline for it and set its type, or cut it out.',
-  'enclosed-void': 'If it is a courtyard or an open area, choose Cut out in the tools and take it out of the outline.',
+  'plan-skewed': 'Check the outline against the walls and drag any corner that is off. A straighter scan of the plan gives a better result.',
+  'non-gla-not-removed': 'If it is a garage or porch, add an outline for it and set what it counts as, or cut it out.',
+  'enclosed-void': 'If it is a courtyard or a light well, choose Outline ▸ Cut out an open area and take it out of the outline.',
   'tiny-floor': 'Check this is a building and not a legend or a title block. Delete it if not.',
   'brush-mismatch': 'The traced outline does not follow what you painted. Paint it again, more tightly.',
-  'no-boundary': 'Paint over the exterior walls and FloorTrace will read them.',
+  'no-boundary': 'Paint over the outside walls and FloorTrace will read them.',
   'floor-empty': 'Paint that outline by hand, or delete it.',
   'spanned-walls': 'The outline was carried across a gap the plan does not draw a wall across. Check that stretch against the plan.',
 }));
@@ -277,6 +277,13 @@ export const primaryWarning = (warnings) =>
 // How the scale a room set is presented. The area is the number the user acts
 // on, so every message here says what the disagreement means for the area
 // rather than describing the geometry that produced it.
+//
+// Each summary is `{level, short, detail}` and, where there is something to do
+// about it, a `remedy`. They are separate on purpose. `detail` is the finding,
+// and it is printed on the saved image for whoever reads the report; `remedy`
+// names a control in this app, which means nothing on a page in a workfile.
+// Written as one sentence, the image used to tell its reader to "click a
+// dimension".
 const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 100);
 
 // Nothing derived from the sample scatter is reported as a margin of error.
@@ -285,6 +292,11 @@ const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 1
 // one plan, 37% scatter against 0.6% error on another. What is reported instead
 // is what was observed — how many rooms agreed, and how far apart they were.
 const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
+
+// The two ways out of a doubtful scale, named as the panel's Scale section
+// names them.
+const PICK_A_ROOM = 'choose “Use a different room” under Scale';
+const BACK_TO_AUTOMATIC = 'Choose “Go back to the automatic scale” under Scale to return to the measured average.';
 
 const autoScaleSummary = (quality) => {
   const rooms = roomsPhrase(quality.roomCount ?? 0);
@@ -295,9 +307,8 @@ const autoScaleSummary = (quality) => {
       level: 'check',
       short: `Scale from ${rooms}`,
       detail: `Only ${rooms} on this plan could be measured well enough to set the `
-        + 'scale, so nothing outvoted them. Areas rest on that — check one room’s '
-        + 'outline against its label, or click a dimension to set the scale from a '
-        + 'room you trust.',
+        + 'scale, so nothing outvoted them. Areas rest on that.',
+      remedy: `Check the green box against its room, or ${PICK_A_ROOM} and pick a room you trust.`,
     };
   }
   if (quality.reason === 'rooms-disagree') {
@@ -306,8 +317,8 @@ const autoScaleSummary = (quality) => {
       short: `Rooms disagree by ~${apart}%`,
       detail: `The ${rooms} used to set the scale imply sizes about ${apart}% apart, `
         + 'which is more than printed dimensions normally vary. The middle of them is '
-        + 'in use. Check the outlines, or click a dimension to set the scale from one '
-        + 'room.',
+        + 'in use.',
+      remedy: `Check the outline, or ${PICK_A_ROOM} to set the scale from one room.`,
     };
   }
   if (quality.reason === 'area-implausible') {
@@ -316,8 +327,8 @@ const autoScaleSummary = (quality) => {
       short: 'Areas look too small for these rooms',
       detail: 'At this scale the traced building comes out smaller than the rooms its '
         + 'own labels describe, so the scale is probably too high and every area too '
-        + 'small. Click a dimension on a plainly rectangular room to set the scale '
-        + 'from it instead.',
+        + 'small.',
+      remedy: `To set the scale from a plainly rectangular room instead, ${PICK_A_ROOM}.`,
     };
   }
   // auto-consensus: worth stating, never worth worrying about. The area is read
@@ -332,8 +343,8 @@ const autoScaleSummary = (quality) => {
     short: `Scale from ${rooms}`,
     detail: `The scale was measured from ${rooms} on this plan rather than one, and is `
       + `the middle of what they imply — individually they span about ${apart}%, which `
-      + 'is normal for printed dimensions. Click a dimension to set the scale from a '
-      + 'single room instead.',
+      + 'is normal for printed dimensions.',
+    remedy: `To set the scale from a single room instead, ${PICK_A_ROOM}.`,
   };
 };
 
@@ -354,7 +365,8 @@ const lineScaleSummary = (quality) => {
       short: `Scale set by hand, areas ~${areaPct}% different`,
       detail: `The line you drew implies a scale about ${pct}% from the rooms the app `
         + `measured itself, which moves every area by roughly ${areaPct}%. Your line is `
-        + 'in use. Clear it to go back to the measured average.',
+        + 'in use.',
+      remedy: BACK_TO_AUTOMATIC,
     };
   }
 
@@ -368,12 +380,15 @@ const lineScaleSummary = (quality) => {
     };
   }
 
+  // In words, not pixels: the line's length in image pixels means nothing to
+  // the person who drew it.
   if (quality.reason === 'short-line') {
     return {
       level: 'note',
       short: 'Scale set by hand from a short line',
-      detail: `The line is only ${quality.lengthPx} px long, so a pixel of click error is `
-        + `about ${pct}%. Draw it along the longest wall you can identify, or zoom in first.`,
+      detail: 'The line you drew is short, so a small slip at either end changes the '
+        + `scale by about ${pct}%.`,
+      remedy: 'Draw it along the longest wall you can identify, or zoom in first.',
     };
   }
 
@@ -417,8 +432,8 @@ export const scaleQualitySummary = (quality) => {
       level: quality.level === 'check' ? 'check' : 'note',
       short: `Scale from this room, areas ~${areaPct}% different`,
       detail: `This room implies a scale about ${pct}% from the ${rooms} the app measured `
-        + `itself, which moves every area by roughly ${areaPct}%. Your choice is in use. `
-        + 'Re-scan to go back to the measured average.',
+        + `itself, which moves every area by roughly ${areaPct}%. Your choice is in use.`,
+      remedy: BACK_TO_AUTOMATIC,
     };
   }
 
@@ -430,14 +445,15 @@ export const scaleQualitySummary = (quality) => {
         short: 'This room disagrees with the last one',
         detail: `This room is about ${pct}% out from the ${rooms} measured before it, `
           + 'and the newer measurement is the one now in use. One of the two outlines '
-          + 'or labels is wrong — measure a third room to settle it.',
+          + 'or labels is wrong.',
+        remedy: 'Pick a third room under Scale to settle it.',
       }
       : {
         level: 'check',
         short: 'Kept the scale from earlier rooms',
         detail: `This room implies a scale about ${pct}% different from the ${rooms} `
-          + 'measured before it, so it was not used — areas are unchanged. Check this '
-          + 'room’s outline and label.',
+          + 'measured before it, so it was not used — areas are unchanged.',
+        remedy: 'Check this room’s green box against its printed size.',
       };
   }
 
@@ -448,7 +464,8 @@ export const scaleQualitySummary = (quality) => {
       short: `Areas may be off by ~${pct}%`,
       detail: `This room’s outline and its label disagree by about ${pct}% about how `
         + 'big the room is. The scale was set from the average of the two, so areas '
-        + 'could be off by roughly that much. Check the outline against the label.',
+        + 'could be off by roughly that much.',
+      remedy: 'Check the green box against the room’s printed size.',
     }
     : {
       level: 'note',

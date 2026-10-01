@@ -20,7 +20,7 @@
 // relationship `computeAreaByType` has to `selectActiveAreaByType`. Nothing
 // here recomputes an area: every figure comes back through `calculateArea` and
 // `areaDisplayValue`, which is what makes it impossible for this to print a
-// square footage the Area card does not.
+// square footage the panel does not.
 
 import {
   calculateArea, signedArea, holeRings, holeKey, isSubtracted,
@@ -169,7 +169,7 @@ const describeOutline = (trace, feetPerPixel, unit) => {
 
   const deductedPixels = holes.reduce((sum, h) => (h.subtracted ? sum + h.pixels : sum), 0);
   // Through `calculateArea`, not `netPixels * sx * sy`: one multiply written
-  // twice is one place for this and the Area card to drift apart.
+  // twice is one place for this and the panel to drift apart.
   const squareFeet = skipped ? 0 : calculateArea(vertices, feetPerPixel, trace?.holes);
   const type = normalizeTraceType(trace?.type);
 
@@ -197,7 +197,7 @@ const describeOutline = (trace, feetPerPixel, unit) => {
     squareFeet,
     displayed: areaDisplayValue(squareFeet, unit),
     // The same figure to the tenth, which is the column the pieces add to. The
-    // integer above is what the Area card headlines and what the levels are
+    // integer above is what the panel headlines and what the levels are
     // summed as; this is finer only so that the pieces are not made to reach a
     // number they were rounded away from.
     subtotal: Number(inDisplayUnits(squareFeet, unit).toFixed(PIECE_DECIMALS)),
@@ -250,7 +250,7 @@ export function buildAreaDerivation(state, unit = state?.unit ?? 'decimal') {
   const sumOfLevels = Number(living.reduce((sum, o) => sum + o.displayed, 0).toFixed(2));
   const reported = areaDisplayValue(glaSquareFeet, unit);
   // The column the working actually prints: each level to the tenth, added.
-  // Separate from `sumOfLevels`, which adds the whole units the Area card
+  // Separate from `sumOfLevels`, which adds the whole units the panel
   // states — they answer different questions and a panel showing the pieces
   // has to add up in the precision the pieces were printed to.
   const sumOfSubtotals = Number(
@@ -285,10 +285,10 @@ export function buildAreaDerivation(state, unit = state?.unit ?? 'decimal') {
       sumOfLevels,
       sumOfSubtotals,
       reported,
-      // A plan with no living area is not a GLA of zero. The Area card
+      // A plan with no living area is not a GLA of zero. The panel
       // headlines the grand total there, and so does the working — the test is
       // copied from its `noGla`, not approximated by counting outlines: a GLA
-      // outline that encloses nothing is one the Area card already steps past.
+      // outline that encloses nothing is one the panel already steps past.
       measured: !(glaSquareFeet === 0 && grandSquareFeet > 0),
     },
     excluded,

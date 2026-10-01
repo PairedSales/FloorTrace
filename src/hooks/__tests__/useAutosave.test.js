@@ -119,7 +119,7 @@ describe('useAutosave', () => {
   // `_hasRestoredState` gates every write in this hook, and every path that
   // sets it sits downstream of a storage read. A read that fails — or, before
   // `getDB` was made to always settle, one that never answered — left autosave
-  // silently off for the whole session while the status bar said "saved".
+  // silently off for the whole session while the app said "saved".
   it('keeps autosaving even when the workspace cannot be read', async () => {
     drafts.readWorkspaceIndex.mockRejectedValueOnce(new Error('IndexedDB open timed out'));
     await mountAutosave();

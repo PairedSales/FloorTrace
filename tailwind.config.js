@@ -48,6 +48,7 @@ export default {
       },
       boxShadow: {
         sheet: 'var(--sheet-shadow)',
+        float: 'var(--float-shadow)',
       },
       // Tints used for selected/active grounds. 12/15/35 are not on Tailwind's
       // default opacity scale, and `@apply` cannot fall back to an arbitrary

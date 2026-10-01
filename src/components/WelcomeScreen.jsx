@@ -1,17 +1,26 @@
-import { FolderOpen } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ImageUp } from 'lucide-react';
 import { useWelcome } from '../hooks/useWelcome';
+import { MOD } from '../utils/keySymbols';
 
 /**
- * The empty canvas, in two sizes.
+ * The start screen: what the app is for, and the one thing to do next.
  *
- * On a first run it shows the pipeline instead of describing it: a floorplan
- * miniature draws itself, its printed room dimensions are read one by one, a
- * scale resolves, and the exterior outline sweeps round to an area. That loop
- * *is* the product — a new user who watches it once knows what this app does
- * without reading a word.
+ * It is the whole window until a plan is open — no panel, no bar, nothing
+ * greyed out waiting for one. The way in is a drop zone, because "put your file
+ * here" is the one upload pattern nobody has to be taught, with a button for
+ * the people who would rather browse and a sample for the people who have no
+ * plan to hand.
  *
- * Every run after that it is the compact state it has always been. The demo is
+ * On a first run it also shows the job instead of describing it: a floor plan
+ * miniature draws itself, its printed room sizes are read one by one, a scale
+ * resolves, and the outline sweeps round to an area. That loop *is* the product
+ * — a new user who watches it once knows what this app does without reading a
+ * word. Every run after that the demo and the three steps stand down; they are
  * charming once and tiresome the fifth time a plan is closed.
+ *
+ * The same screen is what a second plan's empty tab shows (`adding`), where it
+ * says what adding a plan is for.
  *
  * The demo is inline SVG and CSS keyframes, deliberately. This module is
  * reached by the eager shell through `Canvas.jsx`, and anything it imports
@@ -143,14 +152,12 @@ const DEMO_CSS = `
 @media (max-width: 819.98px) and (max-height: 640px) { .ft-demo { display: none; } }
 `;
 
-// The job in the user's words, not the pipeline's. This used to be the four
-// stages the dock's progress strip printed (PLAN, SCALE, OUTLINE, REPORT), with
-// lines like "reads the printed room sizes to get feet per pixel" — the app
-// describing its internals to someone who wanted a square footage.
+// The job in the user's words, not the pipeline's: three things, one of which
+// is not theirs to do.
 const STEPS = [
   { title: 'Open a floor plan', line: 'A picture or a PDF of the sketch.' },
   { title: 'FloorTrace measures it', line: 'It reads the room sizes and outlines the house for you.' },
-  { title: 'Check it and export', line: 'Save an image with the square footage for your report.' },
+  { title: 'Check it and save the image', line: 'The plan with its square footage on it, ready for your report.' },
 ];
 
 // One building, drawn twice: grey as walls while it is being read, accent as
@@ -230,126 +237,155 @@ const PipelineDemo = () => (
   </div>
 );
 
-// The way in, shared by both sizes. A button, not two keybindings: this is the
-// whole screen at the one moment the app has nothing else to say, and it used
-// to answer with a pair of chords — a dead end for anyone who does not read
-// them. On touch the route in is the action bar at the bottom of the screen,
-// which already carries Open and the camera, so only the sample is offered.
-const WayIn = ({ isTouch, onFileOpen, onTryExample }) => (
-  <>
-    <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
-      {!isTouch && (
-        <button
-          type="button"
-          onClick={onFileOpen}
-          className="btn btn-primary h-11 px-5 text-[15px]"
-        >
-          <FolderOpen className="w-[18px] h-[18px]" aria-hidden="true" />
-          Open a floor plan…
-        </button>
-      )}
-      {onTryExample && (
-        <button
-          type="button"
-          onClick={onTryExample}
-          className="btn btn-secondary h-11 px-5 text-[15px]"
-        >
-          Try a sample plan
-        </button>
-      )}
-    </div>
+// Whether a file is being dragged over the window right now. The drop itself
+// is the app root's — it accepts a file anywhere — so this only lights the
+// zone up, to say "yes, here".
+const useFileDragging = () => {
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+    const enter = (e) => { if (hasFiles(e)) { depth += 1; setDragging(true); } };
+    const leave = () => { depth = Math.max(0, depth - 1); if (depth === 0) setDragging(false); };
+    const end = () => { depth = 0; setDragging(false); };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', end);
+    window.addEventListener('dragend', end);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', end);
+      window.removeEventListener('dragend', end);
+    };
+  }, []);
+  return dragging;
+};
 
-    {isTouch ? (
-      <p className="mt-3 text-[14px] text-fg-2 leading-relaxed">
-        Photograph a plan, or open an image, with the buttons below.
+// The way in. On touch the route in is the action bar at the bottom of the
+// screen, which already carries Open and the camera, so only the sample is
+// offered and there is nothing to drop onto.
+const WayIn = ({ isTouch, onFileOpen, onTryExample }) => {
+  const dragging = useFileDragging();
+
+  if (isTouch) {
+    return (
+      <div className="mt-6">
+        {onTryExample && (
+          <button type="button" onClick={onTryExample} className="btn btn-secondary btn-lg">
+            Try the sample plan
+          </button>
+        )}
+        <p className="mt-3 text-[14px] text-fg-2 leading-relaxed">
+          Photograph a plan, or open an image, with the buttons below.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`mt-7 rounded-2xl border-2 border-dashed px-6 py-8 transition-colors
+        ${dragging ? 'border-accent bg-accent/10' : 'border-line bg-panel-2'}`}
+    >
+      <ImageUp className={`mx-auto w-9 h-9 ${dragging ? 'text-accent' : 'text-fg-dim'}`} aria-hidden="true" />
+      <p className="mt-3 text-[17px] font-semibold text-fg">
+        {dragging ? 'Drop it to open it' : 'Drop a floor plan here'}
       </p>
-    ) : (
-      <p className="mt-3 text-[13.5px] text-fg-3">
-        You can also drag a file onto this window, or paste an image with{' '}
-        <kbd className="px-1.5 py-0.5 text-[12px] bg-panel-2 border border-line rounded text-fg-2">Ctrl+V</kbd>.
+      <p className="mt-1 text-[14px] text-fg-3">A picture or a PDF of the sketch</p>
+
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+        <button type="button" onClick={onFileOpen} className="btn btn-primary btn-lg">
+          Choose a file…
+        </button>
+        {onTryExample && (
+          <button type="button" onClick={onTryExample} className="btn btn-secondary btn-lg">
+            Try the sample plan
+          </button>
+        )}
+      </div>
+
+      <p className="mt-4 text-[13.5px] text-fg-3">
+        You can also paste a picture with <kbd>{MOD}+V</kbd>
       </p>
-    )}
-  </>
-);
+    </div>
+  );
+};
 
 // Said before the first plan is open, not after a trace disappoints. The
 // failure this app is most prone to is a wrong answer that looks confident,
 // and a user who was promised "automatic" is the one least equipped to catch
 // it — so "automatic" is never offered unqualified, and the way out is named.
 const Caveat = () => (
-  <p className="mt-6 pt-4 border-t border-line text-[13.5px] text-fg-3 leading-relaxed">
+  <p className="mt-6 text-[13.5px] text-fg-3 leading-relaxed">
     Works best on a clean plan with the room sizes printed on it. If the outline
     isn’t quite right, drag its corners — or paint roughly over the walls and
     FloorTrace redraws it.
   </p>
 );
 
-/* The compact state: what every run after the first one shows. */
-const CompactEmpty = ({ isTouch, onFileOpen, onTryExample }) => (
-  <div className="text-center max-w-md">
-    <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-panel-2 border border-line flex items-center justify-center">
-      <svg className="w-8 h-8 text-fg-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M9 3v18" />
-        <path d="M15 3v18" />
-        <path d="M3 9h18" />
-        <path d="M3 15h18" />
-      </svg>
-    </div>
-    <p className="text-[18px] font-semibold text-fg">
-      No floor plan open
-    </p>
-    <p className="mt-1.5 text-[14px] text-fg-2 leading-relaxed">
-      Open a floor plan and FloorTrace works out its square footage for you.
-    </p>
-    <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
-    <Caveat />
-  </div>
-);
+const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample, adding = false }) => {
+  const firstRun = useWelcome();
+  // The demo and the steps introduce the app; a second plan's empty tab is
+  // shown to someone who has already met it.
+  const introduce = firstRun && !adding;
 
-const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample }) => {
-  const showWelcome = useWelcome();
+  const title = adding ? 'Add another plan'
+    : introduce ? 'Measure a floor plan' : 'Open a floor plan';
+  const lead = adding
+    ? 'Another level, or another sheet of the same property. FloorTrace measures each plan and adds them up.'
+    : introduce
+      ? 'Open a floor plan sketch and FloorTrace works out its gross living area for you.'
+      : 'FloorTrace works out its gross living area for you.';
+
+  // What it is and what to do: the same block on a first run and every run
+  // after it.
+  const wayIn = (
+    <div className="w-full max-w-[34rem] text-center">
+      <h1 className="text-[26px] font-semibold text-fg">{title}</h1>
+      <p className="mt-2 text-[16px] text-fg-2 leading-relaxed">{lead}</p>
+      {/* The sample is for someone with no plan to hand. Offered as a second
+          plan it would be added to the property's total. */}
+      <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={adding ? undefined : onTryExample} />
+      <Caveat />
+    </div>
+  );
 
   return (
     // Scrolls rather than clips. The demo stands down twice and then goes on a
     // short viewport, but those rungs are measured against the window and the
-    // plan column is the window less two bands — so on the shortest phones the
+    // plan column is the window less its bands — so on the shortest screens the
     // estimate can still come up short, and `overflow-hidden` would take the
     // buttons away with nothing on screen saying so. `touch-pan-y` is what
     // makes that reachable at all: the canvas wrapper above this sets
     // `touch-action: none` so a drag never becomes a page scroll.
     <div className="absolute inset-0 overflow-y-auto overscroll-contain touch-pan-y">
-      <div className="min-h-full flex items-center justify-center p-6">
-        {!showWelcome ? (
-          <CompactEmpty isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
-        ) : (
-          <div className="w-full max-w-[30rem] text-center">
-            <PipelineDemo />
-
-            <h1 className="mt-4 text-[22px] font-semibold text-fg">
-              Measure a floor plan
-            </h1>
-            <p className="mt-1.5 text-[15px] text-fg-2 leading-relaxed">
-              Open a floor plan sketch and FloorTrace finds its gross living area for you.
-            </p>
-
-            <ol className="mt-5 flex flex-col gap-3 text-left">
-              {STEPS.map((s, i) => (
-                <li key={s.title} className="flex items-start gap-3">
-                  <span className="grid place-items-center w-7 h-7 shrink-0 rounded-full
-                                   bg-accent/12 text-accent-strong text-[14px] font-semibold">
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-semibold text-fg leading-snug">{s.title}</span>
-                    <span className="block text-[14px] text-fg-3 leading-snug">{s.line}</span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-
-            <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={onTryExample} />
-            <Caveat />
+      <div className="min-h-full flex items-center justify-center p-6 lg:p-10">
+        {!introduce ? wayIn : (
+          // On a first run the way in sits beside how it works, where the
+          // window has the width; stacked, the way in still comes first in the
+          // reading order — the introduction never stands between a user and
+          // the button.
+          <div className="flex w-full max-w-[66rem] flex-col items-center gap-10
+                          lg:flex-row lg:justify-center lg:gap-16">
+            {wayIn}
+            <div className="w-full max-w-[24rem]">
+              <PipelineDemo />
+              <ol className="mt-6 flex flex-col gap-3 text-left">
+                {STEPS.map((s, i) => (
+                  <li key={s.title} className="flex items-start gap-3">
+                    <span className="grid place-items-center w-7 h-7 shrink-0 rounded-full
+                                     bg-accent/12 text-accent-strong text-[14px] font-semibold">
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-semibold text-fg leading-snug">{s.title}</span>
+                      <span className="block text-[14px] text-fg-3 leading-snug">{s.line}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           </div>
         )}
       </div>

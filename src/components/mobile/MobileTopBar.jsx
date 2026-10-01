@@ -5,15 +5,15 @@ import FloorTraceMark from '../FloorTraceMark';
 
 /**
  * Four things earn the top of a phone screen, and the choice is not the desktop
- * menu bar shrunk.
+ * header shrunk.
  *
  * Undo and redo are here rather than in a menu because on touch the commonest
  * mistake is a stray fingertip — a corner nudged while panning, a stroke
  * started on the wrong wall. On the desktop that costs a Ctrl+Z; behind a
  * menu it costs three taps, and a correction that expensive stops being made.
  *
- * Export is here because it is the end of the job and the only reason the app
- * was opened. Everything else lives behind the menu button.
+ * Saving the image is here because it is the end of the job and the only reason
+ * the app was opened. Everything else lives behind the menu button.
  */
 const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, ready, onMenu, onExport, onPlans }) => {
   const { canUndo, canRedo } = useUndoHistory();
@@ -87,9 +87,9 @@ const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, ready, onMe
           type="button"
           onClick={onExport}
           disabled={!image || isProcessing}
-          aria-label="Export for your workfile"
+          aria-label="Save an image for your workfile"
           /* Outlined when there is an area, never filled — the same rule the
-             desktop honours. A filled Export over a doubtful trace is a wrong
+             desktop honours. A filled Save over a doubtful trace is a wrong
              answer that looks green, in the part of the shell read first, and
              `hasArea` says only that a number exists. `ready` additionally
              requires that nothing is outstanding against it. */
@@ -100,7 +100,7 @@ const MobileTopBar = ({ image, subject, planCount = 1, isProcessing, ready, onMe
                         : 'text-fg-2 active:bg-sunken active:text-fg'}`}
         >
           <Share className="w-[18px] h-[18px]" aria-hidden="true" />
-          Export
+          Save
         </button>
       </div>
     </header>

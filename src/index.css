@@ -35,7 +35,7 @@
      outranks `:root[data-theme='dark']`, so one declaration serves both. */
   :root,
   :root[data-theme='dark'] .canvas-grid-bg {
-    --shell:      231 234 238;
+    --shell:      241 243 246;
     --panel:      247 248 250;
     --panel-2:    255 255 255;
     --raised:     255 255 255;
@@ -57,7 +57,7 @@
     /* Accent text standing on an accent *tint*. `bg-accent/12 text-accent`
        moves the ground toward the text, so the pattern eats its own contrast:
        #2E6BE6 is 4.81:1 on white but 4.10:1 on its own 12% tint and 3.53:1 on
-       the 10% tint the status bar runs. This is the same hue darkened until
+       the 10% tint the action bar runs. This is the same hue darkened until
        the worst of those grounds clears AA — 5.67:1 there, 6.59:1 on the /12. */
     --accent-strong: 33 80 159;
 
@@ -66,6 +66,9 @@
     --crit:       180 35 24;
 
     --sheet-shadow: 0 10px 34px -8px rgb(16 22 30 / .42), 0 2px 6px rgb(16 22 30 / .20);
+    /* Menus, the floating view controls and dialogs: one elevation, so nothing
+       that floats looks like it belongs to a different app. */
+    --float-shadow: 0 12px 32px -6px rgb(16 22 30 / .22), 0 2px 6px rgb(16 22 30 / .10);
     color-scheme: light;
   }
 
@@ -98,6 +101,7 @@
     --crit:       255 122 112;
 
     --sheet-shadow: 0 14px 40px -10px rgb(0 0 0 / .72), 0 2px 8px rgb(0 0 0 / .50);
+    --float-shadow: 0 14px 36px -8px rgb(0 0 0 / .70), 0 2px 8px rgb(0 0 0 / .45);
     color-scheme: dark;
   }
 
@@ -121,11 +125,8 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* iOS zooms the page when a focused input's text is under 16px. Every input
-     in this app is 12.5-13px by design, which on a phone means every tap into
-     the subject line or a room dimension left the user zoomed in with no way
-     back. Only on coarse pointers: the desktop density is not up for
-     negotiation. */
+  /* iOS zooms the page when a focused input's text is under 16px. Only on
+     coarse pointers: the desktop density is not up for negotiation. */
   @media (pointer: coarse) {
     input, select, textarea {
       font-size: max(16px, 1em);
@@ -137,8 +138,8 @@
   }
 
   /* Every transition and animation in the shell is decorative — the menus, the
-     accent that moves with the stage, the spinning draft icon. None of them
-     carries information the still frame does not, so all of them can stop. */
+     tinted action bar, the spinning draft icon. None of them carries
+     information the still frame does not, so all of them can stop. */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
@@ -162,13 +163,36 @@
     @apply bg-fg-dim bg-clip-content;
   }
 
-  /* One visible focus treatment for the whole app. The old UI had focus rings
-     on some controls and nothing on others, which is worse than none. */
+  /* One visible focus treatment for the whole app. */
   :focus-visible {
     @apply outline-none ring-2 ring-accent ring-offset-1 ring-offset-panel-2 rounded-sm;
   }
+
+  /* One key cap, wherever a key is named: the menus, the action bar, Help and
+     the start screen. The only use of the code face in the app. */
+  kbd {
+    @apply inline-flex items-center px-1.5 py-px rounded border border-line bg-panel
+           text-[11.5px] font-medium leading-snug text-fg-3 whitespace-nowrap;
+  }
 }
 
+/* ── The design system ─────────────────────────────────────────────────────
+   A small number of patterns, stated once and used everywhere:
+
+     .btn (+ -primary / -secondary / -quiet / -danger, -sm / -lg)   buttons
+     .icon-btn                                    a button that is only an icon
+     .field-input (+ -lg)                         a text field
+     .seg / .seg-option                           a choice between two or three
+     .chip (+ -ok / -warn / -crit / -quiet)       a state, said in a word
+     .note (+ -warn / -crit)                      a sentence that needs a frame
+     .label-sm                                    the small label over a figure
+
+   Type: 14 px for anything read, 13 px for the line under it, 12 px only for
+   chips and key caps. Numbers are the text face with `tabular-nums`.
+
+   Menus, dialogs and the panel's sections are components (`Menu.jsx`,
+   `Dialog.jsx`, `PanelSection.jsx`) rather than classes: each owns behaviour
+   as well as a look, and a class cannot close on Escape. */
 @layer components {
   /* The work surface behind the plan: white under every theme, so a scanned
      plan (which is white paper) has no visible edge and the viewport reads as
@@ -178,94 +202,14 @@
     @apply bg-surface;
   }
 
-  .panel-divider {
-    @apply border-t border-line-soft my-1;
-  }
-
-  /* Command-bar button. 34px tall with 13.5px type: the people this app is for
-     read it at arm's length on a laptop, and the old 32/12.5 band read as a
-     developer tool before anything in it had been used. */
-  .toolbar-btn {
-    @apply inline-flex h-[34px] items-center gap-2 px-3 text-[13.5px] font-medium rounded-md
-           transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
-           text-fg-2 hover:text-fg hover:bg-sunken;
-  }
-  .toolbar-btn:disabled {
-    @apply opacity-40 cursor-default hover:bg-transparent hover:text-fg-2;
-  }
-
-  /* The three labelled verbs. It exists so that the accent weight can move
-     between them without moving *them*: the semibold and the border box are
-     permanent here, and `-primary` / `-ready` below only recolour. When the
-     weight lived on `-primary` and the border on `-ready`, advancing a stage
-     reflowed the row — the same defect as a button moving under the cursor,
-     with the button you were about to press as the one that moves. */
-  .toolbar-btn-stage {
-    @apply font-semibold border border-transparent;
-  }
-
-  /* Primary command — the one verb the current stage is about, and never a
-     disabled one: filled accent at `opacity-40` is 1.76:1. */
-  .toolbar-btn-primary {
-    @apply bg-accent text-accent-ink border-accent hover:bg-accent hover:text-accent-ink
-           hover:brightness-110;
-  }
-
-  /* A command that has become worth doing. Outlined rather than filled so it
-     cannot compete with the filled primary: Export is the end of the job, not
-     the current step, and two solid accent buttons in one row make the row
-     say nothing. It is also the only accent Export ever gets — a filled Export
-     over a `fair` trace is a wrong answer that looks green. */
-  .toolbar-btn-ready {
-    @apply border-accent/55 text-accent hover:bg-accent/12 hover:text-accent-strong;
-  }
-
-  /* Figures are set in the text face with tabular digits, not in the code
-     face. Fira Code on every number made the panel read like a terminal; the
-     columns still line up, because it is the digits that are fixed-width. */
-  .panel-input {
-    @apply w-full px-2.5 py-1.5 text-[14px] tabular-nums rounded-md text-center
-           bg-panel-2 border border-line text-fg
-           placeholder-fg-dim
-           focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent
-           transition-colors duration-150 select-text;
-  }
-
-  /* The size of the room the scale is taken from — the one figure on the
-     panel a person reads off the plan and checks by eye. */
-  .panel-input-lg {
-    @apply py-2 text-[18px];
-  }
-
-  /* Segmented control option. 28px tall — nothing in the shell goes below it. */
-  .unit-pill {
-    @apply h-7 px-2.5 text-[12.5px] font-medium rounded
-           transition-colors duration-150 cursor-pointer select-none;
-  }
-  .unit-pill-active {
-    @apply bg-panel-2 text-fg font-semibold shadow-sm;
-  }
-  .unit-pill-inactive {
-    @apply text-fg-2 hover:text-fg;
-  }
-
-  /* Section heading shared by every dock card. Sentence case at reading size:
-     11px spaced capitals made every card title look like a form field label. */
-  .card-heading {
-    @apply text-[14px] font-semibold text-fg;
-  }
-
-  .dock-card {
-    @apply bg-panel-2 border border-line rounded-md shadow-sm;
-  }
-
-  /* The panel's buttons, stated once. Every dock action used to spell out its
-     own dozen classes, and they had already drifted in height and weight. */
+  /* ── buttons ── */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-md
-           text-[13.5px] font-medium transition duration-150 cursor-pointer select-none
-           disabled:opacity-40 disabled:cursor-default;
+    @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg
+           text-[14.5px] font-medium transition duration-150 cursor-pointer select-none
+           whitespace-nowrap disabled:opacity-40 disabled:cursor-default;
   }
+  /* The one thing to do next. Never a disabled control: filled accent at
+     `opacity-40` is 1.76:1. */
   .btn-primary {
     @apply bg-accent text-accent-ink font-semibold hover:brightness-110
            disabled:hover:brightness-100;
@@ -275,57 +219,148 @@
            disabled:hover:text-fg-2 disabled:hover:border-line;
   }
   .btn-quiet {
-    @apply text-fg-3 hover:text-fg hover:bg-sunken disabled:hover:bg-transparent;
+    @apply text-fg-2 hover:text-fg hover:bg-sunken disabled:hover:bg-transparent
+           disabled:hover:text-fg-2;
+  }
+  /* `accent-ink`, not white: dark `--crit` is a light salmon tuned to read as
+     text on a dark ground, so white on it is 2.54:1. */
+  .btn-danger {
+    @apply bg-crit text-accent-ink font-semibold hover:brightness-110;
+  }
+  .btn-sm {
+    @apply h-8 px-3 gap-1.5 rounded-md text-[13.5px];
+  }
+  .btn-lg {
+    @apply h-12 px-6 rounded-xl text-[16px];
   }
 
-  /* The status band, which is also the instruction bar for a running tool.
-     One row where it fits. When the band is narrow — a small window, or a
-     browser zoomed in, which is common with the people this app is for — a
-     running tool's instruction takes a row of its own so it can be read in
-     full, and its brush, Cancel and Done move to a second row rather than
-     being pushed off the end. A container query rather than a media query:
-     the band's width is the window less a panel that can be open or closed. */
-  .status-band {
-    container-type: inline-size;
-  }
-  @container (max-width: 639.98px) {
-    .status-row-running {
-      flex-wrap: wrap;
-    }
-    .status-row-running > .status-lead {
-      flex-basis: 100%;
-      flex-wrap: wrap;
-    }
-    /* The instruction wraps rather than being cut short — it is the one line
-       the user needs to read in full. */
-    .status-row-running .status-hint {
-      white-space: normal;
-      height: auto;
-      min-height: 2.25rem;
-      padding-block: 0.4rem;
-    }
-    .status-row-running .status-hint > span {
-      white-space: normal;
-      overflow: visible;
-    }
-    /* What can go so the controls share one row: the brush's word label and
-       the key hints inside Cancel and Done. */
-    .status-row-running .status-optional {
-      display: none;
-    }
-    /* While a job runs, its message and its Stop outrank the zoom. */
-    .status-row-processing .status-zoom {
-      display: none;
-    }
+  .icon-btn {
+    @apply grid place-items-center w-9 h-9 shrink-0 rounded-lg text-fg-2
+           transition-colors duration-150 cursor-pointer
+           hover:bg-sunken hover:text-fg
+           disabled:opacity-40 disabled:cursor-default
+           disabled:hover:bg-transparent disabled:hover:text-fg-2;
   }
 
-  /* Status chip — state is readable as form and colour, not colour alone. */
+  /* The button a menu hangs off — the header's Menu and the action bar's four
+     task menus. `.is-open` rather than `[aria-expanded]` so the look can be
+     asserted without parsing an attribute selector out of a class list. */
+  .menu-trigger {
+    @apply inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[14.5px] font-medium
+           text-fg-2 transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
+           hover:bg-sunken hover:text-fg;
+  }
+  .menu-trigger.is-open {
+    @apply bg-sunken text-fg;
+  }
+
+  /* A text link that is a button: the secondary way out of a section. */
+  .link-btn {
+    @apply inline-flex items-center gap-1.5 text-[14px] font-medium text-accent-strong
+           cursor-pointer hover:underline
+           disabled:opacity-40 disabled:cursor-default disabled:hover:no-underline;
+  }
+
+  /* ── fields ──
+     Figures are set in the text face with tabular digits, not in the code
+     face: the columns still line up, because it is the digits that are
+     fixed-width. */
+  .field-input {
+    @apply w-full px-3 py-2 text-[14.5px] tabular-nums rounded-lg text-center
+           bg-panel-2 border border-line text-fg
+           placeholder-fg-dim
+           focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent
+           transition-colors duration-150 select-text;
+  }
+  /* The size of the room the scale is taken from — the one figure on the
+     panel a person reads off the plan and checks by eye. */
+  .field-input-lg {
+    @apply py-2 text-[18px];
+  }
+
+  /* ── a choice between two or three ── */
+  .seg {
+    @apply inline-flex p-0.5 gap-0.5 bg-sunken border border-line rounded-lg;
+  }
+  .seg-option {
+    @apply h-8 px-3 text-[13.5px] font-medium rounded-md text-fg-2
+           transition-colors duration-150 cursor-pointer select-none hover:text-fg;
+  }
+  .seg-option[aria-pressed='true'] {
+    @apply bg-panel-2 text-fg font-semibold shadow-sm;
+  }
+
+  /* ── a state, said in a word ── readable as form and colour, not colour
+     alone. */
   .chip {
     @apply inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full
            text-[12px] font-semibold whitespace-nowrap border;
   }
   .chip-dot {
     @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
+  }
+  .chip-ok    { @apply text-ok bg-ok/12 border-ok/35; }
+  .chip-warn  { @apply text-warn bg-warn/12 border-warn/35; }
+  .chip-crit  { @apply text-crit bg-crit/12 border-crit/35; }
+  /* Not a verdict: a step not taken yet. */
+  .chip-quiet { @apply text-fg-3 bg-sunken border-line; }
+
+  /* ── a sentence that needs a frame ── */
+  .note {
+    @apply px-3.5 py-3 rounded-lg border border-line bg-panel text-[14px] leading-snug text-fg-2;
+  }
+  .note-warn { @apply border-warn/35 bg-warn/10 text-warn font-medium; }
+
+  /* The small label over a figure or a group. Sentence case at reading size:
+     spaced capitals made every one of these look like a form field label. */
+  .label-sm {
+    @apply text-[13px] font-medium text-fg-3;
+  }
+
+  /* A heading inside a sheet or a dialog. */
+  .card-heading {
+    @apply text-[14.5px] font-semibold text-fg;
+  }
+
+  /* ── the action bar ──
+     One row where it fits. When the bar is narrow — a small window, or a
+     browser zoomed in, which is common with the people this app is for — a
+     running tool's instruction takes a row of its own so it can be read in
+     full, and its brush, Cancel and Done move to a second row rather than
+     being pushed off the end. A container query rather than a media query:
+     the bar's width is the window less a panel that can be open or closed. */
+  .action-bar {
+    container-type: inline-size;
+  }
+  @container (max-width: 639.98px) {
+    .action-row-running {
+      flex-wrap: wrap;
+    }
+    .action-row-running > .action-lead {
+      flex-basis: 100%;
+      flex-wrap: wrap;
+    }
+    /* The instruction wraps rather than being cut short — it is the one line
+       the user needs to read in full. */
+    .action-row-running .action-hint {
+      white-space: normal;
+    }
+    .action-row-running .action-hint > span {
+      white-space: normal;
+      overflow: visible;
+    }
+    /* What can go so the controls share one row: the brush's word label and
+       the key hints inside Cancel and Done. */
+    .action-row-running .action-optional {
+      display: none;
+    }
+  }
+  /* The menus' words give way before the menus do: under this width the tip
+     beside them has no room to say anything, so it stands down. */
+  @container (max-width: 559.98px) {
+    .action-row-idle .action-tip {
+      display: none;
+    }
   }
 
   /* ── mobile shell ──────────────────────────────────────────────────────────
@@ -365,31 +400,22 @@
     min-height: 44px;
   }
 
-  /* Density switch for desktop components rendered inside the mobile sheet.
-     `MeasurementDock` is 750 lines of correct logic wearing an 11 px desktop
-     type scale; re-authoring it for touch would fork the warnings panel, the
-     area breakdown and the outline list. Instead the same tree is re-sized
-     from the outside — one scope, no JSX churn, and desktop is untouched
-     because nothing there carries this class. */
-  .touch-dense .unit-pill {
-    @apply h-9 px-3.5 text-[13px];
+  /* Density switch for the results panel rendered inside the mobile sheet.
+     Re-authoring it for touch would fork the checks, the area breakdown and
+     the outline list. Instead the same tree is re-sized from the outside —
+     one scope, no JSX churn, and desktop is untouched because nothing there
+     carries this class. */
+  .touch-dense .seg-option {
+    @apply h-9 px-3.5;
   }
-  .touch-dense .panel-input {
+  .touch-dense .field-input {
     @apply py-2.5 text-[15px];
   }
-  /* Specificity, not preference: `.touch-dense .panel-input` is (0,2,0) and
+  /* Specificity, not preference: `.touch-dense .field-input` is (0,2,0) and
      would otherwise shrink the room size back to 15 px on the phone, where it
      is the field a thumb has to hit. */
-  .touch-dense .panel-input-lg {
+  .touch-dense .field-input-lg {
     @apply text-[21px];
-  }
-  .touch-dense .chip {
-    @apply h-6 px-2.5 text-[12px];
-  }
-  /* The trace list's delete button is `opacity-0 group-hover:opacity-100` —
-     permanently invisible where there is no hover. */
-  .touch-dense .group button.opacity-0 {
-    @apply opacity-100;
   }
   /* `:where()` keeps these at one class of specificity so a component that
      states its own height still wins. Written as `.touch-dense button` they
@@ -407,7 +433,7 @@
   /* …but not the ones that are icons in a row, which have their own sizing and
      would blow the row height out. */
   .touch-dense button.chip,
-  .touch-dense .unit-pill {
+  .touch-dense .seg-option {
     min-height: 0;
   }
 

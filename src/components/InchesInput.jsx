@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useImperativeHandle, useRef } from 'react';
 import { decimalToFeetInches } from '../utils/unitConverter';
 import { useIsTouch } from '../hooks/useViewport';
 
-const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false }) => {
+const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false, ref }) => {
   const isTouch = useIsTouch();
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
@@ -30,6 +30,9 @@ const InchesInput = ({ value, onChange, onBlur, onFocus, id, large = false }) =>
   useEffect(() => {
     return () => clearTimeout(inchesPromptTimerRef.current);
   }, []);
+
+  // Two fields wearing one box: focusing "the input" means the feet.
+  useImperativeHandle(ref, () => ({ focus: () => feetRef.current?.focus() }), []);
 
   const handleFeetChange = (e) => {
     const val = e.target.value;

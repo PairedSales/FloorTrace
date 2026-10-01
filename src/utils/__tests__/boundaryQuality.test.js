@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  primaryWarning, qualitySummary, rankedWarnings, warningLabel, WARNING_CODES,
+  primaryWarning, qualitySummary, rankedWarnings, scaleQualitySummary, warningLabel, WARNING_CODES,
 } from '../boundaryQuality.js';
 import { warning } from '../detection/scoring.js';
 
@@ -126,5 +126,53 @@ describe('the remediation and quality thresholds', () => {
     const { QUALITY_GOOD } = await import('../boundaryQuality');
     const { REMEDIATION_CONFIDENCE } = await import('../detection/remediate.js');
     expect(REMEDIATION_CONFIDENCE).toBe(QUALITY_GOOD);
+  });
+});
+
+/**
+ * `detail` is the finding and is printed on the saved image, for whoever reads
+ * the report. `remedy` names a control in the app, which means nothing on a
+ * page in a workfile — as one sentence, the image told its reader to "click a
+ * dimension".
+ */
+describe('scaleQualitySummary keeps the finding apart from what to do about it', () => {
+  const NAMES_A_CONTROL = /choose|click|under Scale|green box|zoom in|pick a/i;
+  const cases = {
+    'too few rooms': { source: 'auto', reason: 'too-few-rooms', roomCount: 1, disagreement: 0 },
+    'rooms disagree': { source: 'auto', reason: 'rooms-disagree', roomCount: 4, disagreement: 0.4 },
+    'area implausible': { source: 'auto', reason: 'area-implausible', roomCount: 3, disagreement: 0.1 },
+    'the usual consensus': { source: 'auto', roomCount: 5, disagreement: 0.08 },
+    'a line against the rooms': { source: 'line', reason: 'line-vs-rooms', level: 'check', disagreement: 0.3 },
+    'a short line': { source: 'line', reason: 'short-line', disagreement: 0.02, lengthPx: 40 },
+    'a room against the scan': { source: 'manual', reason: 'room-vs-auto', level: 'check', roomCount: 3, disagreement: 0.3 },
+    'a room adopted over earlier ones': { source: 'manual', reason: 'room-vs-project', level: 'check', adopted: true, roomCount: 2, disagreement: 0.3 },
+    'a room that was outvoted': { source: 'auto', reason: 'room-vs-project', level: 'check', adopted: false, roomCount: 2, disagreement: 0.3 },
+    'a room that disagrees with its own label': { source: 'manual', reason: 'room-internal', level: 'check', disagreement: 0.5 },
+  };
+
+  for (const [name, quality] of Object.entries(cases)) {
+    it(`${name}: the finding names no control, and the remedy is its own sentence`, () => {
+      const summary = scaleQualitySummary(quality);
+      expect(summary.detail).not.toMatch(NAMES_A_CONTROL);
+      expect(summary.detail.trim().endsWith('.')).toBe(true);
+      expect(summary.remedy).toMatch(NAMES_A_CONTROL);
+    });
+  }
+
+  // The length of the drawn line is image pixels: nothing the person who drew
+  // it can do anything with.
+  it('never states a length in pixels', () => {
+    for (const quality of Object.values(cases)) {
+      const { short, detail, remedy } = scaleQualitySummary(quality);
+      expect(`${short} ${detail} ${remedy ?? ''}`).not.toMatch(/\bpx\b/);
+    }
+  });
+
+  // Both messages a hand-set scale raises point at the same way back, by the
+  // name the panel prints on it.
+  it('sends a scale set by hand back by the name on the button', () => {
+    for (const key of ['a line against the rooms', 'a room against the scan']) {
+      expect(scaleQualitySummary(cases[key]).remedy).toContain('“Go back to the automatic scale”');
+    }
   });
 });

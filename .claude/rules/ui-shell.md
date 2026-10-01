@@ -5,7 +5,11 @@ paths:
   - "tailwind.config.js"
   - "src/hooks/useViewport.js"
   - "src/hooks/useKeyboardShortcuts.js"
+  - "src/hooks/useMenu.js"
+  - "src/hooks/usePlanIssues.js"
+  - "src/hooks/useCornerPlacement.js"
   - "src/utils/planStage.js"
+  - "src/utils/progressSteps.js"
   - "src/utils/traceIssues.js"
 ---
 
@@ -16,48 +20,67 @@ Most components open with a header comment explaining their layout decisions; re
 ## Who it is for
 
 - Appraisers and agents, often 50+, rarely technical. Optimise for readability and plain words over density and showing the machinery. Say what a thing is for in the user's terms ("the scale came from 3 rooms"), never in the pipeline's ("px/ft", "wall match", "OCR", "void", "hypothesis").
-- Type floor: 13 px for anything a user must read, 12 px only for labels under icons and chips, sentence-case headings (`.card-heading`, 14 px). Numbers are the text face with `tabular-nums`; the code face is for `<kbd>` only.
-- Shared button classes live in `index.css` (`.btn` + `-primary` / `-secondary` / `-quiet`); use them rather than spelling out a button's classes.
+- The screen reads as three things: **the answer** (results panel, left), **the plan** (right), and **what you can do to it** (action bar, above the plan). At rest a finished plan shows about twenty controls. Before adding one, ask whether it is needed before the user asks for it; if not, it belongs behind a menu or inside a folded section.
+- One name per thing, in both shells: *Save image* (never "export"), *outline*, *scale*, *plan*, *room sizes* (never "dimensions"), *results panel*. `HelpModal.jsx` quotes control names, and its test ties them to `toolCatalog.js`.
+
+## The design system (`index.css`)
+
+- Type: 14 px for anything read, 13 px for the line under it, 12 px only for chips and key caps. Numbers are the text face with `tabular-nums`; the code face is for `<kbd>` only.
+- Classes: `.btn` + `-primary` / `-secondary` / `-quiet` / `-danger`, sizes `-sm` / `-lg`; `.icon-btn`; `.link-btn`; `.field-input`; `.seg` / `.seg-option` (pressed state from `aria-pressed`); `.chip` + `-ok` / `-warn` / `-crit` / `-quiet`; `.note` + `-warn`; `.label-sm`; `.menu-trigger`. Use them rather than spelling out a control's classes.
+- Components, where a pattern owns behaviour as well as a look: `Menu.jsx` (every dropdown), `Dialog.jsx` (every dialog), `PanelSection.jsx` (every fold of the panel).
+- **One filled button on screen at a time**, and never a disabled one. In the panel it is Save image, and only when nothing is left to check; in a state that needs something from the user it is the one way to supply it.
 
 ## Two shells, one workflow
 
 - `useIsMobile()` (`max-width: 819.98px`) picks the chrome; `useIsTouch()` (`pointer: coarse`) picks target sizes. They are separate on purpose (a touchscreen laptop keeps the desktop layout with 44 px targets). The product is a desktop app; the mobile shell is kept working but not developed.
-- `App.jsx` owns every workflow decision and builds `<Canvas>` once for whichever shell renders. Don't fork behaviour into `components/mobile/`: the mobile measurement sheet renders the same `MeasurementDock` (restyled by the `.touch-dense` scope in `index.css`), and the tool sheet reads the same `TOOL_GROUPS` (`toolCatalog.js`). Dock props the phone shell does not pass (the outline and scale fixes) are optional; a card without a handler omits the action.
-- Anything the dock tells the user must be on the page, not only in a `title` — a tooltip does not exist on a phone.
+- `App.jsx` owns every workflow decision and builds `<Canvas>` once for whichever shell renders. Don't fork behaviour into `components/mobile/`: the mobile measurement sheet renders the same `ResultsPanel` (`mobile`, restyled by the `.touch-dense` scope in `index.css`), and the tool sheet reads the same `TOOL_GROUPS` (`toolCatalog.js`). Panel props a shell does not pass are optional; a section without a handler omits the action.
+- Anything the panel tells the user must be on the page, not only in a `title` — a tooltip does not exist on a phone.
 
 ## Desktop layout
 
-- Top band `TopBar.jsx` (48 px): `[mark FloorTrace · File · View · Help] | [Open · Undo · Redo] ⋯ [Panel] | [Export]`. With no plan open it is the name, the menus and Open only. Below it, the plan column: `StatusBar` (36 px, only with a plan or while one loads) → `DocumentTabs` → canvas, inset between the measurement dock (left, 340 px, only with a plan) and the tool rail (right, 76 px).
-- The band names no pipeline stage. Opening a plan reads its dimensions, sets the scale and traces the outline by itself; the corrections live on the dock card for the result they correct (Outline, Scale), and the modal tools on the rail. The mark is not a button — closing lives in File.
-- No control in the band is filled. Export is outlined `-ready` once there is an area, never filled; the dock's Export button fills only when nothing is left to check. A disabled control is never the primary anywhere.
-- Menus: File (open, paste, export, copy, save, new plan tab, close, Settings…), View (fit, zoom, rotate, panel, wall lengths, snap), Help (guide, shortcuts, the tracer walkthrough). Workspace preferences — units, theme, autosave, the enhanced reader — are in `SettingsDialog.jsx`, each with a sentence; per-plan switches (wall lengths, snap) stay in View. Several-plan commands are listed only when there are several plans.
-- The band fits at the 820 px desktop minimum with nothing to spare. Anything new with a label goes in a menu.
-- Dropdowns share `menuSurface.jsx`. `workspaceStore.menuOpen` holds the open menu's id (`top:file`, `tools-more`, …), so opening one closes any other across components; it also blocks shortcuts. Swallow `mousedown` on triggers and panels, never on a wrapper.
-- `StatusBar` is also the instruction bar for a running tool. At rest: a tip (only when there is an outline), zoom with Fit, and the save state ("Saved"). While a tool runs the band tints accent and shows the tool's name, instruction, brush, Cancel and Done. In a narrow band (container query, < 640 px) a running tool's name and instruction take their own rows and the brush label and key hints drop, so Done is never pushed off the end; while a job runs there, the zoom stands down. Only the words give way: everything in `.status-lead` truncates and the lead clips, and a control (Stop, Cancel, Done) never lives inside it. A flash is shown only for what is left of its window, so one raised while the band was off screen is not replayed when it returns. Hint priority: `isProcessing` > `statusFlash` > hovered tool > the mode's instruction. Hover text and the corner count render outside the `role="status"` live region. `TOOL_MODES` (`toolModes.js`) is the only copy source for modes. The scale is never shown in pixels.
-- Tool rail: labelled buttons (icon over a one-word `short`), a tooltip, and the `hint` written into `workspaceStore.toolHint` on hover. Tools in the `overflow` group (angle, remove corners, rotate) sit behind a More button, which wears a running overflow tool's icon and name. Disabled tools are `aria-disabled`, not `disabled` — a disabled button gets no hover events in Chrome.
-- Tool digits run 1–9 straight down `TOOL_GROUPS` (the overflow group is last, so its digit is 9). `useKeyboardShortcuts`, `keyboardGuard` and Help read them from there. `Alt`/`Shift+1–7` switch outlines, `Ctrl+Alt+1–6` switch plans, `Ctrl+Alt+N` opens a new plan.
-- Tab strip (`DocumentTabs.jsx`): only with two or more plans; tabs are as wide as their names (110–220 px) and the strip ends at the last tab; it never scrolls — overflow goes into the chevron menu. Its width is re-measured by the window `resize` listener, a `ResizeObserver` and the `dockOpen`/has-image effect deps; keep all three.
-- The toast's `desktopChromePx` counts the top band, the status band when it shows, the tab strip when it exists, and 10 px. The browser tab title is always the static `FloorTrace`.
-- Confirmations (`ConfirmDialog`) focus Cancel: every one of them discards work.
+- **Header** `AppHeader.jsx` (52 px): `[mark FloorTrace] [plan tabs · Add plan] ⋯ [Autosaved] [Undo · Redo] | [Help] [Menu]`. It is a frame, not a menu bar: no File/View/Help, and no filled button. With no plan open it is the name, Help and Menu.
+- **Menu** (the one in the header): open, paste; save image, copy image, save project file; the three per-plan switches (wall lengths, snap, results panel); Settings; close. Rows about the plan are listed only with a plan open, several-plan rows only with several plans. Workspace preferences — units, theme, autosave, the slower reader — are in `SettingsDialog.jsx`, each with a sentence.
+- **Plan tabs** (`PlanTabs.jsx`) live in the header, because the panel changes with the plan as well as the canvas. Shown from the first plan (one tab is the plan's name); tabs are as wide as their names (120–230 px) and never scroll — overflow goes into a menu. The width is re-measured by the window `resize` listener, a `ResizeObserver` and the plan-count/has-image effect deps; keep all three. The last plan can be closed from its tab (it empties in place).
+- **Results panel** (`ResultsPanel.jsx`, 360 px, left, only with a plan) and the **plan column**: `ActionBar` (48 px, only with a plan) over the canvas, with `ViewControls` (zoom, Fit) floating in the canvas's bottom-right corner.
+- **Start screen** (`WelcomeScreen.jsx`, rendered by `Canvas`): the whole window below the header until a plan is open. A drop zone, "Choose a file…" and the sample; on a first run the demo and three steps sit beside it. It wears the theme — only a plan gets the white paper (`canvas-grid-bg`). A second plan's empty tab shows the same screen with `adding`.
+- The toast's `desktopChromePx` counts the header, the action bar when there is a plan, and 10 px. The browser tab title is always the static `FloorTrace`.
 
-## Measurement dock
+## Action bar (`ActionBar.jsx`)
 
-- Order: Area → (the calculation, when opened) → Things to check (`ChecksCard.jsx`, `#dock-checks`) → Outline (`#dock-outline`) → Scale (`#dock-scale`). The same component on mobile, so the same order.
-- The Area headline prints a number only when there is a scale and an outline. With no scale the store falls back to 1 px = 1 ft; that pixel count is never shown as square feet — the card says what is missing instead, as the exhibit prints "—".
-- Every verdict lives on Things to check. Its rows are `summariseIssues(...).issues` (`utils/traceIssues.js`) and its chip counts the same list, so the two cannot disagree; the Area card's "N things to check" link reads the same summary. `info` warnings and accepted ones are not counted and sit under Details with the statistics. No confidence or "wall match" percentage is shown anywhere — it reads as accuracy, which it is not. The card hides until there is an outline or an issue.
-- Commands that start work (read the room sizes again, find the outline, the next-best outline, use a different room) are disabled while `isProcessing`, as the top band's were; find again and next-best also while painting. Modes (paint, corners, a length you know) are not — the rail never gates them either.
-- The calculation card and its toggle show only for a measured area (a scale and an outline), like the headline.
-- Outline card: the list (rename, hide, delete, "Counts as"), add another, and "Outline not right?" fixes (next-best outline, paint, corners, find again) — open by themselves when there is something to check. With no outline it offers the ways to make one, led by the brush after a failed trace, and while a hand-drawn outline is in progress it says how to finish instead.
-- Scale card: where the scale came from (`scaleProvenance`), the size of the room in the green box (editable), and the ways to change it (another room, a length you know, back to the automatic scale, read again).
+- At rest: three menus — **Outline**, **Measure**, **Edit plan** — whose rows come from `TOOL_GROUPS` (`toolCatalog.js`), each with a name, a sentence and its digit. The scale's corrections are not here: the scale is a number, and it is corrected in the panel's Scale section.
+- A group is `tools` (modes: they have a digit, a `TOOL_MODES` entry and a tile on the phone), `commands` (things that happen once) and `menu` (the desktop order, `'-'` for a rule). A group without `menu` is not a bar menu. Rows that cannot be used stay in place, greyed, with the reason as their sentence (`aria-disabled`, never `disabled` — the row must stay reachable to say why).
+- While a tool runs the menus stand down and the bar is that tool's instruction: name, hint, corner count, brush, and the way out. `TOOL_MODES` (`toolModes.js`) is the only copy source. A tool that commits something has `doneLabel` and is left with Cancel + that; a tool with nothing to commit has `leaveLabel: 'Done'` and that is its one, filled, button.
+- Status priority in the lead: `isProcessing` > a flash > the mode's instruction or the idle tip. The menus stay during processing (a wedged job must not lock out every tool); commands that start work wait for a running job, tools do not.
+- Words give way, never controls: everything in `.action-lead` truncates, and Stop, Cancel and Done live outside it. In a narrow bar (container query, < 640 px) a running tool's instruction takes its own row and the key hints drop. A flash is shown only for what is left of its window. The corner count and the elapsed seconds render outside the `role="status"` live region. The scale is never shown in pixels.
+- Tool digits run 1–9 straight down `TOOL_GROUPS`. `useKeyboardShortcuts`, `keyboardGuard` and Help read them from there; `keyboardGuard` finds the image-rewriting digits by the group id `image`. `Alt`/`Shift+1–7` switch outlines, `Ctrl+Alt+1–6` switch plans, `Ctrl+Alt+N` adds a plan.
+- **Cancel means cancel.** Painting keeps the outline it will replace on the plan until the new one is drawn. Placing corners clears it, and `useCornerPlacement` puts it back if placement ends without a finished outline. An outline added (`addOutline`, the route every "Add another outline" takes) and abandoned before it is drawn is taken out of the list again — unless the user went to the brush to paint it. Either way the undo points saved along the way are dropped.
+
+## Menus and dialogs
+
+- `Menu.jsx` is every dropdown. `workspaceStore.menuOpen` holds the open menu's id (`main`, `bar:outline`, `tabs-overflow`, …), so opening one closes any other across components; it also blocks shortcuts (`keyboardGuard`). Menus sharing a `group` switch on hover once one is open. Swallow `mousedown` on triggers and panels, never on a wrapper — mouse buttons 3/4 (undo/redo) are read off the same window event.
+- `Dialog.jsx` is every dialog: Escape closes it and only it (capture, stopped), Tab stays inside, focus is taken on open and returned on close, a press on the backdrop closes. `ConfirmDialog` focuses Cancel and has no close button: every one of them discards work.
+
+## Results panel (`ResultsPanel.jsx`)
+
+- Order: the area → Things to check (`ChecksSection.jsx`, `#panel-checks`) → Outline (`#panel-outline`) → Scale (`#panel-scale`) → How the area was calculated (`WorkSection.jsx`, `#panel-work`) → Save image, pinned to the foot. The same component on mobile, where Save sits under the figure.
+- Each section is a `PanelSection`: folded, it is a title and its own conclusion ("Measured from 3 rooms on this plan"). A section opens by itself when it holds the next thing to do (checks: there is one; outline: none drawn, or several; scale: none, or the length tool / room picker is on) and otherwise stays how it was last left; a plan switch resets that. While FloorTrace is first measuring a plan the sections stand down and the panel shows the job in three steps (`progressSteps.js`), ticking only steps that produced something.
+- The area prints a number only when there is a scale and an outline. With no scale the store falls back to 1 px = 1 ft; that pixel count is never shown as square feet — the panel says what is missing instead, as the exhibit prints "—".
+- Every verdict lives on Things to check. Its rows are the `issues` of `usePlanIssues()` (the one place `summariseIssues`' arguments are gathered) and its chip counts the same list; the line over Save image reads the same summary. `info` warnings and accepted ones are not counted and sit under Details with the statistics. No confidence or "wall match" percentage is shown anywhere — it reads as accuracy, which it is not. A row whose remedy is one click away carries the button (paint the outline, read the sizes again, open Scale).
+- A finding and what to do about it are separate strings (`detail` / `remedy` in `boundaryQuality.js`): the exhibit prints the finding, and must not tell its reader which button to press.
+- Outline section: the list (rename, hide, delete, "Counts as"), add another, and inside/outside of walls. With no outline it offers the ways to make one, led by the brush after a failed trace. Redrawing an outline that exists is the action bar's Outline menu, not repeated here.
+- Scale section: where the scale came from (`scaleProvenance`), the size of the room in the green box (editable), and the ways to change it (another room, a length you know, back to the automatic scale — offered for any scale set by hand, `isUserAsserted` — and read again). While a length is being measured it is only the lengths and the box to type into, which takes the focus.
+- The green box (the room the scale came from) is drawn on the plan only while Scale is open, there is no scale, or a room is being picked (`workspaceStore.scaleRoomShown`, `App.jsx`); the phone always draws it. It is draggable, and dragging it re-sets the scale.
+- Units are a setting, not a control on the panel.
 
 ## Canvas and touch
 
-- Nothing the eager shell imports may pull konva into the entry's static graph: `DocumentTabs` imports no canvas component, and `canvas/imageCache.js` and `canvas/wallSnapEngineCache.js` must stay import-free. `npm run build && npm run check:bundle` catches a regression.
+- Nothing the eager shell imports may pull konva into the entry's static graph: `PlanTabs` imports no canvas component, and `canvas/imageCache.js` and `canvas/wallSnapEngineCache.js` must stay import-free. `npm run build && npm run check:bundle` catches a regression.
 - Touch: `useToolRouter` routes one-finger touches into the same `dispatchPointerDown` as the mouse; two fingers drive the camera (`usePinchZoom`). Test buttons with `button != null && button !== 0` (a `TouchEvent` has no `button`). A gesture that grows a second finger commits rather than cancels. Handles keep their drawn size and get a `hitFunc` sized in `/scale` (~44 screen px). Deleting a vertex on touch is a 500 ms press-and-hold.
 
 ## Styling
 
 - Colours are `rgb(var(--token) / <alpha-value>)`. An opacity modifier on `current` (`border-current/40`) or one outside the configured opacity scale compiles to no CSS at all, and the element silently falls back to a theme-blind default. Name the token (`border-warn/40`).
 - The chrome tokens in `index.css` and the canvas/exhibit colours (exact Dracula values, persisted in `.floorplan` files) are two deliberate palettes. Don't unify them.
+- `.canvas-grid-bg` is the paper: white in both themes, and it re-applies the light tokens to its subtree under the dark theme. Anything inside it (the zoom controls) wears the light palette; anything that should follow the theme (the start screen) must sit outside it.
 - Check contrast of a self-tint (`bg-accent/12` with `text-accent`) composited over its real parent; a token-pair check misses the loss.
 - Never bind `Ctrl+Shift+C` — it is the browser's element inspector.

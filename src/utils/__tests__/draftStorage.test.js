@@ -140,7 +140,7 @@ describe('getDB when the open never answers', () => {
   // Every read at startup awaits this promise, and `_hasRestoredState` is set
   // downstream of all of them. A pending open does not throw and does not
   // retry: the restore simply never returns, autosave is gated off for the
-  // session, and the status bar goes on saying the draft is saved.
+  // session, and the app goes on saying the draft is saved.
   it('rejects rather than hanging forever', async () => {
     installSilentIndexedDB();
     const { getDraft } = await loadFresh();
