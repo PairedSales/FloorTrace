@@ -2,12 +2,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
 import HelpModal from '../HelpModal';
-import { TOOL_GROUPS } from '../toolCatalog';
 
 /**
  * Help names controls, so it is the one place a renamed control goes stale
- * without anything failing. These cases tie its words to the catalogue the
- * screen is built from, and cover the one thing in it that leaves the app.
+ * without anything failing. These cases tie its words to the ones the screen
+ * prints, and cover the one thing in it that leaves the app.
  */
 afterEach(cleanup);
 
@@ -32,34 +31,25 @@ describe('HelpModal', () => {
     expect(view.queryByText('The basics')).toBeNull();
   });
 
-  // The guide tells people which menu to open and which row to choose. Each
-  // name it quotes must be one the action bar actually prints.
-  it('names the menus and tools the way the screen does', () => {
+  // The guide tells people which button to choose. Each name it quotes must be
+  // one the screen actually prints (`ResultsPanel.jsx`, `ActionBar.jsx`).
+  it('names the controls the way the screen does', () => {
     const view = help();
     const guide = view.getByRole('tabpanel').textContent;
-    for (const group of TOOL_GROUPS.filter((g) => g.menu)) {
-      expect(guide, `the ${group.title} menu`).toContain(group.title);
-    }
-    const quoted = ['draw', 'vertex', 'eraser', 'crop', 'scale'];
-    const tools = TOOL_GROUPS.flatMap((g) => g.tools);
-    for (const id of quoted) {
-      const { label } = tools.find((t) => t.id === id);
+    for (const label of [
+      'Try another outline', 'Use a different room', 'Set scale using known length', 'Save image',
+    ]) {
       expect(guide, label).toContain(label);
     }
-    for (const id of ['findOutline', 'addOutline']) {
-      const { label } = TOOL_GROUPS.flatMap((g) => g.commands ?? []).find((c) => c.id === id);
-      expect(guide, label).toContain(label);
-    }
-    // The words the redesign retired.
+    // The words the redesign retired, and the tools that are gone.
     expect(guide).not.toMatch(/Export|tools on the right|File ▸/);
+    expect(guide).not.toMatch(/Paint over|Click the corners|Crop the plan|Erase marks|drag it into place/i);
   });
 
-  it('lists every tool digit the catalogue assigns', () => {
+  it('lists no tool digits: there are no tools to pick', () => {
     const view = help({ initialTab: 'shortcuts' });
-    for (const tool of TOOL_GROUPS.flatMap((g) => g.tools).filter((t) => t.digit)) {
-      const row = view.getByText(tool.label).closest('div');
-      expect(row.querySelector('kbd').textContent, tool.label).toBe(tool.digit);
-    }
+    const keys = [...view.getByRole('tabpanel').querySelectorAll('kbd')].map((k) => k.textContent);
+    expect(keys.filter((k) => /^[1-9]$/.test(k))).toEqual([]);
   });
 
   it('closes on Escape and on its close button', () => {

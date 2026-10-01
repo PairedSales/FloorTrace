@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { useIsTouch } from '../hooks/useViewport';
-import { TOOL_GROUPS } from './toolCatalog';
 import { MOD as mod, ALT as alt } from '../utils/keySymbols';
 import { openTracingTutorial } from '../utils/tracingTutorial';
 import Dialog from './Dialog';
@@ -10,15 +9,15 @@ import Dialog from './Dialog';
  * Help, in two pages: how to use the app, and the keyboard shortcuts.
  *
  * The guide walks the job in the order it happens and names every control
- * exactly as the screen does — the action bar's menus by their titles, the
- * panel's sections by theirs. It is the one place a renamed control goes stale
+ * exactly as the screen does — the panel's sections and buttons by their
+ * titles. It is the one place a renamed control goes stale
  * silently, so the names are worth checking whenever one changes.
  */
 
 // ── the guide ────────────────────────────────────────────────────────────
-// Names here must match the screen: the menu titles and rows in
-// `toolCatalog.js`, the panel's sections and buttons in `ResultsPanel.jsx`, and
-// the header's Menu in `AppHeader.jsx`.
+// Names here must match the screen: the panel's sections and buttons in
+// `ResultsPanel.jsx`, the bar's button in `ActionBar.jsx`, and the header's
+// Menu in `AppHeader.jsx`.
 const GUIDE = [
   {
     title: 'The basics',
@@ -26,38 +25,30 @@ const GUIDE = [
     items: [
       'Open your floor plan: drop the file onto this window, choose it with Menu ▸ Open a floor plan, or paste a picture. Pictures and PDFs both work.',
       'FloorTrace reads the room sizes printed on the plan, works out the scale from them, and outlines the outside walls. It takes a few seconds.',
-      'Compare the outline with the plan. If a corner is off, drag it into place.',
+      'Compare the outline with the plan.',
       'Click Save image, at the bottom of the panel on the left, for a picture of the plan with its measurements — ready for your report or workfile.',
     ],
   },
   {
     title: 'If the outline is wrong',
     items: [
-      'Drag any corner to move it. Right-click a corner to delete it.',
-      'Open Outline, above the plan, and choose “Paint over the walls”. Paint roughly over the outside walls, then click “Draw the outline”. It only needs to be close — FloorTrace follows the walls.',
-      'Or choose “Click the corners” and click each outside corner of the house in turn.',
-      'Notes or a legend drawn inside the house can confuse FloorTrace. Open Edit plan and choose “Erase marks on the plan” to white them out, or “Crop the plan” to keep just the house. Then choose Outline ▸ Find the outline again.',
+      'When FloorTrace found more than one possible outline, “Try another outline” appears above the plan. Click it to swap in the next one.',
+      'An outline that should not be counted can be hidden or deleted: open Outline, in the panel on the left, and use the eye or the bin beside it.',
     ],
   },
   {
     title: 'If the area looks wrong',
     items: [
       'The area depends on the scale. Open Scale, in the panel on the left, to see where it came from.',
-      'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Measure a length you know” and type in the length.',
+      'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Set scale using known length”, click both ends of something whose length you know, and type in the length.',
       'If the room sizes on the plan disagree with each other, Scale opens by itself with a note saying so and what to do about it.',
     ],
   },
   {
     title: 'Garages, porches and other levels',
     items: [
-      'Choose Outline ▸ Add another outline and click its corners. Then open Outline in the panel and set what it counts as — living area (GLA), garage, porch and so on. Only living area counts toward GLA.',
+      'When a plan shows more than one level, FloorTrace outlines each. Open Outline in the panel and check what each one counts as — living area (GLA), garage, porch and so on. Only living area counts toward GLA.',
       'A level drawn on a separate sheet: click “Add plan”, beside the plan’s name at the top. The panel adds the plans together for the whole property.',
-    ],
-  },
-  {
-    title: 'Measuring something else',
-    items: [
-      'Open Measure, above the plan, to measure a distance, an area such as a deck, or an angle. What you measure is drawn on the plan and can be included on the saved image.',
     ],
   },
   {
@@ -93,22 +84,14 @@ const SHORTCUTS = [
       ['R / Shift + R', 'Turn the plan right / left'],
       ['O', 'Show or hide the results panel'],
       ['L', 'Show or hide wall lengths'],
-      [`${mod} + Scroll wheel`, 'Larger or smaller labels and corners'],
+      [`${mod} + Scroll wheel`, 'Larger or smaller labels'],
     ],
   },
   {
-    title: 'Tools',
+    title: 'Setting the scale',
     rows: [
-      // Read off the catalogue rather than retyped, in the order the menus
-      // show them, which is the order the digits follow.
-      ...TOOL_GROUPS.flatMap((g) => g.tools)
-        .filter((t) => t.digit)
-        .map((t) => [t.digit, t.label]),
-      ['[ / ]', 'Smaller / larger brush'],
-      ['Enter', 'Finish what you are drawing'],
-      ['Esc', 'Cancel the current tool'],
-      ['Delete', 'Delete the selected corner, line or shape'],
-      ['Right-click', 'Delete a corner'],
+      ['Esc', 'Stop setting the scale, or stop choosing a room'],
+      ['Delete', 'Delete the selected length'],
     ],
   },
   {
@@ -129,10 +112,7 @@ const SHORTCUTS = [
 const GESTURES = [
   ['Drag', 'Move around the plan'],
   ['Pinch', 'Zoom in and out'],
-  ['Tap', 'Place a corner, a measure point or a room'],
-  ['Double-tap', 'Add a corner to an outline'],
-  ['Press & hold', 'Delete an outline corner'],
-  ['Two fingers', 'Zoom while a brush tool is on'],
+  ['Tap', 'Choose a room, or place an end of a known length'],
 ];
 
 const PageTab = ({ active, onClick, children }) => (

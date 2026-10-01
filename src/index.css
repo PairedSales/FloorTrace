@@ -327,9 +327,8 @@
   /* ── the action bar ──
      One row where it fits. When the bar is narrow — a small window, or a
      browser zoomed in, which is common with the people this app is for — a
-     running tool's instruction takes a row of its own so it can be read in
-     full, and its brush, Cancel and Done move to a second row rather than
-     being pushed off the end. A container query rather than a media query:
+     mode's instruction takes a row of its own so it can be read in full, and
+     Done moves to a second row rather than being pushed off the end. A container query rather than a media query:
      the bar's width is the window less a panel that can be open or closed. */
   .action-bar {
     container-type: inline-size;
@@ -351,16 +350,8 @@
       white-space: normal;
       overflow: visible;
     }
-    /* What can go so the controls share one row: the brush's word label and
-       the key hints inside Cancel and Done. */
+    /* What can go so the controls share one row: the key hint inside Done. */
     .action-row-running .action-optional {
-      display: none;
-    }
-  }
-  /* The menus' words give way before the menus do: under this width the tip
-     beside them has no room to say anything, so it stands down. */
-  @container (max-width: 559.98px) {
-    .action-row-idle .action-tip {
       display: none;
     }
   }

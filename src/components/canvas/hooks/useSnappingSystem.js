@@ -8,13 +8,11 @@ import { cachedWallSnapEngine, rememberWallSnapEngine } from '../wallSnapEngineC
 // decoded, and fall back to the main-thread builder if that fails. Building it
 // on the main thread cost a full-natural-size getImageData plus a second
 // data-URL decode, landing a few frames into the first gesture after every
-// image change (and `image` changes on every crop, so this is not once per
-// session).
+// image change.
 // Memoised across mounts, keyed by image identity, because this hook remounts
 // on every plan switch — the canvas subtree is keyed on the active plan.
-// Without the memo, autoSnapEnabled defaulting to true means merely switching
-// tabs posts a wallSnapSegments request and rebuilds an engine the app already
-// had, with no user action at all.
+// Without the memo, merely switching tabs posts a wallSnapSegments request and
+// rebuilds an engine the app already had, with no user action at all.
 //
 // The cache itself lives in a leaf module so the store can release a closed
 // plan's engine without importing anything under ./canvas/.
@@ -46,7 +44,10 @@ const snapAxisToWallFace = (snapEdge, pos, spanCentre, span, tolerance) => {
   return Math.abs(lo - pos) <= Math.abs(hi - pos) ? lo : hi;
 };
 
-export function useSnappingSystem({ autoSnapEnabled, image }) {
+// Snapping for the one thing still placed by hand: the two ends of a known
+// length. Built only while that tool is on (`enabled`), so a plan that is
+// measured automatically never pays for it.
+export function useSnappingSystem({ enabled, image }) {
   const imageSnapAnalyzerRef = useRef(null);
   const imageSnapAnalyzerSourceRef = useRef(null);
   const imageSnapAnalyzerLoadingRef = useRef(null);
@@ -64,17 +65,10 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
     wallSnapEngineLoadingRef.current = null;
   }, [image]);
 
-  // Warm the wall engine as soon as the image changes rather than on the first
-  // gesture. Safe to do eagerly only because the work is now in the worker —
-  // on the main thread this was the 12-60 ms stall it replaces.
-  //
-  // This is the one part of the change a user could notice: `handleStageMouseUp`
-  // commits the overlay from the last mousemove without re-snapping, so a quick
-  // flick that ended before the engine was ready used to commit an *unsnapped*
-  // rect, and now commits a snapped one. That is what auto-snap promises, and
-  // the rect feeds the implied px/ft, so it is a change worth stating.
+  // Warm the wall engine as soon as the tool is picked up rather than on the
+  // first click. Safe to do eagerly because the work is in the worker.
   useEffect(() => {
-    if (!autoSnapEnabled || !image) return;
+    if (!enabled || !image) return;
     let cancelled = false;
     wallSnapEngineSourceRef.current = image;
     wallSnapEngineLoadingRef.current = buildWallSnapEngine(image)
@@ -93,10 +87,10 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
     return () => {
       cancelled = true;
     };
-  }, [autoSnapEnabled, image]);
+  }, [enabled, image]);
 
   const ensureImageSnapAnalyzer = useCallback(() => {
-    if (!autoSnapEnabled || !image) {
+    if (!enabled || !image) {
       return;
     }
 
@@ -133,10 +127,10 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
           imageSnapAnalyzerLoadingRef.current = null;
         }
       });
-  }, [autoSnapEnabled, image]);
+  }, [enabled, image]);
 
   const ensureWallSnapEngine = useCallback(() => {
-    if (!autoSnapEnabled || !image) {
+    if (!enabled || !image) {
       return;
     }
 
@@ -173,19 +167,19 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
           wallSnapEngineLoadingRef.current = null;
         }
       });
-  }, [autoSnapEnabled, image]);
+  }, [enabled, image]);
 
   // Wall faces first, the generic dark-corner detector as the fallback. The
   // corner detector was the only thing here, and it answers a different
-  // question — "is there a dark corner near this point" — so a hand-corrected
-  // vertex landed on whatever ink was closest, routinely a wall centreline or a
-  // dimension tick, on an outline whose whole job is to follow the wall face.
+  // question — "is there a dark corner near this point" — so a point landed
+  // on whatever ink was closest, routinely a wall centreline or a dimension
+  // tick, when the length being measured runs from wall face to wall face.
   //
-  // Per axis, not all-or-nothing: an outline corner often has a wall on one
+  // Per axis, not all-or-nothing: a corner often has a wall on one
   // side of it only, and taking the raw cursor x because the y found nothing
   // would throw away the half that was right.
   const findVertexSnapPoint = useCallback((point, tolerance = 12) => {
-    if (!autoSnapEnabled || !point) {
+    if (!enabled || !point) {
       return null;
     }
 
@@ -209,92 +203,7 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
       x: x ?? corner?.x ?? point.x,
       y: y ?? corner?.y ?? point.y,
     };
-  }, [autoSnapEnabled, ensureImageSnapAnalyzer, ensureWallSnapEngine]);
+  }, [enabled, ensureImageSnapAnalyzer, ensureWallSnapEngine]);
 
-  // Translate the whole overlay by the smallest delta that lands one vertical
-  // and/or one horizontal edge on a wall face. Each edge targets the face on
-  // the room-interior side: the left edge lands on a wall's right face, the
-  // top edge on a wall's bottom face, and so on.
-  const snapRoomOverlayMove = useCallback((overlay, tolerance = 12) => {
-    if (!autoSnapEnabled) {
-      return overlay;
-    }
-
-    ensureWallSnapEngine();
-    const engine = wallSnapEngineRef.current;
-    if (!engine) {
-      return overlay;
-    }
-
-    const left = engine.snapVerticalEdge(overlay.x1, overlay.y1, overlay.y2, tolerance, 'hi');
-    const right = engine.snapVerticalEdge(overlay.x2, overlay.y1, overlay.y2, tolerance, 'lo');
-    const top = engine.snapHorizontalEdge(overlay.y1, overlay.x1, overlay.x2, tolerance, 'hi');
-    const bottom = engine.snapHorizontalEdge(overlay.y2, overlay.x1, overlay.x2, tolerance, 'lo');
-
-    const dx = [
-      left !== null ? left - overlay.x1 : null,
-      right !== null ? right - overlay.x2 : null,
-    ].filter((v) => v !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
-
-    const dy = [
-      top !== null ? top - overlay.y1 : null,
-      bottom !== null ? bottom - overlay.y2 : null,
-    ].filter((v) => v !== null).sort((a, b) => Math.abs(a) - Math.abs(b))[0] ?? 0;
-
-    if (dx === 0 && dy === 0) {
-      return overlay;
-    }
-
-    const result = {
-      x1: overlay.x1 + dx,
-      y1: overlay.y1 + dy,
-      x2: overlay.x2 + dx,
-      y2: overlay.y2 + dy,
-    };
-    if (Array.isArray(overlay.polygon)) {
-      result.polygon = overlay.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy }));
-    }
-    if (overlay.confidence !== undefined) {
-      result.confidence = overlay.confidence;
-    }
-    return result;
-  }, [autoSnapEnabled, ensureWallSnapEngine]);
-
-  // Snap only the two edges being dragged by the given corner handle.
-  const snapRoomOverlayResize = useCallback((corner, rect, tolerance = 12) => {
-    if (!autoSnapEnabled) {
-      return rect;
-    }
-
-    ensureWallSnapEngine();
-    const engine = wallSnapEngineRef.current;
-    if (!engine) {
-      return rect;
-    }
-
-    const movesX1 = corner === 'tl' || corner === 'bl';
-    const movesY1 = corner === 'tl' || corner === 'tr';
-    const edgeX = movesX1 ? rect.x1 : rect.x2;
-    const edgeY = movesY1 ? rect.y1 : rect.y2;
-
-    const snappedX = engine.snapVerticalEdge(edgeX, rect.y1, rect.y2, tolerance, movesX1 ? 'hi' : 'lo');
-    const snappedY = engine.snapHorizontalEdge(edgeY, rect.x1, rect.x2, tolerance, movesY1 ? 'hi' : 'lo');
-
-    const result = { ...rect };
-    if (snappedX !== null) {
-      result[movesX1 ? 'x1' : 'x2'] = snappedX;
-    }
-    if (snappedY !== null) {
-      result[movesY1 ? 'y1' : 'y2'] = snappedY;
-    }
-    return result;
-  }, [autoSnapEnabled, ensureWallSnapEngine]);
-
-  return {
-    findVertexSnapPoint,
-    snapRoomOverlayMove,
-    snapRoomOverlayResize,
-    ensureImageSnapAnalyzer,
-    ensureWallSnapEngine,
-  };
+  return { findVertexSnapPoint };
 }

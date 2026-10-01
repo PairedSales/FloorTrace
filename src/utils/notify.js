@@ -1,4 +1,3 @@
-import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 
 /**
@@ -60,36 +59,4 @@ export function notify(message, { type = 'error', action = null } = {}) {
     tone: type === 'error' ? 'crit' : 'warn',
     action,
   });
-}
-
-// How long the place a refusal points at stays lit. Longer than the words:
-// the highlight is the useful half, and it should not vanish the instant they do.
-const ANCHOR_MS = 7500;
-let anchorTimer = null;
-
-/**
- * A refusal that has a place on the plan. The words go to the bar; the place
- * goes to the canvas, where `RefusalHighlightLayer` draws it.
- *
- * "That would make the outline cross itself" is unactionable on its own — the
- * user has to find the crossing themselves. Lighting the two edges makes it a
- * pointer instead of a dead end.
- */
-export function flashAt(text, anchor) {
-  const store = useAppStore.getState();
-  store.setErrorAnchor(anchor ?? null);
-  clearTimeout(anchorTimer);
-  if (anchor) {
-    // The plan it belongs to is captured now, and checked when it fires. An
-    // anchor is a place on one drawing, so clearing it later must not reach
-    // across a plan switch and wipe a highlight the user has since raised on a
-    // different plan.
-    const anchoredTo = store.activeDocumentId;
-    anchorTimer = setTimeout(() => {
-      const now = useAppStore.getState();
-      if (now.activeDocumentId !== anchoredTo) return;
-      now.setErrorAnchor(null);
-    }, ANCHOR_MS);
-  }
-  flash(text, 'warn');
 }

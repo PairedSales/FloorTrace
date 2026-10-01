@@ -215,30 +215,6 @@ export function composeExhibit(ctx, model, {
     ops.push(...pill(trace.badge.text, at.x, at.y, clamp(frame.width / 68, 12, 28), 600, measure, ui));
   }
 
-  const annotationSize = clamp(frame.width / 85, 11, 22);
-  for (const line of model.plan.lines) {
-    const a = project(line.start);
-    const b = project(line.end);
-    ops.push({ op: 'poly', points: [a, b], stroke: '#FF79C6', width: strokeW, close: false });
-    if (line.text) {
-      ops.push(...pill(line.text, (a.x + b.x) / 2, (a.y + b.y) / 2,
-        annotationSize, 500, measure, ui));
-    }
-  }
-
-  for (const shape of model.plan.shapes) {
-    const points = shape.vertices.map(project);
-    ops.push({
-      op: 'poly', points, fill: 'rgba(255, 121, 198, 0.15)',
-      stroke: '#FF79C6', width: strokeW, close: true,
-    });
-    if (shape.text) {
-      const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
-      const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
-      ops.push(...pill(shape.text, cx, cy, annotationSize, 500, measure, ui));
-    }
-  }
-
   y = planY + frame.height + Math.round(22 * ui);
 
   // ── summary ───────────────────────────────────────────────────────────────

@@ -65,8 +65,6 @@ describe('working-state projections', () => {
     const TRANSIENT_EVERYWHERE = [
       'isProcessing',        // spinner
       'processingMessage',   // spinner text
-      'traceInteractionMode', // drawing vs idle
-      'drawModeActive',      // tool toggle; note drawStrokes IS autosaved
       'isDirty',             // project tracking
       'viewportSyncToken',   // camera sync signal, meaningless once reloaded
     ];

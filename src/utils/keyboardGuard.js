@@ -1,6 +1,5 @@
 import useWorkspaceStore from '../store/workspaceStore';
 import useAppStore from '../store/appStore';
-import { TOOL_GROUPS } from '../components/toolCatalog';
 
 // One guard for the several window-level keydown listeners. The modal half is
 // load-bearing: HelpModal owns Escape while it is open, so without this a
@@ -12,7 +11,7 @@ export const isTypingInField = (target) =>
 // The export and settings dialogs are here for the same reason the help modal
 // is: each is a focused surface over the plan, and a key that both drives it
 // and reaches the canvas behind it does two things at once. Delete is the
-// sharp case — it would close a plan and delete a vertex in the same press.
+// sharp case — it would act on the dialog and on the plan in the same press.
 export const shortcutsBlocked = (target) => {
   if (isTypingInField(target)) return true;
   const workspace = useWorkspaceStore.getState();
@@ -25,10 +24,9 @@ export const shortcutsBlocked = (target) => {
 // ── Work in flight owns the drawing it started from ─────────────────────────
 //
 // While `isProcessing` is true a scan, a trace or a file read is holding the
-// image it was handed. Undo, redo, paste, opening a file and the crop and
-// eraser digits all *replace* that image, and the result then lands describing
-// ink that is gone — an outline of the uncropped sheet drawn over the cropped
-// one, at whatever confidence it earned, with nothing looking wrong.
+// image it was handed. Undo, redo, paste and opening a file all *replace* that
+// image, and the result then lands describing a drawing that is gone, at
+// whatever confidence it earned, with nothing looking wrong.
 //
 // This cannot live in `shortcutsBlocked`: its two call sites are handed only
 // `e.target`, and which key was pressed is the whole question. Blocking every
@@ -41,16 +39,6 @@ export const shortcutsBlocked = (target) => {
 // It is also the only place the mouse's back/forward buttons can be reached:
 // they are bound to undo/redo directly and pass through no guard at all.
 
-// The digits of the tools that rewrite the plan image, which is what the
-// `image` group *is*. Read off the catalogue rather than written down again:
-// the digit run is already kept by hand in two files, and a third copy is
-// precisely what `toolCatalog.js` warns will drift.
-const IMAGE_TOOL_DIGITS = new Set(
-  (TOOL_GROUPS.find((group) => group.id === 'image')?.tools ?? [])
-    .map((tool) => tool.digit)
-    .filter(Boolean),
-);
-
 const invalidatesWorkInFlight = (e) => {
   const chord = e.ctrlKey || e.metaKey;
   if (chord && !e.altKey) {
@@ -58,15 +46,6 @@ const invalidatesWorkInFlight = (e) => {
     // z/y undo the edit the work was computed from; v and o put a different
     // drawing in front of it; s writes a file the running trace is not in.
     return key === 'z' || key === 'y' || key === 'v' || key === 'o' || key === 's';
-  }
-  // Only the digits that rewrite the image. The other seven are modes, and
-  // entering one changes nothing the running job was computed from — so
-  // blocking all nine cost a user the brush for the whole of a twenty-second
-  // scan, and made the keyboard disagree with the menus, whose tools are not
-  // gated on `isProcessing` at all. The modified digits are outline and plan
-  // switching, which are safe and stay live.
-  if (!chord && !e.altKey && !e.shiftKey) {
-    return /^Digit[1-9]$/.test(e.code ?? '') && IMAGE_TOOL_DIGITS.has(e.code.slice(5));
   }
   return false;
 };

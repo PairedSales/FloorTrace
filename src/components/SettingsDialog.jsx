@@ -12,8 +12,8 @@ import Dialog from './Dialog';
  * the panel, on show every minute of every job, for a choice made once a year.
  *
  * Only settings that belong to the *workspace* live here. "Wall lengths on the
- * plan" and "Snap corners to walls" are stored per plan, so they stay in the
- * Menu where they read as switches on what is in front of you.
+ * plan" is stored per plan, so it stays in the Menu where it reads as a switch
+ * on what is in front of you.
  */
 
 const UNITS = [

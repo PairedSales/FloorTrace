@@ -1,14 +1,12 @@
-import { useEffect, useMemo } from 'react';
-import { flash } from '../utils/notify';
+import { useEffect } from 'react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import * as undoManager from '../store/undoManager';
 import { isTypingInField, shortcutsBlocked } from '../utils/keyboardGuard';
 import { MAX_OPEN_DOCUMENTS } from '../store/documentManager';
-import { TOOL_GROUPS } from '../components/toolCatalog';
 
 // Trace switching covers the whole trace list, which traceManager caps at seven
-// colours — so it stops at 7 even as the tool row below grows past it.
+// colours — so it stops at 7.
 const TRACE_DIGIT_COUNT = 7;
 
 // Plan switching stops at the number of plans that can be open, the same way
@@ -22,9 +20,9 @@ const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
  * Registers and cleans up all window-level input event listeners:
  *  - keydown: Ctrl+V (paste), Ctrl+O (file open), Ctrl+Z/Y (undo/redo),
  *             Ctrl+E (export dialog), Ctrl+Alt+C (copy the exhibit image),
- *             [ / ] (brush size), O (results panel), L (toggle side lengths),
+ *             O (results panel), L (toggle side lengths),
  *             R / Shift+R (rotate the canvas either way), F (fit to window),
- *             1…n (select a tool), Alt/Shift+1…7 (switch perimeter trace)
+ *             Alt/Shift+1…7 (switch perimeter trace)
  *  - mousedown: side buttons 3/4 for undo/redo
  *  - contextmenu: suppressed unless text is selected
  *
@@ -34,12 +32,6 @@ const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
  * @param {() => void} config.onPaste        - triggered by Ctrl+V
  * @param {() => void} config.onFileOpen     - triggered by Ctrl+O
  * @param {(isSaveAs: boolean) => void} config.onSaveProject - triggered by Ctrl+S / Ctrl+Shift+S
- * @param {{field, setSize, min, max, step}|null} config.activeBrush - whichever
- *   brush tool is currently on; `[` and `]` resize it. There is more than one
- *   brush now, so the binding describes "the active brush" rather than naming
- *   the eraser. `field` is the store key rather than the value: key repeat
- *   delivers faster than React re-renders, and a captured value makes every
- *   press in one frame resolve to the same new size.
  */
 export function useKeyboardShortcuts({
   onNewPlan,
@@ -50,65 +42,9 @@ export function useKeyboardShortcuts({
   onSaveProject,
   onExport,
   onCopyExhibit,
-  activeBrush,
   onRotateCanvas,
   onFitToWindow,
-  hasArea,
-  onLineToolToggle,
-  onDrawAreaToggle,
-  onAngleToolToggle,
-  onOutlineByVertex,
-  onCropToolToggle,
-  onEraserToolToggle,
-  onDrawExterior,
-  onVoidToolToggle,
-  onScaleToolToggle,
 }) {
-  // The digit → tool mapping is fixed, never renumbered by what is currently
-  // on screen: a mapping that moves with app state is worse than one that
-  // occasionally says why it did nothing.
-  //
-  // Derived from TOOL_GROUPS rather than restated. This list used to be that
-  // one retyped — the same nine digits, the same nine names and four
-  // word-for-word copies of the disabled reasons — under a comment saying the
-  // two were "kept in step by hand", which they twice had not been.
-  //
-  // Only the handler is genuinely local, so only the handler is written here.
-  const toolDigits = useMemo(() => {
-    const toggles = {
-      draw: onDrawExterior,
-      vertex: onOutlineByVertex,
-      void: onVoidToolToggle,
-      scale: onScaleToolToggle,
-      line: onLineToolToggle,
-      area: onDrawAreaToggle,
-      angle: onAngleToolToggle,
-      crop: onCropToolToggle,
-      eraser: onEraserToolToggle,
-    };
-    return TOOL_GROUPS
-      .flatMap((group) => group.tools)
-      .filter((tool) => tool.digit)
-      .map((tool) => ({
-        digit: tool.digit,
-        label: tool.short,
-        toggle: toggles[tool.id],
-        available: tool.needsArea ? hasArea : true,
-        unavailable: tool.needsArea,
-      }));
-  }, [
-    hasArea,
-    onLineToolToggle,
-    onDrawAreaToggle,
-    onAngleToolToggle,
-    onOutlineByVertex,
-    onCropToolToggle,
-    onEraserToolToggle,
-    onDrawExterior,
-    onVoidToolToggle,
-    onScaleToolToggle,
-  ]);
-
   // ── keydown ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -124,24 +60,8 @@ export function useKeyboardShortcuts({
 
       if (shortcutsBlocked(e.target)) return;
 
-      // Escape drops the highlight a refusal left on the plan. Deliberately
-      // does not consume the event: anything else listening for Escape must
-      // still see it. Sits after the guard so an open help modal swallows the
-      // key instead.
-      if (e.key === 'Escape') {
-        useAppStore.getState().setErrorAnchor(null);
-      }
-
-      // Brush size shortcuts (no modifier keys required)
+      // Unmodified keys
       if (!e.ctrlKey && !e.metaKey) {
-        if ((e.key === '[' || e.key === ']') && activeBrush) {
-          e.preventDefault();
-          const { field, setSize, min = 4, max = 200, step = 4 } = activeBrush;
-          const size = useAppStore.getState()[field];
-          const next = e.key === '[' ? size - step : size + step;
-          setSize(Math.max(min, Math.min(max, next)));
-          return;
-        }
         if (e.key.toLowerCase() === 'o') {
           e.preventDefault();
           // Show or hide the results panel.
@@ -173,8 +93,8 @@ export function useKeyboardShortcuts({
         const digit = /^Digit[1-9]$/.test(e.code || '') ? e.code.slice(5) : null;
         if (digit) {
           e.preventDefault();
-          // Firefox on Windows/Linux eats Alt+1–8 for tab switching, so Shift
-          // is bound as an alias for the same trace switch.
+          // Outline switching. Firefox on Windows/Linux eats Alt+1–8 for tab
+          // switching, so Shift is bound as an alias. A bare digit does nothing.
           if (e.altKey || e.shiftKey) {
             const index = Number(digit) - 1;
             if (index >= TRACE_DIGIT_COUNT) return;
@@ -183,14 +103,6 @@ export function useKeyboardShortcuts({
             if (trace) s.switchPerimeterTrace(trace.id);
             return;
           }
-          if (!useAppStore.getState().image) return;
-          const tool = toolDigits.find((t) => t.digit === digit);
-          if (!tool) return;
-          if (!tool.available) {
-            if (tool.unavailable) flash(tool.unavailable, 'warn');
-            return;
-          }
-          tool.toggle?.();
           return;
         }
       }
@@ -275,8 +187,8 @@ export function useKeyboardShortcuts({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onPaste, onFileOpen, onSaveProject, onExport, onCopyExhibit, activeBrush,
-    onRotateCanvas, onFitToWindow, toolDigits, onNewPlan, onStepPlan, onSelectPlan]);
+  }, [onPaste, onFileOpen, onSaveProject, onExport, onCopyExhibit,
+    onRotateCanvas, onFitToWindow, onNewPlan, onStepPlan, onSelectPlan]);
 
   // ── mousedown: side buttons for undo/redo ─────────────────────────────────
   useEffect(() => {

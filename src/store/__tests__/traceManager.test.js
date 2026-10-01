@@ -23,6 +23,15 @@ const openProjectWith = (names) => useAppStore.setState({
   activeTraceId: 'saved-0',
 });
 
+// A void cut by hand, as a plan saved before the cut-out tool was removed
+// carries it. Nothing in the app makes one any more, but every one already in
+// a file must keep being subtracted — and keep surviving a re-trace.
+const giveUserHole = (traceId, ring) => useAppStore.setState({
+  perimeterTraces: traces().map((t) => (t.id === traceId
+    ? { ...t, holes: [...(t.holes ?? []), { id: 'hole-user-0', ring, source: 'user' }] }
+    : t)),
+});
+
 describe('applyDetectedTraces', () => {
   beforeEach(() => {
     useAppStore.getState().resetPerimeterTraces();
@@ -61,7 +70,7 @@ describe('trace types', () => {
   });
 
   it('defaults a new trace to GLA and takes its colour from the type table', () => {
-    useAppStore.getState().addPerimeterTrace();
+    useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
 
     const added = traces()[1];
     expect(added.type).toBe(DEFAULT_TRACE_TYPE);
@@ -170,7 +179,7 @@ describe('trace types', () => {
 
 // The interior/exterior wall toggle lands here as well as in
 // setPerimeterOverlay, and it is one click that does not look destructive.
-describe('applyDetectedTraces and hand-punched voids', () => {
+describe('applyDetectedTraces and voids cut by hand', () => {
   const lightWell = [
     { x: 2, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 4 }, { x: 2, y: 4 },
   ];
@@ -190,7 +199,7 @@ describe('applyDetectedTraces and hand-punched voids', () => {
   it('keeps a user void when the floor count is unchanged', () => {
     useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
     const targetId = traces()[0].id;
-    useAppStore.getState().addHole(targetId, lightWell);
+    giveUserHole(targetId, lightWell);
 
     useAppStore.getState().applyDetectedTraces([autoFloor(30), autoFloor(40)]);
 
@@ -211,7 +220,7 @@ describe('applyDetectedTraces and hand-punched voids', () => {
 
   it('carries a user void across a floor-count change', () => {
     useAppStore.getState().applyDetectedTraces([square(10)]);
-    useAppStore.getState().addHole(traces()[0].id, lightWell);
+    giveUserHole(traces()[0].id, lightWell);
 
     useAppStore.getState().applyDetectedTraces([autoFloor(30), autoFloor(40)]);
 
@@ -278,11 +287,16 @@ describe('setWallFaceMode', () => {
     expect(traces().find((t) => t.id === 'second-pass').vertices).toEqual(square(50));
   });
 
-  it('leaves an outline the user drew by hand alone', () => {
+  // A saved plan can hold an outline that was drawn by hand: it has no pair.
+  it('leaves an outline with no pair alone', () => {
     useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
-    useAppStore.getState().addPerimeterTrace();
-    const handId = traces()[1].id;
-    useAppStore.getState().setPerimeterOverlay({ vertices: square(7) });
+    const handId = 'drawn-by-hand';
+    useAppStore.setState({
+      perimeterTraces: [...traces(), {
+        id: handId, name: '2nd Floor', vertices: square(7), holes: [],
+        closed: true, visible: true, locked: false,
+      }],
+    });
 
     expect(useAppStore.getState().setWallFaceMode(true)).toBe(1);
 
@@ -302,7 +316,7 @@ describe('setWallFaceMode', () => {
   it('keeps a void the user punched and re-checks it against the new outline', () => {
     useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
     const id = traces()[0].id;
-    useAppStore.getState().addHole(id, [
+    giveUserHole(id, [
       { x: 10, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }, { x: 10, y: 20 },
     ]);
 
@@ -313,9 +327,9 @@ describe('setWallFaceMode', () => {
     expect(userHoles[0].stale).toBeUndefined();
   });
 
-  // A later vertex drag must not reach back into the stored pair, or switching
-  // away and back would return geometry that had quietly moved.
-  it('hands out a copy, so editing the applied outline cannot rewrite the pair', () => {
+  // A later write to the outline must not reach back into the stored pair, or
+  // switching away and back would return geometry that had quietly moved.
+  it('hands out a copy, so rewriting the applied outline cannot rewrite the pair', () => {
     useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
     useAppStore.getState().setWallFaceMode(true);
 
@@ -326,18 +340,6 @@ describe('setWallFaceMode', () => {
     // And the pair survives the edit, so the switch still works on this outline.
     expect(useAppStore.getState().setWallFaceMode(false)).toBe(1);
     expect(traces()[0].vertices).toEqual(square(100));
-  });
-
-  // The pair is a cache of ink the crop/erase has changed, exactly like
-  // `tracedBoundaries`, and is dropped with it.
-  it('clearWallFaces leaves the outlines but forgets the other face', () => {
-    useAppStore.getState().applyDetectedTraces([detected(100, 90)]);
-
-    useAppStore.getState().clearWallFaces();
-
-    expect(traces()[0].vertices).toEqual(square(100));
-    expect(traces()[0].wallFaces).toBeNull();
-    expect(useAppStore.getState().setWallFaceMode(true)).toBe(0);
   });
 });
 
@@ -351,15 +353,17 @@ describe('trace ids', () => {
 
   const distinct = () => new Set(traces().map((t) => t.id));
 
-  it('are distinct for traces created in a tight loop', () => {
-    for (let i = 0; i < 6; i += 1) useAppStore.getState().addPerimeterTrace();
+  const sevenFloors = () => Array.from({ length: 7 }, (_, i) => square(10 + i));
 
-    expect(traces()).toHaveLength(7); // the reset default + 6
+  it('are distinct for traces created in the same tick', () => {
+    useAppStore.getState().applyDetectedTraces(sevenFloors());
+
+    expect(traces()).toHaveLength(7);
     expect(distinct().size).toBe(7);
   });
 
   it('deletes exactly one trace when several were created in the same tick', () => {
-    for (let i = 0; i < 3; i += 1) useAppStore.getState().addPerimeterTrace();
+    useAppStore.getState().applyDetectedTraces(sevenFloors().slice(0, 4));
     const doomed = traces()[1].id;
 
     useAppStore.getState().deletePerimeterTrace(doomed);
@@ -376,9 +380,6 @@ describe('trace ids', () => {
     useAppStore.getState().setPerimeterOverlay({ vertices: square(10) });
     const fromOverlay = traces()[0].id;
 
-    useAppStore.getState().addPerimeterTrace();
-    const fromAdd = traces()[1].id;
-
     // Two detection runs in the same tick. Both change the floor count, so both
     // mint fresh ids — the equal-count branch reuses ids on purpose, to keep
     // renames across a re-trace, and is not what this test is about.
@@ -387,7 +388,7 @@ describe('trace ids', () => {
     useAppStore.getState().applyDetectedTraces([square(40), square(50)]);
     const secondRun = traces().map((t) => t.id);
 
-    const all = [fromReset, fromOverlay, fromAdd, ...firstRun, ...secondRun];
+    const all = [fromReset, fromOverlay, ...firstRun, ...secondRun];
     expect(new Set(all).size).toBe(all.length);
   });
 });
@@ -397,29 +398,15 @@ describe('trace naming', () => {
     useAppStore.getState().resetPerimeterTraces();
   });
 
-  it('numbers from the traces on hand, not a session counter', () => {
-    for (let i = 0; i < 5; i += 1) useAppStore.getState().addPerimeterTrace();
-    expect(traces().map((t) => t.name)).toEqual([
-      '1st Floor', '2nd Floor', '3rd Floor', '4th Floor', '5th Floor', '6th Floor',
-    ]);
-
-    // Reopening a two-floor project used to keep counting from 7.
-    openProjectWith(['1st Floor', '2nd Floor']);
-    useAppStore.getState().addPerimeterTrace();
-
-    expect(traces()[2].name).toBe('3rd Floor');
-  });
-
-  it('does not reuse a number a renamed trace already holds', () => {
-    openProjectWith(['Basement', '4th Floor']);
-    useAppStore.getState().addPerimeterTrace();
-    expect(traces()[2].name).toBe('5th Floor');
+  it('numbers the levels of a sheet in the order they were found', () => {
+    useAppStore.getState().applyDetectedTraces([square(10), square(20), square(30)]);
+    expect(traces().map((t) => t.name)).toEqual(['1st Floor', '2nd Floor', '3rd Floor']);
   });
 
   // A garage used to arrive called "3rd Floor" and stay that way until renamed.
   it('names an auto-named trace for its type when the type changes', () => {
     useAppStore.getState().setImage('data:image/png;base64,AAAA');
-    useAppStore.getState().addPerimeterTrace();
+    useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
     expect(traces()[1].name).toBe('2nd Floor');
 
     useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'garage');
@@ -448,7 +435,7 @@ describe('trace naming', () => {
 
   it('numbers a second trace of the same type rather than colliding', () => {
     useAppStore.getState().setImage('data:image/png;base64,AAAA');
-    useAppStore.getState().addPerimeterTrace();
+    useAppStore.getState().applyDetectedTraces([square(10), square(20)]);
     useAppStore.getState().setPerimeterTraceType(traces()[0].id, 'garage');
     useAppStore.getState().setPerimeterTraceType(traces()[1].id, 'garage');
 

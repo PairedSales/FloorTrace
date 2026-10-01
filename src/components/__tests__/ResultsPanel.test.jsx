@@ -56,9 +56,6 @@ const props = (over = {}) => ({
   onRestoreAutoScale: noop,
   onExport: noop,
   onFindOutline: noop,
-  onPaintOutline: noop,
-  onPlaceCorners: noop,
-  onAddOutline: noop,
   onRescan: noop,
   ...over,
 });
@@ -81,10 +78,8 @@ beforeEach(() => {
     documents: {},
     documentOrder: [],
     activeDocumentId: null,
-    drawModeActive: false,
     scaleToolActive: false,
     scaleLines: [],
-    perimeterVertices: null,
     processingMessage: '',
   });
   useWorkspaceStore.setState({ showWork: false });
@@ -119,15 +114,6 @@ describe('the area', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline({ visible: false })] });
     const view = render(<ResultsPanel {...props({ area: 0 })} />);
     expect(part(view, 'area').getByText(/Every outline is hidden/)).toBeTruthy();
-  });
-
-  // "No outline yet", half-way through drawing one, reads as the app having
-  // lost it.
-  it('says the figure is on its way while a new outline is being drawn', () => {
-    useAppStore.setState({ calibration: calibrated, perimeterVertices: [] });
-    const view = render(<ResultsPanel {...props()} />);
-    expect(part(view, 'area').getByText(/once the new outline is drawn/)).toBeTruthy();
-    expect(part(view, 'area').queryByText('No outline yet.')).toBeNull();
   });
 
   it('says why when the room sizes could not be read', () => {
@@ -197,7 +183,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     expect(part(view, 'scale').getByText(/Rooms disagree by/)).toBeTruthy();
     // What it means for the area, and the way out of it, in the same place.
     expect(part(view, 'scale').getByText(/imply sizes about .* apart/)).toBeTruthy();
-    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Set scale using known length/ })).toBeTruthy();
     // Folded, it still says there is something in it.
     fireEvent.click(header(view, 'scale'));
     expect(within(header(view, 'scale')).getByText('Check')).toBeTruthy();
@@ -234,7 +220,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     useAppStore.setState({ perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 500000 })} />);
     expect(isOpen(view, 'scale')).toBe(true);
-    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Set scale using known length/ })).toBeTruthy();
   });
 
   // Measuring a known length ends with typing it into Scale.
@@ -244,7 +230,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     expect(isOpen(view, 'scale')).toBe(false);
     act(() => useAppStore.setState({ scaleToolActive: true }));
     expect(isOpen(view, 'scale')).toBe(true);
-    expect(part(view, 'scale').getByText('Lengths you measured')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Lengths you know')).toBeTruthy();
   });
 
   it('opens the outlines once there is more than one to tell apart', () => {
@@ -425,21 +411,20 @@ describe('saving the image', () => {
 });
 
 describe('the outline', () => {
-  it('puts the ways to draw it by hand in front of a failed trace', () => {
-    const onPaintOutline = vi.fn();
+  // There is no way to draw one by hand. A failed trace says so and keeps the
+  // retry, which is worth pressing after a trace that was interrupted.
+  it('offers to try again after a failed trace, and no way to draw it by hand', () => {
+    const onFindOutline = vi.fn();
     useAppStore.setState({
       calibration: calibrated,
       lastTraceOutcome: { level: 'failed', reason: null, floors: 0 },
     });
-    const view = render(<ResultsPanel {...props({ onPaintOutline })} />);
+    const view = render(<ResultsPanel {...props({ onFindOutline })} />);
     expect(isOpen(view, 'outline')).toBe(true);
-    const paint = part(view, 'outline').getByRole('button', { name: /Paint over the walls/ });
-    // The primary way forward, not the retry that just failed.
-    expect(paint.className).toContain('btn-primary');
-    fireEvent.click(paint);
-    expect(onPaintOutline).toHaveBeenCalled();
-    expect(part(view, 'outline').getByRole('button', { name: /Click the corners/ })).toBeTruthy();
-    expect(part(view, 'outline').getByRole('button', { name: /Try the automatic outline again/ })).toBeTruthy();
+    expect(part(view, 'outline').getByText('FloorTrace couldn’t find the outline on this plan.')).toBeTruthy();
+    fireEvent.click(part(view, 'outline').getByRole('button', { name: 'Try again' }));
+    expect(onFindOutline).toHaveBeenCalled();
+    expect(view.container.textContent).not.toMatch(/Paint over|Click the corners|draw it yourself/i);
   });
 
   // With no outline there is no picture to read the reason from, so this is the
@@ -481,27 +466,13 @@ describe('the outline', () => {
       .toContain('btn-primary');
   });
 
-  // Redrawing an outline that exists is work done on the plan: it is in the
-  // action bar's Outline menu, not repeated here.
-  it('does not repeat the redraw tools once there is an outline', () => {
+  it('offers no way to draw, redraw or add an outline once there is one', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     open(view, 'outline');
     expect(part(view, 'outline').queryByRole('button', { name: /Paint over the walls/ })).toBeNull();
     expect(part(view, 'outline').queryByRole('button', { name: /Find the outline/ })).toBeNull();
-    expect(part(view, 'outline').getByRole('button', { name: /Add another outline/ })).toBeTruthy();
-  });
-
-  // Through the shell, not the store: the shell is what takes an added outline
-  // back out again if it is abandoned before it is drawn.
-  it('adds another outline through the shell', () => {
-    const onAddOutline = vi.fn();
-    useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
-    const view = render(<ResultsPanel {...props({ area: 800, onAddOutline })} />);
-    open(view, 'outline');
-    fireEvent.click(part(view, 'outline').getByRole('button', { name: /Add another outline/ }));
-    expect(onAddOutline).toHaveBeenCalledTimes(1);
-    expect(useAppStore.getState().perimeterTraces).toHaveLength(1);
+    expect(part(view, 'outline').queryByRole('button', { name: /Add another outline/ })).toBeNull();
   });
 
   it('spells out what GLA is in the list of what an outline counts as', () => {
@@ -531,15 +502,14 @@ describe('the outline', () => {
   });
 });
 
-describe('a shell that offers no drawing', () => {
-  // The phone passes none of the ways to draw an outline.
-  it('does not end the empty section on a colon over nothing', () => {
+describe('the phone sheet', () => {
+  // The phone's one verb finds the outline, so the sheet is not handed it.
+  it('says there is no outline and offers nothing it was not handed', () => {
     useAppStore.setState({ calibration: calibrated });
-    const view = render(
-      <ResultsPanel {...props({ onFindOutline: undefined, onPaintOutline: undefined, onPlaceCorners: undefined })} />,
-    );
+    const view = render(<ResultsPanel {...props({ onFindOutline: undefined })} />);
     expect(part(view, 'outline').getByText('No outline yet.')).toBeTruthy();
-    expect(part(view, 'outline').queryByText(/draw it yourself/)).toBeNull();
+    expect(part(view, 'outline').queryAllByRole('button').filter((b) => !b.hasAttribute('aria-expanded')))
+      .toHaveLength(0);
   });
 
   it('puts the way out under the figure on the phone, where nothing is pinned', () => {
@@ -558,24 +528,20 @@ describe('the scale', () => {
     expect(view.container.querySelector('#panel-scale').textContent).not.toMatch(/px/);
   });
 
-  // With nothing read there are two ways to set the scale. The simpler one
-  // leads, as the one filled button on the panel; the room is the alternative.
-  it('leads with measuring a length when nothing could be read, and offers the room as the other way', () => {
-    useAppStore.setState({ roomOverlay: { x1: 0, y1: 0, x2: 100, y2: 100 } });
+  // With nothing read there is one way to set the scale, and it is the one
+  // filled button on the panel.
+  it('leads with a known length when nothing could be read', () => {
     const view = render(<ResultsPanel {...props({ ocrFailed: true })} />);
     const scale = part(view, 'scale');
     expect(scale.getByText(/needs one measurement from you/)).toBeTruthy();
-    const measure = scale.getByRole('button', { name: /Measure a length you know/ });
-    expect(measure.className).toContain('btn-primary');
+    const known = scale.getByRole('button', { name: /Set scale using known length/ });
+    expect(known.className).toContain('btn-primary');
     // One filled button at a time: with no outline either, the scale's is the
     // one, because it is what the figure at the top is asking for.
     expect(view.container.querySelectorAll('.btn-primary')).toHaveLength(1);
-    expect(scale.getByText(/Or use a whole room: drag the green box/)).toBeTruthy();
-    expect(scale.getByLabelText('Width')).toBeTruthy();
-    expect(scale.getByLabelText('Length')).toBeTruthy();
-    // The way to set it comes before the alternative.
-    expect(measure.compareDocumentPosition(scale.getByLabelText('Width'))
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // No box to drag and no room to type the size of: there is no room.
+    expect(scale.queryByLabelText('Width')).toBeNull();
+    expect(view.container.textContent).not.toMatch(/drag the green box/);
   });
 
   // Typing the length is the second half of the tool. It used to sit at the
@@ -593,7 +559,7 @@ describe('the scale', () => {
     // The cursor is waiting in it.
     expect(document.activeElement).toBe(box);
     expect(scale.queryByLabelText('Width')).toBeNull();
-    expect(scale.queryByRole('button', { name: /Measure a length you know/ })).toBeNull();
+    expect(scale.queryByRole('button', { name: /Set scale using known length/ })).toBeNull();
     expect(scale.queryByRole('button', { name: /Read the room sizes again/ })).toBeNull();
   });
 
@@ -607,7 +573,7 @@ describe('the scale', () => {
     open(view, 'scale');
     const scale = part(view, 'scale');
     expect(scale.getByLabelText('Length of line 1').value).toBe('20.0 ft');
-    expect(scale.getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(scale.getByRole('button', { name: /Set scale using known length/ })).toBeTruthy();
     // A line that already has its length does not take the cursor.
     expect(document.activeElement).not.toBe(scale.getByLabelText('Length of line 1'));
   });
@@ -618,7 +584,7 @@ describe('the scale', () => {
     const view = render(<ResultsPanel {...props()} />);
     const scale = part(view, 'scale');
     expect(scale.getByRole('button', { name: /Pick a room to scale from/ }).className).toContain('btn-primary');
-    expect(scale.getByRole('button', { name: /Measure a length you know/ }).className).not.toContain('btn-primary');
+    expect(scale.getByRole('button', { name: /Set scale using known length/ }).className).not.toContain('btn-primary');
   });
 
   // A second scan started during the first one's automatic run cleared the
@@ -634,7 +600,7 @@ describe('the scale', () => {
     expect(view.getByRole('button', { name: /Read the room sizes again/ }).disabled).toBe(true);
     expect(view.getByRole('button', { name: /Use a different room/ }).disabled).toBe(true);
     // A mode is not work.
-    expect(view.getByRole('button', { name: /Measure a length you know/ }).disabled).toBe(false);
+    expect(view.getByRole('button', { name: /Set scale using known length/ }).disabled).toBe(false);
   });
 
   // The messages a hand-set scale raises tell the user to choose this by

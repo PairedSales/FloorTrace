@@ -142,31 +142,6 @@ export function cancelLastSave() {
 }
 
 /**
- * How many undo points there are: a mark to come back to with `dropSince`.
- */
-export const depth = () => undoStack.length;
-
-/**
- * Forget every undo point saved since `mark`, without applying any of them.
- *
- * For an action abandoned part-way whose caller has put the state back itself
- * (`useCornerPlacement`). The points saved along the way describe steps of
- * something that, as far as the user is concerned, never happened — and undoing
- * through them would take apart what the caller just restored.
- *
- * At the cap the stack has been shifting rather than growing, so the mark no
- * longer says where the action began; nothing is dropped, which is the
- * behaviour there was before this existed.
- */
-export function dropSince(mark) {
-  if (!(mark >= 0) || undoStack.length <= mark) return;
-  undoStack.length = mark;
-  savedRedoStackForCancel = null;
-  pruneImagePool();
-  emit();
-}
-
-/**
  * Undo: restore the previous state.
  * @returns {boolean} true if undo was performed
  */

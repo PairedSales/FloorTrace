@@ -42,8 +42,6 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const isMobile = useIsMobile();
   const projectName = useAppStore((s) => s.projectName);
   const setProjectName = useAppStore((s) => s.setProjectName);
-  const measurementLines = useAppStore((s) => s.measurementLines);
-  const customShapes = useAppStore((s) => s.customShapes);
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
 
   const [options, setOptions] = useState(readExportOptions);
@@ -61,8 +59,6 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const previewBoxRef = useRef(null);
   const previewCanvasRef = useRef(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
-
-  const hasAnnotations = (measurementLines?.length ?? 0) > 0 || (customShapes?.length ?? 0) > 0;
 
   const setOption = useCallback((key, value) => {
     setOptions((prev) => {
@@ -358,13 +354,6 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           label="Wall lengths"
           hint={calibrated ? undefined : 'Needs a scale first'}
           disabled={!calibrated}
-        />
-        <Toggle
-          checked={options.annotations}
-          onChange={(v) => setOption('annotations', v)}
-          label="Your own measurements"
-          hint={hasAnnotations ? 'Distances and areas you measured' : 'You haven’t measured anything'}
-          disabled={!hasAnnotations}
         />
 
         {actionError && (
