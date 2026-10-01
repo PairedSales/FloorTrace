@@ -1251,10 +1251,20 @@ function App() {
     // the pills away; clearing the array as well made "Select room" a one-shot
     // — the second wrong guess had nothing left to pick from — and threw away
     // the tracer's interior points and the exhibit's unit style along with it.
-    await autoTraceExterior();
+    //
+    // Picking a room is about the scale, so an outline already on the plan is
+    // left alone: it used to be traced again on every pick, which replaced an
+    // outline the user had no quarrel with — and any corrections made to it.
+    // Only a plan with no outline yet gets one, because nothing else will have
+    // traced it when the automatic scale could not choose a room.
+    const outlined = useAppStore.getState().perimeterTraces
+      ?.some((t) => t.vertices?.length >= 3);
+    if (!outlined) await autoTraceExterior();
+    if (!isCurrent(work)) return;
     // The last word, because it is the one about the scale: Scale is open with
     // the green box on the plan, which is where the user is being sent.
-    if (roomDoubt && isCurrent(work)) flash(roomDoubt, 'warn');
+    if (roomDoubt) flash(roomDoubt, 'warn');
+    else if (outlined) flash('Scale set from that room');
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
     setPerimeterVertices, setMode, autoTraceExterior]);
 
