@@ -3,11 +3,38 @@
 Ideas not yet built, with the reason each is worth building and the code it
 would touch. Sized S / M relative to each other, not in hours.
 
-Seven items have been removed from this list because they shipped: trace types
-with broken-out totals, the warnings panel, visible undo/redo buttons, canvas
-keyboard shortcuts, the copy-all area summary, the void / hole-punch tool, and
-two-point scale calibration. Their design documents are gone with them — the
-code is the better copy.
+## October 2026: the manual tools were removed
+
+FloorTrace now assumes it traces the sketch well enough that users do not draw
+anything. Every manual tool was taken out so the app starts from a clean
+automatic workflow; a tool comes back only on clear evidence that users need
+it. What was removed, for whoever weighs bringing one back (the code is in git
+history before this change):
+
+- **Outline by hand** — paint over the walls (the detector's corridor mode,
+  `detection/brush.js`, is still in the pipeline and the scripts), click the
+  corners, add another outline, drag / insert / delete corners, remove several
+  corners.
+- **Cut-outs** — the void tool, and selecting and deleting a cut-out.
+- **Measuring** — distance, area and angle, and their place on the saved image.
+- **Editing the plan image** — crop, erase marks, and the offer to find the
+  outline again afterwards.
+- **The green scale box as a control** — dragging and resizing it, and the
+  placeholder box dropped when no room sizes were read.
+- **The Snap switch.**
+
+What stayed: *Set scale using known length* (the only scale a plan with no
+readable room sizes can have), picking a different room, correcting a misread
+room size, *Try another outline*, and renaming, hiding, deleting and typing
+outlines.
+
+Items 3, 4, 7 and 8 below assume outline editing exists; they are kept as a
+record and would follow a decision to bring editing back, not precede it.
+
+## Not yet built
+
+Shipped and removed from this list: trace types with broken-out totals, visible
+undo/redo buttons, the copy-all area summary and two-point scale calibration.
 
 1. **Room labels on canvas — M.**
    Place text like `Bedroom · 12'×14' · 168 sf`, positioned automatically from

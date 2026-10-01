@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { flash, flashAt, notify } from '../notify';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { flash, notify } from '../notify';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
 
@@ -15,7 +15,7 @@ const ws = () => useWorkspaceStore.getState();
 
 beforeEach(() => {
   useWorkspaceStore.setState({ statusFlash: null, notice: null });
-  useAppStore.setState({ errorAnchor: null, activeDocumentId: 'doc-1' });
+  useAppStore.setState({ activeDocumentId: 'doc-1' });
 });
 
 describe('flash — what just happened to the plan', () => {
@@ -62,37 +62,5 @@ describe('notify — something outside the plan went wrong', () => {
   it('leaves the bar alone', () => {
     notify('Could not save the project file.');
     expect(ws().statusFlash).toBeNull();
-  });
-});
-
-describe('flashAt — a refusal with a place on the plan', () => {
-  const anchor = { runs: [[{ x: 0, y: 0 }, { x: 10, y: 10 }], [{ x: 10, y: 0 }, { x: 0, y: 10 }]] };
-
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('says it in the bar and lights the place', () => {
-    flashAt('That would make the outline cross itself', anchor);
-    expect(ws().statusFlash).toMatchObject({ tone: 'warn' });
-    expect(useAppStore.getState().errorAnchor).toBe(anchor);
-    expect(ws().notice).toBeNull();
-  });
-
-  it('lets the highlight go a little after the words', () => {
-    flashAt('That would make the outline cross itself', anchor);
-    vi.advanceTimersByTime(6100);
-    expect(useAppStore.getState().errorAnchor).toBe(anchor);
-    vi.advanceTimersByTime(2000);
-    expect(useAppStore.getState().errorAnchor).toBeNull();
-  });
-
-  // An anchor is a place on one drawing. Clearing it later must not reach
-  // across a plan switch and wipe one raised since on a different plan.
-  it('does not clear a highlight raised on another plan in the meantime', () => {
-    flashAt('That would make the outline cross itself', anchor);
-    const other = { runs: [[{ x: 5, y: 5 }, { x: 6, y: 6 }]] };
-    useAppStore.setState({ activeDocumentId: 'doc-2', errorAnchor: other });
-    vi.advanceTimersByTime(10000);
-    expect(useAppStore.getState().errorAnchor).toBe(other);
   });
 });

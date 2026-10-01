@@ -62,3 +62,30 @@ export function useScaleLine() {
 
   return { setLength, removeLine, clearAll };
 }
+
+/**
+ * useScaleTool
+ *
+ * Picking the length tool up and putting it down. It is the one manual tool
+ * the app has: when no room size can be read from a plan, a length the user
+ * knows is the only scale there is.
+ *
+ * Putting it down drops the line in progress and nothing else — the committed
+ * lines and the scale they set are untouched.
+ */
+export function useScaleTool() {
+  const leaveScaleTool = useCallback(() => {
+    const state = useAppStore.getState();
+    if (!state.scaleToolActive) return;
+    state.setCurrentScaleLine(null);
+    state.setScaleToolActive(false);
+  }, []);
+
+  const toggleScaleTool = useCallback(() => {
+    const state = useAppStore.getState();
+    if (state.scaleToolActive) leaveScaleTool();
+    else state.setScaleToolActive(true);
+  }, [leaveScaleTool]);
+
+  return { toggleScaleTool, leaveScaleTool };
+}

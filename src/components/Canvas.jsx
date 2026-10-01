@@ -28,7 +28,6 @@ const Canvas = React.memo(forwardRef((props, ref) => {
     fitToWindow: () => stageApiRef.current?.fitToWindow(),
     rotateCanvas: (direction) => stageApiRef.current?.rotateCanvas(direction),
     zoomByStep: (direction) => stageApiRef.current?.zoomByStep(direction),
-    closeVoid: () => stageApiRef.current?.closeVoid(),
   }), []);
 
   // Warm the chunk during the first idle moment so a drop never waits on it.

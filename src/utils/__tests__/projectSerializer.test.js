@@ -338,14 +338,23 @@ describe('projectSerializer', () => {
       expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
 
-    it('throws on missing required fields inside customShapes', () => {
-      const storeState = createMockStoreState();
-      const project = serializeSketch(storeState);
-      project.floors[0].state.customShapes = [{
-        closed: true,
-        // missing vertices
-      }];
-      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
+    // Measurements, shapes, brush strokes and the snap switch went with the
+    // tools that made them. A file saved before that still opens, and what it
+    // carried of them does not ride into the store.
+    it('opens a file that carries what the removed tools saved, and drops it', () => {
+      const project = serializeSketch(createMockStoreState());
+      Object.assign(project.floors[0].state, {
+        measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 5, y: 5 } }],
+        customShapes: [{ closed: true }],
+        drawStrokes: [{ points: [{ x: 1, y: 1 }] }],
+        angleToolState: null,
+        autoSnapEnabled: false,
+      });
+      expect(() => validateProjectSchema(project)).not.toThrow();
+      const { statePatch } = deserializeSketch(project);
+      for (const key of ['measurementLines', 'customShapes', 'drawStrokes', 'angleToolState', 'autoSnapEnabled']) {
+        expect(statePatch, key).not.toHaveProperty(key);
+      }
     });
   });
 

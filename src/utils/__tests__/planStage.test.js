@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_TRACES, alternativeCount, planStage } from '../planStage.js';
+import { alternativeCount, planStage } from '../planStage.js';
 
 const ring = () => [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
 
@@ -33,12 +33,14 @@ describe('planStage', () => {
   });
 
   describe('the primary never repeats the action that just failed', () => {
-    it('offers the brush after a trace that produced nothing', () => {
+    // There is no other way to make an outline, so there is no verb: the
+    // panel says why and keeps the retry.
+    it('offers nothing after a trace that produced nothing', () => {
       const result = planStage({
         ...base, perimeterTraces: [],
         lastTraceOutcome: { level: 'failed', reason: 'no wall could be read' },
       });
-      expect(result.primary).toBe('outline-paint');
+      expect(result.primary).toBeNull();
     });
 
     it('offers a hand-set scale after a scan that read nothing', () => {
@@ -49,18 +51,6 @@ describe('planStage', () => {
     it('still offers the ordinary verbs when nothing has failed', () => {
       expect(planStage({ ...base, calibrated: false, perimeterTraces: [] }).primary).toBe('scale');
       expect(planStage({ ...base, perimeterTraces: [] }).primary).toBe('outline');
-    });
-  });
-
-  describe('adding an outline', () => {
-    it('waits for the first outline to be drawn', () => {
-      expect(planStage({ ...base, perimeterTraces: [trace({ vertices: [] })] }).canAddOutline).toBe(false);
-      expect(planStage({ ...base, perimeterTraces: [trace()] }).canAddOutline).toBe(true);
-    });
-
-    it('stops at the number of colours there are to tell them apart', () => {
-      const full = Array.from({ length: MAX_TRACES }, (_, i) => trace({ id: `t${i}` }));
-      expect(planStage({ ...base, perimeterTraces: full }).canAddOutline).toBe(false);
     });
   });
 });
@@ -74,7 +64,7 @@ describe('alternativeCount', () => {
     expect(alternativeCount(traces, 'another')).toBe(0);
   });
 
-  it('offers none once the user has edited the outline', () => {
+  it('offers none against an outline a saved plan carries as edited by hand', () => {
     const traces = [trace({ quality: { confidence: 0.9, edited: true, alternatives } })];
     expect(alternativeCount(traces, 't1')).toBe(0);
   });

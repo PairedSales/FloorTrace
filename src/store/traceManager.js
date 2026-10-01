@@ -79,9 +79,6 @@ const cloneHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
   ? clonePoints(h)
   : { ...h, ring: clonePoints(h.ring) }));
 
-// Naming lives in traceTypes.js, which owns the taxonomy the names come from.
-const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
-
 /**
  * How far back an outline can be walked. The list rides inside every undo
  * snapshot, every draft and every `.floorplan`, so the cap has to bound it by
@@ -135,27 +132,6 @@ export const recordAttempt = (trace) => {
 export function createTraceSlice(set, get) {
   return {
     /**
-     * Add a new empty perimeter trace and select it.
-     */
-    addPerimeterTrace: () => {
-      undoManager.save();
-      const state = get();
-
-      const newId = newTraceId();
-      const newName = generateTraceName(state.perimeterTraces);
-
-      const newTrace = makeTrace({ id: newId, name: newName });
-
-      set({
-        perimeterTraces: assignTypeColors([...state.perimeterTraces, newTrace]),
-        activeTraceId: newId,
-        traceInteractionMode: 'drawing',
-        perimeterVertices: [], // start drawing immediately
-        isDirty: true,
-      });
-    },
-
-    /**
      * Switch / select a perimeter trace.
      * Selection change does not save an undo snapshot.
      */
@@ -163,11 +139,7 @@ export function createTraceSlice(set, get) {
       const state = get();
       if (targetTraceId === state.activeTraceId) return;
 
-      set({
-        activeTraceId: targetTraceId,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null, // cancel drawing mode on switch
-      });
+      set({ activeTraceId: targetTraceId });
     },
 
     /**
@@ -198,8 +170,6 @@ export function createTraceSlice(set, get) {
         // Re-shaded so the lightness steps close up behind the deleted trace.
         perimeterTraces: assignTypeColors(remainingTraces),
         activeTraceId: nextActiveId,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
         isDirty: true,
       });
     },
@@ -377,8 +347,6 @@ export function createTraceSlice(set, get) {
       set({
         perimeterTraces: coloured,
         activeTraceId: activeStillExists ? state.activeTraceId : coloured[0].id,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
         isDirty: true,
       });
     },
@@ -423,26 +391,10 @@ export function createTraceSlice(set, get) {
       if (carried) {
         set({
           perimeterTraces: updated,
-          traceInteractionMode: 'idle',
-          perimeterVertices: null,
           isDirty: true,
         });
       }
       return carried;
-    },
-
-    /**
-     * Drop every trace's wall-face pair. The pair describes ink a crop or an
-     * erase has since changed, so the switch must not be able to re-apply it —
-     * the same reason `tracedBoundaries` is dropped on the same edit. The
-     * outlines themselves stay; only the alternative face is forgotten.
-     */
-    clearWallFaces: () => {
-      const traces = get().perimeterTraces || [];
-      if (!traces.some((t) => t.wallFaces)) return;
-      set({
-        perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
-      });
     },
 
     /**
@@ -484,8 +436,6 @@ export function createTraceSlice(set, get) {
           wallFaces: null,
           closed: true,
         } : t)),
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
         isDirty: true,
       });
       return true;
@@ -499,8 +449,6 @@ export function createTraceSlice(set, get) {
       set({
         perimeterTraces: [makeTrace({ id: defaultTraceId })],
         activeTraceId: defaultTraceId,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
       });
     },
   };

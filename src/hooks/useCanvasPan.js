@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import useAppStore from '../store/appStore';
 
 /**
@@ -13,14 +12,6 @@ import useAppStore from '../store/appStore';
  * @param {React.RefObject} opts.isDraggingRef  - shared with Canvas click-guard
  * @param {React.RefObject} opts.dragStartPosRef - shared with Canvas click-guard
  * @param {React.RefObject} opts.isZoomingRef   - from useCanvasZoom
- * @param {boolean}         opts.draggingRoom
- * @param {*}               opts.draggingRoomCorner
- * @param {*}               opts.draggingVertex
- * @param {boolean}         opts.eraserToolActive
- * @param {boolean}         opts.drawModeActive
- * @param {boolean}         opts.cropToolActive
- * @param {object|null}     opts.roomOverlay
- * @param {string}          opts.traceInteractionMode
  * @param {React.RefObject} opts.viewportSyncTokenRef
  * @returns {{ canPanCanvas, handleStageDragStart, handleStageDragEnd }}
  */
@@ -30,15 +21,6 @@ export function useCanvasPan({
   isDraggingRef,
   dragStartPosRef,
   isZoomingRef,
-  draggingRoom,
-  draggingRoomCorner,
-  draggingVertex,
-  draggingAngle,
-  eraserToolActive,
-  drawModeActive,
-  cropToolActive,
-  voidToolActive,
-  traceInteractionMode,
   viewportSyncTokenRef,
   isPinchingRef = { current: false },
 }) {
@@ -85,31 +67,12 @@ export function useCanvasPan({
   };
 
   /**
-   * True when the stage should be draggable (i.e. panning is allowed).
-   * Panning is blocked during room/corner/vertex drags, tool modes that need
-   * clean pointer events, and while the zoom animation is in flight.
+   * True when the stage should be draggable (i.e. panning is allowed): always,
+   * except while a zoom or a pinch is already moving the camera.
    */
-  const canPanCanvas = useMemo(() => {
-    if (draggingRoom || draggingRoomCorner || draggingVertex !== null || draggingAngle) return false;
-    if (eraserToolActive || drawModeActive || cropToolActive) return false;
-    if (voidToolActive) return false; // a void rectangle is a drag; panning would eat it
-    if (traceInteractionMode === 'drawing') return false; // vertex placement mode
-    // A pinch is the camera moving under two fingers; Konva's own stage drag
-    // would move it a second time from whichever finger it decided was first.
-    return !isZoomingRef.current && !isPinchingRef.current;
-  }, [
-    draggingRoom,
-    draggingRoomCorner,
-    draggingVertex,
-    draggingAngle,
-    eraserToolActive,
-    drawModeActive,
-    cropToolActive,
-    voidToolActive,
-    traceInteractionMode,
-    isZoomingRef,
-    isPinchingRef,
-  ]);
+  // A pinch is the camera moving under two fingers; Konva's own stage drag
+  // would move it a second time from whichever finger it decided was first.
+  const canPanCanvas = !isZoomingRef.current && !isPinchingRef.current;
 
   return { canPanCanvas, handleStageDragStart, handleStageDragEnd };
 }

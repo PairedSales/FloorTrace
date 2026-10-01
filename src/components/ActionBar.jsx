@@ -1,84 +1,64 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, PanelLeftOpen, X } from 'lucide-react';
+import { Loader2, PanelLeftOpen, Shuffle } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
-import { MAX_TRACES, alternativeCount as countAlternatives } from '../utils/planStage';
+import { alternativeCount as countAlternatives } from '../utils/planStage';
 import { TOOL_MODES } from './toolModes';
-import { TOOL_GROUPS } from './toolCatalog';
-import { Menu, MenuItem, MenuSep } from './Menu';
 
 /**
- * The one strip above the plan: what you can do to it, and — while you are
- * doing something — what to do next.
+ * The one strip above the plan: what FloorTrace is doing, what it just did,
+ * and — while the scale is being set by hand — what to do next.
  *
- *   at rest   [ Outline ▾ ][ Measure ▾ ][ Edit plan ▾ ]   tip
- *   in a tool   Painting the outline — paint roughly over…   brush  Cancel  Done
+ *   at rest       Outline found — garage left out            [ Try another outline ]
+ *   working       ◌ Finding the outline…                                 12s  Stop
+ *   in a mode     Setting the scale — click both ends of…                    Done
  *
  * ## What it replaces
  *
- * Two bands. A **tool rail** down the right of the plan — ten icons with a word
- * under each, whose meaning lived in a tooltip — and a **status band** that
- * turned into the instruction bar when a tool ran. The same corrections were
- * also buttons on the panel, under different names. A first-time user met
- * "Paint", "Corners", "Cut out", "Scale", "Measure", "Area", "Crop", "Erase"
- * and "More" before they had been told what any of them was for.
+ * Three menus of tools — Outline, Measure, Edit plan — for drawing and
+ * correcting the outline by hand, measuring on the plan and editing its image.
+ * FloorTrace traces the plan itself, and the tools went so that there is
+ * nothing to learn before the answer: the bar now says things and offers one.
  *
- * Now the bar says three things, in the order a person runs into them: the
- * *outline* is wrong, I want to *measure* something, the *plan* needs tidying.
- * Each is a menu whose rows have a name and a sentence (`toolCatalog.js`), so
- * nothing has to be learned from an icon and nothing is on screen until it is
- * asked for. The fourth thing — the *scale* is wrong — is not here: the scale
- * is a number rather than a drawing, and it is corrected on the panel, beside
- * where it is stated.
+ * ## The one thing it offers
  *
- * ## One bar, two states
+ * **Try another outline**, listed only while the search left a runner-up for
+ * the outline on the plan. The commonest wrong outline is a tie-break between
+ * two near-equal candidates, and the other one is already computed.
  *
- * Picking a tool turns the whole bar into that tool's instruction: its name,
- * what to do, its brush, and its way out. The menus stand down — a tool is a
- * mode, and the only two things that matter in one are what it wants and how to
- * leave. That instruction is the most important text in any correction the
- * user makes, so it is set at reading size in a 48 px bar.
+ * ## Modes
+ *
+ * Two are left, both about the scale and both started from the panel's Scale
+ * section: setting it from a known length, and choosing the room to take it
+ * from. While one is on the bar is its instruction and its way out
+ * (`toolModes.js`).
  *
  * ## What gives way when the bar is narrow
  *
  * Words, never controls. Everything in `.action-lead` truncates and the lead
- * clips; Stop, Cancel and Done live outside it, so a long message can never
- * paint over the button that ends it. Under 640 px (a container query — the
- * bar's width is the window less a panel that may be open) a running tool's
- * instruction takes a row of its own and wraps, and the brush's word label and
- * the key hints drop. At rest the tip stands down before the menus do.
+ * clips; Stop and Done live outside it, so a long message can never paint over
+ * the button that ends it. Under 640 px (a container query — the bar's width
+ * is the window less a panel that may be open) a mode's instruction takes a row
+ * of its own and wraps, and the key hints drop.
  *
  * ## The one line the app speaks in
  *
  * Whatever just happened to the plan is said here, as a flash, and nowhere
  * else: green when it was done ("Outline found", "Area copied"), amber when it
- * was not and why ("An outline needs at least three corners"). There is no
- * pop-up for any of it. A whole automatic run — read the sizes, work out the
- * scale, find the outline — ends in exactly one such line, where it used to
- * end in up to three toasts over the plan (`utils/notify.js`).
+ * was not and why. There is no pop-up for any of it. A whole automatic run —
+ * read the sizes, work out the scale, find the outline — ends in exactly one
+ * such line (`utils/notify.js`).
  *
- * This is the one place a screen reader hears it. The corner count and the
- * elapsed seconds are deliberately **outside** the live region: it is
- * `aria-atomic`, so a number changing on every click, or once a second, would
- * re-announce the whole bar each time.
+ * This is the one place a screen reader hears it. The elapsed seconds are
+ * deliberately **outside** the live region: it is `aria-atomic`, so a number
+ * changing once a second would re-announce the whole bar each time.
  *
  * A flash is shown only for what is left of its window, so one raised while
  * the bar was off screen is not replayed when it returns. An amber one stays
  * longer than a green one: it has to be read, not just noticed.
  *
- * ## The offer
- *
- * After the plan's image has been edited — marks erased, or cropped to the
- * house — the bar at rest offers to find the outline again, because that is
- * nearly always why the image was edited. It is an offer and not an action:
- * the outline on the plan may have been adjusted by hand, and re-tracing over
- * it unasked would throw that away. It stands until it is taken, dismissed, or
- * a trace runs for any other reason.
- *
- * Commands that start work (find the outline, the next-best outline) wait for a
- * running job; tools do not — entering a mode changes nothing the job was
- * computed from. The scale is never stated in pixels here.
+ * The scale is never stated in pixels here.
  */
 
 // How long a flash stays in the bar. A refusal has to be read; a confirmation
@@ -91,62 +71,10 @@ const FLASH_MS = { ok: 3200, warn: 6000 };
 // the only thing on screen that distinguishes "working" from "wedged".
 const ELAPSED_AFTER_MS = 5000;
 
-// What the bar says at rest: the two things a newcomer cannot find out by
-// looking — that the outline's corners move, and where redrawing it lives. It
-// is the standing answer to "the outline is not right", said once and calmly
-// rather than as a warning about each trace.
-const IDLE_TIP = 'Outline not right? Drag any corner, or redraw it from the Outline menu.';
-
-const BUSY_REASON = 'Wait until FloorTrace has finished what it is doing.';
-
-// A leading, trailing or doubled rule is what a menu looks like after one of
-// its rows has stood down.
-const tidy = (rows) => {
-  const out = [];
-  for (const row of rows) {
-    if (row === '-' && (out.length === 0 || out[out.length - 1] === '-')) continue;
-    out.push(row);
-  }
-  while (out[out.length - 1] === '-') out.pop();
-  return out;
-};
-
-const TaskMenu = ({ group, rowState, onSelect }) => {
-  const byId = new Map([...group.tools, ...(group.commands ?? [])].map((entry) => [entry.id, entry]));
-  const rows = tidy(group.menu
-    .map((id) => (id === '-' ? '-' : { entry: byId.get(id), state: rowState(byId.get(id)) }))
-    .filter((row) => row === '-' || (row.entry && row.state)));
-
-  return (
-    <Menu id={group.id} group="bar" label={group.title} icon={group.icon} title={group.hint}>
-      {rows.map((row, i) => (row === '-'
-        ? <MenuSep key={`rule-${i}`} />
-        : (
-          <MenuItem
-            key={row.entry.id}
-            icon={row.entry.icon}
-            label={row.state.label ?? row.entry.label}
-            description={row.state.disabled ? (row.state.reason ?? row.entry.hint) : row.entry.hint}
-            keys={row.entry.digit ?? row.entry.keys}
-            disabled={row.state.disabled}
-            danger={row.entry.danger}
-            onSelect={() => onSelect(row.entry.id)}
-          />
-        )))}
-    </Menu>
-  );
-};
-
 const ActionBar = ({
   tool,
-  count = 0,
-  brushSize,
-  onBrushSizeChange,
   onCancel,
-  onDone,
-  hasArea = false,
-  hasToolData = false,
-  onSelect,
+  onUseAlternative,
   // The results panel can be put away; while it is, the way back sits here.
   panelOpen = true,
   onShowPanel,
@@ -155,14 +83,8 @@ const ActionBar = ({
   const processingMessage = useAppStore((s) => s.processingMessage);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
-  const painting = useAppStore((s) => s.drawModeActive);
-  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
-  const retraceOfferFor = useWorkspaceStore((s) => s.retraceOfferFor);
-  const setRetraceOfferFor = useWorkspaceStore((s) => s.setRetraceOfferFor);
 
-  const traces = perimeterTraces ?? [];
-  const tracedCount = traces.filter((t) => t.vertices?.length >= 3).length;
-  const alternatives = countAlternatives(traces, activeTraceId);
+  const alternatives = countAlternatives(perimeterTraces ?? [], activeTraceId);
 
   // What just happened to the plan lands here rather than over it.
   const flash = useWorkspaceStore((s) => s.statusFlash);
@@ -233,71 +155,25 @@ const ActionBar = ({
   const mode = TOOL_MODES[tool];
   const running = !!mode;
   const tinted = running || isProcessing;
-  const hint = running ? mode.hint : (tracedCount > 0 ? IDLE_TIP : null);
-  // Only at rest, and only for the plan it was raised on: a tool's instruction
-  // and a running job both outrank it.
-  const offerRetrace = !running && !isProcessing && tracedCount > 0
-    && retraceOfferFor != null && retraceOfferFor === activeDocumentId;
-
-  // What each row of the menus is allowed to do right now: `null` to stand
-  // down, otherwise whether it is usable and, when it is not, why.
-  const rowState = (entry) => {
-    if (!entry) return null;
-    switch (entry.id) {
-      case 'alternative':
-        if (!alternatives) return null;
-        return {
-          label: alternatives > 1 ? `Try another outline (${alternatives} more)` : entry.label,
-          disabled: isProcessing || painting,
-          reason: BUSY_REASON,
-        };
-      case 'findOutline':
-        return {
-          label: tracedCount > 0 ? entry.label : 'Find the outline',
-          disabled: isProcessing || painting,
-          reason: BUSY_REASON,
-        };
-      case 'addOutline':
-        if (tracedCount === 0) {
-          return { disabled: true, reason: 'Draw the first outline before adding another.' };
-        }
-        return traces.length >= MAX_TRACES
-          ? { disabled: true, reason: `${MAX_TRACES} outlines is the most one plan can have.` }
-          : { disabled: false };
-      case 'clearMeasurements':
-        return hasToolData ? { disabled: false } : null;
-      default:
-        return { disabled: !!entry.needsArea && !hasArea, reason: entry.needsArea };
-    }
-  };
 
   return (
     // `action-bar` is the query container; the row inside it wraps onto a
-    // second line only while a tool runs in a narrow bar (see index.css).
+    // second line only while a mode is on in a narrow bar (see index.css).
     <div className="action-bar w-full min-w-0 shrink-0">
       <div className={`flex items-center gap-1 w-full min-w-0 min-h-[48px] px-2 py-1.5
                        text-[14px] select-none border-b
                        ${running ? 'action-row-running' : 'action-row-idle'}
                        ${tinted ? 'bg-accent/10 border-accent/40' : 'bg-panel border-line-soft'}`}>
-        {!running && (
-          <>
-            {!panelOpen && onShowPanel && (
-              <button
-                type="button"
-                onClick={onShowPanel}
-                className="btn btn-quiet btn-sm shrink-0"
-                title="Show the area and its details again (O)"
-              >
-                <PanelLeftOpen className="w-[18px] h-[18px]" aria-hidden="true" />
-                Show results
-              </button>
-            )}
-            <div role="toolbar" aria-label="Tools" className="flex items-center gap-0.5 shrink-0">
-              {TOOL_GROUPS.filter((group) => group.menu).map((group) => (
-                <TaskMenu key={group.id} group={group} rowState={rowState} onSelect={onSelect} />
-              ))}
-            </div>
-          </>
+        {!running && !panelOpen && onShowPanel && (
+          <button
+            type="button"
+            onClick={onShowPanel}
+            className="btn btn-quiet btn-sm shrink-0"
+            title="Show the area and its details again (O)"
+          >
+            <PanelLeftOpen className="w-[18px] h-[18px]" aria-hidden="true" />
+            Show results
+          </button>
         )}
 
         {/* The lead: what is happening and what to do about it. It takes the
@@ -337,34 +213,9 @@ const ActionBar = ({
             )}
           </div>
 
-          {/* One slot, in this order: Working… says what is happening, a flash
-              the user just earned beats an offer, and an offer beats the
-              standing instruction. */}
-          {!isProcessing && !shownFlash && offerRetrace && (
-            <span className="inline-flex min-w-0 items-center gap-2">
-              <span className="action-tip min-w-0 truncate text-fg-2">The plan has changed.</span>
-              <button
-                type="button"
-                onClick={() => onSelect('findOutline')}
-                className="btn btn-secondary btn-sm shrink-0"
-              >
-                Find the outline again
-              </button>
-              <button
-                type="button"
-                onClick={() => setRetraceOfferFor(null)}
-                aria-label="Keep the outline as it is"
-                title="Keep the outline as it is"
-                className="icon-btn h-8 w-8 shrink-0"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </span>
-          )}
-          {!isProcessing && !shownFlash && !offerRetrace && hint && (
-            <span className={`action-hint inline-flex min-w-0 shrink-[99] whitespace-nowrap
-                              ${running ? 'text-fg' : 'action-tip text-fg-3'}`}>
-              <span className="min-w-0 truncate">{hint}</span>
+          {!isProcessing && !shownFlash && running && (
+            <span className="action-hint inline-flex min-w-0 shrink-[99] whitespace-nowrap text-fg">
+              <span className="min-w-0 truncate">{mode.hint}</span>
             </span>
           )}
         </div>
@@ -392,55 +243,30 @@ const ActionBar = ({
           </span>
         )}
 
-        {running && count > 0 && (
-          <span className="shrink-0 px-1 tabular-nums text-fg-2">
-            {count} {count === 1 ? 'corner' : 'corners'}
-          </span>
+        {/* The runner-up outlines the search already scored. Not while a job
+            runs: swapping the outline under a trace in flight would be undone
+            by the trace landing. */}
+        {!running && !isProcessing && alternatives > 0 && onUseAlternative && (
+          <button
+            type="button"
+            onClick={onUseAlternative}
+            title="FloorTrace found more than one possible outline; this swaps in the next one"
+            className="btn btn-secondary btn-sm shrink-0 ml-auto"
+          >
+            <Shuffle className="w-4 h-4" aria-hidden="true" />
+            {alternatives > 1 ? `Try another outline (${alternatives} more)` : 'Try another outline'}
+          </button>
         )}
 
-        {running && mode.brush && (
-          <label className="inline-flex items-center gap-2 shrink-0 px-1 text-fg-2">
-            <span className="action-optional">Brush size</span>
-            <input
-              type="range"
-              aria-label="Brush size"
-              min={mode.brush === 'draw' ? 8 : 4}
-              max={mode.brush === 'draw' ? 400 : 200}
-              step={mode.brush === 'draw' ? 6 : 4}
-              value={brushSize}
-              onChange={(e) => onBrushSizeChange(Number(e.target.value))}
-              className="w-28 h-4 accent-accent cursor-pointer"
-            />
-          </label>
-        )}
-
-        {/* The way out, last, where the eye ends up. A tool with nothing to
-            commit is left with "Done" — its one button, so it is the filled
-            one; every other tool is left with Cancel beside what it commits. */}
+        {/* The way out of a mode, last, where the eye ends up. Neither mode has
+            anything to commit — a length lands when it is typed, a room when it
+            is clicked — so there is one button, and it is called Done. */}
         {running && (
           <span className="inline-flex items-center gap-2 shrink-0 ml-auto pl-1">
-            {mode.leaveLabel ? (
-              <button type="button" onClick={onCancel} className="btn btn-primary btn-sm">
-                {mode.leaveLabel}
-                <kbd className="action-optional border-accent-ink/30 bg-transparent text-accent-ink">Esc</kbd>
-              </button>
-            ) : (
-              <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">
-                Cancel
-                <kbd className="action-optional">Esc</kbd>
-              </button>
-            )}
-
-            {onDone && mode.doneLabel && (
-              <button type="button" onClick={onDone} className="btn btn-primary btn-sm">
-                {mode.doneLabel}
-                {mode.doneKey && (
-                  <kbd className="action-optional border-accent-ink/30 bg-transparent text-accent-ink">
-                    {mode.doneKey}
-                  </kbd>
-                )}
-              </button>
-            )}
+            <button type="button" onClick={onCancel} className="btn btn-primary btn-sm">
+              Done
+              <kbd className="action-optional border-accent-ink/30 bg-transparent text-accent-ink">Esc</kbd>
+            </button>
           </span>
         )}
       </div>

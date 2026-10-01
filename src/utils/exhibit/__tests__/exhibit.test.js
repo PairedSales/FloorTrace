@@ -47,8 +47,6 @@ const setUp = (patch = {}) => {
     canvasRotation: 0,
     rooms: [],
     detectedDimensions: [],
-    measurementLines: [],
-    customShapes: [],
     perimeterTraces: [trace()],
     activeTraceId: 't1',
     calibration: {
@@ -298,19 +296,15 @@ describe('exhibit model', () => {
     expect(model.headline.value).toBe('10,000');
   });
 
-  it('omits wall lengths and annotations when they are switched off', () => {
-    const state = setUp({
-      measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 10, y: 0 } }],
-    });
+  it('omits wall lengths and outline labels when they are switched off', () => {
+    const state = setUp();
     const on = buildExhibitModel(state);
     expect(on.plan.traces[0].edges).toHaveLength(4);
-    expect(on.plan.lines).toHaveLength(1);
 
     const off = buildExhibitModel(state, {
-      options: { sideLengths: false, annotations: false, outlineLabels: false },
+      options: { sideLengths: false, outlineLabels: false },
     });
     expect(off.plan.traces[0].edges).toHaveLength(0);
-    expect(off.plan.lines).toHaveLength(0);
     expect(off.plan.traces[0].badge).toBeNull();
   });
 

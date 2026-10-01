@@ -1,6 +1,6 @@
 import {
-  ArrowUpRight, Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Layers, Maximize,
-  Moon, Brush, Route, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
+  ArrowUpRight, Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Maximize,
+  Moon, RotateCw, Route, ScanSearch, ScanText, Share, Sun, Trash2, MonitorSmartphone,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
 import { openTracingTutorial } from '../../utils/tracingTutorial';
@@ -47,9 +47,9 @@ const Toggle = ({ icon, label, detail, checked, onToggle }) => (
 /**
  * Everything the phone screen has no room to show at once.
  *
- * Grouped by what the user is doing — the plan, tracing it, taking the result
- * away, how it is shown. The desktop spreads the same commands over its header
- * Menu, its action bar and its panel; a phone has one list. There is no
+ * Grouped by what the user is doing — the plan, measuring it again, taking the
+ * result away, how it is shown. The desktop spreads the same commands over its
+ * header Menu and its panel; a phone has one list. There is no
  * keybinding column (there is no keyboard), the checkmarks are on the right
  * where a touch list puts them, and "Take a photo" exists here and nowhere on
  * the desktop: on a phone the plan is usually a sheet of paper on the table in
@@ -59,9 +59,9 @@ const Toggle = ({ icon, label, detail, checked, onToggle }) => (
 const MobileMenuSheet = ({
   open, onClose, image, hasArea,
   onFileOpen, onTakePhoto, onExport, onCopyExhibit, onSaveProject, onCloseActivePlan,
-  onFindRoomSize, onTracePerimeter, onDrawExterior, onOutlineByVertex, onAddFloor, canAddOutline,
-  onFitToWindow, showSideLengths, onShowSideLengthsChange,
-  autoSnapEnabled, onAutoSnapChange, onUnitChange,
+  onFindRoomSize, onTracePerimeter,
+  onFitToWindow, onRotate, showSideLengths, onShowSideLengthsChange,
+  onUnitChange,
   saveOnExit, onSaveOnExitChange, enhancedOcr, onEnhancedOcrChange,
   theme, onCycleTheme, onHelpOpen,
 }) => {
@@ -87,6 +87,14 @@ const MobileMenuSheet = ({
             onSelect={onFitToWindow}
             close={onClose}
           />
+          {/* Stays open: turning the plan is usually done more than once. */}
+          <Row
+            icon={RotateCw}
+            label="Turn the plan"
+            detail="45° at a time"
+            disabled={!image}
+            onSelect={() => onRotate?.('clockwise')}
+          />
         </Section>
 
         <Section title="Measure it again">
@@ -103,33 +111,6 @@ const MobileMenuSheet = ({
             label="Find the outline"
             disabled={!image}
             onSelect={onTracePerimeter}
-            close={onClose}
-          />
-          <Row
-            icon={Brush}
-            label="Paint over the walls"
-            detail="Best when FloorTrace cannot find the outline itself"
-            disabled={!image}
-            onSelect={onDrawExterior}
-            close={onClose}
-          />
-          <Row
-            icon={Waypoints}
-            label="Tap the corners"
-            disabled={!image}
-            onSelect={onOutlineByVertex}
-            close={onClose}
-          />
-          {/* Gated on `canAddOutline`, not just `image`: `addPerimeterTrace`
-              has no cap of its own, so the seven-outline ceiling lives entirely
-              in the UI and every surface offering the verb has to carry it.
-              This one did not, and outlines past the seventh are unreachable by
-              the Alt/Shift+1–7 switcher. */}
-          <Row
-            icon={Layers}
-            label="Add another outline"
-            disabled={!image || !canAddOutline}
-            onSelect={onAddFloor}
             close={onClose}
           />
         </Section>
@@ -165,11 +146,6 @@ const MobileMenuSheet = ({
             label="Wall lengths on the plan"
             checked={showSideLengths}
             onToggle={() => onShowSideLengthsChange(!showSideLengths)}
-          />
-          <Toggle
-            label="Snap corners to walls"
-            checked={autoSnapEnabled}
-            onToggle={() => onAutoSnapChange(!autoSnapEnabled)}
           />
           <Toggle
             label="How the area was calculated"
