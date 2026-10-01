@@ -166,7 +166,7 @@ const ActionBar = ({
 
   // What just happened to the plan lands here rather than over it.
   const flash = useWorkspaceStore((s) => s.statusFlash);
-  const [liveFlash, setLiveFlash] = useState(null);
+  const [shownFlash, setShownFlash] = useState(null);
   useEffect(() => {
     if (!flash) return undefined;
     // Only for what is left of its window. The bar is not always on screen —
@@ -175,27 +175,27 @@ const ActionBar = ({
     // which would otherwise be shown and announced over the next plan.
     const left = (FLASH_MS[flash.tone] ?? FLASH_MS.ok) - (Date.now() - (flash.at ?? 0));
     if (left <= 0) {
-      setLiveFlash(null);
+      setShownFlash(null);
       return undefined;
     }
-    setLiveFlash(flash);
-    const t = setTimeout(() => setLiveFlash(null), left);
+    setShownFlash(flash);
+    const t = setTimeout(() => setShownFlash(null), left);
     return () => clearTimeout(t);
   }, [flash]);
 
-  // A job starting silences whatever the last one ended on: "Finding the
-  // outline…" beside "Outline found." is two answers to one question. Anything
-  // said once it is under way — "Still working, try that again" — still shows.
+  // A job starting ends whatever the last one ended on: "Finding the outline…"
+  // beside "Outline found" is two answers to one question. For good, not only
+  // while the job runs — a run is several jobs back to back, and the old line
+  // came back in the gap between two of them. Anything said once a job is
+  // under way ("Still working, try that again") is a new flash and still shows.
   //
-  // Worked out while rendering rather than cleared in an effect: an effect runs
-  // after the paint, and the live region would have announced the stale line
-  // in the frame before it.
-  const [busySince, setBusySince] = useState(null);
-  if (isProcessing && busySince === null) setBusySince(Date.now());
-  if (!isProcessing && busySince !== null) setBusySince(null);
-  const shownFlash = liveFlash && isProcessing && (liveFlash.at ?? 0) < (busySince ?? Date.now())
-    ? null
-    : liveFlash;
+  // Done while rendering rather than in an effect: an effect runs after the
+  // paint, and the live region would have announced the stale line first.
+  const [wasProcessing, setWasProcessing] = useState(isProcessing);
+  if (isProcessing !== wasProcessing) {
+    setWasProcessing(isProcessing);
+    if (isProcessing && shownFlash) setShownFlash(null);
+  }
 
   // How long the running job has been running, and whether anything owns it.
   //

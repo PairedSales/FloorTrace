@@ -123,6 +123,28 @@ describe('ActionBar at rest', () => {
     expect(view.getByText(/Still working/)).toBeTruthy();
   });
 
+  // A run is several jobs back to back — read the sizes, measure the rooms,
+  // find the outline — with a gap between each. The last plan's line must not
+  // come back in one of the gaps.
+  it('does not bring the old line back between two steps of the next run', () => {
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Outline found'); });
+    act(() => { useAppStore.setState({ isProcessing: true, processingMessage: 'Reading the room sizes…' }); });
+    act(() => { useAppStore.setState({ isProcessing: false, processingMessage: '' }); });
+    expect(view.queryByText('Outline found')).toBeNull();
+    act(() => { useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' }); });
+    expect(view.queryByText('Outline found')).toBeNull();
+  });
+
+  // The line a job ends in is raised while the job is still marked as running.
+  it('keeps the line a job ends in once the job is over', () => {
+    useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' });
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Outline found'); });
+    act(() => { useAppStore.setState({ isProcessing: false, processingMessage: '' }); });
+    expect(view.getByText('Outline found')).toBeTruthy();
+  });
+
   // The bar is one line and truncates; the sentence must still be readable.
   it('carries the whole sentence where a truncated one can be read', () => {
     const view = render(<ActionBar {...props()} />);
