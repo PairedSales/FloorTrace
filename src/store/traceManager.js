@@ -13,7 +13,6 @@ import { classifyTraces } from '../utils/traceClassification';
 // from here, so sourcing it there made a cycle that only worked by hoisting.
 import { calculateArea, mergeHoles } from '../utils/areaCalculator';
 import { markStaleHoles } from '../utils/geometryValidation';
-import { RESULT_SCOPED_CODES } from '../utils/boundaryQuality';
 import { pointInPolygon } from '../utils/detection/polygon';
 
 // Which existing trace each newly detected floor *is*, decided by where the
@@ -131,43 +130,6 @@ export const recordAttempt = (trace) => {
   if ((trace?.vertices?.length ?? 0) < 3) return trace;
   const attempts = [...(trace.attempts ?? []), makeAttempt(trace)];
   return { ...trace, attempts: attempts.slice(-MAX_TRACE_ATTEMPTS) };
-};
-
-// Rebuilt, never mutated: `quality.warnings` is the array `rankedWarnings`
-// indexes into, and every reader of a trace compares by reference.
-const withWarningAcknowledged = (trace, index, acknowledged) => ({
-  ...trace,
-  quality: {
-    ...trace.quality,
-    warnings: trace.quality.warnings.map((w, i) => (
-      i === index ? { ...w, acknowledged } : w
-    )),
-  },
-});
-
-// The same finding on a sibling outline. `pipeline.js` fans every whole-drawing
-// warning onto every floor, and the panel prints the group once — so a mark
-// left on one copy is a mark the other copies contradict. Keyed on code plus
-// payload, which is the key `boundary.js` itself dedupes on.
-const warningKey = (w) => `${w?.code}|${JSON.stringify(w?.detail ?? null)}`;
-
-const withGroupAcknowledged = (traces, target, index, acknowledged) => {
-  const source = target.quality.warnings[index];
-  if (!RESULT_SCOPED_CODES.has(source.code)) {
-    return traces.map((t) => (t === target ? withWarningAcknowledged(t, index, acknowledged) : t));
-  }
-  const key = warningKey(source);
-  return traces.map((t) => {
-    const warnings = t?.quality?.warnings;
-    if (!warnings?.some((w) => warningKey(w) === key)) return t;
-    return {
-      ...t,
-      quality: {
-        ...t.quality,
-        warnings: warnings.map((w) => (warningKey(w) === key ? { ...w, acknowledged } : w)),
-      },
-    };
-  });
 };
 
 export function createTraceSlice(set, get) {
@@ -524,55 +486,6 @@ export function createTraceSlice(set, get) {
         } : t)),
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
-      });
-      return true;
-    },
-
-    /**
-     * Mark one detection warning as checked against the plan and accepted.
-     *
-     * `warningIndex` is the position in *this trace's* `quality.warnings`,
-     * which is exactly what `rankedWarnings` carries through as `.index` —
-     * the ranked list is a presentation of that array, so an index into the
-     * ranking would acknowledge a different warning than the one clicked as
-     * soon as anything re-ranked.
-     *
-     * A whole-drawing warning is marked on every outline it was fanned onto,
-     * because it is one finding and the panel prints it once. Marking only the
-     * copy behind the row left the siblings contradicting it, and the row came
-     * straight back.
-     *
-     * Document content: it takes one off the issue count and prints on the
-     * exhibit as reviewed, so it saves its own undo point.
-     */
-    acknowledgeWarning: (traceId, warningIndex, note = null) => {
-      const traces = get().perimeterTraces || [];
-      const trace = traces.find((t) => t.id === traceId);
-      if (!trace?.quality?.warnings?.[warningIndex]) return false;
-      undoManager.save();
-
-      const acknowledged = { at: Date.now(), ...(note ? { note } : {}) };
-      set({
-        perimeterTraces: withGroupAcknowledged(traces, trace, warningIndex, acknowledged),
-        isDirty: true,
-      });
-      return true;
-    },
-
-    /**
-     * Put a warning back in the count, across the same group `acknowledgeWarning`
-     * marked. No-ops on one that was never acknowledged, so it cannot spend an
-     * undo point saying nothing.
-     */
-    unacknowledgeWarning: (traceId, warningIndex) => {
-      const traces = get().perimeterTraces || [];
-      const trace = traces.find((t) => t.id === traceId);
-      if (!trace?.quality?.warnings?.[warningIndex]?.acknowledged) return false;
-      undoManager.save();
-
-      set({
-        perimeterTraces: withGroupAcknowledged(traces, trace, warningIndex, null),
         isDirty: true,
       });
       return true;

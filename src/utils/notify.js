@@ -1,110 +1,95 @@
-import { toast } from 'sonner';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 
 /**
  * The one place the app decides how loudly to speak.
  *
- * The routing rule:
+ *   panel     — anything about the measurement that is still true. The area, a
+ *               doubtful scale, why there is no outline. Never a passing message.
+ *   flash()   — the bar above the plan: what just happened to the plan. One
+ *               line, latest wins. Green when it was done ("Outline found"),
+ *               amber when it was not, and why ("An outline needs three corners").
+ *   notify()  — one notice over the plan, for what went wrong *outside* the
+ *               plan and has nowhere of its own to be said: a file that would
+ *               not open, a save that failed, storage that is full.
+ *   dialog    — anything that destroys work. A dialog's own errors stay in it.
  *
- *   toast       — the user must know it, and cannot see it
- *   flash()     — confirmation of something they just did
- *   action bar  — what the current mode needs, and its way out
- *   panel       — anything still true, that they may act on later
- *   dialog      — anything that destroys work
+ * A message that merely echoes what is already on screen gets no channel at all.
  *
- * A message that merely echoes visible chrome gets no channel at all.
+ * ## Why there is no stack
+ *
+ * This used to be a toast library with room for two. Every stage of the
+ * automatic run — the file loader, the scan, the scale, the trace, the typing
+ * of outlines — reported on itself as it finished, each under its own id, and
+ * they finish within a second or two of each other. Measured on the nine sample
+ * plans: eight raised at least one toast, two raised a pair twelve milliseconds
+ * apart, and on two the toast and the panel contradicted each other, because
+ * each was also worked out twice — once for the toast and once for the panel.
+ *
+ * So the stages do not narrate. The run ends in one line in the bar, the panel
+ * holds whatever is still true, and a notice is raised only when the thing that
+ * went wrong is not on the plan at all. There is one notice at a time: a second
+ * replaces the first, because the first was about something the user has since
+ * moved on from.
  */
-
-// Three tiers, not the six ad-hoc numbers this replaced. Duration tracks
-// importance so the pairing is learnable: acknowledgements go before you look
-// at them, failures wait.
-export const DURATION = {
-  SHORT: 3000,
-  NORMAL: 6000,
-  LONG: 10000,
-};
-
-const EMIT = {
-  success: toast.success,
-  error: toast.error,
-  warning: toast.warning,
-  info: toast.info,
-};
-
-const DEFAULT_DURATION = {
-  success: DURATION.SHORT,
-  info: DURATION.NORMAL,
-  warning: DURATION.NORMAL,
-  error: DURATION.LONG,
-};
 
 /**
- * Raise a toast. `type` and `id` are both required.
+ * What just happened to the plan, in the bar above it.
  *
- * `type` used to be inferred by substring-matching the message — a message
- * containing "detected" was styled as a success regardless of what it said,
- * which in an app whose worst news is about detection is a loaded gun.
- *
- * `id` is what makes the stack survivable: sonner replaces a toast with the
- * same id instead of stacking a second copy, so a repeated condition updates
- * in place. Without it, two identical messages are two toasts and the visible
- * cap (2) is spent on saying one thing twice.
+ * `tone` is 'ok' for something done and 'warn' for something that was not —
+ * a refusal, a job that came to nothing, a step still needed. Never for news
+ * that is still true a minute later: that belongs on the panel.
  */
-export function notify(message, { type, id, duration, action } = {}) {
-  if (!type || !EMIT[type]) {
-    throw new Error(`notify() needs an explicit type (got ${JSON.stringify(type)}) for: ${message}`);
+export function flash(text, tone = 'ok') {
+  useWorkspaceStore.getState().flashStatus(text, tone);
+}
+
+/**
+ * Something outside the plan went wrong. `type` is 'error' when it failed and
+ * 'warning' when it half-worked or the user's work is at risk.
+ *
+ * `action` is `{label, onClick}` — the one thing to do about it, when there is
+ * one. Latest wins; there is no stack to manage and no id to pick.
+ */
+export function notify(message, { type = 'error', action = null } = {}) {
+  if (type !== 'error' && type !== 'warning') {
+    throw new Error(`notify() is for failures: type must be 'error' or 'warning' (got ${JSON.stringify(type)}) for: ${message}`);
   }
-  if (!id) {
-    throw new Error(`notify() needs a stable id so it can coalesce, for: ${message}`);
-  }
-  return EMIT[type](message, {
-    id,
-    duration: duration ?? DEFAULT_DURATION[type],
-    ...(action ? { action } : {}),
+  useWorkspaceStore.getState().setNotice({
+    text: message,
+    tone: type === 'error' ? 'crit' : 'warn',
+    action,
   });
 }
 
+// How long the place a refusal points at stays lit. Longer than the words:
+// the highlight is the useful half, and it should not vanish the instant they do.
+const ANCHOR_MS = 7500;
 let anchorTimer = null;
 
 /**
- * A refusal that has a place on the plan. The message goes to the toast; the
- * geometry goes to the canvas, where WarningHighlightLayer draws it with the
- * same treatment the detector's own `segment` warnings get.
+ * A refusal that has a place on the plan. The words go to the bar; the place
+ * goes to the canvas, where `RefusalHighlightLayer` draws it.
  *
- * "Cannot close perimeter: would cause self-intersection" is unactionable on
- * its own — the user has to find the crossing themselves. Highlighting the two
- * edges makes it a pointer instead of a dead end.
+ * "That would make the outline cross itself" is unactionable on its own — the
+ * user has to find the crossing themselves. Lighting the two edges makes it a
+ * pointer instead of a dead end.
  */
-export function notifyAt(message, { anchor, id, type = 'error', duration } = {}) {
-  const ms = duration ?? DEFAULT_DURATION[type] ?? DURATION.LONG;
+export function flashAt(text, anchor) {
   const store = useAppStore.getState();
   store.setErrorAnchor(anchor ?? null);
   clearTimeout(anchorTimer);
   if (anchor) {
-    // Outlives the toast slightly: the highlight is the useful half, and it
-    // should not vanish the instant the words do.
-    //
     // The plan it belongs to is captured now, and checked when it fires. An
     // anchor is a place on one drawing, so clearing it later must not reach
     // across a plan switch and wipe a highlight the user has since raised on a
-    // different plan — the timer outlives the toast by a second and a half,
-    // which is long enough to switch.
+    // different plan.
     const anchoredTo = store.activeDocumentId;
     anchorTimer = setTimeout(() => {
       const now = useAppStore.getState();
       if (now.activeDocumentId !== anchoredTo) return;
       now.setErrorAnchor(null);
-    }, ms + 1500);
+    }, ANCHOR_MS);
   }
-  return notify(message, { type, id, duration: ms });
-}
-
-/**
- * Confirmation of the user's own action, in the action bar rather than over
- * the plan. Latest wins — there is no stack, because there is nothing to
- * compare between two acknowledgements.
- */
-export function flash(text) {
-  useWorkspaceStore.getState().flashStatus(text);
+  flash(text, 'warn');
 }

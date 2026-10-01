@@ -2,7 +2,6 @@ import { useCallback, useRef } from 'react';
 import { detectRoomsFromLabels } from '../utils/detection';
 import { selectProjectScale } from '../utils/detection/scale.js';
 import { isUserAsserted } from '../utils/detection/validate.js';
-import { notify, flash } from '../utils/notify';
 import { perfMark, MARKS } from '../utils/perfMarks';
 import useAppStore from '../store/appStore';
 import { beginWork, settleWork, ownerVerdict } from '../store/documentRequests';
@@ -76,6 +75,14 @@ export function useAutoScale() {
    * Measure every label and calibrate from the rooms that agree.
    * Returns the decision, or null when nothing usable came back — in which case
    * no scale is set and the user has the flow they already had.
+   *
+   * When a scale the user set by hand stood instead, the decision carries
+   * `keptByHand: {agrees}` — whether the rooms just measured bear it out. It is
+   * the caller's to say, as the last line of the run: said from here it was
+   * replaced a second later by the trace's own. Whether, and not by how much:
+   * the Scale section states the size of a disagreement, from the verdict
+   * stored with the scale, and a second figure worked out here from a
+   * different set of rooms would not match it.
    */
   const measureAndCalibrate = useCallback(async (labels) => {
     const state = useAppStore.getState();
@@ -141,24 +148,13 @@ export function useAutoScale() {
       const heldScale = Math.sqrt(Math.abs((held?.x ?? 0) * (held?.y ?? 0)));
       const gap = heldScale > 0 ? Math.abs(Math.log(decision.feetPerPixel / heldScale)) : 0;
       // A real disagreement is the app overruling a measurement in favour of
-      // the user's number — they have to know. Agreement is just reassurance,
-      // so it acknowledges instead of interrupting.
-      if (gap > 0.03) {
-        notify(
-          `Kept the scale you set by hand. The ${decision.roomCount} room`
-          + `${decision.roomCount === 1 ? '' : 's'} measured on this page imply one about `
-          + `${Math.round((Math.exp(gap) - 1) * 100)}% different.`,
-          { type: 'warning', id: 'auto-scale' },
-        );
-      } else {
-        flash('Kept your scale — the rooms on this page agree with it');
-      }
-      return decision;
+      // the user's number — they have to know. Agreement is just reassurance.
+      return { ...decision, keptByHand: { agrees: gap <= 0.03 } };
     }
 
-    // A 'check' verdict is not announced here: the panel counts it under
-    // Things to check, and keeps showing it for as long as the scale is in
-    // force. A toast said it once and then left the doubt invisible.
+    // A 'check' verdict is not announced here: the panel's Scale section says
+    // it, and keeps saying it for as long as the scale is in force. A message
+    // said it once and then left the doubt invisible.
     return decision;
   }, [applyDecision]);
 

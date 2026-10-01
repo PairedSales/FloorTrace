@@ -1,17 +1,20 @@
 import { useCallback } from 'react';
-import { notify } from '../utils/notify';
 import useAppStore, { roomScaleSamples } from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { resolveLineScale } from '../utils/detection/validate';
-import { scaleQualitySummary } from '../utils/boundaryQuality';
 
 /**
  * useScaleLine
  *
- * The store write and the toast for a scale asserted by drawing a line and
- * stating its true length. The decision — one scalar or two, which line
- * supersedes which, what is worth doubting — is resolveLineScale's and is unit
- * tested there; only the two things a pure function cannot do live here.
+ * The store write for a scale asserted by drawing a line and stating its true
+ * length. The decision — one scalar or two, which line supersedes which, what
+ * is worth doubting — is resolveLineScale's and is unit tested there; only the
+ * thing a pure function cannot do lives here.
+ *
+ * Nothing is announced. A line that disagrees with the rooms the app measured
+ * is written into the calibration's `quality`, and the panel's Scale section —
+ * open, because this tool opens it — says so directly over the length the user
+ * has just typed, for as long as that scale is in force.
  */
 export function useScaleLine() {
   const setLength = useCallback((lineId, feet) => {
@@ -29,15 +32,6 @@ export function useScaleLine() {
 
     if (resolved.changed) {
       state.applyRoomCalibration(resolved.scale, null, 'line-calibration', resolved.quality);
-    }
-
-    // Said out loud only when it is in doubt; the Area panel carries the same
-    // verdict for as long as the scale is in force, which is where the
-    // question is actually asked.
-    const summary = scaleQualitySummary(resolved.quality);
-    if (summary && summary.level === 'check') {
-      notify([summary.detail, summary.remedy].filter(Boolean).join(' '),
-        { type: 'warning', id: 'scale-disagreement' });
     }
   }, []);
 

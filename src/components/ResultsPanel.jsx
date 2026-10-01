@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Plus, Eye, EyeOff, Trash2, Copy, Download, AlertTriangle, Loader2, Brush, Waypoints,
+  Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
   ScanSearch, Ruler, MousePointerClick, RotateCcw, ScanText, Check, Minus,
 } from 'lucide-react';
-import useAppStore, { selectActiveAreaByType, selectWorkspaceArea } from '../store/appStore';
+import useAppStore, {
+  selectActiveAreaByType, selectWorkspaceArea, selectPickingRoom,
+} from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { formatArea, areaDisplayValue, formatAreaValue } from '../utils/unitConverter';
 import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
@@ -16,15 +18,13 @@ import { usePlanIssues } from '../hooks/usePlanIssues';
 import PanelSection from './PanelSection';
 import RoomSizeFields from './RoomSizeFields';
 import ScaleLines from './ScaleLines';
-import ChecksSection from './ChecksSection';
 import WorkSection from './WorkSection';
 
 /**
- * The results panel: the answer, how far to trust it, and — folded away until
- * it is wanted — what the answer is made of.
+ * The results panel: the answer and — folded away until it is wanted — what
+ * the answer is made of.
  *
  *   the area
- *   ▸ Things to check     how far to trust it
  *   ▸ Outline             what was measured
  *   ▸ Scale               what it was measured with
  *   ▸ How the area was calculated
@@ -36,10 +36,25 @@ import WorkSection from './WorkSection';
  * switch, a wall-face switch, an outline's name, its eye, its bin and its type,
  * four ways to redraw it, the size of some room, and four ways to re-scale —
  * some forty controls at rest, nearly all of them answers to questions the user
- * had not asked. Read top to bottom it now says three things: *here is the
- * area*, *here is whether to believe it*, *save it*. Each section folds to one
- * line that states its own conclusion ("Measured from 3 rooms on this plan"),
- * and opens by itself only when it holds the next thing to do.
+ * had not asked. Read top to bottom it now says two things: *here is the area*,
+ * *save it*. Each section folds to one line that states its own conclusion
+ * ("Measured from 3 rooms on this plan"), and opens by itself only when it
+ * holds the next thing to do.
+ *
+ * ## What it does not say
+ *
+ * How well the outline follows the walls. There used to be a section for that,
+ * "Things to check", listing what the detector doubted about its own trace — a
+ * gap it had bridged, a stretch on no drawn wall. Every line described the
+ * picture beside it: the outline is drawn over the plan, and the user checks it
+ * by eye whatever the list says. So the list is gone, and with it the count
+ * that held Save image back.
+ *
+ * What a picture cannot show is still said, inside the section it is about and
+ * nowhere else (`usePlanIssues`): a scale the rooms disagree on, under Scale;
+ * an area counted twice or a cut-out no longer taken off, under Outline. Those
+ * are the wrong answers that look right. The section opens by itself and wears
+ * a "Check" chip while it holds one.
  *
  * Where things went:
  *
@@ -59,9 +74,9 @@ import WorkSection from './WorkSection';
  * under "Gross living area". The figure refuses to print that. It says what is
  * missing and offers the way to supply it, the same way the exhibit prints "—".
  *
- * **Save image fills only when nothing is left to check.** It is the end of the
- * job, and a filled button under a doubtful number is the doubt looking
- * settled. The count of things to check sits directly above it.
+ * **Save image is the filled button as soon as there is an area to save.** It
+ * is the end of the job. Whether the outline is right is the user's to see, and
+ * a button that waited on the app's opinion of it never filled on some plans.
  *
  * **One component for both shells.** The phone's measurement sheet renders this
  * same tree (`mobile`), so the numbers cannot disagree between them. Handlers
@@ -129,6 +144,35 @@ const MeasuringSteps = ({ message, hasLabels, calibrated }) => {
   );
 };
 
+// The reason a trace found nothing arrives as a clause ("the walls are drawn
+// too thin…") or as whole sentences, depending on which stage gave up. Either
+// way it reads as a sentence here.
+const asSentence = (text) => {
+  const t = String(text ?? '').trim();
+  if (!t) return '';
+  return t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? '' : '.');
+};
+
+// A section holding something a picture cannot show. Never a count: there is
+// at most a handful of these in the whole app, and each is read where it sits.
+const CheckChip = () => (
+  <span className="chip chip-warn">
+    <span className="chip-dot" />
+    Check
+  </span>
+);
+
+// One such thing: what it is, why it matters, and what to do about it.
+const CheckNote = ({ issue, className = '' }) => (
+  <div className={`note note-warn font-normal ${className}`}>
+    <p className="font-semibold text-warn">{issue.label}</p>
+    <p className="mt-1 text-fg-2">
+      {issue.detail}
+      {issue.remedy && <> {issue.remedy}</>}
+    </p>
+  </div>
+);
+
 // "GLA" is the trade's word and the one the exhibit prints; the list of
 // choices is where it is spelled out once.
 const typeOptionLabel = (type) => (type.id === DEFAULT_TRACE_TYPE ? 'Living area (GLA)' : type.label);
@@ -183,7 +227,10 @@ const ResultsPanel = ({
   const roomOverlay = useAppStore((s) => s.roomOverlay);
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
   // The room sizes FloorTrace read are on the plan as buttons, to pick one.
-  const pickingRoom = useAppStore((s) => s.mode === 'manual' && (s.detectedDimensions?.length ?? 0) > 0);
+  // Never during the automatic run, which passes through the same state: opening
+  // Scale for that left it open — green box, fields and all — on every plan
+  // FloorTrace had just finished measuring by itself.
+  const pickingRoom = useAppStore(selectPickingRoom);
   const setScaleRoomShown = useWorkspaceStore((s) => s.setScaleRoomShown);
   // An outline being drawn by hand right now. The section then says how to
   // finish it instead of offering three other ways to start.
@@ -193,8 +240,15 @@ const ResultsPanel = ({
   // if "go back to the automatic scale" has anything to go back to.
   const rooms = useAppStore((s) => s.rooms);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
-  // Counted once, from the same summary the exhibit prints.
+  // What a picture cannot show, from the one place it is gathered, sorted into
+  // the section each belongs to.
   const issues = usePlanIssues();
+  const scaleNotes = issues.issues.filter((i) => i.kind === 'scale' || i.kind === 'rescale');
+  const overlapNotes = issues.issues.filter((i) => i.kind === 'double-counted');
+  const staleByTrace = new Map(
+    issues.issues.filter((i) => i.kind === 'stale-void').map((i) => [i.traceId, i]),
+  );
+  const outlineNeedsLook = overlapNotes.length > 0 || staleByTrace.size > 0;
 
   const scrollRef = useRef(null);
 
@@ -323,9 +377,8 @@ const ResultsPanel = ({
   // A section opens by itself when it holds the next thing to do, and stays
   // however it was last set by hand.
   const autoOpen = {
-    checks: issues.count > 0,
-    outline: traced.length === 0 || perimeterTraces.length > 1,
-    scale: !calibrated,
+    outline: traced.length === 0 || perimeterTraces.length > 1 || outlineNeedsLook,
+    scale: !calibrated || scaleNotes.length > 0,
   };
   const [byHand, setByHand] = useState({});
   const isOpen = (key) => byHand[key] ?? autoOpen[key];
@@ -361,35 +414,18 @@ const ResultsPanel = ({
     }, 0);
   };
 
-  // The end of the job. Filled only when nothing is left to check, with the
-  // count of what is sitting directly above it.
+  // The end of the job: the filled button as soon as there is an area to save.
+  // Without a scale the area is not one yet, and the filled button is the
+  // scale's.
   const saveBlock = area > 0 && (
-    <>
-      {measured && issues.count > 0 && (
-        <button
-          type="button"
-          onClick={() => reveal('checks')}
-          className={`mb-3 flex w-full items-start gap-2 text-left text-[14px] font-medium
-                      leading-snug cursor-pointer hover:underline
-                      ${issues.level === 'error' ? 'text-crit' : 'text-warn'}`}
-        >
-          <AlertTriangle className="w-[18px] h-[18px] mt-px shrink-0" aria-hidden="true" />
-          <span>
-            {issues.count} {issues.count === 1 ? 'thing' : 'things'} to check before you
-            use this area
-          </span>
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onExport}
-        className={`btn w-full ${mobile ? '' : 'btn-lg'}
-                    ${measured && issues.count === 0 ? 'btn-primary' : 'btn-secondary'}`}
-      >
-        <Download className="w-[18px] h-[18px]" aria-hidden="true" />
-        Save image…
-      </button>
-    </>
+    <button
+      type="button"
+      onClick={onExport}
+      className={`btn w-full ${mobile ? '' : 'btn-lg'} ${measured ? 'btn-primary' : 'btn-secondary'}`}
+    >
+      <Download className="w-[18px] h-[18px]" aria-hidden="true" />
+      Save image…
+    </button>
   );
 
   return (
@@ -550,21 +586,12 @@ const ResultsPanel = ({
             be the app interrupting its own answer. */}
         {!measuringByItself && (
         <div className="border-t border-line-soft">
-          {/* ── Things to check ── every verdict on the plan, in one place,
-              directly under the number it qualifies. */}
-          <ChecksSection
-            open={isOpen('checks')}
-            onToggle={() => toggle('checks')}
-            onPaintOutline={onPaintOutline}
-            onRescan={onRescan}
-            onShowScale={() => reveal('scale')}
-          />
-
           {/* ── Outline ── */}
           <PanelSection
             id="panel-outline"
             title={perimeterTraces.length > 1 ? 'Outlines' : 'Outline'}
             summary={outlineSummary}
+            badge={outlineNeedsLook ? <CheckChip /> : null}
             open={isOpen('outline')}
             onToggle={() => toggle('outline')}
           >
@@ -582,6 +609,14 @@ const ResultsPanel = ({
                       ? `FloorTrace couldn’t find the outline on its own.${canDraw ? ' Draw it yourself — it only takes a minute:' : ''}`
                       : `No outline yet.${canDraw ? ' Let FloorTrace find it, or draw it yourself:' : ''}`}
                   </p>
+                  {/* Why, when the trace said. With no outline there is no
+                      picture to read it from, so this is the one time the
+                      detector's reason is put into words. */}
+                  {traceFailed && lastTraceOutcome?.reason && (
+                    <p className="mt-2 text-[13.5px] leading-snug text-fg-3">
+                      {asSentence(lastTraceOutcome.reason)}
+                    </p>
+                  )}
                   {/* One filled button on the panel at a time. With no scale
                       either, that one is the scale's: it is what the figure
                       above is asking for. */}
@@ -613,6 +648,9 @@ const ResultsPanel = ({
               )
             ) : (
               <>
+                {overlapNotes.map((issue, i) => (
+                  <CheckNote key={`overlap-${i}`} issue={issue} className="mb-3.5" />
+                ))}
                 <div className="-mx-5 border-y border-line-soft">
                   {perimeterTraces.map((trace) => {
                     const isActive = trace.id === activeTraceId;
@@ -684,10 +722,9 @@ const ResultsPanel = ({
                           </button>
                         </div>
 
-                        {/* What this outline *is*. How good it is — and the
-                            detector's reasons — is read under Things to check,
-                            so this stays a list of outlines rather than of
-                            verdicts. */}
+                        {/* What this outline *is*. How well it follows the walls
+                            is on the plan, to be looked at, and is not said
+                            here. */}
                         <div className="flex items-center gap-2 mt-2 pl-5 text-[13.5px] text-fg-3">
                           <label htmlFor={`type-${trace.id}`}>Counts as</label>
                           <select
@@ -711,9 +748,25 @@ const ResultsPanel = ({
                           </select>
                         </div>
 
+                        {/* A type FloorTrace chose moves this outline's area
+                            out of the living area — so where it read that from
+                            is on the page, not in a tooltip. */}
+                        {trace.typeSource === 'detected' && trace.typeEvidence?.text && (
+                          <p className="mt-1.5 pl-5 text-[13px] leading-snug text-fg-3">
+                            Set from “{trace.typeEvidence.text.trim()}” on the plan.
+                          </p>
+                        )}
+
                         {!drawn && (
                           <p className="mt-2 pl-5 text-[13.5px] leading-snug text-fg-3">
                             Not drawn yet — click its corners on the plan, or paint over its walls.
+                          </p>
+                        )}
+
+                        {staleByTrace.has(trace.id) && (
+                          <p className="mt-2 pl-5 text-[13.5px] leading-snug text-warn">
+                            <span className="font-semibold">{staleByTrace.get(trace.id).label}.</span>
+                            {' '}{staleByTrace.get(trace.id).detail}
                           </p>
                         )}
                       </div>
@@ -772,21 +825,28 @@ const ResultsPanel = ({
           {/* ── Scale ──
               The number every area on this panel is derived from, said as
               where it came from rather than as pixels per foot, with the ways
-              to change it. Whether the rooms *agreed* is a verdict, and reads
-              under Things to check with the rest of them.
+              to change it — and, when the rooms did not agree, that.
 
               A bad room implies a scale that can be 58-90% out, and area goes
-              as scale squared — so this is the most consequential correction
-              the app has, and it belongs where the scale is read. */}
+              as scale squared. Unlike a wrong outline, a wrong scale looks
+              exactly like a right one, so a doubt about it is the one thing
+              this panel says without being asked: the section opens by itself
+              and the doubt is its first paragraph. */}
           <PanelSection
             id="panel-scale"
             title="Scale"
             summary={calibrated ? provenance.replace(/\.$/, '') : 'Not set yet'}
+            badge={scaleNotes.length > 0 ? <CheckChip /> : null}
             open={isOpen('scale')}
             onToggle={() => toggle('scale')}
           >
             {calibrated ? (
-              <p className="text-[14px] leading-snug text-fg-2">{provenance}</p>
+              <>
+                <p className="text-[14px] leading-snug text-fg-2">{provenance}</p>
+                {scaleNotes.map((issue) => (
+                  <CheckNote key={issue.kind} issue={issue} className="mt-3" />
+                ))}
+              </>
             ) : ocrFailed && !isProcessing ? (
               <p className="note note-warn">
                 FloorTrace couldn’t read any room sizes on this plan, so it needs one

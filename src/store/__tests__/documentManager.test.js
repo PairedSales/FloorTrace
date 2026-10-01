@@ -28,8 +28,8 @@ describe('document identity', () => {
   });
 
   // The collision this replaces: every plan that had never had a trace added
-  // shared the id 'trace-default', and trace ids are what focusedWarning, the
-  // double-counting report and an exhibit's outline ids all key on.
+  // shared the id 'trace-default', and trace ids are what the double-counting
+  // report and an exhibit's outline ids key on.
   it('gives two fresh documents different default trace ids', () => {
     const first = app().perimeterTraces[0].id;
     app().restart();

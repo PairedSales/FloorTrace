@@ -1,17 +1,31 @@
-// How much there is to check, derived once — and the list under it, derived
-// from the same pass. Four surfaces used to answer this question separately and
-// disagree in both directions: the panel's chip, the line over its Save button,
-// the exhibit's flag list and the mobile bar's warning triangle.
-// `summariseIssues` is the only producer; everything else renders `issues`. The
-// live surfaces reach it through `usePlanIssues`, which gathers its arguments
-// in one place.
+// What a person cannot see by looking at the outline on the plan — derived
+// once, and the list under it derived from the same pass.
+//
+// FloorTrace used to list everything the detector doubted about an outline: a
+// gap it had bridged, a stretch that followed no drawn wall, a room left
+// outside. All of it described the picture the user was already looking at.
+// The outline is drawn over the plan, and it is checked by eye — it is right
+// or it is not, however the detector came by it. A list of "things to check"
+// beside it said the same thing in words, counted against a figure the user had
+// already verified, and trained people to skim past the one line that mattered.
+//
+// What is left is the short list a picture cannot show: the *number* is
+// doubtful while the outline looks right. A scale the rooms disagree about, a
+// scale that was held back, an area counted twice, a cut-out that is no longer
+// taken off. `summariseIssues` is the only producer; the panel renders each
+// entry inside the section it is about (Scale, Outline), and the phone's
+// action bar counts the same list. The live surfaces reach it through
+// `usePlanIssues`, which gathers its arguments in one place.
+//
+// The detector's own findings are still on every trace (`quality.warnings`),
+// still saved with the plan and still scored by the benchmarks. Only what the
+// user is told changed.
 
 import { holeRings, isSubtracted } from './areaCalculator';
-import { rankedWarnings, qualitySummary, RESULT_SCOPED_CODES, NOTE_ONLY_CODES } from './boundaryQuality';
 
 // A void the outline has moved out from under is no longer subtracted, so the
 // area quietly gained it back. Counted per outline, because one outline is
-// what has to be retraced to settle it.
+// what has to be redrawn to settle it.
 export const staleVoidCount = (trace) => {
   const list = trace?.holes ?? [];
   const rings = holeRings(list);
@@ -24,41 +38,26 @@ export const liveVoids = (trace) => {
   return list.filter((h, i) => rings[i]?.length >= 3 && isSubtracted(h));
 };
 
-// A hidden outline's area has left every total, so its warnings must leave the
-// count with it — they were reasons to doubt a number nobody is being shown.
+// A hidden outline's area has left every total, so its notes leave with it —
+// they were reasons to doubt a number nobody is being shown.
 const isVisible = (trace) => trace?.visible !== false;
 
 /**
- * `info` warnings describe how an outline was *reached* rather than a reason
- * to doubt what it enclosed, and are deliberately not counted — a clean plan
- * that also says "only one hypothesis" has to keep reading as clean.
- *
- * An `acknowledged` warning is one a person has checked against the plan and
- * accepted. It keeps its row and its anchor and prints on the exhibit as
- * reviewed; it stops counting, because a count that can only ever go up is a
- * count people stop reading — and the only other way down is destroying the
- * evidence.
+ * `kind` says which section an entry belongs to: `scale` and `rescale` are the
+ * Scale section's, `double-counted` and `stale-void` are the Outline section's.
  *
  * `needsRescale` is a scale this plan measured while it was parked and that
  * was held back rather than applied late. It is a reason to doubt the area
- * like any other, so it counts: it used to be a row drawn under a chip that
- * said "All clear", beside an Export button that filled.
+ * like any other, so it counts.
  *
- * @returns {{count:number, level:'ok'|'warn'|'error', issues:Array}}
+ * @returns {{count:number, issues:Array}}
  */
-export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutcome, needsRescale = false) => {
+export const summariseIssues = (traces, scaleNote, doubleCounted, needsRescale = false) => {
   const issues = [];
-  let level = 'ok';
-  const bump = (issue) => {
-    issues.push(issue);
-    if (issue.severity === 'error') level = 'error';
-    else if (level === 'ok') level = 'warn';
-  };
 
   if (scaleNote?.level === 'check') {
-    bump({
+    issues.push({
       kind: 'scale',
-      severity: 'warn',
       label: scaleNote.short,
       detail: scaleNote.detail,
       remedy: scaleNote.remedy ?? null,
@@ -66,121 +65,46 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, lastTraceOutco
   }
 
   if (needsRescale) {
-    bump({
+    issues.push({
       kind: 'rescale',
-      severity: 'warn',
       label: 'This plan’s scale was not applied',
       detail: 'Room sizes were read while you were on another plan, so the scale they give was held back rather than applied late.',
-      remedy: 'Choose “Read the room sizes again” under Scale to measure this plan now.',
+      remedy: 'Choose “Read the room sizes again” to measure this plan now.',
     });
   }
 
+  // A garage or porch outlined inside the living-area outline: its floor is in
+  // the living area and again in its own subtotal. Which of the two is wrong is
+  // the user's call, so it is reported and never corrected.
   for (const pair of doubleCounted ?? []) {
-    bump({ kind: 'double-counted', severity: 'warn', label: 'Counted twice', detail: pair?.detail ?? null, pair });
-  }
-
-  // A trace that ran and produced nothing writes no trace object, so without
-  // this the panel says "every outline came back clean" about zero outlines.
-  if (lastTraceOutcome && (lastTraceOutcome.level === 'failed' || lastTraceOutcome.level === 'poor')) {
-    bump({
-      kind: 'trace-outcome',
-      severity: 'error',
-      label: lastTraceOutcome.level === 'failed' ? 'The last trace found no outline' : 'The last trace was rejected',
-      detail: lastTraceOutcome.reason ?? null,
+    const named = pair?.innerName && pair?.outerName;
+    issues.push({
+      kind: 'double-counted',
+      label: named ? `${pair.innerName} sits inside ${pair.outerName}` : 'One outline sits inside another',
+      detail: 'Its area is counted twice — once as living area and once on its own.',
+      remedy: named
+        ? `Redraw ${pair.outerName} so that it leaves ${pair.innerName} out, or cut that area out of it with Outline ▸ Cut out an open area.`
+        : 'Redraw the outer outline so that it leaves the inner one out, or cut that area out of it with Outline ▸ Cut out an open area.',
+      pair,
     });
   }
-
-  // Whole-drawing findings are fanned onto every floor, so counting them per
-  // trace reported one problem N times on an N-outline plan. Collected by code
-  // and detail, and bumped once at the end.
-  const resultScoped = new Map();
 
   for (const trace of (traces ?? []).filter(isVisible)) {
-    // Once per outline however many voids drifted, because one outline is what
-    // has to be retraced to settle all of them.
+    // Once per outline however many cut-outs drifted, because one outline is
+    // what has to be redrawn to settle all of them.
     const stale = staleVoidCount(trace);
     if (stale > 0) {
-      bump({
+      issues.push({
         kind: 'stale-void',
-        severity: 'error',
         traceId: trace.id,
         count: stale,
         label: stale === 1
           ? 'A cut-out is no longer inside this outline'
           : `${stale} cut-outs are no longer inside this outline`,
-      });
-    }
-
-    let counted = 0;
-    let accepted = 0;
-    for (const w of rankedWarnings(trace?.quality?.warnings)) {
-      if (w.severity === 'info') {
-        // A note-only finding still explains a lowered score, so it must not
-        // leave the low-confidence fallback below to invent a vaguer row.
-        if (NOTE_ONLY_CODES.has(w.code)) accepted += 1;
-        continue;
-      }
-      // Scope decides *before* acknowledgement, and that order is load-bearing
-      // twice. A whole-drawing finding is one finding wearing N copies, so it
-      // is accepted when any copy is — the panel prints one row, and the row a
-      // person cleared must not come back because a sibling outline still
-      // carries an untouched copy of it. And it is not this outline's warning,
-      // so it must not feed `accepted` below: clearing a note about the *sheet*
-      // would otherwise delete a doubt about *this polygon*, which is the
-      // count-goes-down-by-destroying-evidence failure in miniature.
-      if (RESULT_SCOPED_CODES.has(w.code)) {
-        const key = `${w.code}|${w.detail ?? ''}`;
-        const seen = resultScoped.get(key);
-        // `index` only means anything paired with the trace it indexes into,
-        // so the two travel together — a caller holding the index alone would
-        // acknowledge whatever sits at that position on the active outline.
-        if (!seen) resultScoped.set(key, { w, traceId: trace.id, acknowledged: !!w.acknowledged });
-        else if (w.acknowledged && !seen.acknowledged) {
-          resultScoped.set(key, { w, traceId: trace.id, acknowledged: true });
-        }
-        continue;
-      }
-      if (w.acknowledged) { accepted += 1; continue; }
-      counted += 1;
-      bump({ kind: 'warning', severity: w.severity, traceId: trace.id, code: w.code, label: w.label, detail: w.detail, remedy: w.remedy, index: w.index });
-    }
-
-    // A doubtful outline always contributes at least one thing to check, even
-    // when it carries no warning to say why. That band is not hypothetical: it
-    // exists by construction between QUALITY_GOOD and the weak-wall-support
-    // trigger, and 2 of the 9 real fixtures land in it — reported "check it"
-    // by the toast while this panel said "All clear".
-    // Gated on a quality record existing at all: an outline the user placed by
-    // hand was never assessed, which is not the same as one assessed and found
-    // wanting. `qualitySummary(undefined)` reports 'failed', so without this
-    // every hand-drawn outline would count as a thing to check.
-    // Gated on `accepted` too: this fires for an outline carrying no warning to
-    // say why it is doubtful, and one whose warnings a person has checked
-    // against the plan is not that. Without it, acknowledging the last warning
-    // on a fair outline swapped one row for another and the count never moved,
-    // which is the monotonic count this whole mechanism exists to break.
-    const q = trace?.quality ? qualitySummary(trace.quality) : null;
-    if (counted === 0 && accepted === 0 && q && (q.level === 'fair' || q.level === 'poor' || q.level === 'failed')) {
-      bump({
-        kind: 'low-confidence',
-        severity: q.level === 'fair' ? 'warn' : 'error',
-        traceId: trace.id,
-        // In words, not the detector's percentage: "only 62%" beside a
-        // coloured dot reads as an accuracy score, which it is not.
-        label: q.level === 'fair'
-          ? 'Parts of this outline are not on a drawn wall'
-          : 'Little of this outline sits on a drawn wall',
-        detail: q.percent === null
-          ? 'FloorTrace could not tell how much of this outline follows a wall drawn on the plan. Compare it to the plan before you use the area.'
-          : `${q.level === 'fair' ? 'Parts' : 'Much'} of this outline do not follow a wall drawn on the plan. Compare it to the plan before you use the area.`,
+        detail: 'It is no longer taken off the area. Redraw the outline, or delete the cut-out.',
       });
     }
   }
 
-  for (const { w, traceId, acknowledged } of resultScoped.values()) {
-    if (acknowledged) continue;
-    bump({ kind: 'warning', severity: w.severity, scope: 'result', traceId, code: w.code, label: w.label, detail: w.detail, remedy: w.remedy, index: w.index });
-  }
-
-  return { count: issues.length, level, issues };
+  return { count: issues.length, issues };
 };

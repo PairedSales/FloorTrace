@@ -3,16 +3,15 @@ import useWorkspaceStore from '../store/workspaceStore';
 /**
  * Promise-based confirmation for actions that discard work.
  *
- * The name is historical — this no longer raises a toast. It parks a request on
- * the store, which `<ConfirmDialog>` renders as a real focus-trapped
- * `alertdialog`. A destructive choice does not belong in the notification
- * stack: it was dismissible by clicking away, weighted the same as
- * "Side lengths enabled", and could be pushed out of view by unrelated chatter.
+ * It parks a request on the store, which `<ConfirmDialog>` renders as a real
+ * focus-trapped `alertdialog`. A destructive choice is never a passing message
+ * (`utils/notify.js`): one of those can be dismissed by clicking away, and
+ * carries no more weight than "Area copied".
  *
  * Resolves true on confirm, false on cancel/Escape/backdrop — the safe default
- * for a destructive action, as before.
+ * for a destructive action.
  */
-export function confirmToast(message, {
+export function askConfirm(message, {
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   detail = null,

@@ -204,7 +204,7 @@ const perimeterTraceSchema = z.object({
   // trace overwrite a hand-picked garage.
   typeSource: z.string().optional(),
   // The label 'detected' was read from, so "why is this a basement" stays
-  // answerable long after the toast that said so.
+  // answerable: the outline's row in the panel quotes it.
   typeEvidence: z.object({
     keyword: z.string().optional(),
     text: z.string().optional(),

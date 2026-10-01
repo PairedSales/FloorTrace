@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
+import useWorkspaceStore from '../../store/workspaceStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
 import { planStage } from '../../utils/planStage';
@@ -105,20 +106,24 @@ const MobileChrome = ({
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const areas = useAppStore(selectActiveAreaByType);
   const documentOrder = useAppStore((s) => s.documentOrder);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  // The plan's image was edited after its outline was found (erased marks, a
+  // crop). On the desktop the bar offers to find the outline again; here the
+  // one verb does.
+  const retraceOffered = useWorkspaceStore((s) => s.retraceOfferFor != null
+    && s.retraceOfferFor === activeDocumentId);
 
-  // The same count the measurement sheet prints, from the one place it is
-  // gathered: this bar used to call the summary itself and had fallen an
-  // argument behind it, so it called a plan clean that the sheet was counting
-  // a held-back scale against.
+  // The same list the measurement sheet shows inside Scale and Outline, from
+  // the one place it is gathered: this bar used to call the summary itself and
+  // had fallen an argument behind it, so it called a plan clean that the sheet
+  // was counting a held-back scale against.
   const issues = usePlanIssues();
   // Read from `planStage`, not re-derived. This shell is the third surface to
   // ask "is this plan outlined", and the first two answering it differently is
   // the reason that helper exists — the seven-outline ceiling it also owns was
   // missing here, so the menu offered an eighth that nothing else would.
   const stage = planStage({
-    image, calibrated, perimeterTraces, area: areas.total,
-    doubleCounted: areas.doubleCounted?.length ?? 0,
-    issues, lastTraceOutcome, ocrFailed,
+    image, calibrated, perimeterTraces, lastTraceOutcome, ocrFailed,
   });
   const { canAddOutline } = stage;
   const noGla = areas.gla === 0 && areas.total > 0;
@@ -131,10 +136,11 @@ const MobileChrome = ({
     ? formatAreaValue(totalDisplay, unit)
     : formatAreaValue(areaDisplayValue(areas.gla, unit), unit);
 
-  // The same count the panel's chip and the exhibit's flags read, not a fourth
-  // hand-rolled derivation. The three-term boolean this replaces missed stale
-  // voids entirely — on the shell with the least room to qualify a number.
+  // Whether the number needs a second look — a doubtful scale, an area counted
+  // twice, a cut-out no longer taken off. Not whether the outline is right:
+  // that is on the plan, to be looked at.
   const areaWarn = issues.count > 0;
+  const scaleDoubt = issues.issues.some((i) => i.kind === 'scale' || i.kind === 'rescale');
 
   // ── the one verb ─────────────────────────────────────────────────────────
   // `planStage` decides, so the bar always offers the step the user is actually
@@ -157,18 +163,21 @@ const MobileChrome = ({
       default:
         break;
     }
-    // An outline exists. If the panel is counting something against it, the
-    // next thing to do is read that — not export it.
-    if (issues.count > 0) {
+    if (retraceOffered) {
+      return { label: 'Find the outline again', icon: ScanSearch, onPress: onTracePerimeter };
+    }
+    // An outline exists. If the number needs a second look, the next thing to
+    // do is read why — the sheet opens on the section that says it.
+    if (areaWarn) {
       return {
-        label: `Check ${issues.count} ${issues.count === 1 ? 'thing' : 'things'}`,
+        label: scaleDoubt ? 'Check the scale' : 'Check the outlines',
         icon: AlertTriangle,
         onPress: () => setSheet('panel'),
       };
     }
     return { label: 'Save image', icon: Share, onPress: onExport };
-  }, [image, stage.primary, issues.count, onMenuFileOpen, onFindRoomSize,
-    onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
+  }, [image, stage.primary, retraceOffered, areaWarn, scaleDoubt, onMenuFileOpen,
+    onFindRoomSize, onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
 

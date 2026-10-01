@@ -12,7 +12,7 @@ import Dialog from './Dialog';
  * notification stack at the same visual weight as "Area copied", dismissible by
  * clicking away, and capable of being pushed out of view by unrelated chatter.
  *
- * Driven by a store field so `confirmToast()` keeps its promise signature and
+ * Driven by a store field so `askConfirm()` keeps its promise signature and
  * its call sites are plain `await`s.
  *
  * **Cancel has the focus.** Every one of these dialogs discards work, and Enter

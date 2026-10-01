@@ -4,7 +4,7 @@ import { parkedStateFor, parkedHistoryFor } from '../store/documentManager';
 import { readDocDraft, readHistoryRecord } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
 import * as undoManager from '../store/undoManager';
-import { loadPagesFromFile, pageShortfall, lowResolutionNote } from '../utils/imageLoader';
+import { loadPagesFromFile, pageShortfall } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
 import { notify, flash } from '../utils/notify';
@@ -96,7 +96,6 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
           // saved project paid for a cold analysis on its first trace.
           prewarmDetection(statePatch.image);
 
-          flash('Project file opened');
         } else {
           // Load and validate before claiming a plan: a failed load must leave
           // the current project intact. A PDF arrives as one entry per page,
@@ -111,7 +110,6 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
           // Counted as they open. The plan cap can stop this loop halfway, and
           // the old message reported the pages *rendered* as the pages opened.
           let opened = 0;
-          let small = 0;
           for (const page of pages) {
             if (!makeRoomForIncoming()) break;
             // Before the writes, not after: the decode and the base64 round
@@ -129,18 +127,15 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
             // holds the main thread and the Tesseract pool.
             prewarmDetection(page.dataUrl);
             opened += 1;
-            if (page.lowResolution) small += 1;
             await handleManualMode(page.dataUrl, true);
           }
 
           const shortfall = pageShortfall({ opened, rendered: pages.length, totalPages });
-          if (shortfall) notify(shortfall, { type: 'warning', id: 'file-open' });
-          const tooSmall = lowResolutionNote(small);
-          if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
+          if (shortfall) notify(shortfall, { type: 'warning' });
         }
       } catch (error) {
         console.error('Error loading file:', error);
-        notify(`Could not open that file — ${error.message}`, { type: 'error', id: 'file-open' });
+        notify(`Could not open that file — ${error?.message || 'it could not be read'}`);
       } finally {
         setIsProcessing(false);
       }
@@ -172,7 +167,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
       }
     } catch (error) {
       console.error('Error exporting project:', error);
-      notify(`Could not save the project — ${error.message}`, { type: 'error', id: 'file-save' });
+      notify(`Could not save the project file — ${error?.message || 'the browser refused to write it'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -262,13 +257,13 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
       if (unreadable) notes.push(`${unreadable} could not be read back`);
       if (withoutImage) notes.push(`${withoutImage} saved without its image`);
       if (notes.length) {
-        notify(`${message} — ${notes.join(', ')}.`, { type: 'warning', id: 'file-save' });
+        notify(`${message} — ${notes.join(', ')}.`, { type: 'warning' });
       } else {
         flash(message);
       }
     } catch (error) {
       console.error('Error saving all projects:', error);
-      notify(`Could not save every plan — ${error.message}`, { type: 'error', id: 'file-save' });
+      notify(`Could not save every plan — ${error?.message || 'the browser refused to write one'}`);
     } finally {
       setIsProcessing(false);
     }

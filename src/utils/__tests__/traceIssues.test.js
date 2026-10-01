@@ -4,61 +4,80 @@ import { warning } from '../detection/scoring.js';
 
 const ring = (n = 4) => Array.from({ length: n }, (_, i) => ({ x: i, y: i }));
 const trace = (over = {}) => ({ id: 't1', name: '1st Floor', vertices: ring(), ...over });
+const kinds = (summary) => summary.issues.map((i) => i.kind);
 
 describe('summariseIssues', () => {
   it('counts nothing on an untouched plan', () => {
-    expect(summariseIssues([], null, [])).toMatchObject({ count: 0, level: 'ok' });
-    expect(summariseIssues(undefined, undefined, undefined)).toMatchObject({ count: 0, level: 'ok' });
+    expect(summariseIssues([], null, [])).toEqual({ count: 0, issues: [] });
+    expect(summariseIssues(undefined, undefined, undefined)).toEqual({ count: 0, issues: [] });
   });
 
   it('counts a scale that wants checking, and not one that agrees', () => {
-    expect(summariseIssues([], { level: 'check' }, [])).toMatchObject({ count: 1, level: 'warn' });
-    expect(summariseIssues([], { level: 'note' }, [])).toMatchObject({ count: 0, level: 'ok' });
+    const check = { level: 'check', short: 'Rooms disagree', detail: 'Why.', remedy: 'Do this.' };
+    expect(summariseIssues([], check, []).issues).toEqual([
+      { kind: 'scale', label: 'Rooms disagree', detail: 'Why.', remedy: 'Do this.' },
+    ]);
+    expect(summariseIssues([], { level: 'note' }, []).count).toBe(0);
   });
 
-  it('counts one per double-counted outline', () => {
-    const doubles = [{ innerId: 'a' }, { innerId: 'b' }];
-    expect(summariseIssues([], null, doubles)).toMatchObject({ count: 2, level: 'warn' });
+  it('counts a scale that was held back while the plan was parked', () => {
+    expect(kinds(summariseIssues([], null, [], true))).toEqual(['rescale']);
   });
 
-  // The panel's whole claim is that the number beside the area is the number of
-  // rows further down. A note about how the outline was reached is not a row.
-  it('ignores info warnings so a clean plan still reads clean', () => {
-    const quality = { confidence: 0.9, warnings: [warning('no-alternative', null, 'info')] };
-    expect(summariseIssues([trace({ quality })], null, [])).toMatchObject({ count: 0, level: 'ok' });
+  it('counts one per double-counted outline, and names the pair', () => {
+    const doubles = [{ innerName: 'Garage', outerName: '1st Floor' }, { innerId: 'b' }];
+    const summary = summariseIssues([], null, doubles);
+    expect(kinds(summary)).toEqual(['double-counted', 'double-counted']);
+    expect(summary.issues[0].label).toBe('Garage sits inside 1st Floor');
+    expect(summary.issues[0].remedy).toContain('Redraw 1st Floor so that it leaves Garage out');
+    expect(summary.issues[1].label).toBe('One outline sits inside another');
   });
 
-  // The labels and the outline are both on the sketch the user is looking at.
-  // The finding also lowers the score, so it must not come back as the vaguer
-  // "little of this outline sits on a wall" row.
-  it('leaves a label outside the outline to the sketch, even when it lowers the score', () => {
-    const quality = { confidence: 0.35, warnings: [warning('label-outside', { count: 1, of: 3 }, 'error')] };
-    expect(summariseIssues([trace({ quality })], null, [])).toMatchObject({ count: 0, level: 'ok' });
-  });
-
-  it('raises the level to error for an error-severity warning', () => {
-    const quality = {
-      confidence: 0.3,
-      warnings: [warning('heavy-closing', { radius: 12 }), warning('unsealed', {}, 'error')],
-    };
-    expect(summariseIssues([trace({ quality })], { level: 'check' }, []))
-      .toMatchObject({ count: 3, level: 'error' });
-  });
-
-  it('counts a void the outline has moved out from under, once per outline', () => {
+  it('counts a cut-out the outline has moved out from under, once per outline', () => {
     const holes = [{ ring: ring(), stale: true }, { ring: ring(), stale: true }];
-    expect(summariseIssues([trace({ holes })], null, [])).toMatchObject({ count: 1, level: 'error' });
+    const summary = summariseIssues([trace({ holes })], null, []);
+    expect(summary.issues).toHaveLength(1);
+    expect(summary.issues[0]).toMatchObject({ kind: 'stale-void', traceId: 't1', count: 2 });
   });
 
-  it('does not count a void that is still subtracted', () => {
-    expect(summariseIssues([trace({ holes: [{ ring: ring() }] })], null, []))
-      .toMatchObject({ count: 0, level: 'ok' });
+  it('does not count a cut-out that is still subtracted', () => {
+    expect(summariseIssues([trace({ holes: [{ ring: ring() }] })], null, []).count).toBe(0);
   });
 
-  it('adds up across every outline', () => {
-    const a = trace({ id: 'a', quality: { confidence: 0.6, warnings: [warning('no-inner', { floor: 0 })] } });
-    const b = trace({ id: 'b', quality: { confidence: 0.6, warnings: [warning('heavy-closing', { radius: 9 })] } });
-    expect(summariseIssues([a, b], null, [])).toMatchObject({ count: 2, level: 'warn' });
+  it('leaves a hidden outline’s cut-outs out, with its area', () => {
+    const holes = [{ ring: ring(), stale: true }];
+    expect(summariseIssues([trace({ holes, visible: false })], null, []).count).toBe(0);
+  });
+
+  // The outline is drawn on the plan and checked by eye. What the detector
+  // doubted about it is on the trace, and is not a line on this list — however
+  // low the score and however severe the finding.
+  it('says nothing about how well an outline follows the walls', () => {
+    const doubtful = trace({
+      quality: {
+        confidence: 0.3,
+        warnings: [
+          warning('unsealed', {}, 'error'),
+          warning('heavy-closing', { radius: 12 }),
+          warning('bridged-opening', { width: 40 }),
+          warning('room-outside', { count: 1, names: ['Kitchen'] }, 'error'),
+        ],
+      },
+    });
+    const unexplained = trace({ id: 't2', quality: { confidence: 0.6, warnings: [] } });
+    expect(summariseIssues([doubtful, unexplained], null, [])).toEqual({ count: 0, issues: [] });
+  });
+
+  it('adds up across every kind', () => {
+    const holes = [{ ring: ring(), stale: true }];
+    const summary = summariseIssues(
+      [trace({ id: 'a', holes }), trace({ id: 'b', holes })],
+      { level: 'check', short: 's', detail: 'd' },
+      [{ innerName: 'A', outerName: 'B' }],
+      true,
+    );
+    expect(kinds(summary)).toEqual(['scale', 'rescale', 'double-counted', 'stale-void', 'stale-void']);
+    expect(summary.count).toBe(5);
   });
 });
 

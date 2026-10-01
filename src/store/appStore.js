@@ -23,9 +23,9 @@ import {
 //
 // The default trace's id is minted per call for the same class of reason, one
 // level up. It used to be the constant `'trace-default'`, so every plan that
-// had never had a trace added shared it — and trace ids are what
-// `focusedWarning`, the double-counting report and an exhibit's outline ids all
-// key on. With one plan that is invisible; with two it is a collision.
+// had never had a trace added shared it — and trace ids are what the
+// double-counting report and an exhibit's outline ids key on. With one plan
+// that is invisible; with two it is a collision.
 const workingStateDefaults = () => {
   const defaultTraceId = newTraceId();
   return {
@@ -78,12 +78,12 @@ const workingStateDefaults = () => {
   currentCustomShape: null,
   perimeterVertices: null,
   tracedBoundaries: null,
-  // What the last trace did, whatever it did — `{ at, level, reason, warnings,
-  // verdict }`. Document content, because "this plan was traced and produced
-  // nothing" is a fact about the plan that has to survive the ten seconds a
-  // toast lives. Without it, a trace that came back empty wrote no field at
-  // all, so the panel said "every outline came back clean" about zero
-  // outlines and the spine read identically to a plan nobody had tried.
+  // What the last trace did, whatever it did — `{ at, level, reason, floors,
+  // source }`. Document content, because "this plan was traced and produced
+  // nothing" is a fact about the plan that has to outlive the line in the bar
+  // that said so. Without it, a trace that came back empty wrote no field at
+  // all, so the panel read exactly as it does on a plan nobody had tried — and
+  // offered the automatic trace that had just failed as the next thing to do.
   lastTraceOutcome: null,
   eraserToolActive: false,
   // The outline-corner eraser, which is a different tool from the image
@@ -296,22 +296,17 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   ...WORKING_STATE_DEFAULTS,
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
-  // Per-plan, despite being UI: both name a place on one drawing. Window-level
-  // UI — the panel, the dialogs, the status flash — lives in workspaceStore.js.
-  // Which detection warning the user is inspecting, as {traceId, index} into
-  // that trace's `quality.warnings`. Declared here rather than in the working
-  // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
-  // edit must not restore a highlight. Every reader resolves it against the
-  // live traces, so a focus left on a deleted trace simply renders nothing.
-  focusedWarning: null,
+  // Per-plan, despite being UI. Window-level UI — the panel, the dialogs, the
+  // status flash — lives in workspaceStore.js.
   // What the autosaved draft is actually doing right now: 'off' | 'pending' |
   // 'saved' | 'error'. Reported rather than assumed — the shell used to read
   // a hardcoded "Saved", which was the one claim in it that was true by
   // coincidence and never checked.
   draftState: 'off',
-  // A transient canvas highlight for an error that has a place on the plan —
-  // a self-intersection knows which two edges cross. Same anchor shape as
-  // `focusedWarning` resolves to, so WarningHighlightLayer renders both.
+  // A transient canvas highlight for a refusal that has a place on the plan —
+  // a self-intersection knows which two edges cross. Declared here rather than
+  // in the working state so it cannot reach a snapshot, a draft or a
+  // `.floorplan`: undoing an edit must not restore a highlight.
   errorAnchor: null,
 
   // ── flag for autosave gating ───────────────────────────────────────────────
@@ -459,8 +454,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         calibratedRoomId: roomId,
         createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
-        // area is rendered from it long after the toast that announced it has
-        // gone, and "is this number right" must stay answerable.
+        // area is rendered from it for as long as the plan is open, and "is
+        // this number right" must stay answerable — the panel's Scale section
+        // reads it.
         quality,
       },
       isDirty: true,
@@ -584,7 +580,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     isProcessing: false,
     processingMessage: '',
   }),
-  setFocusedWarning: (v) => set({ focusedWarning: v }),
   setDraftState: (v) => set({ draftState: v }),
   // Dirty like any other document edit: the subject line is what a saved
   // project is filed under, so losing it is losing work.
@@ -768,6 +763,25 @@ let lastOverlayResult = null;
 // store, memoised on module state. Anything that needs the overlay of a state
 // it was handed must not come through here — the memo answers for whichever
 // state called last.
+/**
+ * Whether the user is choosing a room to take the scale from: the room sizes
+ * FloorTrace read are on the plan as buttons, waiting for a click.
+ *
+ * One selector, because three places have to agree on it — the action bar
+ * (which turns into this mode's instruction), the panel (which opens Scale)
+ * and the canvas (which draws the buttons). They used to work it out
+ * separately, and the canvas's copy was a prop that got dropped from one JSX
+ * element: for five weeks "Use a different room" told people to click a room
+ * size on a plan that showed none.
+ *
+ * Not while a job is running. The automatic run passes through `mode:
+ * 'manual'` on its way from reading the sizes to measuring the rooms, and that
+ * is FloorTrace working, not the user choosing.
+ */
+export const selectPickingRoom = (state) => state.mode === 'manual'
+  && (state.detectedDimensions?.length ?? 0) > 0
+  && !state.isProcessing;
+
 export const selectActivePerimeterOverlay = (state) => {
   const traces = state.perimeterTraces || [];
   const active = traces.find(t => t.id === state.activeTraceId);

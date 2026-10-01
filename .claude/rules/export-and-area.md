@@ -22,6 +22,7 @@ paths:
 - It must look like the screen the user approved: wall-length labels sit inside the polygon exactly as `PerimeterLayer` draws them, and overlays are placed into page space through `project()` rather than a rotated canvas context, so labels stay upright under `canvasRotation`.
 - `scaleProvenance.js` is the single source for where the scale came from (it reads `calibration.quality.roomCount`); the panel, the exhibit and the calculation all state it. It is a leaf module so the panel doesn't pull the exhibit graph into the entry chunk.
 - The exhibit prints findings, not instructions: a scale warning's `detail` goes on the page and its `remedy` (which names a control in the app) does not.
+- Its flags are the same things the panel says, and for the same reason — they cannot be seen in the picture: no outline, no scale, a doubtful scale, an area counted twice, a cut-out not deducted. Nothing about how well an outline follows the walls is printed (no detector warning, no "wall match" score): the outline is on the page for its reader to see.
 - The save picker opens before encoding: encoding a large page spends the click's user activation.
 - Shortcuts: `Ctrl+E` opens the Save image dialog, `Ctrl+Alt+C` copies the image, `Ctrl+S` saves the project file. Never `Ctrl+Shift+C`.
 

@@ -20,11 +20,19 @@ const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
   const draftState = useAppStore((s) => s.draftState);
   const flash = useWorkspaceStore((s) => s.statusFlash);
 
+  // Amber stays longer than green: a refusal has to be read, a confirmation
+  // only noticed. Only for what is left of its window, so a flash raised while
+  // this was off screen is not replayed over the next plan.
   const [shownFlash, setShownFlash] = useState(null);
   useEffect(() => {
     if (!flash) return undefined;
-    setShownFlash(flash.text);
-    const t = setTimeout(() => setShownFlash(null), 2600);
+    const left = (flash.tone === 'warn' ? 5000 : 2600) - (Date.now() - (flash.at ?? 0));
+    if (left <= 0) {
+      setShownFlash(null);
+      return undefined;
+    }
+    setShownFlash(flash);
+    const t = setTimeout(() => setShownFlash(null), left);
     return () => clearTimeout(t);
   }, [flash]);
 
@@ -64,8 +72,8 @@ const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
       )}
 
       {/* The one live region on mobile, matching the action bar's role on the
-          desktop: without it a screen-reader user hears sonner's toasts and
-          nothing at all for the app's own acknowledgements. */}
+          desktop: what just happened to the plan is said here and nowhere
+          else, so without it a screen-reader user hears nothing at all. */}
       <div
         role="status"
         aria-live="polite"
@@ -79,10 +87,11 @@ const MobileCanvasOverlay = ({ hasImage, onFitToWindow }) => {
             {processingMessage || 'Working…'}
           </span>
         ) : shownFlash ? (
-          <span className="inline-flex items-center gap-2 h-9 px-3.5 rounded-full bg-raised
-                           border border-line shadow-lg text-[12.5px] font-semibold text-ok
-                           animate-fade-in">
-            {shownFlash}
+          // Wraps rather than truncates: a phone has no hover to read the rest.
+          <span className={`inline-flex items-center gap-2 min-h-9 px-3.5 py-1.5 rounded-2xl bg-raised
+                            border border-line shadow-lg text-[12.5px] font-semibold text-center
+                            animate-fade-in ${shownFlash.tone === 'warn' ? 'text-warn' : 'text-ok'}`}>
+            {shownFlash.text}
           </span>
         ) : null}
       </div>

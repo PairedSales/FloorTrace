@@ -4,9 +4,7 @@
 // the right one. Every case here used to come out as some other case's message.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import {
-  loadImageFromClipboard, pageShortfall, lowResolutionNote, isPdfFile,
-} from '../imageLoader';
+import { loadImageFromClipboard, pageShortfall, isPdfFile } from '../imageLoader';
 
 const setClipboard = (read) => {
   Object.defineProperty(navigator, 'clipboard', { value: { read }, configurable: true });
@@ -55,17 +53,6 @@ describe('pageShortfall', () => {
     const text = pageShortfall({ opened: 6, rendered: 6, totalPages: 9 });
     expect(text).toMatch(/Opened 6 of 9 pages/);
     expect(text).toMatch(/6 pages at a time/);
-  });
-});
-
-describe('lowResolutionNote', () => {
-  it('says nothing when nothing was too small', () => {
-    expect(lowResolutionNote(0)).toBeNull();
-  });
-
-  it('warns before the trace rather than ten seconds into it', () => {
-    expect(lowResolutionNote(1)).toMatch(/small/i);
-    expect(lowResolutionNote(3)).toMatch(/^3 of these pages/);
   });
 });
 

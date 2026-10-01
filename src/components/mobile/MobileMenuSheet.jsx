@@ -70,6 +70,7 @@ const MobileMenuSheet = ({
   // MobileChrome — the same two fields the panel and Settings read.
   const showWork = useWorkspaceStore((s) => s.showWork);
   const setShowWork = useWorkspaceStore((s) => s.setShowWork);
+  const readerStatus = useWorkspaceStore((s) => s.enhancedOcrStatus);
   const unitPreference = useWorkspaceStore((s) => s.unitPreference);
   const setUnitPreference = useWorkspaceStore((s) => s.setUnitPreference);
 
@@ -214,7 +215,10 @@ const MobileMenuSheet = ({
           />
           <Toggle
             label="Try harder to read room sizes"
-            detail="Slower, better on faint or small print"
+            detail={!enhancedOcr ? 'Slower, better on faint or small print'
+              : readerStatus === 'starting' ? 'Getting ready — about 10 seconds'
+                : readerStatus === 'failed' ? 'Couldn’t start in this browser'
+                  : 'Slower, better on faint or small print'}
             checked={enhancedOcr}
             onToggle={() => onEnhancedOcrChange(!enhancedOcr)}
           />

@@ -20,7 +20,7 @@ const drafts = vi.hoisted(() => ({
   removePlan: vi.fn(async () => {}),
 }));
 vi.mock('../../utils/workspaceDrafts', () => drafts);
-vi.mock('../../utils/confirmToast', () => ({ confirmToast: vi.fn(async () => true) }));
+vi.mock('../../utils/askConfirm', () => ({ askConfirm: vi.fn(async () => true) }));
 vi.mock('../../utils/notify', () => ({ notify: vi.fn(), flash: vi.fn() }));
 
 // What the plan was holding, so the last-plan branch can be shown to free it:

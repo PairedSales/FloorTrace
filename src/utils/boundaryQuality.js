@@ -1,7 +1,16 @@
-// How a traced boundary's quality is presented. The detector emits a
-// confidence and a list of reasons it might be wrong; this decides what the
-// user is told and whether the result is offered as a finished answer or as
-// something to check.
+// What is said about a trace and about the scale it is measured with.
+//
+// The detector emits a confidence and a list of reasons an outline might be
+// wrong. None of that is narrated to the user any more: the outline is drawn on
+// the plan and is checked by eye, and a list of the detector's doubts beside it
+// described a picture the user was already looking at. What this file still
+// decides about a trace is its level (which the benchmarks and the "keep the
+// painting" rule read) and, when a trace produced nothing at all, the one
+// reason worth giving — because then there is no picture to look at.
+//
+// The scale is the other half, and the opposite case: a wrong scale looks
+// exactly like a right one, so its doubts are said, in the panel's Scale
+// section and on the saved image.
 
 export const QUALITY_GOOD = 0.75;
 export const QUALITY_POOR = 0.5;
@@ -90,7 +99,8 @@ export const detailText = (warning) => {
 // the order the detector happened to push them. The first group means the area
 // cannot be trusted at all; the second means it is wrong by a knowable amount;
 // the third describes how the outline was reached rather than what it enclosed.
-// Anything unlisted sorts last but is still reportable.
+// Anything unlisted sorts last but is still reportable. It decides which one
+// reason is given for a trace that found nothing.
 const WARNING_RANK = new Map([
   'no-boundary',
   'floor-empty',
@@ -147,18 +157,11 @@ const WARNING_RANK = new Map([
 
 const UNRANKED = 999;
 const severityRank = (severity) => (severity === 'error' ? 0 : 1);
-const warningRank = (w) => severityRank(w.severity) * 1000 + (WARNING_RANK.get(w.code) ?? UNRANKED);
+const warningRank = (w) => severityRank(w.severity ?? 'warn') * 1000 + (WARNING_RANK.get(w.code) ?? UNRANKED);
 
-// Every code the detector is known to emit, in rank order. Exported so a guard
-// test can assert each one either resolves a canvas anchor or is declared
-// unanchorable — a warning added later must not become silently unclickable.
-export const WARNING_CODES = [...WARNING_RANK.keys()];
-
-// Warnings that describe the whole drawing rather than one floor. The panel
-// groups them under their own divider so a three-floor plan does not read as
-// three separate problems. Derived from the code, not only read from the tag
-// the detector attaches: the `.floorplan` schema types a warning's known fields
-// and drops the rest, so a reopened project arrives without `scope`.
+// Warnings that describe the whole drawing rather than one floor. The pipeline
+// tags them (`scope: 'result'`) and fans them onto every floor, so anything
+// reading one floor's warnings sees what was found about the sheet it is on.
 export const RESULT_SCOPED_CODES = new Set([
   'label-outside', 'floors-rejected', 'no-alternative', 'no-boundary', 'remediated',
   // Both describe the sheet, not one outline: what was dropped before any
@@ -166,113 +169,14 @@ export const RESULT_SCOPED_CODES = new Set([
   'outlines-dropped', 'low-resolution', 'plan-skewed',
 ]);
 
-// Headlines in the reader's words, not the pipeline's. Six of these used to
-// name the stage that produced them ("Only one hypothesis", "Floor has no
-// polygon"), which tells an appraiser nothing about their measurement.
-const LABELS = new Map(Object.entries({
-  unsealed: 'Outline never closed',
-  'weak-wall-support': 'Parts of this outline are not on a wall',
-  'bridged-opening': 'A gap was closed for you',
-  'heavy-closing': 'Large gaps were closed',
-  annexation: 'Reaches past its walls',
-  'wall-left-outside': 'A wall is left outside the outline',
-  'thin-structure-excluded': 'A thin part of the building was left out',
-  'incomplete-enclosure': 'The walls don’t close',
-  'floors-rejected': 'Outlines discarded',
-  'no-boundary': 'No outline traced',
-  'floor-empty': 'One outline came back empty',
-  'self-intersecting': 'Outline crosses itself',
-  'covers-page': 'Outline covers the whole page',
-  'tiny-floor': 'Very small outline',
-  'inner-not-nested': 'The inside-wall outline doesn’t fit',
-  'inner-over-inset': 'The inside-wall outline is far from the walls',
-  'no-inner': 'No inside-wall outline',
-  'floors-overlap': 'Two outlines overlap',
-  'room-outside': 'A measured room is outside the outline',
-  'label-outside': 'A labelled area is outside the outline',
-  'no-alternative': 'Nothing to compare against',
-  'brush-mismatch': 'Doesn’t follow your painting',
-  'drawn-freehand': 'Drawn from your painting',
-  remediated: 'Traced again',
-  'low-resolution': 'This image is too small to trace reliably',
-  'plan-skewed': 'The plan is not square to the page',
-  'non-gla-not-removed': 'A garage or porch may not have been removed',
-  'enclosed-void': 'An enclosed space was not subtracted',
-  'outlines-dropped': 'Parts of the drawing were skipped',
-  'void-superseded': 'An area you cut out was found again',
-  'area-excluded': 'Area removed from the total',
-  'spanned-walls': 'Part of this outline follows no drawn wall',
-}));
-
-// A short headline for one warning. An unlisted code still gets a readable one
-// rather than being hidden, matching how WARNING_RANK treats it.
-export const warningLabel = (code) => LABELS.get(code)
-  ?? String(code ?? '').replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
-
-// What to do about it. Every scale message already ends with an instruction and
-// no trace warning did, so the panel described problems it gave no way to act
-// on. A code with no entry renders no remedy line rather than a filler one —
-// silence is better than "review the outline".
-const REMEDIES = new Map(Object.entries({
-  unsealed: 'Paint the outline over the outside walls instead.',
-  'weak-wall-support': 'Compare the outline to the plan before you use the area. Drag any corner that sits off the wall.',
-  'bridged-opening': 'Check the gap — if it is a wide doorway the outline is right, if it is a missing wall it is not.',
-  'heavy-closing': 'Check the outline where it crosses open space, or paint it by hand.',
-  annexation: 'The outline reaches past the walls it grew from. Paint it by hand to bound it.',
-  'wall-left-outside': 'Some drawn wall sits outside this outline. Paint the outline to include it, or check it is another building.',
-  'incomplete-enclosure': 'Paint the outline by hand — the walls did not close on their own.',
-  'covers-page': 'The outline reached the edge of the sheet. Crop to the building, or paint the outline by hand.',
-  'floors-overlap': 'Two outlines cover the same area and it is counted twice. Delete or hide one.',
-  'self-intersecting': 'The outline crosses itself, so the area is wrong. Drag the crossing corners apart.',
-  'room-outside': 'If the room belongs to the building, paint the outline so that it takes the room in.',
-  'label-outside': 'If those areas belong to the building, paint the outline to include them.',
-  'floors-rejected': 'If one of those was a real building, paint its outline by hand and it will be measured.',
-  'outlines-dropped': 'If part of the building is missing, paint its outline by hand.',
-  'no-inner': 'The inside of these walls could not be found, so this outline is measured to the outside of the walls either way.',
-  'low-resolution': 'Open a larger copy of the plan if you have one — at this size the area cannot be trusted.',
-  'plan-skewed': 'Check the outline against the walls and drag any corner that is off. A straighter scan of the plan gives a better result.',
-  'non-gla-not-removed': 'If it is a garage or porch, add an outline for it and set what it counts as, or cut it out.',
-  'enclosed-void': 'If it is a courtyard or a light well, choose Outline ▸ Cut out an open area and take it out of the outline.',
-  'tiny-floor': 'Check this is a building and not a legend or a title block. Delete it if not.',
-  'brush-mismatch': 'The traced outline does not follow what you painted. Paint it again, more tightly.',
-  'no-boundary': 'Paint over the outside walls and FloorTrace will read them.',
-  'floor-empty': 'Paint that outline by hand, or delete it.',
-  'spanned-walls': 'The outline was carried across a gap the plan does not draw a wall across. Check that stretch against the plan.',
-}));
-
-export const remedyText = (code) => REMEDIES.get(code) ?? null;
-
-// Findings the user sees for themselves on the sketch: the labels and the
-// outline are both on screen, so a label that sits outside the outline is
-// obvious without a flag (and often right — a garage or porch is carved out on
-// purpose). Shown as a note under Details, never counted as a thing to check.
-// The detector still scores them; only what the user is told changes.
-export const NOTE_ONLY_CODES = new Set(['label-outside']);
-
-// Every warning, worst first, in the shape the panel renders. `index` is the
-// position in the source array, not in this one: it is what identifies the
-// warning to focus, so re-ranking can never point the highlight at a different
-// warning than the one that was clicked.
-export const rankedWarnings = (warnings) => (warnings ?? [])
-  .map((w, index) => ({
-    index,
-    code: w.code,
-    severity: NOTE_ONLY_CODES.has(w.code) ? 'info' : (w.severity ?? 'warn'),
-    label: warningLabel(w.code),
-    detail: detailText(w),
-    remedy: remedyText(w.code),
-    // A warning somebody has checked against the plan and accepted. It keeps
-    // its row and its anchor — the record is the point — but stops counting.
-    acknowledged: w.acknowledged ?? null,
-    scope: w.scope ?? (RESULT_SCOPED_CODES.has(w.code) ? 'result' : 'floor'),
-  }))
-  .sort((a, b) => warningRank(a) - warningRank(b));
-
-// The single most important reason to doubt this trace, or null. Taken from
-// the same ranked list the panel expands, so the collapsed line and the list
-// cannot disagree about which warning is worst.
-export const primaryWarning = (warnings) =>
-  rankedWarnings(warnings).find((w) => w.severity !== 'info')?.detail ?? null;
+// The single most important reason to doubt this trace, or null: the worst
+// warning that is not a note about how the outline was reached.
+export const primaryWarning = (warnings) => {
+  const worst = (warnings ?? [])
+    .filter((w) => (w.severity ?? 'warn') !== 'info')
+    .sort((a, b) => warningRank(a) - warningRank(b))[0];
+  return worst ? detailText(worst) : null;
+};
 
 // How the scale a room set is presented. The area is the number the user acts
 // on, so every message here says what the disagreement means for the area
@@ -294,9 +198,10 @@ const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 1
 const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
 
 // The two ways out of a doubtful scale, named as the panel's Scale section
-// names them.
-const PICK_A_ROOM = 'choose “Use a different room” under Scale';
-const BACK_TO_AUTOMATIC = 'Choose “Go back to the automatic scale” under Scale to return to the measured average.';
+// names them. "Below", because a remedy is only ever read inside that section,
+// directly over the buttons it names.
+const PICK_A_ROOM = 'choose “Use a different room” below';
+const BACK_TO_AUTOMATIC = 'Choose “Go back to the automatic scale” below to return to the measured average.';
 
 const autoScaleSummary = (quality) => {
   const rooms = roomsPhrase(quality.roomCount ?? 0);
@@ -332,7 +237,8 @@ const autoScaleSummary = (quality) => {
     };
   }
   // auto-consensus: worth stating, never worth worrying about. The area is read
-  // long after any toast, and "where did this number come from" stays asked.
+  // for as long as the plan is open, and "where did this number come from"
+  // stays asked.
   //
   // The visible line is the room count alone. The spread belongs in the detail:
   // rooms that set a good scale can still span 30% (ExampleFloorplan6 does, and
@@ -413,8 +319,7 @@ export const scaleQualitySummary = (quality) => {
   }
   // Before the early return below, deliberately: a clean line calibration has
   // no `reason`, so placed after it this branch would render nothing — and
-  // that panel line is the only durable statement of where the number came
-  // from once the toast has gone.
+  // that panel line is the only statement of where the number came from.
   if (quality.source === 'line') {
     return lineScaleSummary(quality);
   }
@@ -446,7 +351,7 @@ export const scaleQualitySummary = (quality) => {
         detail: `This room is about ${pct}% out from the ${rooms} measured before it, `
           + 'and the newer measurement is the one now in use. One of the two outlines '
           + 'or labels is wrong.',
-        remedy: 'Pick a third room under Scale to settle it.',
+        remedy: 'Pick a third room to settle it — choose “Use a different room” below.',
       }
       : {
         level: 'check',
@@ -483,7 +388,6 @@ export const qualitySummary = (quality) => {
     level,
     edited,
     confidence,
-    percent: confidence === null ? null : Math.round(confidence * 100),
     reason: primaryWarning(quality?.warnings),
     warnings: quality?.warnings ?? [],
   };
@@ -496,7 +400,7 @@ export const qualitySummary = (quality) => {
  * properties of the ring the user just moved, so they are re-derived and drop.
  * Everything else — a label outside, a room outside, an opening bridged, a wall
  * left out — is a fact about the *drawing*, and about places the edit never
- * visited. Those survive, under a heading that says when they were raised.
+ * visited. Those stay on the trace's record.
  */
 const RETIRED_BY_EDIT = new Set([
   'self-intersecting', 'unsealed', 'covers-page', 'tiny-floor',

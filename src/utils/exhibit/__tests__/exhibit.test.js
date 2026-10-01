@@ -186,7 +186,10 @@ describe('exhibit model', () => {
     expect(model.flags.some((f) => /not deducted/.test(f.text))).toBe(true);
   });
 
-  it('carries a doubtful outline onto the page rather than dropping it', () => {
+  // The outline is printed over the plan, where its reader can see it. What the
+  // detector doubted about it is not a line on the page, and neither is a
+  // score that reads as an accuracy figure.
+  it('prints nothing about how well an outline follows the walls', () => {
     const model = buildExhibitModel(setUp({
       perimeterTraces: [trace({
         quality: {
@@ -196,11 +199,27 @@ describe('exhibit model', () => {
         },
       })],
     }));
-    expect(model.outlines[0].quality.percent).toBe(42);
-    const flag = model.flags.find((f) => f.text.startsWith('1st Floor'));
-    expect(flag.severity).toBe('error');
-    expect(flag.text).toContain('42% wall match');
-    expect(flag.text).toContain('never closed');
+    expect(model.flags).toEqual([]);
+    expect(model.outlines[0]).not.toHaveProperty('quality');
+    const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
+    const printed = layout.ops.filter((o) => o.op === 'text').map((o) => o.text).join(' ');
+    expect(printed).not.toMatch(/wall match|never closed|unverified/);
+    // The outline is still on the page, with how it was reached.
+    expect(printed).toContain('traced automatically');
+  });
+
+  it('prints a doubtful scale, which no picture shows', () => {
+    const model = buildExhibitModel(setUp({
+      calibration: {
+        calibrated: true,
+        feetPerPixel: { x: 1, y: 1 },
+        source: 'room-calibration',
+        quality: { source: 'auto', reason: 'rooms-disagree', roomCount: 4, disagreement: 0.4 },
+      },
+    }));
+    expect(model.flags).toHaveLength(1);
+    expect(model.flags[0]).toMatchObject({ severity: 'warn' });
+    expect(model.flags[0].text).toMatch(/^Scale: The 4 rooms/);
   });
 
   // The exhibit is read by somebody who was not here. An outline the appraiser
@@ -385,9 +404,7 @@ describe('page composition', () => {
 
   it('draws the flag panel behind the flag text, not over it', () => {
     const model = buildExhibitModel(setUp({
-      perimeterTraces: [trace({
-        quality: { source: 'auto', confidence: 0.3, warnings: [{ code: 'unsealed', severity: 'error' }] },
-      })],
+      perimeterTraces: [trace({ holes: [{ id: 'h1', ring: rect(200, 200, 220, 220), stale: true }] })],
     }));
     const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
     const panel = layout.ops.findIndex((o) => o.op === 'roundRect' && o.w > 400);

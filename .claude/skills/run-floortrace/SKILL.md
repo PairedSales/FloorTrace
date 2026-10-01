@@ -35,7 +35,7 @@ The Browser pane doesn't composite, so `document.hidden` is true. What that brea
 - **Media-query change events don't fire**: after `resize_window`, `useIsMobile`/`useIsTouch` stay stale until `App` re-renders. Nudge a store field `App` subscribes to, e.g. `setShowSideLengths`.
 - **Width 0 means the mobile shell.** Check `innerWidth` before planning desktop-layout checks; `resize_window` does not always fix it. If it stays 0, verify structure with a happy-dom component test instead.
 - **CSS transitions freeze at their start value**, so `getComputedStyle` reports pre-change colours and opacity. Finish them first: `document.querySelectorAll('*').forEach((e) => e.getAnimations().forEach((a) => a.finish()))`.
-- `IntersectionObserver` never fires and timers are throttled (toasts outlive their duration). Screenshots can fail while the pane is collapsed or OCR is busy; prefer `read_page`, `find` and `javascript_tool`.
+- `IntersectionObserver` never fires and timers are throttled (the bar's status line and a notice outlive their duration). Screenshots can fail while the pane is collapsed or OCR is busy; prefer `read_page`, `find` and `javascript_tool`.
 
 ## Driving the desktop shell
 

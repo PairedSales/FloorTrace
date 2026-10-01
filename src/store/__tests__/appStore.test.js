@@ -3,6 +3,7 @@ import useAppStore, {
   selectActiveAreaByType,
   selectCombinedArea,
   selectActivePerimeterOverlay,
+  selectPickingRoom,
   AUTOSAVE_FIELDS,
   CALIBRATION_SOURCES,
   PERSISTENT_FLOOR_FIELDS,
@@ -327,30 +328,57 @@ describe('selectActiveAreaByType', () => {
   });
 });
 
-describe('focusedWarning', () => {
-  beforeEach(() => {
-    useAppStore.getState().restart();
-    useAppStore.getState().setFocusedWarning(null);
+// Three places have to agree on this — the bar that turns into the mode's
+// instruction, the panel that opens Scale and the canvas that draws the room
+// sizes as buttons. The canvas's own copy was a prop that got dropped, and for
+// five weeks the instruction pointed at buttons that were not drawn.
+describe('selectPickingRoom', () => {
+  const labels = [{ text: '12x14', bbox: { x: 0, y: 0, width: 10, height: 10 } }];
+  const state = (over) => ({ mode: 'manual', detectedDimensions: labels, isProcessing: false, ...over });
+
+  it('is the room sizes on the plan, waiting to be clicked', () => {
+    expect(selectPickingRoom(state())).toBe(true);
   });
 
-  // Which warning is being inspected is a view of the document, not part of it:
+  it('is not without room sizes to click, or outside that mode', () => {
+    expect(selectPickingRoom(state({ detectedDimensions: [] }))).toBe(false);
+    expect(selectPickingRoom(state({ detectedDimensions: undefined }))).toBe(false);
+    expect(selectPickingRoom(state({ mode: 'normal' }))).toBe(false);
+  });
+
+  // The automatic run passes through the same state between reading the sizes
+  // and measuring the rooms. That is FloorTrace working, not the user choosing.
+  it('is not while a job is running', () => {
+    expect(selectPickingRoom(state({ isProcessing: true }))).toBe(false);
+  });
+});
+
+describe('errorAnchor', () => {
+  const anchor = { kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 9, y: 9 }]] };
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    useAppStore.getState().setErrorAnchor(null);
+  });
+
+  // Where an edit was refused is a view of the document, not part of it:
   // undoing an edit must not restore a highlight, and reopening a project must
   // not start with one already on the canvas.
   it('reaches neither a snapshot nor a draft', () => {
-    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 2 });
-    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 2 });
+    useAppStore.getState().setErrorAnchor(anchor);
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
 
-    expect(AUTOSAVE_FIELDS).not.toContain('focusedWarning');
-    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('focusedWarning');
-    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('focusedWarning');
+    expect(AUTOSAVE_FIELDS).not.toContain('errorAnchor');
+    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('errorAnchor');
+    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('errorAnchor');
   });
 
   it('survives an undo rather than being reverted by one', () => {
-    useAppStore.getState().setFocusedWarning({ traceId: 'trace-1', index: 0 });
+    useAppStore.getState().setErrorAnchor(anchor);
     undoManager.save();
     useAppStore.getState().setUnit('metric');
     undoManager.undo();
-    expect(useAppStore.getState().focusedWarning).toEqual({ traceId: 'trace-1', index: 0 });
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Copy, Download, Loader2, FileJson, AlertTriangle, Share2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
-import { notify, flash } from '../utils/notify';
+import { flash } from '../utils/notify';
 import { readExportOptions, writeExportOptions } from '../utils/exhibit/options';
 import { useIsMobile } from '../hooks/useViewport';
 import Dialog from './Dialog';
@@ -51,6 +51,9 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const [rendering, setRendering] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);       // 'copy' | 'save' | 'share' | null
+  // A save, copy or share that failed. Said here, beside the buttons that were
+  // pressed, and not over the plan behind this dialog.
+  const [actionError, setActionError] = useState(null);
   // Encoded ahead of the tap, because `navigator.share` needs the click's user
   // activation and a full-resolution PNG encode outlives it.
   const [shareFile, setShareFile] = useState(null);
@@ -134,11 +137,14 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   // ── actions ───────────────────────────────────────────────────────────────
   const withBusy = async (kind, fn) => {
     setBusy(kind);
+    setActionError(null);
     try {
       await fn();
     } catch (err) {
       console.error('Saving the image failed:', err);
-      notify(err.message || 'The image could not be saved.', { type: 'error', id: 'export' });
+      setActionError(err.message || (kind === 'copy'
+        ? 'The image could not be copied.'
+        : kind === 'share' ? 'The image could not be shared.' : 'The image could not be saved.'));
     } finally {
       setBusy(null);
     }
@@ -361,12 +367,23 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           disabled={!hasAnnotations}
         />
 
+        {actionError && (
+          <p role="alert" className="note note-crit mt-5">{actionError}</p>
+        )}
+
+        {/* What a picture cannot show — a doubtful scale, an area counted
+            twice — is printed on the image, and said here so it is not a
+            surprise in the report. */}
         {result?.model?.flags?.length > 0 && (
           <p className="note note-warn mt-5 font-normal text-fg-2">
             <b className="text-warn font-semibold">
-              {result.model.flags.length} thing{result.model.flags.length === 1 ? '' : 's'} to check
+              {result.model.flags.length === 1
+                ? 'One note about this measurement'
+                : `${result.model.flags.length} notes about this measurement`}
             </b>
-            {' — they are printed on the image too, so whoever reads it sees them.'}
+            {result.model.flags.length === 1
+              ? ' is printed on the image, so whoever reads it sees it.'
+              : ' are printed on the image, so whoever reads it sees them.'}
           </p>
         )}
       </div>

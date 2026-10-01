@@ -1,5 +1,4 @@
 import { useRef, useEffect, useCallback, useMemo } from 'react';
-import { Toaster } from 'sonner';
 import Canvas from './components/Canvas';
 import AppHeader from './components/AppHeader';
 import ActionBar from './components/ActionBar';
@@ -10,8 +9,8 @@ import HelpModal from './components/HelpModal';
 import ExportDialog from './components/ExportDialog';
 import SettingsDialog from './components/SettingsDialog';
 import ConfirmDialog from './components/ConfirmDialog';
-import { confirmToast } from './utils/confirmToast';
-import { notify, flash, DURATION } from './utils/notify';
+import { askConfirm } from './utils/askConfirm';
+import { notify, flash } from './utils/notify';
 import {
   detectRoomFromClick,
   getFloorBoundaryFaces,
@@ -30,14 +29,14 @@ import {
 import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
 import { boundaryConstraints, nonGlaExcludeRegions } from './utils/traceInputs';
-import { DEFAULT_TRACE_TYPE, traceTypeLabel } from './utils/traceTypes';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { loadExamplePlan } from './utils/examplePlan';
 import { PROGRESS } from './utils/progressSteps';
 import { perfMark, perfReportRun, perfResetRun, MARKS } from './utils/perfMarks';
 import useAppStore, {
-  selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, otherRoomScaleSamples,
+  selectCombinedArea, selectActivePerimeterOverlay, selectCanSwitchWallFace, selectPickingRoom,
+  otherRoomScaleSamples,
 } from './store/appStore';
 import useWorkspaceStore from './store/workspaceStore';
 import * as undoManager from './store/undoManager';
@@ -55,12 +54,16 @@ import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
 import { useCornerPlacement } from './hooks/useCornerPlacement';
+import Notice from './components/Notice';
 import useUnitPreference from './hooks/useUnitPreference';
 
-// The desktop chrome a top-centre toast has to clear: the header's 52, the
-// action bar's 48 when there is a plan for it to act on, and 10 px of air. A
-// function of what is actually on screen, because the bar comes and goes.
+// The desktop chrome a notice has to clear: the header's 52, the action bar's
+// 48 when there is a plan for it to act on, and 10 px of air. A function of
+// what is actually on screen, because the bar comes and goes.
 const desktopChromePx = (hasPlan) => 52 + (hasPlan ? 48 : 0) + 10;
+// The results panel's width (`ResultsPanel.jsx`, `w-[360px]`), which is what a
+// notice has to clear to sit over the plan rather than half over the panel.
+const RESULTS_PANEL_PX = 360;
 
 // One string for both trace entry points, matching the command that starts it.
 // The toolbar said "Detecting exterior boundary…" and the post-scan path said
@@ -109,13 +112,16 @@ const tracedAreaPx = (traced) => {
   ), 0);
 };
 
+// What the trace left out of the outline on purpose, as the second half of
+// the one line a trace ends in. Said because an outline that stops short of the
+// garage otherwise reads as a mistake.
 const excludedAreasNote = (traced) => {
   const garages = traced.excludedGarages ?? 0;
   const others = (traced.excludedRegions ?? 0) - garages;
-  if (garages && others > 0) return ' Garage and porch/patio areas excluded.';
-  if (garages) return ' Garage area excluded.';
-  if (others > 0) return ' Porch/patio areas excluded.';
-  return '';
+  if (garages && others > 0) return 'The garage and the porch or patio were left out';
+  if (garages) return 'The garage was left out';
+  if (others > 0) return 'The porch or patio was left out';
+  return null;
 };
 
 function App() {
@@ -129,6 +135,7 @@ function App() {
   const roomDimensions = useAppStore((s) => s.roomDimensions);
   const area = useAppStore(selectCombinedArea);
   const mode = useAppStore((s) => s.mode);
+  const pickingRoom = useAppStore(selectPickingRoom);
   const calibration = useAppStore((s) => s.calibration);
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
@@ -272,10 +279,9 @@ function App() {
                 : cropToolActive ? 'crop'
                   : cornerEraserActive ? 'cornerEraser'
                   : eraserToolActive ? 'eraser'
-                      // Pills on screen is a mode, even though no tool flag
-                      // says so: `mode` is what renders them and what a click
-                      // on one acts through.
-                      : (mode === 'manual' && detectedDimensions.length > 0) ? 'pick'
+                      // Room sizes on the plan as buttons is a mode, even though
+                      // no tool flag says so (`selectPickingRoom`).
+                      : pickingRoom ? 'pick'
                         : 'select';
 
   // The old "Close project" split in two once more than one plan could be
@@ -320,8 +326,8 @@ function App() {
       });
       // Deliberately no `setPerimeterVertices([])`. That resolved `activeTool`
       // to `'vertex'`, so the action bar answered a failed *scan* with "Click
-      // each corner of the exterior" — a third instruction, for a different
-      // stage, on top of the toast and the box this drops on the plan. The
+      // each corner of the exterior" — an instruction for a different stage,
+      // on top of the panel's own and the box this drops on the plan. The
       // failure path has no business entering a modal outline tool.
       setMode('normal');
     };
@@ -344,7 +350,7 @@ function App() {
         // still be the live one when the answer arrives, or the undo point and
         // the clearing below land on a different drawing.
         const asking = beginWork('confirm');
-        const confirmed = await confirmToast(
+        const confirmed = await askConfirm(
           'Entering Manual Mode will clear existing overlays. Continue?',
           { confirmLabel: 'Continue' }
         );
@@ -359,10 +365,9 @@ function App() {
         setPerimeterOverlay(null);
       }
       
-      if (!imgSrc) {
-        notify('Open a floorplan first.', { type: 'error', id: 'no-image' });
-        return;
-      }
+      // Nothing to read. Every control that leads here is absent or greyed
+      // out without a plan, and the start screen already says what to do.
+      if (!imgSrc) return;
       
       setIsProcessing(true, PROGRESS.readingSizes);
       setMode('manual');
@@ -409,34 +414,40 @@ function App() {
         if (verdict !== 'applied') return;
 
         if (dimensions.length === 0) {
-          notify('Couldn’t read any room sizes on this plan. Set the scale under Scale, in the panel on the left.', { type: 'warning', id: 'scan' });
+          // No message of its own. The panel says it for as long as it is
+          // true — the figure reads "couldn't read any room sizes" and Scale
+          // opens on the ways to set one — and the run still ends in one line
+          // in the bar, from the trace below.
           placeCentredOverlay(imgSrc);
           // The outline does not wait for a scale. Finding the walls needs
           // nothing the scan failed to read, so a plan with no room sizes
           // printed on it still gets its outline — and is left one thing short
           // of an area, not two. It used to stop here with nothing drawn and
           // two jobs for the user, the first of which the app could do itself.
-          await traceAfterScanRef.current?.();
+          //
+          // Only when there is no outline yet. Reading the sizes again on a
+          // plan that already has one must not re-trace over it: the user asked
+          // about the scale, and the outline may be one they adjusted by hand.
+          const outlined = useAppStore.getState().perimeterTraces
+            ?.some((t) => t.vertices?.length >= 3);
+          if (outlined) flash('Couldn’t read any room sizes on this plan', 'warn');
+          else await traceAfterScanRef.current?.();
         } else {
-          const count = dimensions.length;
           // Auto-switch unit based on detected format. The parser's vocabulary
           // is {inches, decimal, meters} and the UI's is {inches, decimal,
           // metric}; without the mapping a metric plan set a unit no formatter
           // recognised.
           const uiUnit = detectedFormat === 'meters' ? 'metric' : detectedFormat;
-          let unitNote = '';
           // Only when the user has not said which unit they want. A pinned
           // preference is a standing instruction, and the drawing does not get
           // to overrule it — that is the whole point of pinning one.
           if (uiUnit && unit !== uiUnit && useWorkspaceStore.getState().unitPreference === 'auto') {
             setUnit(uiUnit);
-            const label = uiUnit === 'inches' ? 'feet and inches'
-              : uiUnit === 'metric' ? 'meters' : 'decimal feet';
-            unitNote = ` Showing ${label}, like the plan.`;
           }
-          // One message, not two: the unit change is a consequence of the scan,
-          // not a separate event the user needs to weigh.
-          flash(`Found ${count} room size${count === 1 ? '' : 's'}.${unitNote}`);
+          // Nothing is announced here. The scan is the first of three steps the
+          // panel is ticking off as they finish, and a "found 7 room sizes"
+          // beside the next step's "Measuring the rooms…" was two things said
+          // at once about a job that was not over.
           // Everything from here is automatic: every label is measured, the
           // rooms that agree set the scale, the room the scale came from is
           // placed as the overlay, and the exterior is traced. The pills stay
@@ -447,12 +458,12 @@ function App() {
       } catch (error) {
         console.error('Error detecting dimensions:', error);
         // Same rule as the success path: a failure to read an image the user
-        // has already moved on from is not news about the plan on screen, and
-        // `id: 'scan'` means this toast would replace whatever the current
-        // plan's own scan had to say.
+        // has already moved on from is not news about the plan on screen.
         deliver(work, () => {
+          // The panel carries it from here: the figure says the sizes could
+          // not be read, and Scale opens on the ways to set one by hand.
           setOcrFailed(true);
-          notify('Couldn’t read this plan. Set the scale under Scale, in the panel on the left.', { type: 'error', id: 'scan' });
+          flash('Couldn’t read the room sizes on this plan', 'warn');
           placeCentredOverlay(imgSrc);
         });
       } finally {
@@ -487,7 +498,7 @@ function App() {
 
     const asking = beginWork('confirm');
     if (losing.length) {
-      const confirmed = await confirmToast(
+      const confirmed = await askConfirm(
         'Read the room sizes again?',
         {
           detail: 'This starts the plan’s measurement over and replaces '
@@ -576,9 +587,7 @@ function App() {
       await handleManualMode(dataUrl, true);
     } catch (error) {
       console.error('Error loading example plan:', error);
-      notify(error?.message || 'Could not load the example plan.', {
-        type: 'error', id: 'example-plan',
-      });
+      notify(error?.message || 'The sample plan could not be opened.');
     } finally {
       setIsProcessing(false);
     }
@@ -594,43 +603,28 @@ function App() {
   } = useCornerPlacement();
 
   /**
-   * Draw mode: paint roughly over the exterior walls and let the tracer read
-   * the strokes as a corridor. The fallback whenever auto-detection fails, so
-   * it is entered from the failure path as well as from the Outline menu.
+   * Paint the outline: paint roughly over the exterior walls and let the tracer
+   * read the strokes as a corridor. The way to an outline whenever the
+   * automatic one is wrong or was not found.
    *
    * **The outline being replaced stays on the plan**, locked, as the thing to
    * paint over, and is only replaced when the painting has been turned into a
-   * new one. Entering the brush used to delete it on the spot unless the caller
-   * asked otherwise — so Cancel left the plan with no outline and no area, and
-   * the failure path's toast pointed at an outline that was already gone.
+   * new one. Entering the brush used to delete it on the spot — so Cancel left
+   * the plan with no outline and no area.
    *
-   * `keepStrokes` defaults to "whatever is already painted", because the only
-   * routes back into the brush all ran `setDrawStrokes([])` and destroyed the
-   * work the user was coming back to add to.
+   * Whatever is already painted is kept: every route back into the brush is the
+   * user coming back to add to it, and clearing the strokes on the way in
+   * destroyed exactly that work.
    *
-   * `reason` is raised through `notify` with the trace-result id, so it
-   * *replaces* the "check it" toast rather than sitting under a message about
-   * an outline that no longer exists. It was previously passed as `{ message }`
-   * to a function that never had that parameter, and has never been rendered.
+   * Takes no arguments, deliberately: it is handed straight to `onClick`, and
+   * an options object would be handed a click event.
    */
-  const handleDrawMode = useCallback(({ keepStrokes, reason = null } = {}) => {
+  const handlePaintOutline = useCallback(() => {
     undoManager.save();
     setPerimeterVertices(null);
-    const painted = useAppStore.getState().drawStrokes?.length > 0;
-    if (keepStrokes === false || (keepStrokes === undefined && !painted)) setDrawStrokes([]);
     // Always enters; the toggle would turn it back off when already on.
     if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
-    if (reason) {
-      notify(reason, { type: 'warning', id: 'trace-result', duration: DURATION.LONG });
-    }
-  }, [setPerimeterVertices, setDrawStrokes, handleDrawModeToggle]);
-
-  // The two outline *methods*, named for what they do rather than for the
-  // handlers behind them: `handleDrawMode` paints, `handleDrawExterior` places
-  // corners, which reads backwards and has been mis-wired once. Wrapped rather
-  // than passed bare, because `handleDrawMode({ keepStrokes } = {})` would take
-  // a click event as its options object.
-  const handlePaintOutline = useCallback(() => handleDrawMode(), [handleDrawMode]);
+  }, [setPerimeterVertices, handleDrawModeToggle]);
 
   /**
    * Adopt the search's next-best footprint for the active outline.
@@ -732,120 +726,37 @@ function App() {
     return shaped.length;
   }, [setPerimeterOverlay, setPerimeterVertices]);
 
-  // Report the trace honestly. A low-confidence outline is applied but
-  // announced as one to check, with the reason and a one-click way to draw it
-  // by hand instead — the previous behaviour fired an unconditional green
-  // "Perimeter detected" even for a footprint covering 6% of the building.
+  /**
+   * The one line a trace ends in.
+   *
+   * This used to be five different toasts and a flash — found, found but check
+   * it, found but probably wrong, traced again, set to count as a garage — each
+   * decided from the detector's verdict on its own outline, and each said a
+   * second time by the panel. Measured on the sample plans, eight in nine
+   * raised at least one and two raised a pair at once.
+   *
+   * The outline is on the plan now, and the user is looking at it: whether it
+   * is right is theirs to see, and what to do when it is not is the bar's
+   * standing line. So this says what happened and stops. The two things it
+   * still has to say in words are the two that leave nothing to look at — no
+   * outline was found, or one was and there is no scale to measure it with —
+   * and both are also what the panel is showing, for as long as they are true.
+   */
   const reportTrace = useCallback((traced, floorCount) => {
-    const quality = qualitySummary(traced?.quality);
-    const excludedNote = excludedAreasNote(traced ?? {});
-    const drawn = traced?.quality?.source === 'drawn';
-    // A drawn trace that went wrong is corrected by painting again, not by
-    // switching to a different tool, so the offer differs from the auto path's.
-    // `keepStrokes` on both: the strokes are the work, and the button offering
-    // to fix the outline used to delete them on the way in.
-    const drawAction = drawn
-      ? { label: 'Paint again', onClick: () => handleDrawMode({ keepStrokes: true }) }
-      : { label: 'Paint it instead', onClick: () => handleDrawMode({ keepStrokes: true }) };
-
     if (!floorCount) {
-      notify(quality.reason
-        ? `FloorTrace couldn’t find the outline — ${quality.reason}. Paint over the outside walls instead.`
-        : 'FloorTrace couldn’t find the outline. Paint over the outside walls instead.',
-      { type: 'error', id: 'trace-result', duration: DURATION.LONG, action: drawAction });
+      flash('Couldn’t find the outline — paint over the outside walls instead', 'warn');
       return;
     }
-
-    // No wall-face parenthetical and no percentage. "Outline found (outer wall
-    // face) (71% confidence): check it" was two parentheticals and an
-    // imperative with no object; the wall face is a setting with its own
-    // switch under Outline, and the percentage read as an accuracy score it
-    // is not (see the note below).
+    const drawn = traced?.quality?.source === 'drawn';
     const what = floorCount > 1
-      ? `${drawn ? 'Drew' : 'Found'} ${floorCount} levels`
+      ? `${drawn ? 'Drew' : 'Found'} ${floorCount} outlines`
       : (drawn ? 'Outline drawn from your painting' : 'Outline found');
-    // The outline on screen is not the one the first search produced, and the
-    // area moved with it. By the routing rule that is a toast and not a flash
-    // even when the result is clean: the user must know it, and cannot see it —
-    // a re-traced outline looks exactly like a first-time one.
-    const retry = traced?.quality?.remediation;
-    const recovered = retry?.accepted ? retry.after.held - retry.before.held : 0;
-    const retryNote = recovered > 0
-      ? ` The first try left ${recovered} room${recovered === 1 ? '' : 's'} outside, so it was traced again.`
-      : '';
-
-    // A clean trace is visible on the canvas the instant it lands, and its
-    // confidence is on the outline row — so it acknowledges rather than
-    // interrupts. Only a result worth checking earns the stack.
-    if (quality.level === 'good') {
-      if (retryNote) {
-        notify(`${what}.${excludedNote}${retryNote}`,
-          { type: 'success', id: 'trace-result', duration: DURATION.NORMAL });
-      } else {
-        flash(`${what}.${excludedNote}`);
-      }
+    if (!useAppStore.getState().calibration?.calibrated) {
+      flash(`${what} — set the scale to see the area`, 'warn');
       return;
     }
-    // No percentage. The detector's score is the share of this outline that
-    // sits on wall the plan actually draws — evidence about the tracing, blind
-    // to whether the enclosed area is the right area. Read as "71% accurate" it
-    // is worse than no number: measured across the results the app presents,
-    // its correlation with area error is +0.117, and the single worst
-    // over-count in the fixture set carries the joint-highest value. What the
-    // user can act on is the reason, so that is what is said.
-    const reason = quality.reason ? `: ${quality.reason}` : '';
-
-    // A result the detector rates poor is not handed over as an answer, but it
-    // is no longer taken away either. The outline stays on the canvas with its
-    // reasons intact, as the thing to paint over; the brush is the toast's
-    // primary action and is entered only when the user takes it. Deleting it
-    // here left the toast pointing at geometry that no longer existed, offering
-    // a mode the app had already entered, behind a button that wiped whatever
-    // had been painted since.
-    if (quality.level === 'poor' || quality.level === 'failed') {
-      notify(
-        `${what}, but it is probably wrong${reason}.${retryNote} `
-        + 'It is left on the plan so you can see it — paint over the outside walls to replace it.',
-        {
-          type: 'error',
-          id: 'trace-result',
-          duration: DURATION.LONG,
-          action: {
-            label: drawn ? 'Paint again' : 'Paint it instead',
-            onClick: () => handleDrawMode({ keepStrokes: true }),
-          },
-        },
-      );
-      return;
-    }
-
-    notify(`${what} — please check it against the plan${reason}.${retryNote}`, {
-      type: 'warning',
-      id: 'trace-result',
-      duration: DURATION.LONG,
-      action: drawAction,
-    });
-  }, [handleDrawMode]);
-
-  // An outline typed from the plan's own words moves its area out of GLA and
-  // into another subtotal. The user can see the new type on the outline row,
-  // but only if they look — and the number they came for changed, so this is
-  // a toast rather than a flash.
-  const reportTraceTypes = useCallback((changes) => {
-    if (!changes?.length) return;
-    const named = changes.filter((c) => c.type !== DEFAULT_TRACE_TYPE);
-    const reverted = changes.length - named.length;
-    const parts = [];
-    if (named.length) {
-      const names = named.map((c) => c.name).join(', ');
-      const kinds = [...new Set(named.map((c) => traceTypeLabel(c.type).toLowerCase()))];
-      parts.push(`${names} set to count as ${kinds.join(' / ')}, from the words on the plan.`);
-    }
-    if (reverted) {
-      parts.push(`${reverted} outline${reverted === 1 ? '' : 's'} back to counting as GLA — `
-        + 'the words it was read from are gone.');
-    }
-    notify(parts.join(' '), { type: 'info', id: 'trace-types', duration: DURATION.NORMAL });
+    const leftOut = excludedAreasNote(traced ?? {});
+    flash(leftOut ? `${what}. ${leftOut}.` : what);
   }, []);
 
   // Returns the quality level of the applied trace, so the caller can decide
@@ -855,6 +766,9 @@ function App() {
     if (!image) return null;
     setIsProcessing(true, message);
     const work = beginWork('trace');
+    // Any trace answers the offer to trace again after the image was edited.
+    const ws = useWorkspaceStore.getState();
+    if (ws.retraceOfferFor === work.docId) ws.setRetraceOfferFor(null);
     try {
       const traced = await traceFloorplanBoundary(image, {
         excludeRegions: nonGlaExcludeRegions(useAppStore.getState()),
@@ -884,7 +798,9 @@ function App() {
         // plan's `areaLabels` and retypes the outlines this closure has just
         // placed, so on the held-and-replayed path both have to be the
         // adopting plan's, not whichever plan was live when the trace started.
-        const typeChanges = floors ? useAppStore.getState().classifyTraceTypes() : [];
+        // Not announced: a type set from the plan's own words is on the
+        // outline's row, with the words it was read from.
+        if (floors) useAppStore.getState().classifyTraceTypes();
         // Every trace, not only the one the automatic scan ran: the footprint is
         // the one check on the scale that survives a majority of bad rooms, and a
         // re-trace from the menu or a draw-mode pass changes it. It re-runs a pure
@@ -894,9 +810,9 @@ function App() {
         if (floors) reviewAgainstFootprint(tracedAreaPx(traced));
         // Written before the report, and on the no-floor branch too. This is
         // the only durable record that a trace ran at all: without it a trace
-        // that produced nothing wrote no field, so once the toast expired the
-        // panel said "every outline came back clean" about zero outlines and
-        // the spine read exactly as it does on a plan nobody has tried.
+        // that produced nothing wrote no field, so the panel read exactly as
+        // it does on a plan nobody has tried, and offered the automatic trace
+        // that had just failed as the next thing to do.
         const level = floors ? qualitySummary(traced?.quality).level : 'failed';
         setLastTraceOutcome({
           at: Date.now(),
@@ -906,7 +822,6 @@ function App() {
           source: brush ? 'drawn' : 'auto',
         });
         reportTrace(traced, floors);
-        reportTraceTypes(typeChanges);
       };
 
       const verdict = deliver(work, applyTrace);
@@ -916,8 +831,8 @@ function App() {
       // stopping with no message is indistinguishable from a trace that hung.
       if (verdict === 'stale' || verdict === 'dropped') {
         flash(verdict === 'stale'
-          ? 'The plan changed while the outline was being found — find it again.'
-          : 'That outline finished after its plan was closed.');
+          ? 'The plan changed while the outline was being found — find it again'
+          : 'That outline finished after its plan was closed', 'warn');
       }
       if (verdict !== 'applied') return null;
 
@@ -927,28 +842,29 @@ function App() {
     } catch (error) {
       // Logged outside the delivery: a crash on a plan the user has since
       // cropped is still a crash, and inside the closure it was swallowed
-      // along with the toast.
+      // along with the message.
       console.error('Perimeter detection failed:', error);
-      // The toast is a claim about the plan on screen — `id: 'trace-result'`
-      // means it replaces whatever that plan's own trace had to say — so it is
-      // raised only by work that still owns what it was tracing.
+      // A claim about the plan on screen, so it is raised only by work that
+      // still owns what it was tracing.
       deliver(work, () => {
         // One dead end used to cover a timeout, a killed worker and a bug in
         // applying a *successful* trace. They need different things from the
-        // user, so they say different things.
+        // user, so they say different things: the line in the bar now, and the
+        // rest under Outline for as long as there is no outline.
         const text = String(error?.message ?? '');
-        const message = /timed out|timeout/i.test(text)
-          ? 'Finding the outline took too long and was stopped. Crop the plan to the house, or paint the outline instead.'
-          : /terminated|worker/i.test(text)
-            ? 'Finding the outline was interrupted. Try again, or paint the outline instead.'
-            : 'FloorTrace couldn’t find the outline on this plan. Paint over the outside walls instead.';
-        setLastTraceOutcome({ at: Date.now(), level: 'failed', reason: message, floors: 0 });
-        notify(message, {
-          type: 'error',
-          id: 'trace-result',
-          duration: DURATION.LONG,
-          action: { label: 'Paint it instead', onClick: () => handleDrawMode({ keepStrokes: true }) },
+        const timedOut = /timed out|timeout/i.test(text);
+        const interrupted = !timedOut && /terminated|worker/i.test(text);
+        setLastTraceOutcome({
+          at: Date.now(),
+          level: 'failed',
+          reason: timedOut
+            ? 'Finding it took too long and was stopped. Cropping the plan to the house makes it quicker.'
+            : interrupted ? 'Finding it was interrupted, so it is worth trying again.' : null,
+          floors: 0,
         });
+        flash(timedOut ? 'Finding the outline took too long and was stopped'
+          : interrupted ? 'Finding the outline was interrupted — try again'
+            : 'Couldn’t find the outline — paint over the outside walls instead', 'warn');
       });
       return 'failed';
     } finally {
@@ -963,12 +879,10 @@ function App() {
       setIsProcessing(false);
     }
   }, [image, useInteriorWalls, setTracedBoundaries, applyTracedBoundary, setIsProcessing,
-    reportTrace, reportTraceTypes, handleDrawMode, reviewAgainstFootprint,
-    setLastTraceOutcome]);
+    reportTrace, reviewAgainstFootprint, setLastTraceOutcome]);
 
-  // Auto-detection, with draw mode as its fallback. A result the detector
-  // itself rates poor or worse is not something to hand over as an answer, so
-  // the brush is put in the user's hand rather than merely offered.
+  // Find the outline, from the menu or the panel. The undo point is this
+  // function's: the automatic run after a scan has already saved its own.
   const handleTracePerimeter = useCallback(async () => {
     if (!image) return;
     undoManager.save();
@@ -981,7 +895,7 @@ function App() {
     const strokes = state.drawStrokes;
     if (!strokes.length) {
       setDrawModeActive(false);
-      flash('Nothing painted — drag over the outside walls first');
+      flash('Nothing painted — drag over the outside walls first', 'warn');
       return;
     }
     undoManager.save();
@@ -992,8 +906,7 @@ function App() {
     });
     // The strokes are kept unless the result is clean: re-entering draw mode to
     // add one more pass is the natural correction, and discarding them would
-    // make the user paint the whole outline again. `fair` used to clear them,
-    // which is precisely the case whose own toast says to check it.
+    // make the user paint the whole outline again.
     if (level === 'good') setDrawStrokes([]);
   }, [runTrace, setDrawModeActive, setDrawStrokes]);
 
@@ -1070,8 +983,8 @@ function App() {
 
   // Set the project scale from one room. The decision — which rooms get a
   // vote, what the verdict is, whether anything moved — is resolveScaleUpdate's
-  // and is unit-tested there; what is left here is the store write and the
-  // toast, the two things a pure function cannot do.
+  // and is unit-tested there; what is left here is the store write, the one
+  // thing a pure function cannot do.
   const updateScale = useCallback((dimensions, overlay, options = {}) => {
     const state = useAppStore.getState();
     const resolved = resolveScaleUpdate({
@@ -1083,9 +996,9 @@ function App() {
     });
     if (!resolved) return;
 
-    // Deliberately silent. The panel's Things to check carries this verdict
-    // for as long as the scale is in force, which is where the question is
-    // actually asked — a toast said it once and then left the doubt invisible.
+    // Deliberately silent. The panel's Scale section carries this verdict for
+    // as long as the scale is in force, which is where the question is
+    // actually asked — a message said it once and then left the doubt invisible.
 
     if (resolved.changed) {
       applyRoomCalibration(resolved.scale, null, 'room-calibration', resolved.quality);
@@ -1118,9 +1031,9 @@ function App() {
       setPerimeterOverlay({ vertices: currentVertices });
       setPerimeterVertices(null); // Exit vertex placement mode
       // An outline drawn corner by corner answers a failed automatic trace.
-      // Only a trace writes this record, so without clearing it "The last
-      // trace found no outline" stood beside the user's finished outline,
-      // counted as a thing to check, for as long as the plan was open.
+      // Only a trace writes this record, so without clearing it the panel
+      // would go back to "FloorTrace couldn’t find the outline" the moment
+      // this outline was deleted, about a trace the user has since replaced.
       setLastTraceOutcome(null);
     }
   }, [setPerimeterOverlay, setPerimeterVertices, setLastTraceOutcome]);
@@ -1132,7 +1045,7 @@ function App() {
     const overlay = selectActivePerimeterOverlay(useAppStore.getState());
     if (!overlay?.vertices) return;
     if (overlay.vertices.length <= 3) {
-      notify('An outline needs at least three corners.', { type: 'warning', id: 'min-vertices' });
+      flash('An outline needs at least three corners', 'warn');
       return;
     }
     updatePerimeterVertices(
@@ -1220,6 +1133,17 @@ function App() {
     // — and equally on every later re-trace, which used to leave the verdict
     // this trace produced standing against a building that no longer existed.
     await autoTraceExterior();
+
+    // The last word of the run, when the user's own scale stood against the
+    // rooms just measured: the scale is what they asked about by reading the
+    // sizes again, so it outranks "Outline found".
+    if (decision.keptByHand) {
+      if (decision.keptByHand.agrees) {
+        flash('Kept the scale you set by hand — the rooms on this plan agree with it');
+      } else {
+        flash('Kept the scale you set by hand — the rooms on this plan disagree with it', 'warn');
+      }
+    }
   }, [measureAndCalibrate, autoTraceExterior, setIsProcessing, showAutoScaleRoom, setMode]);
 
   useEffect(() => {
@@ -1278,14 +1202,15 @@ function App() {
 
     if (!isCurrent(work)) return;
 
+    // What to say about the room once everything below has run. Held until
+    // then because the trace that follows ends in a line of its own, and the
+    // bar keeps only the latest: said first, this would be on screen for the
+    // half second before "Outline found" replaced it.
+    let roomDoubt = null;
     if (!detected) {
       // A failed room detection used to fall through to a hardcoded 200x200
       // box and calibrate the whole project from it, without a word.
-      notify(
-        'Couldn’t find that room’s walls — drag the green box to fit the room, '
-        + 'then check the area.',
-        { type: 'warning', id: 'room-detect' },
-      );
+      roomDoubt = 'Couldn’t find that room’s walls — drag the green box to fit the room';
     } else {
       useAppStore.getState().addRoom({
         labelId: labelId ?? null,
@@ -1302,11 +1227,7 @@ function App() {
       // the rectangle. Saying nothing made a doubtful room indistinguishable
       // from a certain one at exactly the moment it mattered most.
       if (detected.confidence < 0.5) {
-        notify(
-          'FloorTrace isn’t sure it found this room’s walls, and the scale comes from it — '
-          + 'check the green box matches the room before you trust the area.',
-          { type: 'warning', id: 'room-detect' },
-        );
+        roomDoubt = 'Not sure of that room’s walls — check the green box fits the room';
       }
     }
 
@@ -1327,9 +1248,11 @@ function App() {
     // The labels are kept, not cleared. `setMode('normal')` above is what puts
     // the pills away; clearing the array as well made "Select room" a one-shot
     // — the second wrong guess had nothing left to pick from — and threw away
-    // the tracer's interior points, the warning anchors and the exhibit's unit
-    // style along with it.
+    // the tracer's interior points and the exhibit's unit style along with it.
     await autoTraceExterior();
+    // The last word, because it is the one about the scale: Scale is open with
+    // the green box on the plan, which is where the user is being sent.
+    if (roomDoubt && isCurrent(work)) flash(roomDoubt, 'warn');
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
     setPerimeterVertices, setMode, autoTraceExterior]);
 
@@ -1392,10 +1315,6 @@ function App() {
   const handleAutoSnapChange = useCallback((value) => {
     setAutoSnapEnabled(value);
   }, [setAutoSnapEnabled]);
-
-  const handleSaveOnExitChangeWithToast = useCallback((value) => {
-    handleSaveOnExitChange(value);
-  }, [handleSaveOnExitChange]);
 
   // Focus moving between the feet and inches sub-fields is one edit, not two:
   // cancelling the pending clear is what makes "still editing" true for the
@@ -1518,22 +1437,19 @@ function App() {
   // so the next step is nearly always to find the outline again. The edit
   // offers it, rather than leaving the user to know to go and ask, and rather
   // than re-tracing unasked over an outline they may have adjusted by hand.
+  //
+  // The offer is the action bar's, at rest (`retraceOfferFor`): nothing is said
+  // while the eraser is still in the user's hand, where every stroke lands
+  // here, and it is still there when they put the tool down.
   const handleImageEdited = useCallback((newImageDataUrl) => {
     handleImageUpdate(newImageDataUrl);
-    notify('Plan updated. When you have finished, find the outline again so it uses the cleaned-up plan.', {
-      type: 'info',
-      id: 'image-edited',
-      duration: DURATION.LONG,
-      action: {
-        label: 'Find the outline',
-        onClick: () => {
-          if (useAppStore.getState().isProcessing) return;
-          handleCancelTool();
-          handleTracePerimeter();
-        },
-      },
-    });
-  }, [handleImageUpdate, handleCancelTool, handleTracePerimeter]);
+    const state = useAppStore.getState();
+    // Only with an outline to find *again*. Without one the panel is already
+    // offering to find it.
+    if (state.perimeterTraces?.some((t) => t.vertices?.length >= 3)) {
+      useWorkspaceStore.getState().setRetraceOfferFor(state.activeDocumentId);
+    }
+  }, [handleImageUpdate]);
 
   // Everything `toolCatalog.js` lists, by id. The menus speak the same tool
   // ids as `TOOL_MODES`, and each maps to the very toggle the keyboard already
@@ -1756,7 +1672,7 @@ function App() {
           autoSnapEnabled={autoSnapEnabled}
           onAutoSnapChange={handleAutoSnapChange}
           saveOnExit={saveOnExit}
-          onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+          onSaveOnExitChange={handleSaveOnExitChange}
           enhancedOcr={enhancedOcr}
           onEnhancedOcrChange={handleEnhancedOcrChange}
           theme={theme}
@@ -1884,7 +1800,7 @@ function App() {
           theme={theme}
           onThemeChange={setTheme}
           saveOnExit={saveOnExit}
-          onSaveOnExitChange={handleSaveOnExitChangeWithToast}
+          onSaveOnExitChange={handleSaveOnExitChange}
           enhancedOcr={enhancedOcr}
           onEnhancedOcrChange={handleEnhancedOcrChange}
         />
@@ -1922,40 +1838,15 @@ function App() {
         className="hidden"
       />
 
-      {/* Only real notifications - every "you are in X mode" message is the
-          action bar's, which carries the running mode, and every low-stakes
-          confirmation is a flash in the same bar. What is left is what
-          actually deserves to interrupt. */}
-      {/* Two slots, not sonner's default three. A burst that cannot be read is
-          worse than a burst that is truncated, and with every toast carrying
-          a stable id the same condition updates in place instead of stacking. */}
-      <Toaster
-        position="top-center"
-        visibleToasts={2}
-        closeButton
-        // Clears whichever chrome is above it: the desktop header and action
-        // bar, or one mobile bar plus whatever the notch takes. Named rather
-        // than written inline, because it was a hard-coded `116px` for a stack
-        // that had already changed twice.
-        style={{
-          top: isMobile
-            ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
-            : `${desktopChromePx(!!image)}px`,
-        }}
-        toastOptions={{
-          classNames: {
-            toast: 'group !bg-raised !border-line !text-fg !rounded-xl !shadow-float font-medium text-[14.5px] leading-snug font-sans select-none flex items-center gap-2.5 p-4 !w-fit !max-w-lg',
-            title: '!text-fg',
-            description: '!text-fg-3',
-            success: '!text-ok',
-            error: '!text-crit',
-            info: '!text-accent',
-            warning: '!text-warn',
-            actionButton: '!bg-accent !text-accent-ink !font-semibold',
-            cancelButton: '!bg-sunken !text-fg',
-            closeButton: '!bg-raised !border-line !text-fg',
-          }
-        }}
+      {/* The one notice, for what went wrong outside the plan — a file, a
+          save, storage. Everything about the plan itself is the bar's or the
+          panel's (`utils/notify.js`). Below whichever chrome is above it: the
+          desktop header and action bar, or one mobile bar plus the notch. */}
+      <Notice
+        top={isMobile
+          ? 'calc(env(safe-area-inset-top, 0px) + 60px)'
+          : `${desktopChromePx(!!image)}px`}
+        left={!isMobile && panelOpen && image ? RESULTS_PANEL_PX : 0}
       />
     </div>
   );

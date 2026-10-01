@@ -95,8 +95,8 @@ async function renderPage(page, maxDimension) {
  *
  * @param {File|Blob} file
  * @param {{maxDimension: number, maxPages?: number, onProgress?: (page: number, total: number) => void}} options
- * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string,
- *   lowResolution: boolean}>, skipped: number, totalPages: number}>}
+ * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string}>,
+ *   skipped: number, totalPages: number}>}
  */
 export async function pdfToPageImages(file, { maxDimension, maxPages = MAX_PDF_PAGES, onProgress } = {}) {
   if (file.size > MAX_PDF_BYTES) {
@@ -138,10 +138,6 @@ export async function pdfToPageImages(file, { maxDimension, maxPages = MAX_PDF_P
           mimeType: 'image/png',
           // One plan per page, so each needs a name a tab can show.
           name: doc.numPages > 1 ? `${baseName} p${n}.png` : `${baseName}.png`,
-          // A page is rendered onto `maxDimension`, so it is never the small
-          // input an exported screenshot can be. Carried anyway so a caller
-          // reads one shape whichever kind of file it handed in.
-          lowResolution: false,
         });
       } finally {
         page.cleanup();

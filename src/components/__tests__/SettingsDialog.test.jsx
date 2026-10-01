@@ -23,7 +23,9 @@ const props = (over = {}) => ({
   ...over,
 });
 
-beforeEach(() => useWorkspaceStore.setState({ unitPreference: 'auto', showSettings: false }));
+beforeEach(() => useWorkspaceStore.setState({
+  unitPreference: 'auto', showSettings: false, enhancedOcrStatus: 'idle',
+}));
 afterEach(cleanup);
 
 describe('SettingsDialog', () => {
@@ -54,6 +56,24 @@ describe('SettingsDialog', () => {
     expect(view.getByText(/pause the app for about 10 seconds/)).toBeTruthy();
     fireEvent.click(view.getByLabelText(/Try harder to read room sizes/));
     expect(onEnhancedOcrChange).toHaveBeenCalledWith(true);
+  });
+
+  // It takes ten seconds to start and can fail, with this dialog open in front
+  // of the plan. So it is said here, on the switch, and not over the plan.
+  it('says on the switch how the slow reader is getting on', () => {
+    const view = render(<SettingsDialog {...props({ enhancedOcr: true })} />);
+    act(() => useWorkspaceStore.setState({ enhancedOcrStatus: 'starting' }));
+    expect(view.getByText(/Getting the slower reader ready/)).toBeTruthy();
+    act(() => useWorkspaceStore.setState({ enhancedOcrStatus: 'ready' }));
+    expect(view.getByText(/gets a second, slower reading/)).toBeTruthy();
+    act(() => useWorkspaceStore.setState({ enhancedOcrStatus: 'failed' }));
+    expect(view.getByText(/couldn’t start in this browser/)).toBeTruthy();
+  });
+
+  it('does not report on a reader that is switched off', () => {
+    useWorkspaceStore.setState({ enhancedOcrStatus: 'failed' });
+    const view = render(<SettingsDialog {...props({ enhancedOcr: false })} />);
+    expect(view.getByText(/pause the app for about 10 seconds/)).toBeTruthy();
   });
 
   it('turns autosave off from its own checkbox', () => {
