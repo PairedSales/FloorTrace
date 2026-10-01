@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Copy, Download, Loader2, FileJson, AlertTriangle, Share2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
-import { notify, flash } from '../utils/notify';
+import { flash } from '../utils/notify';
 import { readExportOptions, writeExportOptions } from '../utils/exhibit/options';
 import { useIsMobile } from '../hooks/useViewport';
 import Dialog from './Dialog';
@@ -51,6 +51,9 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const [rendering, setRendering] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);       // 'copy' | 'save' | 'share' | null
+  // A save, copy or share that failed. Said here, beside the buttons that were
+  // pressed, and not over the plan behind this dialog.
+  const [actionError, setActionError] = useState(null);
   // Encoded ahead of the tap, because `navigator.share` needs the click's user
   // activation and a full-resolution PNG encode outlives it.
   const [shareFile, setShareFile] = useState(null);
@@ -134,11 +137,14 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   // ── actions ───────────────────────────────────────────────────────────────
   const withBusy = async (kind, fn) => {
     setBusy(kind);
+    setActionError(null);
     try {
       await fn();
     } catch (err) {
       console.error('Saving the image failed:', err);
-      notify(err.message || 'The image could not be saved.', { type: 'error', id: 'export' });
+      setActionError(err.message || (kind === 'copy'
+        ? 'The image could not be copied.'
+        : kind === 'share' ? 'The image could not be shared.' : 'The image could not be saved.'));
     } finally {
       setBusy(null);
     }
@@ -360,6 +366,10 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           hint={hasAnnotations ? 'Distances and areas you measured' : 'You haven’t measured anything'}
           disabled={!hasAnnotations}
         />
+
+        {actionError && (
+          <p role="alert" className="note note-crit mt-5">{actionError}</p>
+        )}
 
         {/* What a picture cannot show — a doubtful scale, an area counted
             twice — is printed on the image, and said here so it is not a

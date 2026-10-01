@@ -187,7 +187,7 @@ export function useKeyboardShortcuts({
           const tool = toolDigits.find((t) => t.digit === digit);
           if (!tool) return;
           if (!tool.available) {
-            if (tool.unavailable) flash(tool.unavailable);
+            if (tool.unavailable) flash(tool.unavailable, 'warn');
             return;
           }
           tool.toggle?.();

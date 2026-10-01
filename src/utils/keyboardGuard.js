@@ -81,7 +81,7 @@ const swallow = (e) => {
   // at the Stop button, which is only there past five seconds and only for work
   // the detection worker can be terminated for — an OCR scan, the longest wait
   // in the app, has neither.
-  useWorkspaceStore.getState().flashStatus('Still working — try that again once this finishes');
+  useWorkspaceStore.getState().flashStatus('Still working — try that again once this finishes', 'warn');
 };
 
 const isBusy = () => useAppStore.getState().isProcessing;

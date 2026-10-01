@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { notify } from '../utils/notify';
+import { flash } from '../utils/notify';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import { getCentroid, holeRings } from '../utils/areaCalculator';
@@ -64,7 +64,7 @@ export function useVoidTool({ voidToolActive, getCanvasCoords, scaleRef }) {
   const commit = useCallback((ring) => {
     const { ok, reason, trace } = evaluate(ring);
     if (!ok) {
-      notify(reason, { type: 'error', id: 'void-tool' });
+      flash(reason, 'warn');
       return false;
     }
     undoManager.save();
@@ -122,8 +122,8 @@ export function useVoidTool({ voidToolActive, getCanvasCoords, scaleRef }) {
     if (dragged) {
       const end = rect?.end;
       setRect(null);
-      // A flick with no real width is not a rectangle, and rejecting it with a
-      // toast would fire on every stray drag.
+      // A flick with no real width is not a rectangle, and rejecting it out
+      // loud would say so on every stray drag.
       if (anchor && end && !isDegenerateRect(anchor, end)) commit(rectRing(anchor, end));
       return true;
     }

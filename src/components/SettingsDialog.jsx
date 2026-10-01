@@ -1,4 +1,5 @@
 import useWorkspaceStore from '../store/workspaceStore';
+import { ENHANCED_OCR_HINT } from '../hooks/useEnhancedOcr';
 import Dialog from './Dialog';
 
 /**
@@ -64,6 +65,9 @@ const SettingsDialog = ({
 }) => {
   const unitPreference = useWorkspaceStore((s) => s.unitPreference);
   const setUnitPreference = useWorkspaceStore((s) => s.setUnitPreference);
+  // How the slower reader is getting on, said on its own switch: it takes ten
+  // seconds to start and can fail, and this dialog is open while it does.
+  const readerStatus = useWorkspaceStore((s) => s.enhancedOcrStatus);
 
   // "Same as the plan" hands the choice back to the drawing; any other answer
   // pins that unit for every plan.
@@ -121,7 +125,7 @@ const SettingsDialog = ({
           checked={!!enhancedOcr}
           onChange={() => onEnhancedOcrChange(!enhancedOcr)}
           label="Try harder to read room sizes"
-          hint="Adds a second, slower reader for small or blurry text. Turning it on can pause the app for about 10 seconds while it gets ready."
+          hint={ENHANCED_OCR_HINT[enhancedOcr ? readerStatus : 'idle'] ?? ENHANCED_OCR_HINT.idle}
         />
       </Group>
     </Dialog>

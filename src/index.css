@@ -310,6 +310,8 @@
     @apply px-3.5 py-3 rounded-lg border border-line bg-panel text-[14px] leading-snug text-fg-2;
   }
   .note-warn { @apply border-warn/35 bg-warn/10 text-warn font-medium; }
+  /* Something failed, said where it was asked for — inside a dialog. */
+  .note-crit { @apply border-crit/35 bg-crit/10 text-crit font-medium; }
 
   /* The small label over a figure or a group. Sentence case at reading size:
      spaced capitals made every one of these look like a form field label. */

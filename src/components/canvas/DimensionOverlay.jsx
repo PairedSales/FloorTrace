@@ -20,11 +20,12 @@ const pillHit = (w, h, minH) => (ctx, shape) => {
 };
 
 /**
- * DimensionOverlay renders OCR-detected dimension pills, anchor dots, and connector
- * lines in manual mode.
+ * The room sizes FloorTrace read, drawn on the plan as buttons — a pill, an
+ * anchor dot and the line joining them — while the user is choosing which room
+ * to take the scale from (`selectPickingRoom`).
  */
 const DimensionOverlay = ({
-  mode,
+  visible,
   detectedDimensions,
   scale,
   unit,
@@ -34,7 +35,7 @@ const DimensionOverlay = ({
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const isTouch = useIsTouch();
 
-  if (mode !== 'manual' || !detectedDimensions || detectedDimensions.length === 0) return null;
+  if (!visible || !detectedDimensions || detectedDimensions.length === 0) return null;
 
   const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
 

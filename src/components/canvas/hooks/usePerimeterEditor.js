@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { notifyAt } from '../../../utils/notify';
+import { flashAt } from '../../../utils/notify';
 import { hasSelfIntersection, findSelfIntersection, validateVertexMove } from '../../../utils/geometryValidation';
 import { pointToLineDistance } from '../canvasUtils';
 
@@ -91,8 +91,7 @@ export function usePerimeterEditor({
 
     const crossing = findSelfIntersection(newVertices, true);
     if (crossing) {
-      notifyAt('That would make the outline cross itself — the move was undone.',
-        { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
+      flashAt('That would make the outline cross itself — the corner was put back', crossing);
       onCancelUndoSave?.();
     } else {
       onPerimeterUpdate(newVertices, false);
@@ -150,8 +149,7 @@ export function usePerimeterEditor({
 
     const crossing = findSelfIntersection(newVertices, true);
     if (crossing) {
-      notifyAt('A corner there would make the outline cross itself.',
-        { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
+      flashAt('A corner there would make the outline cross itself', crossing);
       return;
     }
 

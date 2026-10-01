@@ -3,6 +3,7 @@ import useAppStore, {
   selectActiveAreaByType,
   selectCombinedArea,
   selectActivePerimeterOverlay,
+  selectPickingRoom,
   AUTOSAVE_FIELDS,
   CALIBRATION_SOURCES,
   PERSISTENT_FLOOR_FIELDS,
@@ -324,6 +325,31 @@ describe('selectActiveAreaByType', () => {
     const after = selectActiveAreaByType(useAppStore.getState());
     expect(after).not.toBe(before);
     expect(after.byType).toEqual({ porch: 100 });
+  });
+});
+
+// Three places have to agree on this — the bar that turns into the mode's
+// instruction, the panel that opens Scale and the canvas that draws the room
+// sizes as buttons. The canvas's own copy was a prop that got dropped, and for
+// five weeks the instruction pointed at buttons that were not drawn.
+describe('selectPickingRoom', () => {
+  const labels = [{ text: '12x14', bbox: { x: 0, y: 0, width: 10, height: 10 } }];
+  const state = (over) => ({ mode: 'manual', detectedDimensions: labels, isProcessing: false, ...over });
+
+  it('is the room sizes on the plan, waiting to be clicked', () => {
+    expect(selectPickingRoom(state())).toBe(true);
+  });
+
+  it('is not without room sizes to click, or outside that mode', () => {
+    expect(selectPickingRoom(state({ detectedDimensions: [] }))).toBe(false);
+    expect(selectPickingRoom(state({ detectedDimensions: undefined }))).toBe(false);
+    expect(selectPickingRoom(state({ mode: 'normal' }))).toBe(false);
+  });
+
+  // The automatic run passes through the same state between reading the sizes
+  // and measuring the rooms. That is FloorTrace working, not the user choosing.
+  it('is not while a job is running', () => {
+    expect(selectPickingRoom(state({ isProcessing: true }))).toBe(false);
   });
 });
 

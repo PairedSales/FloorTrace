@@ -11,7 +11,7 @@
 // eager shell would fire once against a null stage and never again.
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
-import useAppStore, { roomScaleSamples } from '../store/appStore';
+import useAppStore, { roomScaleSamples, selectPickingRoom } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
 import { anchorBounds } from '../utils/planAnchors';
@@ -40,7 +40,6 @@ const CanvasStage = React.memo(({
   perimeterTraces,
   activeTraceId,
   traceInteractionMode,
-  mode,
   onRoomOverlayUpdate,
   onPerimeterUpdate,
   detectedDimensions,
@@ -108,6 +107,11 @@ const CanvasStage = React.memo(({
   const setViewportTransform = useAppStore((s) => s.setViewportTransform);
   const setCanvasRotation = useAppStore((s) => s.setCanvasRotation);
   const errorAnchor = useAppStore((s) => s.errorAnchor);
+  // Whether the room sizes are on the plan as buttons. Read from the store
+  // rather than taken as a prop: it *was* a prop, `mode`, and the one JSX
+  // element that passed it stopped doing so — the buttons then never drew, and
+  // nothing failed to say so.
+  const pickingRoom = useAppStore(selectPickingRoom);
   const annotationSize = useWorkspaceStore((s) => s.annotationSize);
 
   // Shared refs to break mutual dependencies between hooks
@@ -594,7 +598,7 @@ const CanvasStage = React.memo(({
             <RefusalHighlightLayer anchor={errorAnchor} scale={overlayScale} />
 
             <DimensionOverlay
-              mode={mode}
+              visible={pickingRoom}
               detectedDimensions={detectedDimensions}
               scale={overlayScale}
               unit={unit}

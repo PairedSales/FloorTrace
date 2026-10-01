@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, PanelLeftOpen } from 'lucide-react';
+import { Loader2, PanelLeftOpen, X } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
@@ -49,24 +49,41 @@ import { Menu, MenuItem, MenuSep } from './Menu';
  * instruction takes a row of its own and wraps, and the brush's word label and
  * the key hints drop. At rest the tip stands down before the menus do.
  *
- * ## The live region
+ * ## The one line the app speaks in
  *
- * Acknowledgements ("Area copied") land here as a flash rather than as a toast
- * over the plan, and this is the one place a screen reader hears them. The
- * corner count and the elapsed seconds are deliberately **outside** it: the
- * region is `aria-atomic`, so a number changing on every click, or once a
- * second, would re-announce the whole bar each time.
+ * Whatever just happened to the plan is said here, as a flash, and nowhere
+ * else: green when it was done ("Outline found", "Area copied"), amber when it
+ * was not and why ("An outline needs at least three corners"). There is no
+ * pop-up for any of it. A whole automatic run — read the sizes, work out the
+ * scale, find the outline — ends in exactly one such line, where it used to
+ * end in up to three toasts over the plan (`utils/notify.js`).
+ *
+ * This is the one place a screen reader hears it. The corner count and the
+ * elapsed seconds are deliberately **outside** the live region: it is
+ * `aria-atomic`, so a number changing on every click, or once a second, would
+ * re-announce the whole bar each time.
  *
  * A flash is shown only for what is left of its window, so one raised while
- * the bar was off screen is not replayed when it returns.
+ * the bar was off screen is not replayed when it returns. An amber one stays
+ * longer than a green one: it has to be read, not just noticed.
+ *
+ * ## The offer
+ *
+ * After the plan's image has been edited — marks erased, or cropped to the
+ * house — the bar at rest offers to find the outline again, because that is
+ * nearly always why the image was edited. It is an offer and not an action:
+ * the outline on the plan may have been adjusted by hand, and re-tracing over
+ * it unasked would throw that away. It stands until it is taken, dismissed, or
+ * a trace runs for any other reason.
  *
  * Commands that start work (find the outline, the next-best outline) wait for a
  * running job; tools do not — entering a mode changes nothing the job was
  * computed from. The scale is never stated in pixels here.
  */
 
-// How long a confirmation stays in the bar.
-const FLASH_MS = 3200;
+// How long a flash stays in the bar. A refusal has to be read; a confirmation
+// only has to be noticed.
+const FLASH_MS = { ok: 3200, warn: 6000 };
 
 // How long a job may run before the bar admits how long it has been running.
 // A trace is usually under a second and a scan is usually a few, and a counter
@@ -74,9 +91,11 @@ const FLASH_MS = 3200;
 // the only thing on screen that distinguishes "working" from "wedged".
 const ELAPSED_AFTER_MS = 5000;
 
-// What the bar says at rest. The one thing a newcomer cannot find out by
-// looking: that the outline's corners move.
-const IDLE_TIP = 'Tip: drag any corner of the outline to adjust it.';
+// What the bar says at rest: the two things a newcomer cannot find out by
+// looking — that the outline's corners move, and where redrawing it lives. It
+// is the standing answer to "the outline is not right", said once and calmly
+// rather than as a warning about each trace.
+const IDLE_TIP = 'Outline not right? Drag any corner, or redraw it from the Outline menu.';
 
 const BUSY_REASON = 'Wait until FloorTrace has finished what it is doing.';
 
@@ -137,29 +156,46 @@ const ActionBar = ({
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
   const painting = useAppStore((s) => s.drawModeActive);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  const retraceOfferFor = useWorkspaceStore((s) => s.retraceOfferFor);
+  const setRetraceOfferFor = useWorkspaceStore((s) => s.setRetraceOfferFor);
 
   const traces = perimeterTraces ?? [];
   const tracedCount = traces.filter((t) => t.vertices?.length >= 3).length;
   const alternatives = countAlternatives(traces, activeTraceId);
 
-  // Low-stakes confirmations land here rather than as a toast over the plan.
+  // What just happened to the plan lands here rather than over it.
   const flash = useWorkspaceStore((s) => s.statusFlash);
-  const [shownFlash, setShownFlash] = useState(null);
+  const [liveFlash, setLiveFlash] = useState(null);
   useEffect(() => {
     if (!flash) return undefined;
     // Only for what is left of its window. The bar is not always on screen —
     // closing the last plan takes it away, and that close is itself a flash —
     // so on mount the store can hold a message from before the bar existed,
     // which would otherwise be shown and announced over the next plan.
-    const left = FLASH_MS - (Date.now() - (flash.at ?? 0));
+    const left = (FLASH_MS[flash.tone] ?? FLASH_MS.ok) - (Date.now() - (flash.at ?? 0));
     if (left <= 0) {
-      setShownFlash(null);
+      setLiveFlash(null);
       return undefined;
     }
-    setShownFlash(flash.text);
-    const t = setTimeout(() => setShownFlash(null), left);
+    setLiveFlash(flash);
+    const t = setTimeout(() => setLiveFlash(null), left);
     return () => clearTimeout(t);
   }, [flash]);
+
+  // A job starting silences whatever the last one ended on: "Finding the
+  // outline…" beside "Outline found." is two answers to one question. Anything
+  // said once it is under way — "Still working, try that again" — still shows.
+  //
+  // Worked out while rendering rather than cleared in an effect: an effect runs
+  // after the paint, and the live region would have announced the stale line
+  // in the frame before it.
+  const [busySince, setBusySince] = useState(null);
+  if (isProcessing && busySince === null) setBusySince(Date.now());
+  if (!isProcessing && busySince !== null) setBusySince(null);
+  const shownFlash = liveFlash && isProcessing && (liveFlash.at ?? 0) < (busySince ?? Date.now())
+    ? null
+    : liveFlash;
 
   // How long the running job has been running, and whether anything owns it.
   //
@@ -198,6 +234,10 @@ const ActionBar = ({
   const running = !!mode;
   const tinted = running || isProcessing;
   const hint = running ? mode.hint : (tracedCount > 0 ? IDLE_TIP : null);
+  // Only at rest, and only for the plan it was raised on: a tool's instruction
+  // and a running job both outrank it.
+  const offerRetrace = !running && !isProcessing && tracedCount > 0
+    && retraceOfferFor != null && retraceOfferFor === activeDocumentId;
 
   // What each row of the menus is allowed to do right now: `null` to stand
   // down, otherwise whether it is usable and, when it is not, why.
@@ -285,13 +325,43 @@ const ActionBar = ({
             )}
 
             {shownFlash && (
-              <span className="min-w-0 truncate font-semibold text-ok">{shownFlash}</span>
+              // The whole sentence is in `title` too: the bar is one line, and
+              // a refusal that ran out of room must still be readable.
+              <span
+                title={shownFlash.text}
+                className={`min-w-0 truncate font-semibold
+                            ${shownFlash.tone === 'warn' ? 'text-warn' : 'text-ok'}`}
+              >
+                {shownFlash.text}
+              </span>
             )}
           </div>
 
           {/* One slot, in this order: Working… says what is happening, a flash
-              the user just earned beats the standing instruction. */}
-          {!isProcessing && !shownFlash && hint && (
+              the user just earned beats an offer, and an offer beats the
+              standing instruction. */}
+          {!isProcessing && !shownFlash && offerRetrace && (
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span className="action-tip min-w-0 truncate text-fg-2">The plan has changed.</span>
+              <button
+                type="button"
+                onClick={() => onSelect('findOutline')}
+                className="btn btn-secondary btn-sm shrink-0"
+              >
+                Find the outline again
+              </button>
+              <button
+                type="button"
+                onClick={() => setRetraceOfferFor(null)}
+                aria-label="Keep the outline as it is"
+                title="Keep the outline as it is"
+                className="icon-btn h-8 w-8 shrink-0"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </span>
+          )}
+          {!isProcessing && !shownFlash && !offerRetrace && hint && (
             <span className={`action-hint inline-flex min-w-0 shrink-[99] whitespace-nowrap
                               ${running ? 'text-fg' : 'action-tip text-fg-3'}`}>
               <span className="min-w-0 truncate">{hint}</span>

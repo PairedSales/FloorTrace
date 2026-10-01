@@ -112,8 +112,10 @@ describe('shortcuts that would invalidate work in flight', () => {
   it('says why the key did nothing, without promising a Stop button', () => {
     useAppStore.setState({ isProcessing: true });
     press({ key: 'z', ctrlKey: true });
-    const { text } = useWorkspaceStore.getState().statusFlash ?? {};
+    const { text, tone } = useWorkspaceStore.getState().statusFlash ?? {};
     expect(text).toMatch(/working/i);
+    // A refusal, so it is said in amber: the key did not do what it does.
+    expect(tone).toBe('warn');
     // The Stop is only there past five seconds, and only for work the detection
     // worker can be terminated for — an OCR scan has neither.
     expect(text).not.toMatch(/stop/i);

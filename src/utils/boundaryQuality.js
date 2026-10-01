@@ -237,7 +237,8 @@ const autoScaleSummary = (quality) => {
     };
   }
   // auto-consensus: worth stating, never worth worrying about. The area is read
-  // long after any toast, and "where did this number come from" stays asked.
+  // for as long as the plan is open, and "where did this number come from"
+  // stays asked.
   //
   // The visible line is the room count alone. The spread belongs in the detail:
   // rooms that set a good scale can still span 30% (ExampleFloorplan6 does, and
@@ -318,8 +319,7 @@ export const scaleQualitySummary = (quality) => {
   }
   // Before the early return below, deliberately: a clean line calibration has
   // no `reason`, so placed after it this branch would render nothing — and
-  // that panel line is the only durable statement of where the number came
-  // from once the toast has gone.
+  // that panel line is the only statement of where the number came from.
   if (quality.source === 'line') {
     return lineScaleSummary(quality);
   }

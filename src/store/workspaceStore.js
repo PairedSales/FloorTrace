@@ -87,10 +87,25 @@ const useWorkspaceStore = create((set, get) => ({
   // Whether the Settings dialog is up.
   showSettings: false,
 
-  // Transient confirmation for the action bar ("Area copied"), as {text, at}.
-  // `at` is what makes two identical messages in a row two separate flashes
-  // rather than one no-op set.
+  // What just happened to the plan, for the bar above it ("Area copied"), as
+  // {text, tone, at}. `tone` is 'ok' or 'warn'. `at` is what makes two
+  // identical messages in a row two separate flashes rather than one no-op set.
   statusFlash: null,
+
+  // The one notice: something outside the plan went wrong — a file, a save,
+  // storage — as {text, tone, action, at}, or null. One slot and no queue:
+  // a second notice replaces the first (`utils/notify.js`).
+  notice: null,
+
+  // How the slower reader for room sizes is getting on — 'idle' | 'starting' |
+  // 'ready' | 'failed' — for the switch that turns it on to say in its own line.
+  enhancedOcrStatus: 'idle',
+
+  // The plan whose image was edited after its outline was found, by id, or
+  // null. The bar offers to find the outline again while it stands — erasing a
+  // legend or cropping to the house is nearly always done *because* the outline
+  // came out wrong. Cleared by the next trace.
+  retraceOfferFor: null,
 
   // Whether the results panel is open. A panel put away is a view preference,
   // not a fact about the project, so it must never ride along in a
@@ -149,14 +164,22 @@ const useWorkspaceStore = create((set, get) => ({
   menuOpen: null,
 
   // Pending destructive confirmation, as {message, detail, confirmLabel,
-  // cancelLabel, resolve}. Parked here so confirmToast() can stay a plain
+  // cancelLabel, resolve}. Parked here so askConfirm() can stay a plain
   // promise-returning function callable from non-React code while a real
   // dialog does the rendering.
   confirmRequest: null,
 
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setShowSettings: (v) => set({ showSettings: !!v }),
-  flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
+  flashStatus: (text, tone = 'ok') => set({
+    statusFlash: { text, tone: tone === 'warn' ? 'warn' : 'ok', at: Date.now() },
+  }),
+  setNotice: ({ text, tone = 'crit', action = null }) => set({
+    notice: { text, tone: tone === 'warn' ? 'warn' : 'crit', action, at: Date.now() },
+  }),
+  dismissNotice: () => set({ notice: null }),
+  setRetraceOfferFor: (docId) => set({ retraceOfferFor: docId ?? null }),
+  setEnhancedOcrStatus: (v) => set({ enhancedOcrStatus: v }),
   setPanelOpen: (v) => set({ panelOpen: v }),
   setScaleRoomShown: (v) => set({ scaleRoomShown: !!v }),
 

@@ -4,7 +4,7 @@ import { getCanvasCoordinates } from '../canvasUtils';
 import { findSelfIntersection } from '../../../utils/geometryValidation';
 import { shortcutsBlocked } from '../../../utils/keyboardGuard';
 import { useScaleLine } from '../../../hooks/useScaleLine';
-import { notifyAt } from '../../../utils/notify';
+import { flashAt } from '../../../utils/notify';
 
 export function useToolRouter({
   stageRef,
@@ -710,8 +710,7 @@ export function useToolRouter({
           if (distance < 10 / scaleRef.current) {
             const crossing = findSelfIntersection(perimeterVertices, true);
             if (crossing) {
-              notifyAt('Closing here would make the outline cross itself.',
-                { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
+              flashAt('Closing here would make the outline cross itself', crossing);
               return;
             }
             handleClosePerimeter();
@@ -723,8 +722,7 @@ export function useToolRouter({
           const candidate = [...perimeterVertices, finalPoint];
           const crossing = findSelfIntersection(candidate, false);
           if (crossing) {
-            notifyAt('That segment would cross one you already placed.',
-              { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
+            flashAt('That side would cross one you already placed', crossing);
             return;
           }
         }
@@ -984,8 +982,7 @@ export function useToolRouter({
       if (perimeterVertices && perimeterVertices.length > 2) {
         const crossing = findSelfIntersection(perimeterVertices, true);
         if (crossing) {
-          notifyAt('Closing here would make the outline cross itself.',
-            { anchor: { kind: 'segment', ...crossing }, id: 'self-intersect' });
+          flashAt('Closing here would make the outline cross itself', crossing);
           return;
         }
         handleClosePerimeter();

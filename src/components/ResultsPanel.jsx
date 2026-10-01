@@ -3,7 +3,9 @@ import {
   Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
   ScanSearch, Ruler, MousePointerClick, RotateCcw, ScanText, Check, Minus,
 } from 'lucide-react';
-import useAppStore, { selectActiveAreaByType, selectWorkspaceArea } from '../store/appStore';
+import useAppStore, {
+  selectActiveAreaByType, selectWorkspaceArea, selectPickingRoom,
+} from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { formatArea, areaDisplayValue, formatAreaValue } from '../utils/unitConverter';
 import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator';
@@ -225,7 +227,10 @@ const ResultsPanel = ({
   const roomOverlay = useAppStore((s) => s.roomOverlay);
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
   // The room sizes FloorTrace read are on the plan as buttons, to pick one.
-  const pickingRoom = useAppStore((s) => s.mode === 'manual' && (s.detectedDimensions?.length ?? 0) > 0);
+  // Never during the automatic run, which passes through the same state: opening
+  // Scale for that left it open — green box, fields and all — on every plan
+  // FloorTrace had just finished measuring by itself.
+  const pickingRoom = useAppStore(selectPickingRoom);
   const setScaleRoomShown = useWorkspaceStore((s) => s.setScaleRoomShown);
   // An outline being drawn by hand right now. The section then says how to
   // finish it instead of offering three other ways to start.

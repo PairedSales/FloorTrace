@@ -9,6 +9,8 @@ describe('workspaceStore', () => {
     useWorkspaceStore.setState({
       showHelpModal: false,
       statusFlash: null,
+      notice: null,
+      retraceOfferFor: null,
       panelOpen: true,
       showExportDialog: false,
       confirmRequest: null,
@@ -20,9 +22,10 @@ describe('workspaceStore', () => {
   it('keeps window state off the document store', () => {
     const app = useAppStore.getState();
     for (const key of [
-      'showHelpModal', 'statusFlash', 'panelOpen', 'showExportDialog', 'confirmRequest',
-      'setShowHelpModal', 'flashStatus', 'setPanelOpen', 'setShowExportDialog',
-      'requestConfirm', 'resolveConfirm',
+      'showHelpModal', 'statusFlash', 'notice', 'retraceOfferFor', 'panelOpen',
+      'showExportDialog', 'confirmRequest',
+      'setShowHelpModal', 'flashStatus', 'setNotice', 'dismissNotice', 'setRetraceOfferFor',
+      'setPanelOpen', 'setShowExportDialog', 'requestConfirm', 'resolveConfirm',
     ]) {
       expect(app[key]).toBeUndefined();
     }
@@ -48,6 +51,43 @@ describe('workspaceStore', () => {
       expect(second).not.toBe(first);
       expect(second.text).toBe('Area copied');
       expect(typeof second.at).toBe('number');
+    });
+
+    it('is green unless it is a refusal, and knows no third tone', () => {
+      ws().flashStatus('Area copied');
+      expect(ws().statusFlash.tone).toBe('ok');
+      ws().flashStatus('Nothing painted', 'warn');
+      expect(ws().statusFlash.tone).toBe('warn');
+      ws().flashStatus('Anything else', 'purple');
+      expect(ws().statusFlash.tone).toBe('ok');
+    });
+  });
+
+  describe('notice', () => {
+    it('holds one, replaced by the next and cleared by a dismissal', () => {
+      ws().setNotice({ text: 'The first.', tone: 'warn' });
+      const first = ws().notice;
+      expect(first).toMatchObject({ text: 'The first.', tone: 'warn', action: null });
+      expect(typeof first.at).toBe('number');
+
+      ws().setNotice({ text: 'The second.' });
+      expect(ws().notice).toMatchObject({ text: 'The second.', tone: 'crit' });
+
+      ws().dismissNotice();
+      expect(ws().notice).toBeNull();
+    });
+  });
+
+  // An offer made on one plan must not follow the user to another: the store
+  // holds which plan it is for, and the bar compares.
+  describe('retraceOfferFor', () => {
+    it('names the plan the offer is for, and is cleared with nothing', () => {
+      ws().setRetraceOfferFor('doc-1');
+      expect(ws().retraceOfferFor).toBe('doc-1');
+      ws().setRetraceOfferFor(null);
+      expect(ws().retraceOfferFor).toBeNull();
+      ws().setRetraceOfferFor(undefined);
+      expect(ws().retraceOfferFor).toBeNull();
     });
   });
 

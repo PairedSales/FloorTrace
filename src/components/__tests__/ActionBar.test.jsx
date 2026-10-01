@@ -50,7 +50,8 @@ beforeEach(() => {
     activeTraceId: 't1',
     perimeterTraces: [{ id: 't1', vertices: square, quality: { confidence: 0.9, warnings: [] } }],
   });
-  useWorkspaceStore.setState({ statusFlash: null, menuOpen: null });
+  useAppStore.setState({ activeDocumentId: 'doc-1' });
+  useWorkspaceStore.setState({ statusFlash: null, menuOpen: null, retraceOfferFor: null });
 });
 afterEach(cleanup);
 
@@ -60,14 +61,16 @@ describe('ActionBar at rest', () => {
     const toolbar = view.getByRole('toolbar', { name: 'Tools' });
     expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
       .toEqual(['Outline', 'Measure', 'Edit plan']);
-    expect(view.getByText(/drag any corner of the outline/)).toBeTruthy();
+    // The standing answer to "the outline is not right": where the fix is,
+    // said once and calmly rather than as a warning about each trace.
+    expect(view.getByText('Outline not right? Drag any corner, or redraw it from the Outline menu.')).toBeTruthy();
     expect(view.queryByText('Cancel')).toBeNull();
   });
 
   it('keeps the corner tip until there is an outline to drag', () => {
     useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
     const view = render(<ActionBar {...props()} />);
-    expect(view.queryByText(/drag any corner/)).toBeNull();
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
   });
 
   it('never states the scale in pixels', () => {
@@ -79,7 +82,7 @@ describe('ActionBar at rest', () => {
   // Closing the last plan takes the bar away, and that close is itself a
   // flash — which the next plan's bar used to show and announce on mount.
   it('does not replay a confirmation from before it was on screen', () => {
-    useWorkspaceStore.setState({ statusFlash: { text: 'Plan closed', at: Date.now() - 60000 } });
+    useWorkspaceStore.setState({ statusFlash: { text: 'Plan closed', tone: 'ok', at: Date.now() - 60000 } });
     const view = render(<ActionBar {...props()} />);
     expect(view.queryByText('Plan closed')).toBeNull();
   });
@@ -89,7 +92,127 @@ describe('ActionBar at rest', () => {
     act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
     expect(view.getByText('Area copied')).toBeTruthy();
     expect(view.container.querySelector('[role="status"]').textContent).toContain('Area copied');
-    expect(view.queryByText(/drag any corner/)).toBeNull();
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
+  });
+
+  // The bar is the one place the app says what just happened to the plan:
+  // green when it was done, amber when it was not and why.
+  it('says something done in green and something refused in amber', () => {
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Outline found.'); });
+    expect(view.getByText('Outline found.').className).toContain('text-ok');
+
+    act(() => { useWorkspaceStore.getState().flashStatus('An outline needs at least three corners', 'warn'); });
+    const refusal = view.getByText('An outline needs at least three corners');
+    expect(refusal.className).toContain('text-warn');
+    expect(refusal.className).not.toContain('text-ok');
+    // One line, latest wins: there is no second message to overlap the first.
+    expect(view.queryByText('Outline found.')).toBeNull();
+  });
+
+  // "Finding the outline…" beside the last run's "Outline found." is two
+  // answers to one question.
+  it('drops what the last job ended on when the next one starts', () => {
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Outline found.'); });
+    act(() => { useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' }); });
+    expect(view.queryByText('Outline found.')).toBeNull();
+    expect(view.getByText('Finding the outline…')).toBeTruthy();
+    // …and still says what is raised once the job is under way.
+    act(() => { useWorkspaceStore.getState().flashStatus('Still working — try that again once this finishes', 'warn'); });
+    expect(view.getByText(/Still working/)).toBeTruthy();
+  });
+
+  // The bar is one line and truncates; the sentence must still be readable.
+  it('carries the whole sentence where a truncated one can be read', () => {
+    const view = render(<ActionBar {...props()} />);
+    const long = 'Kept the scale you set by hand — the rooms on this plan disagree with it';
+    act(() => { useWorkspaceStore.getState().flashStatus(long, 'warn'); });
+    expect(view.getByText(long).getAttribute('title')).toBe(long);
+  });
+});
+
+describe('how long the bar keeps saying it', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('lets a confirmation go after a moment', () => {
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(view.queryByText('Area copied')).toBeNull();
+    expect(view.getByText(/Drag any corner/)).toBeTruthy();
+  });
+
+  // A refusal has to be read, not just noticed.
+  it('keeps a refusal longer than a confirmation', () => {
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Nothing painted — drag over the outside walls first', 'warn'); });
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(view.getByText(/Nothing painted/)).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(view.queryByText(/Nothing painted/)).toBeNull();
+  });
+});
+
+describe('the offer to find the outline again, after the plan’s image was edited', () => {
+  const offer = () => useWorkspaceStore.setState({ retraceOfferFor: 'doc-1' });
+
+  it('stands in the bar at rest, and one click takes it', () => {
+    offer();
+    const onSelect = vi.fn();
+    const view = render(<ActionBar {...props({ onSelect })} />);
+    expect(view.getByText('The plan has changed.')).toBeTruthy();
+    // In place of the standing tip, not beside it.
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
+    fireEvent.click(view.getByRole('button', { name: 'Find the outline again' }));
+    expect(onSelect).toHaveBeenCalledWith('findOutline');
+  });
+
+  // It is an offer: the outline may have been adjusted by hand, and the user
+  // may have erased a note for the saved image and nothing else.
+  it('can be turned down, and stays turned down', () => {
+    offer();
+    const view = render(<ActionBar {...props()} />);
+    fireEvent.click(view.getByRole('button', { name: 'Keep the outline as it is' }));
+    expect(useWorkspaceStore.getState().retraceOfferFor).toBeNull();
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+    expect(view.getByText(/Drag any corner/)).toBeTruthy();
+  });
+
+  it('is not made on a plan it was not raised for', () => {
+    offer();
+    useAppStore.setState({ activeDocumentId: 'doc-2' });
+    const view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  it('is not made with no outline to find again — the panel is already offering to find one', () => {
+    offer();
+    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
+    const view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  // Every eraser stroke edits the image. Nothing is said while the eraser is
+  // still in the user's hand; it is there when they put the tool down.
+  it('waits for the tool to be put down, and for a running job to finish', () => {
+    offer();
+    let view = render(<ActionBar {...props({ tool: 'eraser' })} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+    cleanup();
+
+    useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' });
+    view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  it('gives way to what just happened', () => {
+    offer();
+    const view = render(<ActionBar {...props()} />);
+    act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
+    expect(view.getByText('Area copied')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
   });
 
   it('offers the way back to the results while they are put away', () => {

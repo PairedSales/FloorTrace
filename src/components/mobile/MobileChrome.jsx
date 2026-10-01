@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
+import useWorkspaceStore from '../../store/workspaceStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
 import { planStage } from '../../utils/planStage';
@@ -105,6 +106,12 @@ const MobileChrome = ({
   const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const areas = useAppStore(selectActiveAreaByType);
   const documentOrder = useAppStore((s) => s.documentOrder);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  // The plan's image was edited after its outline was found (erased marks, a
+  // crop). On the desktop the bar offers to find the outline again; here the
+  // one verb does.
+  const retraceOffered = useWorkspaceStore((s) => s.retraceOfferFor != null
+    && s.retraceOfferFor === activeDocumentId);
 
   // The same list the measurement sheet shows inside Scale and Outline, from
   // the one place it is gathered: this bar used to call the summary itself and
@@ -156,6 +163,9 @@ const MobileChrome = ({
       default:
         break;
     }
+    if (retraceOffered) {
+      return { label: 'Find the outline again', icon: ScanSearch, onPress: onTracePerimeter };
+    }
     // An outline exists. If the number needs a second look, the next thing to
     // do is read why — the sheet opens on the section that says it.
     if (areaWarn) {
@@ -166,8 +176,8 @@ const MobileChrome = ({
       };
     }
     return { label: 'Save image', icon: Share, onPress: onExport };
-  }, [image, stage.primary, areaWarn, scaleDoubt, onMenuFileOpen, onFindRoomSize,
-    onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
+  }, [image, stage.primary, retraceOffered, areaWarn, scaleDoubt, onMenuFileOpen,
+    onFindRoomSize, onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
 

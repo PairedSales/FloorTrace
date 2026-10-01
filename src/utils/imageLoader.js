@@ -1,12 +1,15 @@
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 export const MAX_IMAGE_DIMENSION = 4000; // px
 
-// Below this the plan has no room for a wall. The tracer works at 1400 px and
-// calls anything under 3 px of stroke untraceable, so a sheet whose long edge is
-// under ~1000 px arrives with hairlines where the walls are and dimension text
-// too small for OCR to resolve. The detector reaches the same verdict on its own
-// (`low-resolution`), but only after the ten seconds it takes to get there —
-// this is the same fact, before the wait rather than after it.
+// Below this a plan often has no room for a wall: the tracer works at 1400 px
+// and calls anything under 3 px of stroke untraceable. It is the rule the
+// plan-collecting scripts reject a page on (`scripts/lib/sourceLog.mjs`).
+//
+// The app itself no longer warns on it. Said on the way in, it fired on four of
+// the nine sample plans, three of which then traced without a fault — a caution
+// that is wrong three times in four is one people learn to dismiss. The
+// detector reaches its own verdict from the walls themselves (`low-resolution`),
+// and that is what is given as the reason when a trace finds no outline.
 export const MIN_TRACEABLE_DIMENSION = 1000; // px
 
 /** By type when the browser gives one, by name when it does not. */
@@ -22,8 +25,10 @@ const fileOrBlobToDataUrl = (fileOrBlob) => {
       resolve(e.target.result);
     };
 
-    reader.onerror = (error) => {
-      reject(error);
+    // An Error with words, never the bare event: the caller prints
+    // `error.message` after "Could not open that file —", and an event has none.
+    reader.onerror = () => {
+      reject(new Error('it could not be read'));
     };
 
     reader.readAsDataURL(fileOrBlob);
@@ -34,7 +39,10 @@ const dataUrlToImageElement = (dataUrl) =>
   new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    // Words, not the bare event — see `fileOrBlobToDataUrl`. A file with an
+    // image's name and something else inside it used to come out as "Could not
+    // open that file — undefined".
+    img.onerror = () => reject(new Error('it is not an image this browser can read'));
     img.src = dataUrl;
   });
 
@@ -45,10 +53,9 @@ const validateImageSize = (fileOrBlob) => {
 };
 
 /**
- * The image as the app will hold it, and what is worth saying about it.
+ * The image as the app will hold it.
  *
- * @returns {Promise<{dataUrl: string, mimeType: string, width: number,
- *   height: number, lowResolution: boolean}>}
+ * @returns {Promise<{dataUrl: string, mimeType: string, width: number, height: number}>}
  */
 const prepareDataUrl = async (dataUrl, mimeType = 'image/png') => {
   const image = await dataUrlToImageElement(dataUrl);
@@ -62,7 +69,6 @@ const prepareDataUrl = async (dataUrl, mimeType = 'image/png') => {
       mimeType,
       width: image.width,
       height: image.height,
-      lowResolution: Math.max(image.width, image.height) < MIN_TRACEABLE_DIMENSION,
     };
   }
 
@@ -90,8 +96,6 @@ const prepareDataUrl = async (dataUrl, mimeType = 'image/png') => {
     mimeType: 'image/png',
     width: canvas.width,
     height: canvas.height,
-    // It was over 4000 px a moment ago.
-    lowResolution: false,
   };
 };
 
@@ -115,11 +119,8 @@ export const loadImageFromFile = async (file) => {
  * so a vector page is rendered at the largest size the app will keep rather
  * than at pdf.js's 72 dpi default.
  *
- * Each page carries `lowResolution`: too small for the tracer to follow, said
- * before the trace rather than ten seconds into it.
- *
- * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string,
- *   lowResolution: boolean}>, skipped: number, totalPages: number}>}
+ * @returns {Promise<{pages: Array<{dataUrl: string, mimeType: string, name: string}>,
+ *   skipped: number, totalPages: number}>}
  */
 export const loadPagesFromFile = async (file, options = {}) => {
   if (isPdfFile(file)) {
@@ -128,9 +129,9 @@ export const loadPagesFromFile = async (file, options = {}) => {
     const { pdfToPageImages } = await import('./pdfLoader');
     return pdfToPageImages(file, { ...options, maxDimension: MAX_IMAGE_DIMENSION });
   }
-  const { dataUrl, mimeType, lowResolution } = await loadImageFromFile(file);
+  const { dataUrl, mimeType } = await loadImageFromFile(file);
   return {
-    pages: [{ dataUrl, mimeType, name: file.name, lowResolution }],
+    pages: [{ dataUrl, mimeType, name: file.name }],
     skipped: 0,
     totalPages: 1,
   };
@@ -161,14 +162,6 @@ export const pageShortfall = ({ opened, rendered, totalPages }) => {
     ? 'there is no room for more plans'
     : `${rendered} pages at a time is the most this can open`;
   return `Opened ${opened} of ${totalPages} pages — ${reason}. Open the rest from the PDF separately.`;
-};
-
-/** Too small to trace, said on the way in rather than after the trace. */
-export const lowResolutionNote = (count) => {
-  if (!count) return null;
-  return count === 1
-    ? 'This image is small — at this size the walls are hairlines and the trace will miss parts of the building. Open a larger copy if you have one.'
-    : `${count} of these pages are too small to trace reliably — open larger copies if you have them.`;
 };
 
 // Load image from clipboard

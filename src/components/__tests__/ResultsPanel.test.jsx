@@ -305,6 +305,20 @@ describe('the room the scale came from', () => {
     expect(shown()).toBe(true);
   });
 
+  // The automatic run passes through the same state — the sizes are read, the
+  // rooms not yet measured — and opening Scale for it left the section open,
+  // green box and all, on every plan FloorTrace had just finished by itself.
+  it('does not open Scale for the automatic run passing through the same state', () => {
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    act(() => useAppStore.setState({
+      isProcessing: true, processingMessage: 'Measuring the rooms…',
+      mode: 'manual', detectedDimensions: [{ text: '12x14' }],
+    }));
+    act(() => useAppStore.setState({ isProcessing: false, processingMessage: '', mode: 'normal' }));
+    expect(isOpen(view, 'scale')).toBe(false);
+    expect(shown()).toBe(false);
+  });
+
   // The phone's sheet has to be closed to reach the plan, so it draws the box
   // always and this flag is not its to set.
   it('is left alone by the phone sheet', () => {

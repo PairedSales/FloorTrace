@@ -2,11 +2,11 @@ import { useCallback } from 'react';
 import useAppStore from '../store/appStore';
 import * as undoManager from '../store/undoManager';
 import {
-  loadImageFromClipboard, loadPagesFromFile, isPdfFile, pageShortfall, lowResolutionNote,
+  loadImageFromClipboard, loadPagesFromFile, isPdfFile, pageShortfall,
 } from '../utils/imageLoader';
 import { prewarmDetection } from '../utils/detection';
 import { perfMark, perfResetRun, MARKS } from '../utils/perfMarks';
-import { notify, flash } from '../utils/notify';
+import { notify } from '../utils/notify';
 
 export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
   const setImage = useAppStore((s) => s.setImage);
@@ -21,7 +21,7 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
       perfResetRun();
       perfMark(MARKS.imageSet);
       // Load and validate first — a failed paste must leave the current project intact
-      const { dataUrl, mimeType, lowResolution } = await loadImageFromClipboard();
+      const { dataUrl, mimeType } = await loadImageFromClipboard();
       if (dataUrl) {
         resetOverlays();
         undoManager.clear();
@@ -33,11 +33,6 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
         useAppStore.getState().setActiveDocumentMeta({ sourceFileName: null });
         prewarmDetection(dataUrl);
         await handleManualMode(dataUrl, true); // Automatically enter manual mode
-        // The same note the dropped-file path gives, and this is the path that
-        // needs it most: a paste is a screenshot, which is the one input that
-        // routinely arrives at screen resolution.
-        const tooSmall = lowResolutionNote(lowResolution ? 1 : 0);
-        if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
       }
     } catch (error) {
       console.error('Error pasting image:', error);
@@ -45,9 +40,7 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
       // empty one and an image over the 20 MB cap — and told all three to copy
       // an image first, which for the last two is advice for a problem the user
       // does not have.
-      notify(error?.message || 'Nothing to paste — copy an image first.', {
-        type: 'error', id: 'paste',
-      });
+      notify(error?.message || 'Nothing to paste — copy an image first.');
     }
   }, [resetOverlays, handleManualMode, makeRoomForIncoming, setImage, setImageMimeType]);
 
@@ -67,9 +60,7 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
     // is indistinguishable from an app that has stopped responding — which is
     // what dragging in a PDF used to look like.
     if (!openable) {
-      notify(`${file.name} is not a plan image, a PDF or a .floorplan.`, {
-        type: 'warning', id: 'file-open',
-      });
+      notify(`${file.name} is not a plan image, a PDF or a .floorplan.`, { type: 'warning' });
       return;
     }
 
@@ -95,7 +86,6 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
         // saved project paid for a cold analysis on its first trace.
         prewarmDetection(statePatch.image);
 
-        flash('Project file opened');
       } else {
         // Load and validate before claiming a plan: a failed load must leave
         // the current project intact. A PDF arrives as one entry per page,
@@ -111,7 +101,6 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
         // can stop this loop halfway, and the old message reported the pages
         // *rendered* as the pages opened.
         let opened = 0;
-        let small = 0;
         for (const page of pages) {
           if (!makeRoomForIncoming()) break;
           perfResetRun();
@@ -125,18 +114,15 @@ export function useDragAndDrop(handleManualMode, makeRoomForIncoming) {
           // holds the main thread and the Tesseract pool.
           prewarmDetection(page.dataUrl);
           opened += 1;
-          if (page.lowResolution) small += 1;
           await handleManualMode(page.dataUrl, true);
         }
 
         const shortfall = pageShortfall({ opened, rendered: pages.length, totalPages });
-        if (shortfall) notify(shortfall, { type: 'warning', id: 'file-open' });
-        const tooSmall = lowResolutionNote(small);
-        if (tooSmall) notify(tooSmall, { type: 'warning', id: 'file-resolution' });
+        if (shortfall) notify(shortfall, { type: 'warning' });
       }
     } catch (error) {
       console.error('Error loading dropped file:', error);
-      notify(`Could not open that file — ${error.message}`, { type: 'error', id: 'file-open' });
+      notify(`Could not open that file — ${error?.message || 'it could not be read'}`);
     } finally {
       setIsProcessing(false);
     }

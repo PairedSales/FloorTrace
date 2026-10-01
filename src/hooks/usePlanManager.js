@@ -5,8 +5,8 @@ import { MAX_OPEN_DOCUMENTS, releaseImageResources } from '../store/documentMana
 import { detachDocument } from '../store/documentRequests';
 import { readDocDraft, readHistoryRecord, removePlan } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
-import { confirmToast } from '../utils/confirmToast';
-import { notify, flash } from '../utils/notify';
+import { askConfirm } from '../utils/askConfirm';
+import { notify } from '../utils/notify';
 
 /**
  * Opening, closing and switching plans — the parts that need to await something
@@ -29,9 +29,7 @@ export function usePlanManager() {
     if (draft.status === 'missing' || draft.status === 'malformed') {
       // The tab promised a plan that is not there. Saying so is the point:
       // opening it as an empty plan would look like the work simply vanished.
-      notify('That plan could not be reopened — its saved copy is missing.', {
-        type: 'error', id: 'plan-restore',
-      });
+      notify('That plan could not be reopened — its saved copy is missing.');
       useAppStore.getState().closeDocument(docId);
       return false;
     }
@@ -47,9 +45,7 @@ export function usePlanManager() {
     if (draft.status === 'no-image') {
       // Traces and calibration survived and are worth showing; the picture
       // behind them did not. Better than dropping the plan silently.
-      notify('That plan reopened without its image — the outlines are intact.', {
-        type: 'warning', id: 'plan-restore',
-      });
+      notify('That plan reopened without its image — the outlines are intact.', { type: 'warning' });
     }
     return true;
   }, []);
@@ -92,9 +88,7 @@ export function usePlanManager() {
     const docId = useAppStore.getState().openDocument();
     if (!docId) {
       // Said, never silent. The wording matches the outline cap's voice.
-      notify(`${MAX_OPEN_DOCUMENTS} plans is the maximum — close one first.`, {
-        type: 'warning', id: 'plan-cap',
-      });
+      notify(`${MAX_OPEN_DOCUMENTS} plans is the most that can be open — close one first.`, { type: 'warning' });
       return null;
     }
     return docId;
@@ -121,7 +115,7 @@ export function usePlanManager() {
     if (confirmFirst && hasWork) {
       // Quoted, so a plan called "Garage plan" does not read as part of the
       // question.
-      const confirmed = await confirmToast(
+      const confirmed = await askConfirm(
         meta.title ? `Close “${meta.title}”?` : 'Close this plan?',
         { detail: 'Its measurements will be discarded.', confirmLabel: 'Close plan' },
       );
@@ -142,7 +136,8 @@ export function usePlanManager() {
       // it sends the next plan's first Ctrl+S into the file just closed.
       forgetFileHandle(docId);
       useAppStore.getState().restart();
-      flash('Plan closed');
+      // Nothing is said: the plan is gone from the screen and the start screen
+      // is in its place, which is the whole of the news.
       return true;
     }
 
@@ -190,7 +185,7 @@ export function usePlanManager() {
 
     if (withWork.length > 0) {
       const several = order.length > 1;
-      const confirmed = await confirmToast(
+      const confirmed = await askConfirm(
         several ? `Close all ${order.length} plans?` : 'Close this plan?',
         {
           detail: several
@@ -206,7 +201,6 @@ export function usePlanManager() {
       const closed = await closePlan(docId, { confirmFirst: false });
       if (!closed) return false;
     }
-    flash(order.length > 1 ? 'All plans closed' : 'Plan closed');
     return true;
   }, [closePlan]);
 

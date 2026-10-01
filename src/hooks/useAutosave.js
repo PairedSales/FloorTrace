@@ -189,16 +189,17 @@ export function useAutosave() {
     } catch (error) {
       console.error('Failed to autosave local draft:', error);
       // Both channels, by the routing rule: the header carries it for as
-      // long as it stays true, and the toast fires once because a storage
-      // refusal is the one autosave event the user has to act on.
+      // long as it stays true ("Not saved"), and the notice says once what to
+      // do about it — a storage refusal is the one autosave event the user has
+      // to act on, and the work at risk is everything on screen.
       useAppStore.getState().setDraftState('error');
       notify(
         isQuotaError(error)
           // Distinguished because the two need different actions from the user:
           // one is "make room", the other is "this browser will not store".
-          ? 'Autosave stopped — this browser is out of storage. Export before you close the tab.'
-          : 'Autosave is unavailable — storage is full or blocked.',
-        { type: 'warning', id: 'autosave' },
+          ? 'Autosave stopped — this browser is out of storage. Save a project file before you close the tab.'
+          : 'Autosave isn’t working — this browser’s storage is full or blocked. Save a project file before you close the tab.',
+        { type: 'warning' },
       );
     }
   }, [buildIndex]);
@@ -373,13 +374,13 @@ export function useAutosave() {
             // was skipped. Left alone the index goes on naming a dead plan and
             // warns about it on every reload, forever.
             if (restored.lost > 0) queueIndexWrite();
-            // One message with a count, never N toasts. A workspace of seven
-            // plans restoring is one event, not seven.
+            // One message with a count. A workspace of seven plans restoring
+            // is one event, not seven.
             if (restored.lost > 0) {
               notify(
                 `Restored ${restored.opened} of ${restored.opened + restored.lost} plans — `
                 + `${restored.lost === 1 ? 'one could not be read' : `${restored.lost} could not be read`}.`,
-                { type: 'warning', id: 'restore' },
+                { type: 'warning' },
               );
             } else {
               flash(restored.opened === 1
@@ -398,8 +399,8 @@ export function useAutosave() {
         // autosave off for the session, which is what leaving the flag false
         // does — so the `finally` below sets it whatever happened here.
         console.error('Failed to restore autosaved workspace:', error);
-        notify('Could not read the saved workspace — new work will still be saved.', {
-          type: 'warning', id: 'restore',
+        notify('Your earlier work could not be read back — new work will still be saved.', {
+          type: 'warning',
         });
       } finally {
         setHasRestoredState(true);
@@ -566,7 +567,7 @@ export function useAutosave() {
 
           // A plan restored without its image record still carries the traces
           // and calibration that survived — `restoreWorkspace` keeps them
-          // deliberately and the toast says they are intact. Deleting them on
+          // deliberately and the notice says they are intact. Deleting them on
           // the first edit makes that message a lie. Fall through and write
           // what is left instead.
           //
