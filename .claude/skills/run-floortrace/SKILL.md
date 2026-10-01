@@ -30,7 +30,7 @@ description: Launch FloorTrace's dev server and drive the app in the Browser pan
 
 The Browser pane doesn't composite, so `document.hidden` is true. What that breaks, and the workaround:
 
-- **`requestAnimationFrame` never fires**, so Konva never paints its hit canvas and node-level handlers (the room-size pills, scale lines) miss every event. Before interacting: `window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0)`, then `window.dispatchEvent(new Event('resize'))`.
+- **`requestAnimationFrame` never fires**, so Konva never paints its hit canvas and node-level handlers (OCR pills, vertex handles, room corners) miss every event. Before interacting: `window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0)`, then `window.dispatchEvent(new Event('resize'))`.
 - **`ResizeObserver` never delivers**, so the stage sticks at its 800×600 default. A window `resize` event drives `useCameraController`'s `measure()` instead.
 - **Media-query change events don't fire**: after `resize_window`, `useIsMobile`/`useIsTouch` stay stale until `App` re-renders. Nudge a store field `App` subscribes to, e.g. `setShowSideLengths`.
 - **Width 0 means the mobile shell.** Check `innerWidth` before planning desktop-layout checks; `resize_window` does not always fix it. If it stays 0, verify structure with a happy-dom component test instead.
@@ -39,8 +39,8 @@ The Browser pane doesn't composite, so `document.hidden` is true. What that brea
 
 ## Driving the desktop shell
 
-- Menu: the trigger is `#menu-main` (the header's Menu); `.click()` it, then click the `[role="menuitem"]` whose text you want. A row that cannot be used is `aria-disabled`, not `disabled`. The action bar (`.action-bar`) has no menus: read its text for the status line, and it holds *Try another outline* and a mode's *Done* when there is one.
-- The results panel's sections are `#panel-area`, `#panel-outline`, `#panel-scale` and `#panel-work`; each opens from its `button[aria-expanded]`. Folded, a section's fields and buttons are not in the DOM.
+- Menus: the triggers are `#menu-main` (the header's Menu) and `#menu-bar-outline`, `#menu-bar-measure`, `#menu-bar-image` (the action bar); `.click()` one, then click the `[role="menuitem"]` whose text you want. A row that cannot be used is `aria-disabled`, not `disabled`.
+- The results panel's sections are `#panel-checks`, `#panel-outline`, `#panel-scale` and `#panel-work`; each opens from its `button[aria-expanded]`. Folded, a section's fields and buttons are not in the DOM.
 - The green scale-room box is only on the plan while Scale is open (or there is no scale), so open `#panel-scale` before looking for it on the stage.
 - A screenshot of a 1440-wide viewport comes back at about 800 px. To read a region at full size, scale the shell from the corner you want: `Object.assign(document.getElementById('app-container').style, { transformOrigin: '0% 0%', transform: 'scale(1.8)' })` — and set `transform` back to `''` afterwards.
 
@@ -48,7 +48,7 @@ The Browser pane doesn't composite, so `document.hidden` is true. What that brea
 
 - Konva shapes are not DOM. Find the stage from `document.querySelector('.konvajs-content').parentElement` by walking its React fiber's hooks for a value with `.find`, `.batchDraw` and `.content`.
 - Click a shape: `stage.find('Circle')` (one per detected dimension, at the label centre), then `node.fire('click', { evt: new MouseEvent('click') }, true)`.
-- The length tool (Scale ▸ *Set scale using known length*): dispatch `mousedown`/`mouseup`/`click` `MouseEvent`s on `.konvajs-content` for each end, about half a second apart — not `PointerEvent`s. Nothing else on the stage takes a drag. Map image pixels to client coordinates with `stage.children[0].getAbsoluteTransform().point(p)` plus `stage.container().getBoundingClientRect()`.
+- Drags (brush, eraser, crop): dispatch `MouseEvent`s on `stage.content` — not `stage.container()`, and not `PointerEvent`s. Map image pixels to client coordinates with `stage.children[0].getAbsoluteTransform().point(p)` plus `stage.container().getBoundingClientRect()`.
 - Touch paths: dispatch `TouchEvent`s built from `Touch` objects on `.konvajs-content canvas`. Always include at least one `changedTouches` entry; Konva throws on an empty `touchend`.
 
 ## Checking styles

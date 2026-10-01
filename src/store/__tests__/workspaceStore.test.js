@@ -10,6 +10,7 @@ describe('workspaceStore', () => {
       showHelpModal: false,
       statusFlash: null,
       notice: null,
+      retraceOfferFor: null,
       panelOpen: true,
       showExportDialog: false,
       confirmRequest: null,
@@ -21,7 +22,7 @@ describe('workspaceStore', () => {
   it('keeps window state off the document store', () => {
     const app = useAppStore.getState();
     for (const key of [
-      'showHelpModal', 'statusFlash', 'notice', 'panelOpen',
+      'showHelpModal', 'statusFlash', 'notice', 'retraceOfferFor', 'panelOpen',
       'showExportDialog', 'confirmRequest',
       'setShowHelpModal', 'flashStatus', 'setNotice', 'dismissNotice', 'setRetraceOfferFor',
       'setPanelOpen', 'setShowExportDialog', 'requestConfirm', 'resolveConfirm',
@@ -55,7 +56,7 @@ describe('workspaceStore', () => {
     it('is green unless it is a refusal, and knows no third tone', () => {
       ws().flashStatus('Area copied');
       expect(ws().statusFlash.tone).toBe('ok');
-      ws().flashStatus('Nothing found', 'warn');
+      ws().flashStatus('Nothing painted', 'warn');
       expect(ws().statusFlash.tone).toBe('warn');
       ws().flashStatus('Anything else', 'purple');
       expect(ws().statusFlash.tone).toBe('ok');
@@ -79,6 +80,17 @@ describe('workspaceStore', () => {
 
   // An offer made on one plan must not follow the user to another: the store
   // holds which plan it is for, and the bar compares.
+  describe('retraceOfferFor', () => {
+    it('names the plan the offer is for, and is cleared with nothing', () => {
+      ws().setRetraceOfferFor('doc-1');
+      expect(ws().retraceOfferFor).toBe('doc-1');
+      ws().setRetraceOfferFor(null);
+      expect(ws().retraceOfferFor).toBeNull();
+      ws().setRetraceOfferFor(undefined);
+      expect(ws().retraceOfferFor).toBeNull();
+    });
+  });
+
   describe('requestConfirm', () => {
     it('resolves a confirmation with the answer given', async () => {
       const answer = new Promise((resolve) => {

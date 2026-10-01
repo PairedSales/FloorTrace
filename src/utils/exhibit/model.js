@@ -29,6 +29,7 @@ export { scaleProvenance };
 export const EXHIBIT_DEFAULTS = {
   sideLengths: true,
   outlineLabels: true,
+  annotations: true,
   summary: true,
 };
 
@@ -308,6 +309,28 @@ export function buildExhibitModel(state, {
         }
         : null,
     })),
+    lines: opts.annotations
+      ? (state.measurementLines ?? []).map((line) => {
+        const dx = (line.end.x - line.start.x) * feetPerPixel.x;
+        const dy = (line.end.y - line.start.y) * feetPerPixel.y;
+        return {
+          start: line.start,
+          end: line.end,
+          text: calibrated ? formatLength(Math.hypot(dx, dy), unit, unitStyle) : null,
+        };
+      })
+      : [],
+    shapes: opts.annotations
+      ? (state.customShapes ?? [])
+        .filter((s) => s.closed && s.vertices?.length >= 3)
+        .map((s) => {
+          const { value, suffix } = formatArea(calculateArea(s.vertices, feetPerPixel), unit);
+          return {
+            vertices: s.vertices,
+            text: calibrated ? `${value} ${suffix}` : null,
+          };
+        })
+      : [],
   };
 
   return {

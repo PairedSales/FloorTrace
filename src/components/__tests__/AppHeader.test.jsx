@@ -42,6 +42,7 @@ const baseProps = {
   onPanelToggle: noop,
   showSideLengths: true,
   onShowSideLengthsChange: noop,
+  autoSnapEnabled: true,
   onAutoSnapChange: noop,
 };
 
@@ -113,12 +114,12 @@ describe('the header is a frame, not a menu bar', () => {
 });
 
 describe('the Menu holds what is not on screen', () => {
-  it('lists opening, saving, the two switches, Settings and closing', () => {
+  it('lists opening, saving, the three switches, Settings and closing', () => {
     const rows = rowsOf(openMenu(header()));
     expect(rows).toEqual([
       'Open a floor plan…', 'Paste a floor plan',
       'Save image…', 'Copy image', 'Save project file', 'Save project file as…',
-      'Wall lengths on the plan', 'Results panel',
+      'Wall lengths on the plan', 'Snap corners to walls', 'Results panel',
       'Settings…',
       'Close this plan',
     ]);

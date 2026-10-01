@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 //
 // While a scan or a trace runs it is holding the image it started from. The
-// shortcuts that replace that image were reaching it: an undo or a paste halfway
-// through a trace turned the result into a description of a drawing that is
-// gone, and nothing about the answer looked wrong afterwards.
+// shortcuts that replace that image were reaching it: a crop or an undo halfway
+// through a trace turned the result into a description of ink that is gone, and
+// nothing about the answer looked wrong afterwards.
 //
 // The guard is a capture-phase listener rather than a branch in
 // `shortcutsBlocked`, because that function's callers hand it only `e.target`
@@ -14,7 +14,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
+import { TOOL_GROUPS } from '../../components/toolCatalog';
 import '../keyboardGuard';
+
+// Read off the catalogue rather than written down again: the digits moved when
+// the tools were regrouped, and will again.
+const codeOf = (id) => `Digit${TOOL_GROUPS.flatMap((g) => g.tools).find((t) => t.id === id).digit}`;
 
 const seen = [];
 const listener = (e) => seen.push(e);
@@ -51,11 +56,23 @@ describe('shortcuts that would invalidate work in flight', () => {
     }
   });
 
-  // No digit is a tool any more, so none of them is held back.
-  it('lets a bare digit through', () => {
+  // Crop and erase are the two of the nine that rewrite the image, and they are
+  // the only two gated: entering any other mode changes nothing the running job
+  // was computed from, and the menus do not gate the other tools either.
+  it('stops the digits that rewrite the image, and only those', () => {
     useAppStore.setState({ isProcessing: true });
-    press({ key: '8', code: 'Digit8' });
-    expect(seen).toHaveLength(1);
+    for (const code of [codeOf('crop'), codeOf('eraser')]) {
+      seen.length = 0;
+      press({ key: code.slice(5), code });
+      expect(reaches(), `${code} reached the app`).toBe(false);
+    }
+    seen.length = 0;
+    // The brush, during a scan: the longest wait in the app, and painting an
+    // outline through it takes nothing away from it.
+    for (const code of [codeOf('draw'), codeOf('line'), codeOf('angle')]) {
+      press({ key: code.slice(5), code });
+    }
+    expect(seen).toHaveLength(3);
   });
 
   // Switching plans mid-trace is supported on purpose: the result is held and

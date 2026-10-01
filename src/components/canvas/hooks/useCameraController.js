@@ -16,8 +16,17 @@ export function useCameraController({
   stageX,
   stageY,
   viewportSyncToken,
-  isDraggingRef,
-  dragStartPosRef,
+  eraserToolActive,
+  drawModeActive,
+  cropToolActive,
+  voidToolActive,
+  traceInteractionMode,
+  draggingRoom = false,
+  draggingRoomCorner = null,
+  draggingVertex = null,
+  draggingAngle = false,
+  isDraggingRef = { current: false },
+  dragStartPosRef = { current: null },
 }) {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
@@ -46,7 +55,9 @@ export function useCameraController({
   );
 
   // The touch counterpart of the wheel. Lives beside it rather than inside the
-  // tool router because it is a camera gesture, not a tool one.
+  // tool router because it is a camera gesture, not a tool one: it must work
+  // identically whatever tool is on, including the brush tools that own every
+  // single-finger event.
   const pinch = usePinchZoom({ stageRef, scaleRef, setScale, viewportSyncTokenRef });
 
   const fitToWindow = useCallback(() => {
@@ -102,6 +113,15 @@ export function useCameraController({
     isDraggingRef,
     dragStartPosRef,
     isZoomingRef,
+    draggingRoom,
+    draggingRoomCorner,
+    draggingVertex,
+    draggingAngle,
+    eraserToolActive,
+    drawModeActive,
+    cropToolActive,
+    voidToolActive,
+    traceInteractionMode,
     viewportSyncTokenRef,
     isPinchingRef: pinch.isPinchingRef,
   });

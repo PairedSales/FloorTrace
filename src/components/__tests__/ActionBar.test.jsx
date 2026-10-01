@@ -1,50 +1,76 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, fireEvent, cleanup, within, act } from '@testing-library/react';
 import ActionBar from '../ActionBar';
+import { TOOL_GROUPS } from '../toolCatalog';
 import { TOOL_MODES } from '../toolModes';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
 import { beginWork, settleWork, ownerVerdict, resetRequests } from '../../store/documentRequests';
 
 /**
- * One bar says what FloorTrace is doing and what it just did, offers the
- * runner-up outline when there is one, and — while the scale is being set by
- * hand — is that mode's instruction and its way out.
+ * One bar says both things: what can be done to the plan, and — while a tool
+ * is running — that tool's instruction, its brush and its way out.
  *
- * It offers no tools: the plan is traced automatically and the outline is
- * looked at, not drawn.
+ * At rest the cases are about the menus: every tool and command has a home,
+ * each row says what it is for, and a row that cannot be used says why.
+ * Running, they are the cases where the instruction and the controls compete
+ * for the width of the plan.
  */
 const square = [{ x: 0, y: 0 }, { x: 9, y: 0 }, { x: 9, y: 9 }, { x: 0, y: 9 }];
 
 const props = (over = {}) => ({
   tool: 'select',
+  count: 0,
+  brushSize: 24,
+  onBrushSizeChange: () => {},
   onCancel: () => {},
-  onUseAlternative: () => {},
+  onDone: null,
+  hasArea: true,
+  hasToolData: false,
+  onSelect: () => {},
   panelOpen: true,
   onShowPanel: () => {},
   ...over,
 });
 
+const openMenu = (view, name) => {
+  fireEvent.click(view.getByRole('button', { name }));
+  return view.getByRole('menu');
+};
+const rowsOf = (menu) => within(menu).getAllByRole('menuitem')
+  .map((row) => row.querySelector('.font-medium').textContent.trim());
+const row = (menu, label) => within(menu).getByText(label).closest('[role="menuitem"]');
+
 beforeEach(() => {
   useAppStore.setState({
     isProcessing: false,
     processingMessage: '',
+    drawModeActive: false,
     activeTraceId: 't1',
     perimeterTraces: [{ id: 't1', vertices: square, quality: { confidence: 0.9, warnings: [] } }],
   });
   useAppStore.setState({ activeDocumentId: 'doc-1' });
-  useWorkspaceStore.setState({ statusFlash: null, menuOpen: null });
+  useWorkspaceStore.setState({ statusFlash: null, menuOpen: null, retraceOfferFor: null });
 });
 afterEach(cleanup);
 
 describe('ActionBar at rest', () => {
-  it('offers no tools, no menus and no way out of a mode', () => {
+  it('offers three jobs by name, and a tip — no mode name, no way out', () => {
     const view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('toolbar')).toBeNull();
-    expect(view.queryByRole('menu')).toBeNull();
-    expect(view.queryAllByRole('button')).toHaveLength(0);
-    expect(view.container.textContent).not.toMatch(/Drag any corner|Paint|Crop|Erase|Measure/);
+    const toolbar = view.getByRole('toolbar', { name: 'Tools' });
+    expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
+      .toEqual(['Outline', 'Measure', 'Edit plan']);
+    // The standing answer to "the outline is not right": where the fix is,
+    // said once and calmly rather than as a warning about each trace.
+    expect(view.getByText('Outline not right? Drag any corner, or redraw it from the Outline menu.')).toBeTruthy();
+    expect(view.queryByText('Cancel')).toBeNull();
+  });
+
+  it('keeps the corner tip until there is an outline to drag', () => {
+    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
+    const view = render(<ActionBar {...props()} />);
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
   });
 
   it('never states the scale in pixels', () => {
@@ -61,11 +87,12 @@ describe('ActionBar at rest', () => {
     expect(view.queryByText('Plan closed')).toBeNull();
   });
 
-  it('shows a fresh confirmation in the live region', () => {
+  it('shows a fresh confirmation in place of the tip, in the live region', () => {
     const view = render(<ActionBar {...props()} />);
     act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
     expect(view.getByText('Area copied')).toBeTruthy();
     expect(view.container.querySelector('[role="status"]').textContent).toContain('Area copied');
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
   });
 
   // The bar is the one place the app says what just happened to the plan:
@@ -75,8 +102,8 @@ describe('ActionBar at rest', () => {
     act(() => { useWorkspaceStore.getState().flashStatus('Outline found.'); });
     expect(view.getByText('Outline found.').className).toContain('text-ok');
 
-    act(() => { useWorkspaceStore.getState().flashStatus('Couldn’t find the outline on this plan', 'warn'); });
-    const refusal = view.getByText('Couldn’t find the outline on this plan');
+    act(() => { useWorkspaceStore.getState().flashStatus('An outline needs at least three corners', 'warn'); });
+    const refusal = view.getByText('An outline needs at least three corners');
     expect(refusal.className).toContain('text-warn');
     expect(refusal.className).not.toContain('text-ok');
     // One line, latest wins: there is no second message to overlap the first.
@@ -125,15 +152,6 @@ describe('ActionBar at rest', () => {
     act(() => { useWorkspaceStore.getState().flashStatus(long, 'warn'); });
     expect(view.getByText(long).getAttribute('title')).toBe(long);
   });
-
-  it('offers the way back to the results while they are put away', () => {
-    const onShowPanel = vi.fn();
-    const view = render(<ActionBar {...props({ panelOpen: false, onShowPanel })} />);
-    fireEvent.click(view.getByRole('button', { name: /Show results/ }));
-    expect(onShowPanel).toHaveBeenCalled();
-    cleanup();
-    expect(render(<ActionBar {...props()} />).queryByRole('button', { name: /Show results/ })).toBeNull();
-  });
 });
 
 describe('how long the bar keeps saying it', () => {
@@ -145,92 +163,240 @@ describe('how long the bar keeps saying it', () => {
     act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
     act(() => { vi.advanceTimersByTime(3300); });
     expect(view.queryByText('Area copied')).toBeNull();
+    expect(view.getByText(/Drag any corner/)).toBeTruthy();
   });
 
   // A refusal has to be read, not just noticed.
   it('keeps a refusal longer than a confirmation', () => {
     const view = render(<ActionBar {...props()} />);
-    act(() => { useWorkspaceStore.getState().flashStatus('Couldn’t read the room sizes on this plan', 'warn'); });
+    act(() => { useWorkspaceStore.getState().flashStatus('Nothing painted — drag over the outside walls first', 'warn'); });
     act(() => { vi.advanceTimersByTime(3300); });
-    expect(view.getByText(/Couldn’t read/)).toBeTruthy();
+    expect(view.getByText(/Nothing painted/)).toBeTruthy();
     act(() => { vi.advanceTimersByTime(3000); });
-    expect(view.queryByText(/Couldn’t read/)).toBeNull();
+    expect(view.queryByText(/Nothing painted/)).toBeNull();
   });
 });
 
-describe('the runner-up outline', () => {
-  const withAlternatives = (quality) => useAppStore.setState({
-    perimeterTraces: [{ id: 't1', vertices: square, quality }],
+describe('the offer to find the outline again, after the plan’s image was edited', () => {
+  const offer = () => useWorkspaceStore.setState({ retraceOfferFor: 'doc-1' });
+
+  it('stands in the bar at rest, and one click takes it', () => {
+    offer();
+    const onSelect = vi.fn();
+    const view = render(<ActionBar {...props({ onSelect })} />);
+    expect(view.getByText('The plan has changed.')).toBeTruthy();
+    // In place of the standing tip, not beside it.
+    expect(view.queryByText(/Drag any corner/)).toBeNull();
+    fireEvent.click(view.getByRole('button', { name: 'Find the outline again' }));
+    expect(onSelect).toHaveBeenCalledWith('findOutline');
   });
 
-  it('is offered only while there is one, and says how many', () => {
-    let view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('button', { name: /Try another outline/ })).toBeNull();
-    cleanup();
-
-    withAlternatives({ alternatives: [{}] });
-    view = render(<ActionBar {...props()} />);
-    expect(view.getByRole('button', { name: 'Try another outline' })).toBeTruthy();
-    cleanup();
-
-    withAlternatives({ alternatives: [{}, {}] });
-    view = render(<ActionBar {...props()} />);
-    expect(view.getByRole('button', { name: 'Try another outline (2 more)' })).toBeTruthy();
-  });
-
-  it('swaps it in on one click', () => {
-    withAlternatives({ alternatives: [{}] });
-    const onUseAlternative = vi.fn();
-    const view = render(<ActionBar {...props({ onUseAlternative })} />);
-    fireEvent.click(view.getByRole('button', { name: 'Try another outline' }));
-    expect(onUseAlternative).toHaveBeenCalledTimes(1);
-  });
-
-  // A saved plan can carry an outline that was edited by hand. A runner-up
-  // scored against the detector's own geometry is no alternative to that.
-  it('is not offered against an outline edited by hand', () => {
-    withAlternatives({ edited: true, alternatives: [{}] });
+  // It is an offer: the outline may have been adjusted by hand, and the user
+  // may have erased a note for the saved image and nothing else.
+  it('can be turned down, and stays turned down', () => {
+    offer();
     const view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('button', { name: /Try another outline/ })).toBeNull();
+    fireEvent.click(view.getByRole('button', { name: 'Keep the outline as it is' }));
+    expect(useWorkspaceStore.getState().retraceOfferFor).toBeNull();
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+    expect(view.getByText(/Drag any corner/)).toBeTruthy();
   });
 
-  // Swapping the outline under a trace in flight would be undone by the trace
-  // landing; in a mode the bar is that mode's.
-  it('waits for a running job, and stands down in a mode', () => {
-    withAlternatives({ alternatives: [{}] });
+  it('is not made on a plan it was not raised for', () => {
+    offer();
+    useAppStore.setState({ activeDocumentId: 'doc-2' });
+    const view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  it('is not made with no outline to find again — the panel is already offering to find one', () => {
+    offer();
+    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
+    const view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  // Every eraser stroke edits the image. Nothing is said while the eraser is
+  // still in the user's hand; it is there when they put the tool down.
+  it('waits for the tool to be put down, and for a running job to finish', () => {
+    offer();
+    let view = render(<ActionBar {...props({ tool: 'eraser' })} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+    cleanup();
+
     useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' });
-    let view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('button', { name: /Try another outline/ })).toBeNull();
-    cleanup();
-
-    useAppStore.setState({ isProcessing: false, processingMessage: '' });
-    view = render(<ActionBar {...props({ tool: 'scale' })} />);
-    expect(view.queryByRole('button', { name: /Try another outline/ })).toBeNull();
+    view = render(<ActionBar {...props()} />);
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
   });
 
-  it('sits outside the part of the bar that gives way', () => {
-    withAlternatives({ alternatives: [{}] });
+  it('gives way to what just happened', () => {
+    offer();
     const view = render(<ActionBar {...props()} />);
-    expect(view.getByRole('button', { name: 'Try another outline' }).closest('.action-lead')).toBeNull();
+    act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
+    expect(view.getByText('Area copied')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
+  });
+
+  it('offers the way back to the results while they are put away', () => {
+    const onShowPanel = vi.fn();
+    const view = render(<ActionBar {...props({ panelOpen: false, onShowPanel })} />);
+    fireEvent.click(view.getByRole('button', { name: /Show results/ }));
+    expect(onShowPanel).toHaveBeenCalled();
+    cleanup();
+    expect(render(<ActionBar {...props()} />).queryByRole('button', { name: /Show results/ })).toBeNull();
   });
 });
 
-describe('ActionBar while the scale is being set by hand', () => {
-  it('has exactly two modes, and both are about the scale', () => {
-    expect(Object.keys(TOOL_MODES).sort()).toEqual(['pick', 'scale']);
+describe('every tool and command has a home', () => {
+  // The landing checklist for everything the old rail and the old panel
+  // offered. A group without a `menu` is not a bar menu: the scale's
+  // corrections live on the panel.
+  const homes = [
+    ['Outline', ['Paint over the walls', 'Click the corners', 'Find the outline again',
+      'Cut out an open area', 'Remove several corners', 'Add another outline']],
+    ['Measure', ['Measure a distance', 'Measure an area', 'Measure an angle']],
+    ['Edit plan', ['Crop the plan', 'Erase marks on the plan', 'Turn the plan right', 'Turn the plan left']],
+  ];
+
+  it.each(homes)('%s lists %j', (title, expected) => {
+    expect(rowsOf(openMenu(render(<ActionBar {...props()} />), title))).toEqual(expected);
   });
 
-  it.each(['scale', 'pick'])('states the %s mode and its instruction from TOOL_MODES', (tool) => {
-    const view = render(<ActionBar {...props({ tool })} />);
-    expect(view.getByText(TOOL_MODES[tool].name)).toBeTruthy();
-    expect(view.getByText(TOOL_MODES[tool].hint)).toBeTruthy();
+  it('gives every row a sentence saying what it is for', () => {
+    const view = render(<ActionBar {...props()} />);
+    for (const [title] of homes) {
+      const menu = openMenu(view, title);
+      for (const item of within(menu).getAllByRole('menuitem')) {
+        expect(item.querySelector('.text-fg-3')?.textContent.length, item.textContent).toBeGreaterThan(10);
+      }
+      fireEvent.keyDown(window, { key: 'Escape' });
+    }
   });
 
-  // A length lands when it is typed and a room when it is clicked, so there is
-  // nothing to cancel — and leaving through "Cancel" reads as taking it back.
-  it('is left with Done, not Cancel', () => {
+  it('hands back the id the catalogue lists, for tools and commands alike', () => {
+    const picked = [];
+    const view = render(<ActionBar {...props({ onSelect: (id) => picked.push(id) })} />);
+    fireEvent.click(row(openMenu(view, 'Outline'), 'Paint over the walls'));
+    fireEvent.click(row(openMenu(view, 'Outline'), 'Find the outline again'));
+    fireEvent.click(row(openMenu(view, 'Measure'), 'Measure an angle'));
+    // Turning is two explicit directions, where it used to hide one behind a
+    // right-click.
+    fireEvent.click(row(openMenu(view, 'Edit plan'), 'Turn the plan left'));
+    expect(picked).toEqual(['draw', 'findOutline', 'angle', 'rotateLeft']);
+    // Picking closes the menu and gives the keyboard back.
+    expect(view.queryByRole('menu')).toBeNull();
+    expect(useWorkspaceStore.getState().menuOpen).toBeNull();
+  });
+
+  it('prints the digit beside each tool that has one', () => {
+    const view = render(<ActionBar {...props()} />);
+    const tools = TOOL_GROUPS.filter((g) => g.menu).flatMap((g) => g.tools.map((t) => [g.title, t]));
+    for (const [title, tool] of tools) {
+      if (!tool.digit) continue;
+      const menu = openMenu(view, title);
+      expect(row(menu, tool.label).querySelector('kbd').textContent, tool.label).toBe(tool.digit);
+      fireEvent.keyDown(window, { key: 'Escape' });
+    }
+  });
+
+  it('keeps a tool that needs an outline in place, with its reason, and ignores a click on it', () => {
+    const picked = [];
+    const view = render(<ActionBar {...props({ hasArea: false, onSelect: (id) => picked.push(id) })} />);
+    const item = row(openMenu(view, 'Measure'), 'Measure an area');
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(within(item).getByText('Measuring an area needs an outline first.')).toBeTruthy();
+    fireEvent.click(item);
+    expect(picked).toEqual([]);
+  });
+
+  it('lists the next-best outline only while there is one, and says how many', () => {
+    let view = render(<ActionBar {...props()} />);
+    expect(rowsOf(openMenu(view, 'Outline'))).not.toContain('Try another outline');
+    cleanup();
+
+    useAppStore.setState({
+      perimeterTraces: [{ id: 't1', vertices: square, quality: { alternatives: [{}, {}] } }],
+    });
+    view = render(<ActionBar {...props()} />);
+    expect(rowsOf(openMenu(view, 'Outline'))).toContain('Try another outline (2 more)');
+    cleanup();
+
+    // Once the geometry is the user's, a runner-up scored against the
+    // detector's own is no longer an alternative to it.
+    useAppStore.setState({
+      perimeterTraces: [{ id: 't1', vertices: square, quality: { edited: true, alternatives: [{}] } }],
+    });
+    view = render(<ActionBar {...props()} />);
+    expect(rowsOf(openMenu(view, 'Outline')).some((r) => r.startsWith('Try another'))).toBe(false);
+  });
+
+  it('lists Clear only while there is something to clear', () => {
+    let view = render(<ActionBar {...props()} />);
+    expect(rowsOf(openMenu(view, 'Measure'))).not.toContain('Clear your measurements');
+    cleanup();
+    view = render(<ActionBar {...props({ hasToolData: true })} />);
+    expect(rowsOf(openMenu(view, 'Measure'))).toContain('Clear your measurements');
+  });
+
+  it('will not add an outline before the first is drawn', () => {
+    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
+    const view = render(<ActionBar {...props({ hasArea: false })} />);
+    const menu = openMenu(view, 'Outline');
+    expect(row(menu, 'Add another outline').getAttribute('aria-disabled')).toBe('true');
+    // With nothing drawn, "again" would be a lie.
+    expect(rowsOf(menu)).toContain('Find the outline');
+  });
+
+  // The old top band disabled these while a job ran. Unguarded, a second trace
+  // started during the first one's run cleared the busy state in the middle of
+  // the second's.
+  it('makes the commands that start work wait for a running job, and the tools not', () => {
+    useAppStore.setState({
+      isProcessing: true,
+      perimeterTraces: [{ id: 't1', vertices: square, quality: { alternatives: [{}] } }],
+    });
+    const view = render(<ActionBar {...props()} />);
+    const menu = openMenu(view, 'Outline');
+    expect(row(menu, 'Find the outline again').getAttribute('aria-disabled')).toBe('true');
+    expect(row(menu, 'Try another outline').getAttribute('aria-disabled')).toBe('true');
+    // Modes are not work: entering one changes nothing the job was computed from.
+    expect(row(menu, 'Paint over the walls').getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('makes them wait while an outline is being painted', () => {
+    useAppStore.setState({ drawModeActive: true });
+    const view = render(<ActionBar {...props()} />);
+    expect(row(openMenu(view, 'Outline'), 'Find the outline again').getAttribute('aria-disabled')).toBe('true');
+  });
+});
+
+describe('ActionBar while a tool is running', () => {
+  it('stands the menus down and states the mode and its instruction from TOOL_MODES', () => {
+    const view = render(<ActionBar {...props({ tool: 'pick' })} />);
+    expect(view.queryByRole('toolbar')).toBeNull();
+    expect(view.getByText(TOOL_MODES.pick.name)).toBeTruthy();
+    expect(view.getByText(TOOL_MODES.pick.hint)).toBeTruthy();
+  });
+
+  it('offers Cancel always and Done only when the mode commits', () => {
     const onCancel = vi.fn();
-    for (const tool of ['scale', 'pick']) {
+    const onDone = vi.fn();
+    const view = render(<ActionBar {...props({ tool: 'crop', onCancel, onDone })} />);
+    // `crop` has no doneLabel: there is nothing to finish, only a drag to make.
+    expect(view.queryByText(/Finish|Draw the outline/)).toBeNull();
+    fireEvent.click(view.getByText('Cancel'));
+    expect(onCancel).toHaveBeenCalled();
+
+    view.rerender(<ActionBar {...props({ tool: 'draw', onCancel, onDone })} />);
+    fireEvent.click(view.getByText('Draw the outline'));
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  // Each measurement lands as it is made, so there is nothing to cancel —
+  // and leaving a finished one through "Cancel" reads as taking it back.
+  it('leaves a tool that has nothing to commit with Done, not Cancel', () => {
+    const onCancel = vi.fn();
+    for (const tool of ['scale', 'line', 'angle', 'eraser', 'cornerEraser']) {
       const view = render(<ActionBar {...props({ tool, onCancel })} />);
       expect(view.queryByText('Cancel'), tool).toBeNull();
       const done = view.getByRole('button', { name: /^Done/ });
@@ -238,23 +404,52 @@ describe('ActionBar while the scale is being set by hand', () => {
       fireEvent.click(done);
       cleanup();
     }
-    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onCancel).toHaveBeenCalledTimes(5);
+  });
+
+  it('carries the brush only for the modes that paint, in words rather than pixels', () => {
+    const onBrushSizeChange = vi.fn();
+    const view = render(<ActionBar {...props({ tool: 'vertex' })} />);
+    expect(view.queryByLabelText('Brush size')).toBeNull();
+
+    view.rerender(<ActionBar {...props({ tool: 'draw', onBrushSizeChange })} />);
+    const slider = view.getByLabelText('Brush size');
+    expect(view.queryByText('24 px')).toBeNull();
+    fireEvent.change(slider, { target: { value: '80' } });
+    expect(onBrushSizeChange).toHaveBeenCalledWith(80);
+  });
+
+  it('counts the corners placed so far', () => {
+    const view = render(<ActionBar {...props({ tool: 'vertex', count: 1 })} />);
+    expect(view.getByText('1 corner')).toBeTruthy();
+    view.rerender(<ActionBar {...props({ tool: 'vertex', count: 4 })} />);
+    expect(view.getByText('4 corners')).toBeTruthy();
   });
 
   it('lets Working… take the instruction', () => {
-    const view = render(<ActionBar {...props({ tool: 'scale' })} />);
-    expect(view.getByText(TOOL_MODES.scale.hint)).toBeTruthy();
+    const view = render(<ActionBar {...props({ tool: 'draw' })} />);
+    expect(view.getByText(/Paint roughly over the outside walls/)).toBeTruthy();
 
     act(() => useAppStore.setState({ isProcessing: true, processingMessage: 'Tracing…' }));
     expect(view.getByText('Tracing…')).toBeTruthy();
-    expect(view.queryByText(TOOL_MODES.scale.hint)).toBeNull();
+    expect(view.queryByText(/Paint roughly over the outside walls/)).toBeNull();
+  });
+
+  // The count changes on every click, so it must not sit in the live region —
+  // aria-atomic would re-announce the mode and the instruction with it.
+  it('keeps the changing count out of the live region', () => {
+    const view = render(<ActionBar {...props({ tool: 'vertex', count: 3 })} />);
+    const live = view.container.querySelector('[role="status"]');
+    expect(live.textContent).toContain(TOOL_MODES.vertex.name);
+    expect(live.textContent).not.toContain('3 corners');
   });
 
   // The words give way; the way out does not.
-  it('keeps Done outside the part of the bar that gives way', () => {
-    const view = render(<ActionBar {...props({ tool: 'scale' })} />);
-    expect(view.getByRole('button', { name: /^Done/ }).closest('.action-lead')).toBeNull();
-    expect(view.getByText(TOOL_MODES.scale.hint).closest('.action-lead')).toBeTruthy();
+  it('keeps Cancel and Done outside the part of the bar that gives way', () => {
+    const view = render(<ActionBar {...props({ tool: 'draw', onDone: () => {} })} />);
+    expect(view.getByText('Cancel').closest('.action-lead')).toBeNull();
+    expect(view.getByText('Draw the outline').closest('.action-lead')).toBeNull();
+    expect(view.getByText(/Paint roughly/).closest('.action-lead')).toBeTruthy();
     expect(view.container.querySelector('.action-row-running')).toBeTruthy();
   });
 });
@@ -275,9 +470,12 @@ describe('ActionBar while work is running', () => {
     useAppStore.setState({ isProcessing: false, processingMessage: '' });
   });
 
-  it('says what it is doing', () => {
+  // The menus stay: a tool can be picked through a long job, and a wedged job
+  // must not lock the user out of every tool.
+  it('says what it is doing, and keeps the menus', () => {
     const view = render(<ActionBar {...props()} />);
     expect(view.getByText('Finding the outline…')).toBeTruthy();
+    expect(view.getByRole('toolbar', { name: 'Tools' })).toBeTruthy();
   });
 
   // A trace is usually well under a second, and a counter that flashes up and

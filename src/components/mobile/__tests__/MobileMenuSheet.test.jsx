@@ -27,10 +27,15 @@ const sheet = (props = {}) => render(
     onCloseActivePlan={noop}
     onFindRoomSize={noop}
     onTracePerimeter={noop}
+    onDrawExterior={noop}
+    onOutlineByVertex={noop}
+    onAddFloor={noop}
+    canAddOutline
     onFitToWindow={noop}
-    onRotate={noop}
     showSideLengths={false}
     onShowSideLengthsChange={noop}
+    autoSnapEnabled
+    onAutoSnapChange={noop}
     onUnitChange={noop}
     saveOnExit
     onSaveOnExitChange={noop}
@@ -51,17 +56,12 @@ afterEach(cleanup);
 describe('the phone menu speaks the desktop\u2019s words', () => {
   it.each([
     'Open a floor plan…', 'Save image…', 'Copy image', 'Save project file',
-    'Wall lengths on the plan',
+    'Wall lengths on the plan', 'Snap corners to walls',
     'Keep my work in this browser', 'Try harder to read room sizes',
-    'Read the room sizes again',
+    'Read the room sizes again', 'Add another outline',
   ])('says "%s"', (label) => {
     sheet();
     expect(screen.getByText(label)).toBeTruthy();
-  });
-
-  it('offers no way to draw on the plan', () => {
-    sheet();
-    expect(document.body.textContent).not.toMatch(/Paint over|Tap the corners|Add another outline|Snap/);
   });
 
   it('no longer calls anything an export', () => {

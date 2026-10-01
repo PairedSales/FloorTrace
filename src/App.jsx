@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import Canvas from './components/Canvas';
 import AppHeader from './components/AppHeader';
 import ActionBar from './components/ActionBar';
@@ -44,7 +44,7 @@ import { beginWork, settleWork, deliver, isCurrent } from './store/documentReque
 import { useAutosave } from './hooks/useAutosave';
 import { useEnhancedOcr } from './hooks/useEnhancedOcr';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useScaleTool } from './hooks/useScaleLine';
+import { useToolManager } from './hooks/useToolManager';
 import { useProjectIO } from './hooks/useProjectIO';
 import { useExhibitExport } from './hooks/useExhibitExport';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
@@ -53,6 +53,7 @@ import { useTheme } from './hooks/useTheme';
 import { useIsMobile } from './hooks/useViewport';
 import { usePlanManager } from './hooks/usePlanManager';
 import { usePlanAreaIndex } from './hooks/usePlanAreaIndex';
+import { useCornerPlacement } from './hooks/useCornerPlacement';
 import Notice from './components/Notice';
 import useUnitPreference from './hooks/useUnitPreference';
 
@@ -132,6 +133,7 @@ function App() {
   const perimeterOverlay = useAppStore(selectActivePerimeterOverlay);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
   const activeTraceId = useAppStore((s) => s.activeTraceId);
+  const traceInteractionMode = useAppStore((s) => s.traceInteractionMode);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
   const area = useAppStore(selectCombinedArea);
   const mode = useAppStore((s) => s.mode);
@@ -142,15 +144,36 @@ function App() {
   const detectedDimensions = useAppStore((s) => s.detectedDimensions);
   const showSideLengths = useAppStore((s) => s.showSideLengths);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
+  const autoSnapEnabled = useAppStore((s) => s.autoSnapEnabled);
   const ocrFailed = useAppStore((s) => s.ocrFailed);
   const unit = useAppStore((s) => s.unit);
+  const lineToolActive = useAppStore((s) => s.lineToolActive);
+  const measurementLines = useAppStore((s) => s.measurementLines);
+  const currentMeasurementLine = useAppStore((s) => s.currentMeasurementLine);
+  const drawAreaActive = useAppStore((s) => s.drawAreaActive);
+  const customShapes = useAppStore((s) => s.customShapes);
+  const currentCustomShape = useAppStore((s) => s.currentCustomShape);
+  const perimeterVertices = useAppStore((s) => s.perimeterVertices);
   const tracedBoundaries = useAppStore((s) => s.tracedBoundaries);
   const canSwitchWallFace = useAppStore(selectCanSwitchWallFace);
   const activeDocumentId = useAppStore((s) => s.activeDocumentId);
   const documentOrder = useAppStore((s) => s.documentOrder);
   const showHelpModal = useWorkspaceStore((s) => s.showHelpModal);
   const showExportDialog = useWorkspaceStore((s) => s.showExportDialog);
+  const eraserToolActive = useAppStore((s) => s.eraserToolActive);
+  const cornerEraserActive = useAppStore((s) => s.cornerEraserActive);
+  const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
+  const cropToolActive = useAppStore((s) => s.cropToolActive);
+  const voidToolActive = useAppStore((s) => s.voidToolActive);
+  const angleToolActive = useAppStore((s) => s.angleToolActive);
+  const angleToolState = useAppStore((s) => s.angleToolState);
+  const drawModeActive = useAppStore((s) => s.drawModeActive);
+  const drawBrushSize = useAppStore((s) => s.drawBrushSize);
+  const drawStrokes = useAppStore((s) => s.drawStrokes);
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
+
+  // Floor management
+  const clearWallFaces = useAppStore((s) => s.clearWallFaces);
 
   // Store actions (stable references — never cause re-renders)
   const setImage = useAppStore((s) => s.setImage);
@@ -168,11 +191,22 @@ function App() {
   const setRooms = useAppStore((s) => s.setRooms);
   const setOcrFailed = useAppStore((s) => s.setOcrFailed);
   const setUnit = useAppStore((s) => s.setUnit);
+  const setCurrentMeasurementLine = useAppStore((s) => s.setCurrentMeasurementLine);
+  const setMeasurementLines = useAppStore((s) => s.setMeasurementLines);
+  const setCurrentCustomShape = useAppStore((s) => s.setCurrentCustomShape);
+  const setCustomShapes = useAppStore((s) => s.setCustomShapes);
+  const setPerimeterVertices = useAppStore((s) => s.setPerimeterVertices);
   const setTracedBoundaries = useAppStore((s) => s.setTracedBoundaries);
   const setLastTraceOutcome = useAppStore((s) => s.setLastTraceOutcome);
+  const setAngleToolState = useAppStore((s) => s.setAngleToolState);
   const setShowHelpModal = useWorkspaceStore((s) => s.setShowHelpModal);
   const setShowSideLengths = useAppStore((s) => s.setShowSideLengths);
   const setUseInteriorWalls = useAppStore((s) => s.setUseInteriorWalls);
+  const setAutoSnapEnabled = useAppStore((s) => s.setAutoSnapEnabled);
+  const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
+  const setDrawBrushSize = useAppStore((s) => s.setDrawBrushSize);
+  const setDrawStrokes = useAppStore((s) => s.setDrawStrokes);
+  const setDrawModeActive = useAppStore((s) => s.setDrawModeActive);
 
   const fileInputRef = useRef(null);
   // A second input, differing only in `capture`. It cannot be the same element
@@ -201,7 +235,19 @@ function App() {
   const afterScanRef = useRef(null);
   const traceAfterScanRef = useRef(null);
 
-  const { toggleScaleTool, leaveScaleTool } = useScaleTool();
+  const {
+    handleLineToolToggle,
+    handleDrawAreaToggle,
+    handleEraserToolToggle,
+    handleCornerEraserToggle,
+    handleCropToolToggle,
+    handleAngleToolToggle,
+    handleDrawModeToggle,
+    handleScaleToolToggle,
+    handleClearTools,
+    handleVoidToolToggle,
+    deactivateAll,
+  } = useToolManager();
 
   // Declared after handlePasteImage / handleFileOpen (see below) so the
   // shortcut hook can close over the stable callback references.
@@ -220,11 +266,25 @@ function App() {
     };
   }, []);
 
-  // What the action bar is showing an instruction for. There are two modes
-  // left: setting the scale from a known length, and choosing the room to take
-  // it from. Room sizes on the plan as buttons is a mode even though no tool
-  // flag says so (`selectPickingRoom`).
-  const activeTool = scaleToolActive ? 'scale' : pickingRoom ? 'pick' : 'select';
+  // Mode is shown by the action bar, which carries the running tool's name,
+  // its instruction, its brush and its way out. Before any of that it was eight
+  // `duration: Infinity` toasts — the app's only persistent mode indicator,
+  // rendered over the canvas, stacking with real notifications, and carrying
+  // the sole documentation of Esc-to-cancel.
+  const activeTool = drawModeActive ? 'draw'
+    : perimeterVertices !== null ? 'vertex'
+      : voidToolActive ? 'void'
+        : scaleToolActive ? 'scale'
+          : lineToolActive ? 'line'
+            : angleToolActive ? 'angle'
+              : drawAreaActive ? 'area'
+                : cropToolActive ? 'crop'
+                  : cornerEraserActive ? 'cornerEraser'
+                  : eraserToolActive ? 'eraser'
+                      // Room sizes on the plan as buttons is a mode, even though
+                      // no tool flag says so (`selectPickingRoom`).
+                      : pickingRoom ? 'pick'
+                        : 'select';
 
   // The old "Close project" split in two once more than one plan could be
   // open: closing the one you are looking at is a different act from closing
@@ -246,6 +306,36 @@ function App() {
   const handleCloseAllPlans = useCallback(async () => {
     if (await closeAllPlans()) clearAutosavedDraft();
   }, [closeAllPlans, clearAutosavedDraft]);
+
+  // OCR found nothing usable: drop a placeholder overlay in the middle of the
+  // image for the user to size by hand.
+  const placeCentredOverlay = useCallback((imgSrc) => {
+    // A second async hop, and the one nobody guarded: reached from the scan's
+    // two failure paths, it decodes the image *again* and then writes an
+    // overlay, a perimeter and a mode. A guard where the scan resumes does not
+    // cover this — by the time `onload` fires the user may have cropped, erased
+    // or loaded a different plan, and the placeholder would land on it. It owns
+    // its own hop rather than inheriting the scan's, because it outlives it.
+    const work = beginWork('placeholder', { image: imgSrc });
+    const img = new Image();
+    img.onload = () => {
+      settleWork(work);
+      if (!isCurrent(work)) return;
+      const centerX = img.width / 2;
+      const centerY = img.height / 2;
+      setRoomOverlay({
+        x1: centerX - 100, y1: centerY - 100, x2: centerX + 100, y2: centerY + 100,
+      });
+      // Deliberately no `setPerimeterVertices([])`. That resolved `activeTool`
+      // to `'vertex'`, so the action bar answered a failed *scan* with "Click
+      // each corner of the exterior" — an instruction for a different stage,
+      // on top of the panel's own and the box this drops on the plan. The
+      // failure path has no business entering a modal outline tool.
+      setMode('normal');
+    };
+    img.onerror = () => settleWork(work);
+    img.src = imgSrc;
+  }, [setRoomOverlay, setMode]);
 
   // Handle manual mode
   const handleManualMode = useCallback(async (imgSrc = image, forceEnter = false) => {
@@ -328,9 +418,9 @@ function App() {
         if (dimensions.length === 0) {
           // No message of its own. The panel says it for as long as it is
           // true — the figure reads "couldn't read any room sizes" and Scale
-          // opens on the way to set one — and the run still ends in one line
+          // opens on the ways to set one — and the run still ends in one line
           // in the bar, from the trace below.
-          setMode('normal');
+          placeCentredOverlay(imgSrc);
           // The outline does not wait for a scale. Finding the walls needs
           // nothing the scan failed to read, so a plan with no room sizes
           // printed on it still gets its outline — and is left one thing short
@@ -339,7 +429,7 @@ function App() {
           //
           // Only when there is no outline yet. Reading the sizes again on a
           // plan that already has one must not re-trace over it: the user asked
-          // about the scale.
+          // about the scale, and the outline may be one they adjusted by hand.
           const outlined = useAppStore.getState().perimeterTraces
             ?.some((t) => t.vertices?.length >= 3);
           if (outlined) flash('Couldn’t read any room sizes on this plan', 'warn');
@@ -363,7 +453,8 @@ function App() {
           // Everything from here is automatic: every label is measured, the
           // rooms that agree set the scale, the room the scale came from is
           // placed as the overlay, and the exterior is traced. The pills stay
-          // lit only when that fails.
+          // lit only when that fails — with an overlay on screen, dragging it
+          // is how the user overrules a room the app chose badly.
           await afterScanRef.current?.(dimensions);
         }
       } catch (error) {
@@ -372,10 +463,10 @@ function App() {
         // has already moved on from is not news about the plan on screen.
         deliver(work, () => {
           // The panel carries it from here: the figure says the sizes could
-          // not be read, and Scale opens on the way to set one by hand.
+          // not be read, and Scale opens on the ways to set one by hand.
           setOcrFailed(true);
-          setMode('normal');
           flash('Couldn’t read the room sizes on this plan', 'warn');
+          placeCentredOverlay(imgSrc);
         });
       } finally {
         settleWork(work);
@@ -387,7 +478,7 @@ function App() {
         releaseOcrWorkersWhenIdle(60000);
       }
     }
-  }, [image, mode, roomOverlay, perimeterOverlay, unit, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
+  }, [image, mode, roomOverlay, perimeterOverlay, unit, placeCentredOverlay, setDetectedDimensions, setExteriorLabels, setAreaLabels, setIsProcessing, setMode, setOcrFailed, setPerimeterOverlay, setRoomOverlay, setUnit]);
 
   // Find room size: non-destructively re-scan dimensions from the image
   const handleFindRoomSize = useCallback(async () => {
@@ -431,6 +522,7 @@ function App() {
     
     setRoomOverlay(null);
     setPerimeterOverlay(null);
+    setPerimeterVertices(null);
     setDetectedDimensions([]);
     // The rooms measured from the previous scan describe labels this one is
     // about to re-read. Left behind, they voted in the new scan's scale and
@@ -444,6 +536,7 @@ function App() {
     perimeterOverlay,
     setRoomOverlay,
     setPerimeterOverlay,
+    setPerimeterVertices,
     setDetectedDimensions,
     setRooms,
     handleManualMode,
@@ -502,12 +595,46 @@ function App() {
     }
   }, [makeRoomForIncoming, resetOverlays, setImage, setImageMimeType, setIsProcessing, handleManualMode]);
 
+  // Corner-by-corner outline placement — the right tool when the plan is clean
+  // and the user knows precisely where the wall goes. The hook is what gives
+  // the old outline back, or takes an added one out again, if they change their
+  // mind part-way.
+  const {
+    startPlacing: handleDrawExterior,
+    addOutline: handleAddOutline,
+  } = useCornerPlacement();
+
+  /**
+   * Paint the outline: paint roughly over the exterior walls and let the tracer
+   * read the strokes as a corridor. The way to an outline whenever the
+   * automatic one is wrong or was not found.
+   *
+   * **The outline being replaced stays on the plan**, locked, as the thing to
+   * paint over, and is only replaced when the painting has been turned into a
+   * new one. Entering the brush used to delete it on the spot — so Cancel left
+   * the plan with no outline and no area.
+   *
+   * Whatever is already painted is kept: every route back into the brush is the
+   * user coming back to add to it, and clearing the strokes on the way in
+   * destroyed exactly that work.
+   *
+   * Takes no arguments, deliberately: it is handed straight to `onClick`, and
+   * an options object would be handed a click event.
+   */
+  const handlePaintOutline = useCallback(() => {
+    undoManager.save();
+    setPerimeterVertices(null);
+    // Always enters; the toggle would turn it back off when already on.
+    if (!useAppStore.getState().drawModeActive) handleDrawModeToggle();
+  }, [setPerimeterVertices, handleDrawModeToggle]);
+
   /**
    * Adopt the search's next-best footprint for the active outline.
    *
    * The commonest correctable failure is a tie-break: two candidates within
    * `SCORE_EPSILON` (0.015) of each other and the wrong one won. The right
-   * geometry has already been computed and scored — this hands it over. The rejected one goes
+   * geometry has already been computed and scored — this hands it over instead
+   * of asking the user to paint the whole outline again. The rejected one goes
    * onto the trace's attempt history, so it is one undo away either direction.
    */
   const handleUseAlternative = useCallback(() => {
@@ -577,7 +704,8 @@ function App() {
           // The runner-up footprints the search already scored. Kept on the
           // trace so the commonest correctable failure — a tie-break inside
           // SCORE_EPSILON picking the wrong one of two near-equal candidates —
-          // costs a click. Geometry only.
+          // costs a click rather than repainting the whole outline. Geometry
+          // only; they are not offered once the user has edited the outline.
           alternatives: floor.alternatives ?? [],
           // Page-level, so every floor of a re-searched sheet carries the same
           // record — the same way the `remediated` warning is result-scoped.
@@ -592,12 +720,13 @@ function App() {
     });
 
     if (shaped.length === 1) {
+      setPerimeterVertices(null);
       setPerimeterOverlay(shaped[0]);
     } else {
       useAppStore.getState().applyDetectedTraces(shaped);
     }
     return shaped.length;
-  }, [setPerimeterOverlay]);
+  }, [setPerimeterOverlay, setPerimeterVertices]);
 
   /**
    * The one line a trace ends in.
@@ -609,17 +738,21 @@ function App() {
    * raised at least one and two raised a pair at once.
    *
    * The outline is on the plan now, and the user is looking at it: whether it
-   * is right is theirs to see. So this says what happened and stops. The two things it
+   * is right is theirs to see, and what to do when it is not is the bar's
+   * standing line. So this says what happened and stops. The two things it
    * still has to say in words are the two that leave nothing to look at — no
    * outline was found, or one was and there is no scale to measure it with —
    * and both are also what the panel is showing, for as long as they are true.
    */
   const reportTrace = useCallback((traced, floorCount) => {
     if (!floorCount) {
-      flash('Couldn’t find the outline on this plan', 'warn');
+      flash('Couldn’t find the outline — paint over the outside walls instead', 'warn');
       return;
     }
-    const what = floorCount > 1 ? `Found ${floorCount} outlines` : 'Outline found';
+    const drawn = traced?.quality?.source === 'drawn';
+    const what = floorCount > 1
+      ? `${drawn ? 'Drew' : 'Found'} ${floorCount} outlines`
+      : (drawn ? 'Outline drawn from your painting' : 'Outline found');
     if (!useAppStore.getState().calibration?.calibrated) {
       flash(`${what} — set the scale to see the area`, 'warn');
       return;
@@ -628,15 +761,21 @@ function App() {
     flash(leftOut ? `${what} — ${leftOut}` : what);
   }, []);
 
-  // Returns the quality level of the applied trace.
-  const runTrace = useCallback(async (message) => {
+  // Returns the quality level of the applied trace, so the caller can decide
+  // whether to fall back. `brush` carries draw mode's strokes (original image
+  // px) and turns the whole stage into a search inside those strokes.
+  const runTrace = useCallback(async (message, brush = null) => {
     if (!image) return null;
     setIsProcessing(true, message);
     const work = beginWork('trace');
+    // Any trace answers the offer to trace again after the image was edited.
+    const ws = useWorkspaceStore.getState();
+    if (ws.retraceOfferFor === work.docId) ws.setRetraceOfferFor(null);
     try {
       const traced = await traceFloorplanBoundary(image, {
         excludeRegions: nonGlaExcludeRegions(useAppStore.getState()),
         constraints: boundaryConstraints(useAppStore.getState()),
+        ...(brush ? { brush } : {}),
       });
 
       perfMark(MARKS.traceEnd);
@@ -647,11 +786,14 @@ function App() {
       // trace is seconds of work, and losing it silently because you looked at
       // another plan is the kind of nothing-happened that is hard to even
       // report as a bug.
-      // Captured from the apply, never re-derived: `applyTracedBoundary`
-      // returns the floors it could actually use — which is not the same as
-      // the floors the detector reported.
+      // Captured from the apply, never re-derived. This count is what decides
+      // whether `handleTracePerimeter` falls back to draw mode, and
+      // `applyTracedBoundary` returns the floors it could actually use — which
+      // is not the same as the floors the detector reported.
       let applied = 0;
       const applyTrace = () => {
+        // Kept for brush results too: a drawn trace has the same inner/outer
+        // pair, so toggling wall mode afterwards must still work.
         setTracedBoundaries(traced);
         const floors = traced ? applyTracedBoundary(traced, useInteriorWalls) : 0;
         // Inside the apply and not beside it: the classification reads this
@@ -663,7 +805,7 @@ function App() {
         if (floors) useAppStore.getState().classifyTraceTypes();
         // Every trace, not only the one the automatic scan ran: the footprint is
         // the one check on the scale that survives a majority of bad rooms, and a
-        // re-trace changes it. It re-runs a pure
+        // re-trace from the menu or a draw-mode pass changes it. It re-runs a pure
         // selection over rooms already measured, and no-ops unless the scale in
         // force is still the automatic one.
         applied = floors;
@@ -679,7 +821,7 @@ function App() {
           level,
           reason: qualitySummary(traced?.quality).reason ?? null,
           floors,
-          source: 'auto',
+          source: brush ? 'drawn' : 'auto',
         });
         reportTrace(traced, floors);
       };
@@ -687,7 +829,7 @@ function App() {
       const verdict = deliver(work, applyTrace);
       // 'routed' is held and replayed on adopt, so it is not a failure and must
       // not be recorded as one. 'stale' and 'dropped' are the user's own doing
-      // — they replaced the image or closed the plan — but the spinner simply
+      // — they cropped the image or closed the plan — but the spinner simply
       // stopping with no message is indistinguishable from a trace that hung.
       if (verdict === 'stale' || verdict === 'dropped') {
         flash(verdict === 'stale'
@@ -701,7 +843,7 @@ function App() {
       return applied ? qualitySummary(traced?.quality).level : 'failed';
     } catch (error) {
       // Logged outside the delivery: a crash on a plan the user has since
-      // replaced is still a crash, and inside the closure it was swallowed
+      // cropped is still a crash, and inside the closure it was swallowed
       // along with the message.
       console.error('Perimeter detection failed:', error);
       // A claim about the plan on screen, so it is raised only by work that
@@ -718,19 +860,19 @@ function App() {
           at: Date.now(),
           level: 'failed',
           reason: timedOut
-            ? 'Finding it took too long and was stopped.'
+            ? 'Finding it took too long and was stopped. Cropping the plan to the house makes it quicker.'
             : interrupted ? 'Finding it was interrupted, so it is worth trying again.' : null,
           floors: 0,
         });
         flash(timedOut ? 'Finding the outline took too long and was stopped'
           : interrupted ? 'Finding the outline was interrupted — try again'
-            : 'Couldn’t find the outline on this plan', 'warn');
+            : 'Couldn’t find the outline — paint over the outside walls instead', 'warn');
       });
       return 'failed';
     } finally {
       settleWork(work);
       // Unconditional, unlike the result writes above. Gated on the image, a
-      // trace the user interrupted by replacing the image left `isProcessing` true with
+      // trace the user interrupted by cropping left `isProcessing` true with
       // nothing left to turn it off: a spinner that never stops and every
       // command that starts work disabled for the rest of the session. Clearing a
       // spinner a newer operation had just set is a flicker; this was a wedge.
@@ -748,6 +890,27 @@ function App() {
     undoManager.save();
     await runTrace(FIND_OUTLINE_MESSAGE);
   }, [image, runTrace]);
+
+  // Draw mode's commit: hand the painted strokes to the tracer as a corridor.
+  const handleFinishDrawMode = useCallback(async () => {
+    const state = useAppStore.getState();
+    const strokes = state.drawStrokes;
+    if (!strokes.length) {
+      setDrawModeActive(false);
+      flash('Nothing painted — drag over the outside walls first', 'warn');
+      return;
+    }
+    undoManager.save();
+    setDrawModeActive(false);
+    const level = await runTrace('Drawing the outline from your painting…', {
+      strokes,
+      radius: state.drawBrushSize / 2,
+    });
+    // The strokes are kept unless the result is clean: re-entering draw mode to
+    // add one more pass is the natural correction, and discarding them would
+    // make the user paint the whole outline again.
+    if (level === 'good') setDrawStrokes([]);
+  }, [runTrace, setDrawModeActive, setDrawStrokes]);
 
   // One setting over every outline. Each traced outline carries the detector's
   // own inner/outer pair, so the switch reaches outlines from earlier detection
@@ -775,6 +938,51 @@ function App() {
     canvasRef.current?.rotateCanvas(direction);
   }, []);
 
+  // Handle image update from eraser or crop tool (saves undo point before
+  // changing). The cached detection result describes the *previous* image, so
+  // it is dropped — kept, toggling inner/outer after a crop re-applied
+  // pre-crop geometry. The per-trace wall-face pairs are the same cache one
+  // level down and go with it, or the switch would walk straight back into it.
+  const handleImageUpdate = useCallback((newImageDataUrl) => {
+    undoManager.save();
+    setImage(newImageDataUrl);
+    setTracedBoundaries(null);
+    clearWallFaces();
+    // Room rectangles are in image pixels, so a crop moves every one of them
+    // and an erase can remove the wall a room was measured against.
+    setRooms([]);
+    // `scaleLines` and `calibration` deliberately survive: the crop tool keeps
+    // the canvas at full size and redraws the selection in place, and neither
+    // it nor the eraser resamples, so image-pixel coordinates — and therefore
+    // feet-per-pixel — are invariant across both. Do not add a defensive reset.
+  }, [setImage, setTracedBoundaries, setRooms, clearWallFaces]);
+
+  const handleAddMeasurementLine = useCallback((line) => {
+    // Clear the in-progress line before saving the snapshot so that undo restores
+    // a clean state (no half-drawn line) rather than the mid-draw state.
+    setCurrentMeasurementLine(null);
+    undoManager.save();
+    setMeasurementLines([...useAppStore.getState().measurementLines, line]);
+  }, [setMeasurementLines, setCurrentMeasurementLine]);
+
+  const handleMeasurementLinesChange = useCallback((nextLines) => {
+    undoManager.save();
+    setMeasurementLines(nextLines);
+  }, [setMeasurementLines]);
+
+  const handleAddCustomShape = useCallback((shape) => {
+    undoManager.save();
+    setCustomShapes([...useAppStore.getState().customShapes, shape]);
+  }, [setCustomShapes]);
+
+  const handleCustomShapesChange = useCallback((nextShapes) => {
+    undoManager.save();
+    setCustomShapes(nextShapes);
+  }, [setCustomShapes]);
+
+
+
+
   // Set the project scale from one room. The decision — which rooms get a
   // vote, what the verdict is, whether anything moved — is resolveScaleUpdate's
   // and is unit-tested there; what is left here is the store write, the one
@@ -799,6 +1007,55 @@ function App() {
     }
   }, [applyRoomCalibration]);
 
+  // Update room overlay position. Pinned: dragging the overlay is the user
+  // correcting the room the app got wrong, and unpinned it was outvoted by the
+  // consensus that produced the wrong room — then adopted verbatim on the very
+  // next drag, once the rejected write had pinned the calibration.
+  const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
+    if (saveAction) undoManager.save();
+    setRoomOverlay(overlay);
+    if (roomDimensions.width && roomDimensions.height) {
+      updateScale(roomDimensions, overlay, { pinned: true });
+    }
+  }, [setRoomOverlay, roomDimensions, updateScale]);
+
+  // Update perimeter vertices
+  const updatePerimeterVertices = useCallback((vertices, saveAction = true) => {
+    if (saveAction) undoManager.save();
+    setPerimeterOverlay({ vertices });
+  }, [setPerimeterOverlay]);
+
+  // Handle closing the perimeter
+  const handleClosePerimeter = useCallback(() => {
+    const currentVertices = useAppStore.getState().perimeterVertices;
+    if (currentVertices && currentVertices.length > 2) {
+      undoManager.save();
+      setPerimeterOverlay({ vertices: currentVertices });
+      setPerimeterVertices(null); // Exit vertex placement mode
+      // An outline drawn corner by corner answers a failed automatic trace.
+      // Only a trace writes this record, so without clearing it the panel
+      // would go back to "FloorTrace couldn’t find the outline" the moment
+      // this outline was deleted, about a trace the user has since replaced.
+      setLastTraceOutcome(null);
+    }
+  }, [setPerimeterOverlay, setPerimeterVertices, setLastTraceOutcome]);
+
+  // Delete a specific perimeter vertex by index (right-click, or Delete on a
+  // selected vertex). The floor of three needs a voice: with a visible
+  // selection and a Delete key, a silent no-op reads as a broken keybinding.
+  const handleDeletePerimeterVertex = useCallback((index) => {
+    const overlay = selectActivePerimeterOverlay(useAppStore.getState());
+    if (!overlay?.vertices) return;
+    if (overlay.vertices.length <= 3) {
+      flash('An outline needs at least three corners', 'warn');
+      return;
+    }
+    updatePerimeterVertices(
+      overlay.vertices.filter((_, i) => i !== index),
+      true
+    );
+  }, [updatePerimeterVertices]);
+
   // Auto-trace exterior boundary after a room overlay is placed.
   const autoTraceExterior = useCallback(
     () => runTrace(FIND_OUTLINE_MESSAGE),
@@ -813,8 +1070,8 @@ function App() {
   //
   // Deliberately no updateScale call. The scale in force is the median over
   // every measured room; re-deriving it from this one rectangle would pin it to
-  // that room and switch the footprint cross-check off, which is what picking
-  // a room is *supposed* to do and must stay the user's choice.
+  // that room and switch the footprint cross-check off, which is exactly what
+  // dragging the overlay is *supposed* to do and must stay the user's choice.
   const showAutoScaleRoom = useCallback((decision) => {
     const room = representativeRoom(decision);
     if (!room || !(room.labelDims?.width > 0) || !(room.labelDims?.height > 0)) return false;
@@ -898,16 +1155,26 @@ function App() {
 
   /**
    * Place a room: run the detector, record the result as reusable evidence,
-   * calibrate from it, then trace the exterior.
+   * calibrate from it, then trace the exterior. The two entry points (clicking
+   * a detected dimension pill and clicking the canvas in manual mode) differ
+   * only in whether a label bounding box is known.
    */
   const placeRoom = useCallback(async ({ point, dims, labelBbox, labelId }) => {
-    let overlay = null;
+    let overlay = {
+      x1: point.x - 100,
+      y1: point.y - 100,
+      x2: point.x + 100,
+      y2: point.y + 100,
+    };
     let detected = null;
 
     // Every other parsed label on the page, as a place this room is not: a
     // rectangle holding another room's dimensions grew through a wall. The
     // scan's batch gives each room it measures the same evidence, and this is
     // the same rooms by another route, so the two must not be able to disagree.
+    // A canvas click in manual mode names no label, and needs to name none —
+    // growRoomRect drops any of these that the room it settled on contains,
+    // which is exactly the label of the room being clicked.
     const foreignPoints = useAppStore.getState().detectedDimensions
       .filter((d) => d.bbox && labelKeyOf(d) !== labelId)
       .map((d) => ({ x: d.bbox.x + d.bbox.width / 2, y: d.bbox.y + d.bbox.height / 2 }));
@@ -937,32 +1204,34 @@ function App() {
 
     if (!isCurrent(work)) return;
 
-    // A room whose walls were not found sets nothing. It used to fall through
-    // to a hardcoded 200x200 box and calibrate the whole project from it; with
-    // no way to drag that box onto the room, the only honest answer is to leave
-    // the scale alone and the room sizes up to pick another from.
-    if (!detected || !overlay) {
-      flash('Couldn’t find that room’s walls — pick a different room, or set the scale using a known length', 'warn');
-      return;
+    // What to say about the room once everything below has run. Held until
+    // then because the trace that follows ends in a line of its own, and the
+    // bar keeps only the latest: said first, this would be on screen for the
+    // half second before "Outline found" replaced it.
+    let roomDoubt = null;
+    if (!detected) {
+      // A failed room detection used to fall through to a hardcoded 200x200
+      // box and calibrate the whole project from it, without a word.
+      roomDoubt = 'Couldn’t find that room’s walls — drag the green box to fit the room';
+    } else {
+      useAppStore.getState().addRoom({
+        labelId: labelId ?? null,
+        name: null,
+        rect: detected.rect,
+        confidence: detected.confidence,
+        sides: detected.sides,
+        feetPerPixel: detected.pixelsPerFoot
+          ? { x: 1 / detected.pixelsPerFoot.x, y: 1 / detected.pixelsPerFoot.y }
+          : null,
+      });
+      // The detector already knows when it could not confirm this room's
+      // walls, and the very next statement calibrates the whole project from
+      // the rectangle. Saying nothing made a doubtful room indistinguishable
+      // from a certain one at exactly the moment it mattered most.
+      if (detected.confidence < 0.5) {
+        roomDoubt = 'Not sure of that room’s walls — check the green box fits the room';
+      }
     }
-
-    useAppStore.getState().addRoom({
-      labelId: labelId ?? null,
-      name: null,
-      rect: detected.rect,
-      confidence: detected.confidence,
-      sides: detected.sides,
-      feetPerPixel: detected.pixelsPerFoot
-        ? { x: 1 / detected.pixelsPerFoot.x, y: 1 / detected.pixelsPerFoot.y }
-        : null,
-    });
-    // The detector already knows when it could not confirm this room's walls,
-    // and the very next statement calibrates the whole project from the
-    // rectangle. Held until the trace below has run, because the bar keeps
-    // only the latest line and "Outline found" would replace it.
-    const roomDoubt = detected.confidence < 0.5
-      ? 'Not sure of that room’s walls — check the green box fits the room, or pick another'
-      : null;
 
     // Store the label the way the room is drawn, so the panel, the overlay and
     // the scale all describe the same rectangle.
@@ -975,6 +1244,7 @@ function App() {
     setRoomOverlay(overlay);
     updateScale(dimStrings, overlay, { pinned: true });
 
+    setPerimeterVertices(null);
     setMode('normal');
 
     // The labels are kept, not cleared. `setMode('normal')` above is what puts
@@ -986,9 +1256,9 @@ function App() {
     // the green box on the plan, which is where the user is being sent.
     if (roomDoubt && isCurrent(work)) flash(roomDoubt, 'warn');
   }, [image, setIsProcessing, setRoomDimensions, setRoomOverlay, updateScale,
-    setMode, autoTraceExterior]);
+    setPerimeterVertices, setMode, autoTraceExterior]);
 
-  // A room size on the plan was clicked: take the scale from that room.
+  // Handle dimension selection in manual mode
   const handleDimensionSelect = useCallback((dimension) => {
     undoManager.save();
     placeRoom({
@@ -1044,6 +1314,10 @@ function App() {
     setShowSideLengths(value);
   }, [setShowSideLengths]);
 
+  const handleAutoSnapChange = useCallback((value) => {
+    setAutoSnapEnabled(value);
+  }, [setAutoSnapEnabled]);
+
   // Focus moving between the feet and inches sub-fields is one edit, not two:
   // cancelling the pending clear is what makes "still editing" true for the
   // whole visit, rather than false from the first tab onward.
@@ -1067,6 +1341,22 @@ function App() {
     }, 0);
   }, [updateScale]);
   const handleHelpClose = useCallback(() => setShowHelpModal(false), [setShowHelpModal]);
+  const handleSaveUndoPoint = useCallback(() => undoManager.save(), []);
+  const handleCancelUndoSave = useCallback(() => undoManager.cancelLastSave(), []);
+  const handleAngleToolStateChange = useCallback((nextState) => {
+    undoManager.save();
+    setAngleToolState(nextState);
+  }, [setAngleToolState]);
+
+  // ── Keyboard shortcuts (wired after stable callbacks are defined) ─────────
+  // Whichever brush [ and ] currently resize. Draw mode wins when both are
+  // somehow on, but the tool manager makes them mutually exclusive anyway.
+  const activeBrush = useMemo(() => (drawModeActive
+    ? { field: 'drawBrushSize', setSize: setDrawBrushSize, min: 8, max: 400, step: 6 }
+    : eraserToolActive
+      ? { field: 'eraserBrushSize', setSize: setEraserBrushSize, min: 4, max: 200, step: 4 }
+      : null), [drawModeActive, eraserToolActive, setDrawBrushSize, setEraserBrushSize]);
+
   const handleSelectPlan = useCallback((index) => {
     const order = useAppStore.getState().documentOrder;
     if (order[index]) switchPlan(order[index]);
@@ -1081,8 +1371,19 @@ function App() {
     onSaveProject: handleSaveProject,
     onExport: openExport,
     onCopyExhibit: copyExhibitNow,
+    activeBrush,
     onRotateCanvas: handleRotateCanvas,
     onFitToWindow: handleFitToWindow,
+    hasArea: area > 0,
+    onLineToolToggle: handleLineToolToggle,
+    onDrawAreaToggle: handleDrawAreaToggle,
+    onAngleToolToggle: handleAngleToolToggle,
+    onOutlineByVertex: handleDrawExterior,
+    onCropToolToggle: handleCropToolToggle,
+    onEraserToolToggle: handleEraserToolToggle,
+    onDrawExterior: handlePaintOutline,
+    onVoidToolToggle: handleVoidToolToggle,
+    onScaleToolToggle: handleScaleToolToggle,
   });
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
@@ -1098,24 +1399,24 @@ function App() {
   );
   const handleShowPanel = useCallback(() => setPanelOpen(true), [setPanelOpen]);
 
-  // Setting the scale from a known length ends with typing the length into the
-  // panel's Scale section, so the panel comes back with the tool.
+  // Measuring a known length ends with typing it into the panel's Scale
+  // section. Started from the keyboard with the panel put away, the tool would
+  // draw a line and then have nowhere to take its length — so the panel comes
+  // back with it.
   useEffect(() => {
     if (scaleToolActive) setPanelOpen(true);
   }, [scaleToolActive, setPanelOpen]);
 
-  // Leaving a mode: put the length tool down, and put the room sizes away if
-  // choosing a room is the mode being shown.
+  // Leaving a tool: drop every flag, and drop vertex-placement, room placement
+  // and the room picker too — none is a tool-manager flag, but all three are
+  // modes, and Cancel means "no mode" rather than "no flag".
   const handleCancelTool = useCallback(() => {
-    leaveScaleTool();
+    deactivateAll();
+    setPerimeterVertices(null);
+    // Only when the picker is the mode being shown: cancelling the eraser must
+    // not also put away pills the user opened before reaching for it.
     if (activeTool === 'pick') setMode('normal');
-  }, [activeTool, leaveScaleTool, setMode]);
-
-  // One or the other: entering the length tool puts the room sizes away.
-  const handleScaleToolToggle = useCallback(() => {
-    if (activeTool === 'pick') setMode('normal');
-    toggleScaleTool();
-  }, [activeTool, setMode, toggleScaleTool]);
+  }, [activeTool, deactivateAll, setPerimeterVertices, setMode]);
 
   // Put the read labels back on screen so the user can pick the room the
   // automatic selection got wrong. Deliberately not a re-scan: OCR is the
@@ -1129,9 +1430,59 @@ function App() {
       return;
     }
     if (!useAppStore.getState().detectedDimensions.length) return;
-    leaveScaleTool();
+    handleCancelTool();
     setMode('manual');
-  }, [activeTool, leaveScaleTool, setMode]);
+  }, [activeTool, handleCancelTool, setMode]);
+
+  // Erasing marks and cropping are done *because* the outline came out wrong —
+  // a legend or a note inside the house is a documented way to lose a trace —
+  // so the next step is nearly always to find the outline again. The edit
+  // offers it, rather than leaving the user to know to go and ask, and rather
+  // than re-tracing unasked over an outline they may have adjusted by hand.
+  //
+  // The offer is the action bar's, at rest (`retraceOfferFor`): nothing is said
+  // while the eraser is still in the user's hand, where every stroke lands
+  // here, and it is still there when they put the tool down.
+  const handleImageEdited = useCallback((newImageDataUrl) => {
+    handleImageUpdate(newImageDataUrl);
+    const state = useAppStore.getState();
+    // Only with an outline to find *again*. Without one the panel is already
+    // offering to find it.
+    if (state.perimeterTraces?.some((t) => t.vertices?.length >= 3)) {
+      useWorkspaceStore.getState().setRetraceOfferFor(state.activeDocumentId);
+    }
+  }, [handleImageUpdate]);
+
+  // Everything `toolCatalog.js` lists, by id. The menus speak the same tool
+  // ids as `TOOL_MODES`, and each maps to the very toggle the keyboard already
+  // binds — so the two routes into a tool cannot drift apart. The commands
+  // (things that happen once, rather than modes) are below them.
+  const handleToolSelect = useCallback((id) => {
+    switch (id) {
+      case 'select': return handleCancelTool();
+      case 'draw': return handlePaintOutline();
+      case 'vertex': return handleDrawExterior();
+      case 'void': return handleVoidToolToggle();
+      case 'scale': return handleScaleToolToggle();
+      case 'line': return handleLineToolToggle();
+      case 'angle': return handleAngleToolToggle();
+      case 'area': return handleDrawAreaToggle();
+      case 'crop': return handleCropToolToggle();
+      case 'eraser': return handleEraserToolToggle();
+      case 'cornerEraser': return handleCornerEraserToggle();
+      case 'alternative': return handleUseAlternative();
+      case 'findOutline': return handleTracePerimeter();
+      case 'addOutline': return handleAddOutline();
+      case 'clearMeasurements': return handleClearTools();
+      case 'rotateRight': return handleRotateCanvas('clockwise');
+      case 'rotateLeft': return handleRotateCanvas('counterclockwise');
+      default: return undefined;
+    }
+  }, [handleCancelTool, handlePaintOutline, handleDrawExterior, handleVoidToolToggle,
+    handleScaleToolToggle, handleLineToolToggle, handleAngleToolToggle,
+    handleDrawAreaToggle, handleCropToolToggle, handleEraserToolToggle,
+    handleCornerEraserToggle, handleUseAlternative, handleTracePerimeter,
+    handleAddOutline, handleClearTools, handleRotateCanvas]);
 
   const handleZoom = useCallback((direction) => {
     canvasRef.current?.zoomByStep(direction);
@@ -1144,16 +1495,45 @@ function App() {
 
   const handleTakePhoto = useCallback(() => cameraInputRef.current?.click(), []);
 
+  // Enter closes a shape in progress; a phone has no Enter, so both closers get
+  // a button. The area polygon is App's to close (it owns the shape list); the
+  // void lives in the canvas hook and is reached through the same imperative
+  // handle the camera controls use.
+  const handleCloseCustomShape = useCallback(() => {
+    const shape = useAppStore.getState().currentCustomShape;
+    if (!shape || shape.closed || shape.vertices.length < 3) return;
+    handleAddCustomShape({ ...shape, closed: true });
+    setCurrentCustomShape(null);
+  }, [handleAddCustomShape, setCurrentCustomShape]);
+
+  const handleCloseVoid = useCallback(() => canvasRef.current?.closeVoid(), []);
+
+  const contextCount = activeTool === 'vertex'
+    ? (perimeterVertices?.length ?? 0)
+    : activeTool === 'area'
+      ? (currentCustomShape?.vertices?.length ?? 0)
+      : 0;
+  const contextBrush = activeTool === 'draw' ? drawBrushSize
+    : activeTool === 'eraser' ? eraserBrushSize : 0;
+  const onContextBrushChange = activeTool === 'draw' ? setDrawBrushSize : setEraserBrushSize;
+  const contextDone = activeTool === 'draw' ? handleFinishDrawMode
+    : activeTool === 'vertex' ? handleClosePerimeter : null;
+
+  const hasToolData = measurementLines?.length > 0 || customShapes?.length > 0
+    || !!currentMeasurementLine || !!currentCustomShape;
+
   // The room the scale was taken from — the green box — is on the plan only
   // while it is the subject: the panel's Scale section is open, there is no
   // scale yet and the box is how one is set, or a room is being picked. At
-  // rest it was an unexplained rectangle on one room of the house.
+  // rest it was an unexplained rectangle on one room of the house, and it is
+  // draggable: moving it re-sets the scale every area is worked out from, which
+  // is easy to do by accident while trying to move the plan.
   //
   // The phone always draws it. Its measurement sheet has to be closed to reach
-  // the plan, so "while Scale is open" would mean never while it can be seen.
+  // the plan, so "while Scale is open" would mean never while it can be dragged.
   //
   // Nor while a drawn line is the scale: the box would then be evidence for
-  // nothing.
+  // nothing, and dragging it would throw the line's scale away.
   const scaleRoomOnPlan = isMobile || (
     calibration.source !== 'line-calibration'
     && (scaleRoomShown || !calibration.calibrated || activeTool === 'pick')
@@ -1163,11 +1543,12 @@ function App() {
   // element, same props: nothing about tracing depends on the chrome around it,
   // and a second copy of this list is a second place for them to diverge.
   // `key` is the entire correctness argument for in-progress gestures across a
-  // plan switch. The canvas hooks hold real state outside the store — the
-  // length being drawn, a selected scale line — and none of it is parked,
-  // because none of it is a fact about the plan. Keying the subtree on the plan
-  // means all of it dies with the tree instead of being reinterpreted against a
-  // different drawing.
+  // plan switch. The canvas hooks hold real state outside the store — a crop
+  // rectangle mid-drag, the eraser's starting vertices, the void tool's target
+  // trace, a half-dragged vertex index, the protractor's live coordinates — and
+  // none of it is parked, because none of it is a fact about the plan. Keying
+  // the subtree on the plan means all of it dies with the tree instead of being
+  // reinterpreted against a different drawing.
   const canvasElement = (
     <Canvas
       key={activeDocumentId}
@@ -1180,6 +1561,9 @@ function App() {
       perimeterOverlay={perimeterOverlay}
       perimeterTraces={perimeterTraces}
       activeTraceId={activeTraceId}
+      traceInteractionMode={traceInteractionMode}
+      onRoomOverlayUpdate={updateRoomOverlay}
+      onPerimeterUpdate={updatePerimeterVertices}
       isProcessing={isProcessing}
       processingMessage={processingMessage}
       detectedDimensions={detectedDimensions}
@@ -1187,14 +1571,51 @@ function App() {
       showSideLengths={showSideLengths}
       feetPerPixel={calibration.feetPerPixel}
       unit={unit}
+      lineToolActive={lineToolActive}
+      onLineToolToggle={handleLineToolToggle}
+      measurementLines={measurementLines}
+      currentMeasurementLine={currentMeasurementLine}
+      onMeasurementLineUpdate={setCurrentMeasurementLine}
+      onAddMeasurementLine={handleAddMeasurementLine}
+      onMeasurementLinesChange={handleMeasurementLinesChange}
+      drawAreaActive={drawAreaActive}
+      onDrawAreaToggle={handleDrawAreaToggle}
+      customShapes={customShapes}
+      currentCustomShape={currentCustomShape}
+      onCustomShapeUpdate={setCurrentCustomShape}
+      onAddCustomShape={handleAddCustomShape}
+      onCustomShapesChange={handleCustomShapesChange}
+      perimeterVertices={perimeterVertices}
+      onClosePerimeter={handleClosePerimeter}
+      autoSnapEnabled={autoSnapEnabled}
+      onDeletePerimeterVertex={handleDeletePerimeterVertex}
+      onSaveUndoPoint={handleSaveUndoPoint}
+      onCancelUndoSave={handleCancelUndoSave}
+      eraserToolActive={eraserToolActive}
+      cornerEraserActive={cornerEraserActive}
+      eraserBrushSize={eraserBrushSize}
+      cropToolActive={cropToolActive}
+      onCropToolToggle={handleCropToolToggle}
+      onImageUpdate={handleImageEdited}
+      angleToolActive={angleToolActive}
+      angleToolState={angleToolState}
+      onAngleToolStateChange={handleAngleToolStateChange}
+      onAngleToolToggle={handleAngleToolToggle}
+      drawModeActive={drawModeActive}
+      drawBrushSize={drawBrushSize}
+      drawStrokes={drawStrokes}
+      onDrawModeToggle={handleDrawModeToggle}
+      onFinishDrawMode={handleFinishDrawMode}
+      voidToolActive={voidToolActive}
+      onVoidToolToggle={handleVoidToolToggle}
     />
   );
 
   // Two shells over one workflow. Desktop reads in three parts: the header says
   // which plan is open, the results panel on the left says what was measured
-  // and how far to trust it, and the plan takes the rest — under one bar that
-  // says what FloorTrace is doing and, while the scale is being set by hand,
-  // what to do next. Before a plan is open there is
+  // and how far to trust it, and the plan takes the rest — under one action
+  // bar that offers what can be done to it and, while a tool runs, turns into
+  // that tool's instruction and its way out. Before a plan is open there is
   // only the header and the start screen.
   // Mobile: a top bar, the plan, and one bar under the thumb — see MobileChrome
   // for why that is a different arrangement rather than the same one scaled
@@ -1216,6 +1637,7 @@ function App() {
           onClosePlan={closePlan}
           onNewPlan={openPlan}
           activeTool={activeTool}
+          hasToolData={hasToolData}
           onMenuFileOpen={handleFileOpen}
           onTakePhoto={handleTakePhoto}
           onExport={openExport}
@@ -1225,9 +1647,18 @@ function App() {
           onHelpOpen={handleHelpOpen}
           onFindRoomSize={handleFindRoomSize}
           onTracePerimeter={handleTracePerimeter}
+          onDrawExterior={handlePaintOutline}
+          onOutlineByVertex={handleDrawExterior}
+          onAddFloor={handleAddOutline}
           onFitToWindow={handleFitToWindow}
           onRotate={handleRotateCanvas}
+          onToolSelect={handleToolSelect}
           onCancelTool={handleCancelTool}
+          onClearTools={handleClearTools}
+          onFinishDrawMode={handleFinishDrawMode}
+          onClosePerimeter={handleClosePerimeter}
+          onCloseCustomShape={handleCloseCustomShape}
+          onCloseVoid={handleCloseVoid}
           roomDimensions={roomDimensions}
           onDimensionsChange={handleDimensionsChange}
           onDimensionFocus={handleDimensionFocus}
@@ -1240,6 +1671,8 @@ function App() {
           onRestoreAutoScale={restoreAutoScale}
           showSideLengths={showSideLengths}
           onShowSideLengthsChange={handleShowSideLengthsChange}
+          autoSnapEnabled={autoSnapEnabled}
+          onAutoSnapChange={handleAutoSnapChange}
           saveOnExit={saveOnExit}
           onSaveOnExitChange={handleSaveOnExitChange}
           enhancedOcr={enhancedOcr}
@@ -1273,6 +1706,8 @@ function App() {
         onPanelToggle={handlePanelToggle}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={handleShowSideLengthsChange}
+        autoSnapEnabled={autoSnapEnabled}
+        onAutoSnapChange={handleAutoSnapChange}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -1297,6 +1732,9 @@ function App() {
             onRestoreAutoScale={restoreAutoScale}
             onExport={openExport}
             onFindOutline={handleTracePerimeter}
+            onPaintOutline={handlePaintOutline}
+            onPlaceCorners={handleDrawExterior}
+            onAddOutline={handleAddOutline}
             onRescan={handleFindRoomSize}
           />
         )}
@@ -1312,12 +1750,18 @@ function App() {
             Canvas' root is `absolute inset-0`, so it would paint over the bar
             and the Konva stage would swallow its clicks. */}
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          {/* Only with a plan: everything it says is about one. */}
+          {/* Only with a plan: every row of it acts on one. */}
           {image && (
             <ActionBar
               tool={activeTool}
+              count={contextCount}
+              brushSize={contextBrush}
+              onBrushSizeChange={onContextBrushChange}
               onCancel={handleCancelTool}
-              onUseAlternative={handleUseAlternative}
+              onDone={contextDone}
+              hasArea={area > 0}
+              hasToolData={hasToolData}
+              onSelect={handleToolSelect}
               panelOpen={panelOpen}
               onShowPanel={handleShowPanel}
             />
@@ -1333,7 +1777,6 @@ function App() {
                 onZoomIn={() => handleZoom(1)}
                 onZoomOut={() => handleZoom(-1)}
                 onFitToWindow={handleFitToWindow}
-                onRotate={handleRotateCanvas}
               />
             )}
           </div>

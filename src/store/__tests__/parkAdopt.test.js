@@ -34,7 +34,7 @@ describe('park and adopt', () => {
         calibration: { calibrated: true, feetPerPixel: { x: 0.05, y: 0.05 }, source: 'room-calibration', calibratedRoomId: null, createdAt: 1, quality: null },
         rooms: [{ rect: { left: 1, right: 2, top: 3, bottom: 4 } }],
         detectedDimensions: [{ width: 10, height: 12, text: "10' x 12'", bbox: { x: 1, y: 2, width: 3, height: 4 }, format: 'decimal' }],
-        scaleLines: [{ id: 's1', start: { x: 0, y: 0 }, end: { x: 5, y: 5 }, feet: 10 }],
+        measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 5, y: 5 } }],
         zoomScale: 2.5,
         stageX: -120,
         stageY: 40,
@@ -123,6 +123,34 @@ describe('park and adopt', () => {
       app().adoptDocument(docA);
 
       expect(app().isDirty).toBe(true);
+    });
+
+    // drawStrokes IS autosaved and drawModeActive is not, so parking one
+    // without the other returns strokes on the plan and no brush in hand.
+    it('keeps draw mode and its strokes together', () => {
+      useAppStore.setState({
+        image: IMAGE_A,
+        drawModeActive: true,
+        drawStrokes: [{ points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }],
+      });
+
+      app().parkActiveDocument();
+      app().adoptDocument(docA);
+
+      expect(app().drawModeActive).toBe(true);
+      expect(app().drawStrokes).toHaveLength(1);
+    });
+
+    it('keeps vertex placement and the mode that explains it together', () => {
+      useAppStore.setState({ image: IMAGE_A });
+      app().setPerimeterVertices([{ x: 1, y: 1 }]);
+      expect(app().traceInteractionMode).toBe('drawing');
+
+      app().parkActiveDocument();
+      app().adoptDocument(docA);
+
+      expect(app().traceInteractionMode).toBe('drawing');
+      expect(app().perimeterVertices).toHaveLength(1);
     });
 
     // A parked plan's work is abandoned, so returning to a spinner would be a

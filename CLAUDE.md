@@ -41,13 +41,11 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 
 - `src/App.jsx` — orchestrator: wires the store to the shells and owns cross-cutting workflow (mode transitions, calibration, notifications). Reusable interaction logic lives in `src/hooks/`.
 - `src/store/` — one Zustand store for the plan's working state (`appStore.js`) plus `workspaceStore.js` for workspace-wide UI state and preferences; undo (`undoManager.js`), outlines (`traceManager.js`), open plans (`documentManager.js`) and ownership of async results (`documentRequests.js`).
-- `src/components/` — two shells over one workflow: desktop (`AppHeader` with its `PlanTabs`, `ResultsPanel`, the `ActionBar` status line, `ViewControls`) and `mobile/`; the shared `Menu`, `Dialog` and `PanelSection`; the lazily loaded Konva canvas in `canvas/`.
+- `src/components/` — two shells over one workflow: desktop (`AppHeader` with its `PlanTabs`, `ResultsPanel`, `ActionBar`, `ViewControls`) and `mobile/`; the shared `Menu`, `Dialog` and `PanelSection`; the lazily loaded Konva canvas in `canvas/`.
 - `src/utils/detection/` — wall and boundary detection. Pure-JS cores run in `src/workers/detectionWorker.js` and, unchanged, in the Node benchmarks.
 - `src/utils/dimensions/` — dimension OCR (Tesseract, optional PaddleOCR), fronted by `DimensionsOCR.js` and the lazy `ocrLazy.js`.
 - `src/utils/exhibit/` — the exhibit PNG, the primary export. `.floorplan` (`projectSerializer.js`) is the editable project file.
 - `scripts/` — benchmarks, probes and generators. `fixtures/` — sample plans with `.truth.json` sidecars.
-
-There are no manual drawing or editing tools: the outline is read-only, and the one manual input is the scale (pick a different room, or *Set scale using known length*). See `.claude/rules/ui-shell.md` before adding one back.
 
 The flow: load an image → OCR reads the labels → every labelled room is measured and the rooms vote on one project scale → the exterior is traced with those rooms and labels as constraints → area, with the detector's confidence and warnings.
 
@@ -77,6 +75,6 @@ Rules for each subsystem load automatically when you open its files: `.claude/ru
 
 - `docs/architecture.md` — pipeline overview and quality model.
 - `docs/accuracy-roadmap.md` — the accuracy scoreboard and its targets, what stands in the way, and a log of every change that moved it.
-- `docs/remediation-plan.md` — open findings. `docs/tools-and-options-backlog.md` — ideas not yet built, and the manual tools removed in October 2026.
+- `docs/remediation-plan.md` — open findings. `docs/tools-and-options-backlog.md` — ideas not yet built.
 - `docs/ocr-performance.md`, `docs/load-to-area-performance.md` — dated measurement records. `docs/CODE_REVIEW.md` — historical review from July 2026.
 - `Reference Data for Wall Detection System/` — papers behind the detector. `datasets/README.md` — getting CubiCasa5K.

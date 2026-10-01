@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, FolderOpen, Ruler, ScanSearch, ScanText, Share } from 'lucide-react';
+import { AlertTriangle, Brush, FolderOpen, ScanSearch, ScanText, Share } from 'lucide-react';
 import useAppStore, { selectActiveAreaByType } from '../../store/appStore';
+import useWorkspaceStore from '../../store/workspaceStore';
 import { areaDisplayValue, formatAreaValue } from '../../utils/unitConverter';
 import { displayedBreakdownTotal } from '../../utils/areaCalculator';
 import { planStage } from '../../utils/planStage';
@@ -12,11 +13,12 @@ import MobileActionBar from './MobileActionBar';
 import MobileCanvasOverlay from './MobileCanvasOverlay';
 import MobileMenuSheet from './MobileMenuSheet';
 import MobileToolContext from './MobileToolContext';
+import MobileToolSheet from './MobileToolSheet';
 import MobileTopBar from './MobileTopBar';
 
 /**
- * The mobile shell: top bar, bottom bar, and the three sheets between them
- * — menu, measurement, and the plans sheet the tab strip stands in for.
+ * The mobile shell: top bar, bottom bar, and the four sheets between them
+ * — menu, tools, measurement, and the plans sheet the tab strip stands in for.
  *
  * `App` still owns every workflow decision — this component owns only where
  * those decisions appear on a phone. It reads the store directly for the state
@@ -32,6 +34,7 @@ const MobileChrome = ({
   // the chrome never rebuilds the Konva stage underneath it.
   children,
   activeTool,
+  hasToolData,
   // plan / project
   onMenuFileOpen,
   onTakePhoto,
@@ -47,11 +50,20 @@ const MobileChrome = ({
   // trace
   onFindRoomSize,
   onTracePerimeter,
+  onDrawExterior,
+  onOutlineByVertex,
+  onAddFloor,
   // canvas
   onFitToWindow,
   onRotate,
-  // the mode bar
+  // tools
+  onToolSelect,
   onCancelTool,
+  onClearTools,
+  onFinishDrawMode,
+  onClosePerimeter,
+  onCloseCustomShape,
+  onCloseVoid,
   // measurement panel
   roomDimensions,
   onDimensionsChange,
@@ -66,6 +78,8 @@ const MobileChrome = ({
   // preferences
   showSideLengths,
   onShowSideLengthsChange,
+  autoSnapEnabled,
+  onAutoSnapChange,
   saveOnExit,
   onSaveOnExitChange,
   enhancedOcr,
@@ -73,7 +87,7 @@ const MobileChrome = ({
   theme,
   onCycleTheme,
 }) => {
-  const [sheet, setSheet] = useState(null); // 'menu' | 'panel' | 'plans'
+  const [sheet, setSheet] = useState(null); // 'menu' | 'tools' | 'panel' | 'plans'
 
   const image = useAppStore((s) => s.image);
   const unit = useAppStore((s) => s.unit);
@@ -84,8 +98,21 @@ const MobileChrome = ({
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
   const useInteriorWalls = useAppStore((s) => s.useInteriorWalls);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
+  const perimeterVertices = useAppStore((s) => s.perimeterVertices);
+  const currentCustomShape = useAppStore((s) => s.currentCustomShape);
+  const drawBrushSize = useAppStore((s) => s.drawBrushSize);
+  const eraserBrushSize = useAppStore((s) => s.eraserBrushSize);
+  const setDrawBrushSize = useAppStore((s) => s.setDrawBrushSize);
+  const setEraserBrushSize = useAppStore((s) => s.setEraserBrushSize);
   const areas = useAppStore(selectActiveAreaByType);
   const documentOrder = useAppStore((s) => s.documentOrder);
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
+  // The plan's image was edited after its outline was found (erased marks, a
+  // crop). On the desktop the bar offers to find the outline again; here the
+  // one verb does.
+  const retraceOffered = useWorkspaceStore((s) => s.retraceOfferFor != null
+    && s.retraceOfferFor === activeDocumentId);
+
   // The same list the measurement sheet shows inside Scale and Outline, from
   // the one place it is gathered: this bar used to call the summary itself and
   // had fallen an argument behind it, so it called a plan clean that the sheet
@@ -93,10 +120,12 @@ const MobileChrome = ({
   const issues = usePlanIssues();
   // Read from `planStage`, not re-derived. This shell is the third surface to
   // ask "is this plan outlined", and the first two answering it differently is
-  // the reason that helper exists.
+  // the reason that helper exists — the seven-outline ceiling it also owns was
+  // missing here, so the menu offered an eighth that nothing else would.
   const stage = planStage({
     image, calibrated, perimeterTraces, lastTraceOutcome, ocrFailed,
   });
+  const { canAddOutline } = stage;
   const noGla = areas.gla === 0 && areas.total > 0;
   // The same arithmetic the panel and the exhibit do, because the thumb bar and
   // the measurement sheet are on screen together: a total summed from the raw
@@ -124,13 +153,18 @@ const MobileChrome = ({
       case 'scale':
         return { label: 'Read the room sizes', icon: ScanText, onPress: onFindRoomSize };
       // The scan came back empty and is memoised, so offering it again is a
-      // guaranteed no-op. A length the user knows is the route that works.
+      // guaranteed no-op. The brush and the ruler are the routes that work.
       case 'scale-manual':
-        return { label: 'Set scale using known length', icon: Ruler, onPress: onScaleTool };
+        return { label: 'Set the scale by hand', icon: ScanText, onPress: onScaleTool };
       case 'outline':
         return { label: 'Find the outline', icon: ScanSearch, onPress: onTracePerimeter };
+      case 'outline-paint':
+        return { label: 'Paint the outline', icon: Brush, onPress: onDrawExterior };
       default:
         break;
+    }
+    if (retraceOffered) {
+      return { label: 'Find the outline again', icon: ScanSearch, onPress: onTracePerimeter };
     }
     // An outline exists. If the number needs a second look, the next thing to
     // do is read why — the sheet opens on the section that says it.
@@ -142,10 +176,28 @@ const MobileChrome = ({
       };
     }
     return { label: 'Save image', icon: Share, onPress: onExport };
-  }, [image, stage.primary, areaWarn, scaleDoubt, onMenuFileOpen,
-    onFindRoomSize, onScaleTool, onTracePerimeter, onExport]);
+  }, [image, stage.primary, retraceOffered, areaWarn, scaleDoubt, onMenuFileOpen,
+    onFindRoomSize, onScaleTool, onTracePerimeter, onDrawExterior, onExport]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
+
+  // ── active-tool bar ──────────────────────────────────────────────────────
+  const toolCount = activeTool === 'vertex'
+    ? (perimeterVertices?.length ?? 0)
+    : activeTool === 'area'
+      ? (currentCustomShape?.vertices?.length ?? 0)
+      : 0;
+  const brushSize = activeTool === 'draw' ? drawBrushSize
+    : activeTool === 'eraser' ? eraserBrushSize : 0;
+  const onBrushSizeChange = activeTool === 'draw' ? setDrawBrushSize : setEraserBrushSize;
+
+  // Void and area gain a commit button they do not have on the desktop, where
+  // Enter closes them. There is no Enter here, and "tap the first corner again"
+  // is a 22 px target at the far end of a gesture.
+  const toolDone = activeTool === 'draw' ? onFinishDrawMode
+    : activeTool === 'vertex' ? onClosePerimeter
+      : activeTool === 'area' ? onCloseCustomShape
+        : activeTool === 'void' ? onCloseVoid : null;
 
   const toolActive = activeTool !== 'select';
 
@@ -173,12 +225,18 @@ const MobileChrome = ({
       {toolActive ? (
         <MobileToolContext
           active={activeTool}
+          count={toolCount}
+          brushSize={brushSize}
+          onBrushSizeChange={onBrushSizeChange}
           onCancel={onCancelTool}
+          onDone={toolDone}
         />
       ) : (
         <MobileActionBar
           primary={primaryAction}
           isProcessing={isProcessing}
+          onTools={() => setSheet('tools')}
+          toolsActive={sheet === 'tools'}
           onPanel={() => setSheet('panel')}
           panelOpen={sheet === 'panel'}
           areaText={areas.total > 0 ? areaText : '—'}
@@ -208,10 +266,15 @@ const MobileChrome = ({
         onCloseActivePlan={onCloseActivePlan}
         onFindRoomSize={onFindRoomSize}
         onTracePerimeter={onTracePerimeter}
+        onDrawExterior={onDrawExterior}
+        onOutlineByVertex={onOutlineByVertex}
+        onAddFloor={onAddFloor}
+        canAddOutline={canAddOutline}
         onFitToWindow={onFitToWindow}
-        onRotate={onRotate}
         showSideLengths={showSideLengths}
         onShowSideLengthsChange={onShowSideLengthsChange}
+        autoSnapEnabled={autoSnapEnabled}
+        onAutoSnapChange={onAutoSnapChange}
         onUnitChange={onUnitChange}
         saveOnExit={saveOnExit}
         onSaveOnExitChange={onSaveOnExitChange}
@@ -220,6 +283,17 @@ const MobileChrome = ({
         theme={theme}
         onCycleTheme={onCycleTheme}
         onHelpOpen={onHelpOpen}
+      />
+
+      <MobileToolSheet
+        open={sheet === 'tools'}
+        onClose={closeSheet}
+        activeTool={activeTool}
+        hasArea={areas.total > 0}
+        hasToolData={hasToolData}
+        onSelect={onToolSelect}
+        onRotate={onRotate}
+        onClearTools={onClearTools}
       />
 
       <BottomSheet
@@ -244,6 +318,8 @@ const MobileChrome = ({
           onScaleTool={() => { closeSheet(); onScaleTool(); }}
           onSelectRoom={() => { closeSheet(); onSelectRoom?.(); }}
           onRestoreAutoScale={onRestoreAutoScale}
+          // The sheet covers the plan the corners are about to be tapped on.
+          onAddOutline={() => { closeSheet(); onAddFloor(); }}
           onExport={() => { closeSheet(); onExport(); }}
         />
       </BottomSheet>

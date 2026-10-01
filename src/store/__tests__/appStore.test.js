@@ -181,6 +181,46 @@ describe('holeRings', () => {
   });
 });
 
+describe('addHole / removeHole', () => {
+  beforeEach(() => {
+    useAppStore.getState().resetOverlays();
+  });
+
+  const traceId = () => useAppStore.getState().activeTraceId;
+
+  it('tags a hand-punched void as the user\'s and appends it', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole] });
+    useAppStore.getState().addHole(traceId(), lightWell);
+
+    const t = activeTrace();
+    expect(t.holes).toHaveLength(2);
+    expect(t.holes[1]).toMatchObject({ ring: lightWell, source: 'user' });
+    expect(t.holes[1].id).toEqual(expect.any(String));
+    expect(calculateArea(t.vertices, SCALE, t.holes)).toBe(9500);
+  });
+
+  it('refuses a ring with fewer than three corners', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [] });
+    useAppStore.getState().addHole(traceId(), [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
+
+    expect(activeTrace().holes).toEqual([]);
+  });
+
+  it('removes by id and leaves the others alone', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [autoHole, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'hole-user-0');
+
+    expect(activeTrace().holes).toEqual([autoHole]);
+  });
+
+  it('removes an untagged ring by its positional key', () => {
+    useAppStore.getState().setPerimeterOverlay({ vertices: outer, holes: [courtyard, userHole] });
+    useAppStore.getState().removeHole(traceId(), 'ring-0');
+
+    expect(activeTrace().holes).toEqual([userHole]);
+  });
+});
+
 describe('selectActivePerimeterOverlay', () => {
   beforeEach(() => {
     useAppStore.getState().resetOverlays();
@@ -313,6 +353,39 @@ describe('selectPickingRoom', () => {
   });
 });
 
+describe('errorAnchor', () => {
+  const anchor = { kind: 'segment', runs: [[{ x: 0, y: 0 }, { x: 9, y: 9 }]] };
+
+  beforeEach(() => {
+    useAppStore.getState().restart();
+    useAppStore.getState().setErrorAnchor(null);
+  });
+
+  // Where an edit was refused is a view of the document, not part of it:
+  // undoing an edit must not restore a highlight, and reopening a project must
+  // not start with one already on the canvas.
+  it('reaches neither a snapshot nor a draft', () => {
+    useAppStore.getState().setErrorAnchor(anchor);
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
+
+    expect(AUTOSAVE_FIELDS).not.toContain('errorAnchor');
+    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('errorAnchor');
+    expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('errorAnchor');
+  });
+
+  it('survives an undo rather than being reverted by one', () => {
+    useAppStore.getState().setErrorAnchor(anchor);
+    undoManager.save();
+    useAppStore.getState().setUnit('metric');
+    undoManager.undo();
+    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
+  });
+});
+
+// `tracedBoundaries` is the detector result the interior/exterior toggle
+// re-applies. It is the heaviest field in a snapshot, so it is tempting to drop
+// from the field sets — these pin down why it cannot be, and how it is made
+// cheap instead.
 describe('tracedBoundaries weight and lifetime', () => {
   const IMG_A = 'data:image/png;base64,AAAA';
   const IMG_B = 'data:image/png;base64,BBBB';

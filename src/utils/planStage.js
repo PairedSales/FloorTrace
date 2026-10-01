@@ -1,9 +1,14 @@
+// traceManager hands out seven trace colours, so seven is the ceiling. Written
+// here because every surface that offers "add an outline" gates on it, and they
+// used to disagree: one refused an eighth outline while another offered it.
+export const MAX_TRACES = 7;
+
 /**
  * How many runner-up outlines the search left for the active outline.
  *
- * Not offered on an outline a saved plan carries as edited by hand: once the
- * geometry is the user's, a runner-up scored against the detector's own is no
- * longer an alternative to it.
+ * Offered only on an outline the detector produced and the user has not since
+ * edited: once the geometry is theirs, a runner-up scored against the
+ * detector's own is no longer an alternative to it.
  */
 export const alternativeCount = (traces, activeTraceId) => {
   const active = (traces ?? []).find((t) => t.id === activeTraceId);
@@ -23,12 +28,11 @@ export const alternativeCount = (traces, activeTraceId) => {
  * empty is memoised, so pressing "Read the room sizes" again is a guaranteed
  * no-op; a trace the detector could not read will not read it on a second
  * identical pass either. `ocrFailed` and `lastTraceOutcome` are what tell "it
- * ran and produced nothing" from "nobody has tried": a failed scan sends the
- * user to the known length, and a failed trace offers nothing here — the panel
- * says why and keeps the retry.
+ * ran and produced nothing" from "nobody has tried", and send the user to the
+ * route that works instead: the ruler, the brush.
  *
- * @returns {{tracedCount: number,
- *   primary: null|'scale'|'scale-manual'|'outline'}}
+ * @returns {{tracedCount: number, canAddOutline: boolean,
+ *   primary: null|'scale'|'scale-manual'|'outline'|'outline-paint'}}
  */
 export function planStage({
   image,
@@ -43,8 +47,12 @@ export function planStage({
 
   const primary = !image ? null
     : !calibrated ? (ocrFailed ? 'scale-manual' : 'scale')
-      : tracedCount === 0 ? (traceFailed ? null : 'outline')
+      : tracedCount === 0 ? (traceFailed ? 'outline-paint' : 'outline')
         : null;
 
-  return { tracedCount, primary };
+  return {
+    tracedCount,
+    primary,
+    canAddOutline: tracedCount > 0 && perimeterTraces.length < MAX_TRACES,
+  };
 }
