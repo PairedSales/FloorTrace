@@ -9,7 +9,7 @@ describe('workspaceStore', () => {
     useWorkspaceStore.setState({
       showHelpModal: false,
       statusFlash: null,
-      dockOpen: true,
+      panelOpen: true,
       showExportDialog: false,
       confirmRequest: null,
     });
@@ -20,8 +20,8 @@ describe('workspaceStore', () => {
   it('keeps window state off the document store', () => {
     const app = useAppStore.getState();
     for (const key of [
-      'showHelpModal', 'statusFlash', 'dockOpen', 'showExportDialog', 'confirmRequest',
-      'setShowHelpModal', 'flashStatus', 'setDockOpen', 'setShowExportDialog',
+      'showHelpModal', 'statusFlash', 'panelOpen', 'showExportDialog', 'confirmRequest',
+      'setShowHelpModal', 'flashStatus', 'setPanelOpen', 'setShowExportDialog',
       'requestConfirm', 'resolveConfirm',
     ]) {
       expect(app[key]).toBeUndefined();
@@ -29,12 +29,12 @@ describe('workspaceStore', () => {
   });
 
   it('does not lose window state when the document store restarts', () => {
-    ws().setDockOpen(false);
+    ws().setPanelOpen(false);
     ws().setShowHelpModal(true);
 
     useAppStore.getState().restart();
 
-    expect(ws().dockOpen).toBe(false);
+    expect(ws().panelOpen).toBe(false);
     expect(ws().showHelpModal).toBe(true);
   });
 

@@ -36,7 +36,8 @@ export function useScaleLine() {
     // question is actually asked.
     const summary = scaleQualitySummary(resolved.quality);
     if (summary && summary.level === 'check') {
-      notify(summary.detail, { type: 'warning', id: 'scale-disagreement' });
+      notify([summary.detail, summary.remedy].filter(Boolean).join(' '),
+        { type: 'warning', id: 'scale-disagreement' });
     }
   }, []);
 

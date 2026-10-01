@@ -47,8 +47,9 @@ const Toggle = ({ icon, label, detail, checked, onToggle }) => (
 /**
  * Everything the phone screen has no room to show at once.
  *
- * Grouped by the desktop menu bar's own titles, so a user who knows one knows
- * the other — but the *contents* differ where the platform does. There is no
+ * Grouped by what the user is doing — the plan, tracing it, taking the result
+ * away, how it is shown. The desktop spreads the same commands over its header
+ * Menu, its action bar and its panel; a phone has one list. There is no
  * keybinding column (there is no keyboard), the checkmarks are on the right
  * where a touch list puts them, and "Take a photo" exists here and nowhere on
  * the desktop: on a phone the plan is usually a sheet of paper on the table in
@@ -66,7 +67,7 @@ const MobileMenuSheet = ({
 }) => {
   const ThemeIcon = THEME_ICON[theme] ?? MonitorSmartphone;
   // Window state, read where it is used rather than threaded through
-  // MobileChrome — the same two fields the dock and the top bar read.
+  // MobileChrome — the same two fields the panel and Settings read.
   const showWork = useWorkspaceStore((s) => s.showWork);
   const setShowWork = useWorkspaceStore((s) => s.setShowWork);
   const unitPreference = useWorkspaceStore((s) => s.unitPreference);
@@ -77,7 +78,7 @@ const MobileMenuSheet = ({
       <div className="pb-6">
         <Section title="Plan">
           <Row icon={Camera} label="Take a photo of a plan" onSelect={onTakePhoto} close={onClose} />
-          <Row icon={FolderOpen} label="Open plan or project…" onSelect={onFileOpen} close={onClose} />
+          <Row icon={FolderOpen} label="Open a floor plan…" onSelect={onFileOpen} close={onClose} />
           <Row
             icon={Maximize}
             label="Fit plan to screen"
@@ -87,10 +88,10 @@ const MobileMenuSheet = ({
           />
         </Section>
 
-        <Section title="Trace">
+        <Section title="Measure it again">
           <Row
             icon={ScanText}
-            label="Read dimensions"
+            label="Read the room sizes again"
             detail="Find the printed room sizes and set the scale"
             disabled={!image}
             onSelect={onFindRoomSize}
@@ -98,22 +99,22 @@ const MobileMenuSheet = ({
           />
           <Row
             icon={ScanSearch}
-            label="Find outline"
+            label="Find the outline"
             disabled={!image}
             onSelect={onTracePerimeter}
             close={onClose}
           />
           <Row
             icon={Brush}
-            label="Paint outline"
-            detail="Best when auto-detection cannot read the plan"
+            label="Paint over the walls"
+            detail="Best when FloorTrace cannot find the outline itself"
             disabled={!image}
             onSelect={onDrawExterior}
             close={onClose}
           />
           <Row
             icon={Waypoints}
-            label="Place corners"
+            label="Tap the corners"
             disabled={!image}
             onSelect={onOutlineByVertex}
             close={onClose}
@@ -132,10 +133,10 @@ const MobileMenuSheet = ({
           />
         </Section>
 
-        <Section title="Export">
+        <Section title="Save">
           <Row
             icon={Share}
-            label="Export for workfile…"
+            label="Save image…"
             detail="One image with the plan and every number on it"
             disabled={!image}
             onSelect={onExport}
@@ -143,14 +144,14 @@ const MobileMenuSheet = ({
           />
           <Row
             icon={Copy}
-            label="Copy measurement image"
+            label="Copy image"
             disabled={!image || !hasArea}
             onSelect={onCopyExhibit}
             close={onClose}
           />
           <Row
             icon={FileJson}
-            label="Save editable project"
+            label="Save project file"
             detail="Only needed if you mean to come back and edit"
             disabled={!image}
             onSelect={() => onSaveProject(false)}
@@ -158,20 +159,20 @@ const MobileMenuSheet = ({
           />
         </Section>
 
-        <Section title="View">
+        <Section title="On the plan">
           <Toggle
-            label="Show side lengths"
+            label="Wall lengths on the plan"
             checked={showSideLengths}
             onToggle={() => onShowSideLengthsChange(!showSideLengths)}
           />
           <Toggle
-            label="Snap to walls"
+            label="Snap corners to walls"
             checked={autoSnapEnabled}
             onToggle={() => onAutoSnapChange(!autoSnapEnabled)}
           />
           <Toggle
-            label="Show the area calculation"
-            detail="The math behind the GLA, under the figure"
+            label="How the area was calculated"
+            detail="The sums behind the living area, in the measurement sheet"
             checked={showWork}
             onToggle={() => setShowWork(!showWork)}
           />
@@ -192,9 +193,8 @@ const MobileMenuSheet = ({
             detail={THEME_LABEL[theme]}
             onSelect={onCycleTheme}
           />
-          {/* Same item, same section, same words as the desktop View menu —
-              the one place it differs is that a touch list has room to say
-              what it is. */}
+          {/* The same page desktop Help links to; a touch list has room to
+              say what it is. */}
           <Row
             icon={Route}
             label="How the outline is traced"
@@ -207,18 +207,18 @@ const MobileMenuSheet = ({
 
         <Section title="Settings">
           <Toggle
-            label="Save work on exit"
-            detail="Keeps a draft in this browser"
+            label="Keep my work in this browser"
+            detail="Still here if you close the tab"
             checked={saveOnExit}
             onToggle={() => onSaveOnExitChange(!saveOnExit)}
           />
           <Toggle
-            label="Enhanced dimension reading"
+            label="Try harder to read room sizes"
             detail="Slower, better on faint or small print"
             checked={enhancedOcr}
             onToggle={() => onEnhancedOcrChange(!enhancedOcr)}
           />
-          <Row icon={HelpCircle} label="How it works" onSelect={onHelpOpen} close={onClose} />
+          <Row icon={HelpCircle} label="Help" onSelect={onHelpOpen} close={onClose} />
         </Section>
 
         <div className="mt-4 pt-2 border-t border-line-soft">

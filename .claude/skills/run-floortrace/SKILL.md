@@ -13,9 +13,9 @@ description: Launch FloorTrace's dev server and drive the app in the Browser pan
 
 ## Load a plan
 
-- Simplest: click **Try an example plan** on the welcome screen (`public/example-plan.png`, the same image as `fixtures/ExampleFloorplan8.png`).
+- Simplest: click **Try the sample plan** on the start screen (`public/example-plan.png`, the same image as `fixtures/ExampleFloorplan8.png`).
 - Any fixture: Vite serves `fixtures/` at `/FloorTrace/fixtures/<name>.png`. Fetch it, wrap it in a `File` inside a `DataTransfer`, and dispatch `new DragEvent('drop', { dataTransfer, bubbles: true })` on `#app-container` — that element owns `onDrop`; dispatching on `#root` does nothing.
-- A restored draft or an unsaved-changes confirmation can block a drop: click Discard, or start clean by clearing `localStorage`, deleting the IndexedDB databases (`floortrace-db` holds drafts; `keyval-store` is Tesseract's cache) and reloading. Close other tabs on the same origin first, or `deleteDatabase` blocks and autosave never initialises.
+- A drop onto an open plan opens a second plan beside it (six at most), and a reload restores every plan that was open. To start clean, clear `localStorage`, delete the IndexedDB database `floortrace-db` (drafts; `keyval-store` is Tesseract's cache and is worth keeping) and reload. Close other tabs on the same origin first, or `deleteDatabase` blocks and autosave never initialises.
 - A new port is a new origin, with empty storage and a cold Tesseract cache.
 
 ## Read state
@@ -36,6 +36,13 @@ The Browser pane doesn't composite, so `document.hidden` is true. What that brea
 - **Width 0 means the mobile shell.** Check `innerWidth` before planning desktop-layout checks; `resize_window` does not always fix it. If it stays 0, verify structure with a happy-dom component test instead.
 - **CSS transitions freeze at their start value**, so `getComputedStyle` reports pre-change colours and opacity. Finish them first: `document.querySelectorAll('*').forEach((e) => e.getAnimations().forEach((a) => a.finish()))`.
 - `IntersectionObserver` never fires and timers are throttled (toasts outlive their duration). Screenshots can fail while the pane is collapsed or OCR is busy; prefer `read_page`, `find` and `javascript_tool`.
+
+## Driving the desktop shell
+
+- Menus: the triggers are `#menu-main` (the header's Menu) and `#menu-bar-outline`, `#menu-bar-measure`, `#menu-bar-image` (the action bar); `.click()` one, then click the `[role="menuitem"]` whose text you want. A row that cannot be used is `aria-disabled`, not `disabled`.
+- The results panel's sections are `#panel-checks`, `#panel-outline`, `#panel-scale` and `#panel-work`; each opens from its `button[aria-expanded]`. Folded, a section's fields and buttons are not in the DOM.
+- The green scale-room box is only on the plan while Scale is open (or there is no scale), so open `#panel-scale` before looking for it on the stage.
+- A screenshot of a 1440-wide viewport comes back at about 800 px. To read a region at full size, scale the shell from the corner you want: `Object.assign(document.getElementById('app-container').style, { transformOrigin: '0% 0%', transform: 'scale(1.8)' })` — and set `transform` back to `''` afterwards.
 
 ## Canvas interaction
 

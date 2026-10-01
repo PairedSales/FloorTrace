@@ -19,7 +19,7 @@ import { qualitySummary, rankedWarnings, scaleQualitySummary, NOTE_ONLY_CODES } 
 import { liveVoids, staleVoidCount } from '../traceIssues';
 import { scaleProvenance } from '../scaleProvenance';
 
-// Re-exported: it moved to a leaf module so the dock can state the same
+// Re-exported: it moved to a leaf module so the panel can state the same
 // sentence without pulling this file's lazy graph into the entry chunk.
 export { scaleProvenance };
 
@@ -79,7 +79,7 @@ const edgeLabels = (vertices, feetPerPixel, unit, unitStyle) => {
 
 // Through `traceIssues`, not re-derived: `.claude/rules/ui-shell.md` makes "the
 // count is derived once" an invariant for this exact quantity, and the exhibit printing a
-// different number of stale voids from the dock is the failure that rule
+// different number of stale voids from the panel is the failure that rule
 // exists to prevent.
 const voidNote = (holes, feetPerPixel, unit) => {
   const trace = { holes: holes ?? [] };

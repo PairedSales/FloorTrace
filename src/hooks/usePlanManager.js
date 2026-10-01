@@ -119,10 +119,11 @@ export function usePlanManager() {
     const hasWork = isActive ? Boolean(state.image) : Boolean(meta.hasWork);
 
     if (confirmFirst && hasWork) {
-      const label = meta.title || 'this plan';
+      // Quoted, so a plan called "Garage plan" does not read as part of the
+      // question.
       const confirmed = await confirmToast(
-        `Close ${label}? Its measurements will be discarded.`,
-        { confirmLabel: 'Close plan' },
+        meta.title ? `Close “${meta.title}”?` : 'Close this plan?',
+        { detail: 'Its measurements will be discarded.', confirmLabel: 'Close plan' },
       );
       if (!confirmed) return false;
     }
@@ -171,19 +172,41 @@ export function usePlanManager() {
   /**
    * Close every plan.
    *
-   * Strictly sequential, and that is not a style choice. `requestConfirm`
-   * answers an incumbent request `false` before replacing it, and there is one
-   * dialog mounted — so issuing N confirmations together would auto-answer
-   * N-1 of them while showing one, silently keeping or dropping plans
-   * depending on which way the answer fell. Cancelling stops the rest.
+   * Asked once, for all of them. It used to ask about each plan in turn —
+   * three plans, three dialogs for one decision the user had already made by
+   * choosing "Close all plans" — and answering No to the second left the first
+   * closed and the rest open.
+   *
+   * The closing itself is strictly sequential: each one awaits its stored
+   * records being removed, and whichever plan inherits the store root has to
+   * be read back first.
    */
   const closeAllPlans = useCallback(async () => {
-    const order = [...useAppStore.getState().documentOrder];
+    const state = useAppStore.getState();
+    const order = [...state.documentOrder];
+    const withWork = order.filter((docId) => (docId === state.activeDocumentId
+      ? Boolean(state.image)
+      : Boolean(state.documents[docId]?.hasWork)));
+
+    if (withWork.length > 0) {
+      const several = order.length > 1;
+      const confirmed = await confirmToast(
+        several ? `Close all ${order.length} plans?` : 'Close this plan?',
+        {
+          detail: several
+            ? 'Their measurements will be discarded.'
+            : 'Its measurements will be discarded.',
+          confirmLabel: several ? 'Close all plans' : 'Close plan',
+        },
+      );
+      if (!confirmed) return false;
+    }
+
     for (const docId of order) {
-      const closed = await closePlan(docId);
+      const closed = await closePlan(docId, { confirmFirst: false });
       if (!closed) return false;
     }
-    flash('All plans closed');
+    flash(order.length > 1 ? 'All plans closed' : 'Plan closed');
     return true;
   }, [closePlan]);
 

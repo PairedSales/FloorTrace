@@ -1,4 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, lazy, Suspense } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useIsTouch } from '../hooks/useViewport';
 import { markWelcomed } from '../hooks/useWelcome';
 import WelcomeScreen from './WelcomeScreen';
@@ -11,15 +12,15 @@ import WelcomeScreen from './WelcomeScreen';
 // it is reachable until an image is loaded.
 //
 // What stays here is exactly what first paint shows: the container the camera
-// measures itself against, and the empty state.
+// measures itself against, the start screen, and the wait for a plan to open.
 const CanvasStage = lazy(() => import('./CanvasStage'));
 
 const Canvas = React.memo(forwardRef((props, ref) => {
-  const { image, isProcessing, onFileOpen, onTryExample } = props;
+  const { image, isProcessing, processingMessage, onFileOpen, onTryExample, addingPlan } = props;
   const isTouch = useIsTouch();
   const containerRef = useRef(null);
   // Populated by the lazy module once it mounts. The handle itself is eager so
-  // `canvasRef.current` is never null — the rotate button and the keyboard
+  // `canvasRef.current` is never null — the rotate command and the keyboard
   // shortcuts hold it from mount, and both are no-ops without an image anyway.
   const stageApiRef = useRef(null);
 
@@ -42,24 +43,46 @@ const Canvas = React.memo(forwardRef((props, ref) => {
     return () => cancel(handle);
   }, []);
 
-  // A plan has been opened, so the pipeline demo has done its job. Marked here
-  // rather than on the button, because a drop, a paste and a restored draft are
-  // all first runs that never touch it.
+  // A plan has been opened, so the first-run introduction has done its job.
+  // Marked here rather than on the button, because a drop, a paste and a
+  // restored draft are all first runs that never touch it.
   useEffect(() => {
     if (image) markWelcomed();
   }, [image]);
 
+  // The paper is white in every theme; the start screen is not paper. Only a
+  // plan (or one on its way) gets the paper and, under the dark theme, the
+  // light tokens `.canvas-grid-bg` pins to it.
+  const hasPlan = image || isProcessing;
+
   return (
-    <div ref={containerRef} className="absolute inset-0 canvas-grid-bg canvas-touch" style={{ cursor: 'default' }}>
-      {!image && !isProcessing && (
+    <div
+      ref={containerRef}
+      className={`absolute inset-0 canvas-touch ${hasPlan ? 'canvas-grid-bg' : ''}`}
+      style={{ cursor: 'default' }}
+    >
+      {!hasPlan && (
         <WelcomeScreen
           isTouch={isTouch}
           onFileOpen={onFileOpen}
           onTryExample={onTryExample}
+          adding={addingPlan}
         />
       )}
 
-      {(image || isProcessing) && (
+      {/* A plan is being opened and there is nothing to draw yet: a PDF being
+          rendered, the sample being fetched. With no word here the screen went
+          from the start screen to a blank sheet for as long as that took. */}
+      {!image && isProcessing && (
+        <div className="absolute inset-0 grid place-items-center p-6" role="status" aria-live="polite">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-accent" aria-hidden="true" />
+            <p className="text-[16px] font-medium text-fg">{processingMessage || 'Opening the plan…'}</p>
+          </div>
+        </div>
+      )}
+
+      {hasPlan && (
         <Suspense fallback={null}>
           <CanvasStage {...props} containerRef={containerRef} apiRef={stageApiRef} />
         </Suspense>

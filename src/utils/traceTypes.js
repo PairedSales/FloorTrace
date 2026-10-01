@@ -1,5 +1,5 @@
 // The trace taxonomy, owned by one module because four consumers read it:
-// traceManager, the area selector, the dock and the serializer's normalizer.
+// traceManager, the area selector, the panel and the serializer's normalizer.
 // Array order is load-bearing twice — it is the order breakdown rows appear in,
 // and the reading order a report expects (GLA first, non-living last).
 export const TRACE_TYPES = [

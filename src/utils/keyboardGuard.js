@@ -62,7 +62,7 @@ const invalidatesWorkInFlight = (e) => {
   // Only the digits that rewrite the image. The other seven are modes, and
   // entering one changes nothing the running job was computed from — so
   // blocking all nine cost a user the brush for the whole of a twenty-second
-  // scan, and made the keyboard disagree with the rail, whose buttons are not
+  // scan, and made the keyboard disagree with the menus, whose tools are not
   // gated on `isProcessing` at all. The modified digits are outline and plan
   // switching, which are safe and stay live.
   if (!chord && !e.altKey && !e.shiftKey) {

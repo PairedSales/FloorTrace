@@ -25,7 +25,7 @@ function getDB() {
     // startup. A pending promise here does not throw and does not retry: the
     // restore simply never returns, `_hasRestoredState` is never set, and every
     // write in the hook is gated off for the rest of the session while the
-    // status bar goes on saying the draft is saved. That is a hang, and it was
+    // header goes on saying the draft is saved. That is a hang, and it was
     // indistinguishable from one.
     let settled = false;
     const settle = (fn) => (value) => {

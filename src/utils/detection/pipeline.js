@@ -277,7 +277,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const confidence = Math.max(0, Math.min(0.98, boundary.confidence * validation.factor));
 
   // The validation discount reaches the floors, not only the aggregate. Every
-  // durable surface — the dock chip, `planStage`, the exhibit's flag list —
+  // durable surface — the panel's chip, `planStage`, the exhibit's flag list —
   // reads a floor's own confidence, and only the transient toast read the
   // aggregate. A floor cut to 0.35 by `label-outside` chipped green at 0.98
   // while the toast beside it said 65%, about the same outline.

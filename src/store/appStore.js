@@ -297,7 +297,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
 
   // ── UI-only state (not in undo/autosave) ───────────────────────────────────
   // Per-plan, despite being UI: both name a place on one drawing. Window-level
-  // UI — the dock, the modals, the status flash — lives in workspaceStore.js.
+  // UI — the panel, the dialogs, the status flash — lives in workspaceStore.js.
   // Which detection warning the user is inspecting, as {traceId, index} into
   // that trace's `quality.warnings`. Declared here rather than in the working
   // state so it cannot reach a snapshot, a draft or a `.floorplan`: undoing an
@@ -305,9 +305,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   // live traces, so a focus left on a deleted trace simply renders nothing.
   focusedWarning: null,
   // What the autosaved draft is actually doing right now: 'off' | 'pending' |
-  // 'saved' | 'error'. Reported rather than assumed — the status bar used to
-  // read a hardcoded "Saved", which was the one claim in the shell that was
-  // true by coincidence and never checked.
+  // 'saved' | 'error'. Reported rather than assumed — the shell used to read
+  // a hardcoded "Saved", which was the one claim in it that was true by
+  // coincidence and never checked.
   draftState: 'off',
   // A transient canvas highlight for an error that has a place on the plan —
   // a self-intersection knows which two edges cross. Same anchor shape as

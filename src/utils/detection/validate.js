@@ -159,7 +159,7 @@ export const validateBoundaryResult = (result, context = {}) => {
       // outline was reached: in interior mode this floor shows and measures
       // its *exterior* polygon under an interior caption. The mode is an app
       // setting applied after detection, so this core cannot see it — the
-      // dock's wall-face pill is what says so, from the same missing `inner`.
+      // panel's wall-face switch is what says so, from the same missing `inner`.
       warnings.push(warning('no-inner', { floor: i }));
       penalise(i, 0.9);
     }

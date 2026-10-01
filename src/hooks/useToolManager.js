@@ -198,8 +198,8 @@ export function useToolManager() {
 
   return {
     // Exported so the shell can leave whatever tool is on without knowing
-    // which one it was — the rail's Select button and the status bar's
-    // Cancel both mean "no tool", not "toggle this specific flag".
+    // which one it was — the action bar's Cancel means "no tool", not
+    // "toggle this specific flag".
     deactivateAll,
     handleLineToolToggle,
     handleDrawAreaToggle,

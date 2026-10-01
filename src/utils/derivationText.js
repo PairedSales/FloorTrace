@@ -100,7 +100,7 @@ export function derivationText(derivation) {
   if (gla.measured && Math.round(gla.sumOfSubtotals) !== gla.reported) {
     lines.push(`The levels above add to ${formatAreaTenths(gla.sumOfSubtotals, unit).value}. `
       + `The figure reported is the unrounded sum, ${gla.unrounded.toFixed(1)}, rounded once — `
-      + `that is the one the Area card states.`);
+      + `that is the one FloorTrace reports.`);
   }
 
   return lines.join('\n');

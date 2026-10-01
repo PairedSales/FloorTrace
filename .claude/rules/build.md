@@ -33,7 +33,7 @@ paths:
 
 - Icons in `public/` (favicons, `favicon.ico`, `icon.svg`, touch icons) come from `npm run icons`, which rasterises `src/components/markGeometry.js` — the same geometry `FloorTraceMark` draws. They are the mark on transparency: `icon.svg` switches colour with `prefers-color-scheme`, the rasters use one tone between the two themes' `--fg-3`. Don't move the rasters onto either theme's `--fg`; a near-white glyph disappears in a light tab bar.
 - `public/tracing-tutorial.html` comes from `npm run tutorial`: a real pipeline run over `fixtures/ExampleFloorplan8.png` inlined into `docs/tracing-tutorial.src.html`. Edit the template. A detection change that makes the page's quoted numbers wrong shows up as a diff here — that is intended.
-- `public/example-plan.png` (the welcome screen's example) is byte-identical to `fixtures/ExampleFloorplan8.png`.
+- `public/example-plan.png` (the start screen's sample plan) is byte-identical to `fixtures/ExampleFloorplan8.png`.
 - Committed binaries — `public/models/`, `public/tesseract/`, the 516 kB tutorial — add a full copy to git history each time they are regenerated. Replace rather than accumulate, and don't regenerate them for unrelated changes.
 
 ## CI (`.github/workflows/deploy.yml`)

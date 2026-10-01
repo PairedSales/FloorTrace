@@ -6,11 +6,17 @@ import {
 // What each tool mode is called, what it asks the user to do, and how it
 // commits. Data rather than markup, in its own module so the components that
 // read it stay pure component exports (react-refresh/only-export-components).
-// Three read it now: the desktop `StatusBar`, which *is* the context bar, the
-// mobile `MobileToolContext`, and nothing else — `select` is deliberately absent
-// from the table, and both of them treat that absence as "no mode is running".
-// Order matters only for the first match; the tool flags are mutually
-// exclusive by construction (useToolManager.deactivateAll).
+// Two read it: the desktop `ActionBar`, which turns into the instruction bar
+// while a tool runs, and the mobile `MobileToolContext`. `select` is
+// deliberately absent from the table, and both of them treat that absence as
+// "no mode is running". Order matters only for the first match; the tool flags
+// are mutually exclusive by construction (useToolManager.deactivateAll).
+//
+// `doneLabel` is a tool that commits something: the bar offers it beside
+// Cancel. `leaveLabel` is a tool that has nothing to commit — each stroke or
+// measurement lands as it is made — so there is nothing to cancel either, and
+// its one way out is called what it is. Leaving a finished measurement through
+// a button marked "Cancel" reads as taking the measurement back.
 //
 // `touchHint` is the same instruction in the gestures a phone actually has.
 // It is a separate string rather than a find-and-replace of "click" because
@@ -51,23 +57,27 @@ export const TOOL_MODES = {
     // Shares `eraserBrushSize` with the image eraser: the slider means the same
     // thing in both — how wide a swathe the drag takes.
     brush: 'eraser',
+    leaveLabel: 'Done',
   },
   scale: {
     icon: Scaling,
     name: 'Setting the scale',
-    hint: 'Click both ends of a length you know, then type the length in the Scale section.',
+    hint: 'Click both ends of something whose length you know, then type its length under Scale in the panel.',
     touchHint: 'Tap both ends of a length you know, then type it in the Measurement panel.',
+    leaveLabel: 'Done',
   },
   line: {
     icon: Ruler,
     name: 'Measuring a distance',
     hint: 'Click where the distance starts, then where it ends.',
     touchHint: 'Tap where the distance starts, then where it ends.',
+    leaveLabel: 'Done',
   },
   angle: {
     icon: Compass,
     name: 'Measuring an angle',
     hint: 'Drag the ends or the corner of the angle onto the two walls.',
+    leaveLabel: 'Done',
   },
   area: {
     icon: Pentagon,
@@ -88,10 +98,11 @@ export const TOOL_MODES = {
     hint: 'Drag over notes or a legend to white them out of the plan.',
     touchHint: 'Drag over notes or a legend to white them out. Pinch to zoom while you work.',
     brush: 'eraser',
+    leaveLabel: 'Done',
   },
   // Not a tool flag: this one is on whenever the read labels are on screen as
   // pills, which is the state the automatic scale leaves behind only when it
-  // could not choose, or that "Pick a different room" returns to deliberately.
+  // could not choose, or that "Use a different room" returns to deliberately.
   pick: {
     icon: MousePointerClick,
     name: 'Choosing a room',

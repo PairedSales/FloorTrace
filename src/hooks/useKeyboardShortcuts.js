@@ -22,7 +22,7 @@ const PLAN_DIGIT_COUNT = MAX_OPEN_DOCUMENTS;
  * Registers and cleans up all window-level input event listeners:
  *  - keydown: Ctrl+V (paste), Ctrl+O (file open), Ctrl+Z/Y (undo/redo),
  *             Ctrl+E (export dialog), Ctrl+Alt+C (copy the exhibit image),
- *             [ / ] (eraser brush size), O (toggle options), L (toggle side lengths),
+ *             [ / ] (brush size), O (results panel), L (toggle side lengths),
  *             R / Shift+R (rotate the canvas either way), F (fit to window),
  *             1…n (select a tool), Alt/Shift+1…7 (switch perimeter trace)
  *  - mousedown: side buttons 3/4 for undo/redo
@@ -64,16 +64,14 @@ export function useKeyboardShortcuts({
   onVoidToolToggle,
   onScaleToolToggle,
 }) {
-  // The digit → tool mapping is fixed, never renumbered by what the panel is
-  // currently showing: a mapping that moves with app state is worse than one
-  // that occasionally says why it did nothing.
+  // The digit → tool mapping is fixed, never renumbered by what is currently
+  // on screen: a mapping that moves with app state is worse than one that
+  // occasionally says why it did nothing.
   //
   // Derived from TOOL_GROUPS rather than restated. This list used to be that
   // one retyped — the same nine digits, the same nine names and four
   // word-for-word copies of the disabled reasons — under a comment saying the
-  // two were "kept in step by hand", which they twice had not been: the digits
-  // disagreed with the rail's order, and the labels still said "Line" and
-  // "Draw Exterior" long after the shell renamed both.
+  // two were "kept in step by hand", which they twice had not been.
   //
   // Only the handler is genuinely local, so only the handler is written here.
   const toolDigits = useMemo(() => {
@@ -146,11 +144,9 @@ export function useKeyboardShortcuts({
         }
         if (e.key.toLowerCase() === 'o') {
           e.preventDefault();
-          // Was the options popover, which the menu bar absorbed. Kept bound to
-          // the nearest thing it meant — show/hide the side panel — rather than
-          // left toggling a store field nothing renders any more.
+          // Show or hide the results panel.
           const w = useWorkspaceStore.getState();
-          w.setDockOpen(!w.dockOpen);
+          w.setPanelOpen(!w.panelOpen);
           return;
         }
         if (e.key.toLowerCase() === 'l') {

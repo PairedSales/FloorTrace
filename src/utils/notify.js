@@ -9,8 +9,8 @@ import useWorkspaceStore from '../store/workspaceStore';
  *
  *   toast       — the user must know it, and cannot see it
  *   flash()     — confirmation of something they just did
- *   status bar — what the current mode needs, and its way out
- *   dock        — anything still true, that they may act on later
+ *   action bar  — what the current mode needs, and its way out
+ *   panel       — anything still true, that they may act on later
  *   dialog      — anything that destroys work
  *
  * A message that merely echoes visible chrome gets no channel at all.
@@ -101,7 +101,7 @@ export function notifyAt(message, { anchor, id, type = 'error', duration } = {})
 }
 
 /**
- * Confirmation of the user's own action, in the status bar rather than over
+ * Confirmation of the user's own action, in the action bar rather than over
  * the plan. Latest wins — there is no stack, because there is nothing to
  * compare between two acknowledgements.
  */

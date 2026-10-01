@@ -96,7 +96,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
           // saved project paid for a cold analysis on its first trace.
           prewarmDetection(statePatch.image);
 
-          flash('Project loaded');
+          flash('Project file opened');
         } else {
           // Load and validate before claiming a plan: a failed load must leave
           // the current project intact. A PDF arrives as one entry per page,
@@ -168,7 +168,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
 
       if (success) {
         useAppStore.getState().setIsDirty(false);
-        flash(isSaveAs ? 'Project saved' : 'Project exported');
+        flash('Project file saved');
       }
     } catch (error) {
       console.error('Error exporting project:', error);

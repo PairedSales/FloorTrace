@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Copy, Download, Loader2, FileJson, AlertTriangle, Share2 } from 'lucide-react';
+import { Copy, Download, Loader2, FileJson, AlertTriangle, Share2 } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import { notify, flash } from '../utils/notify';
 import { readExportOptions, writeExportOptions } from '../utils/exhibit/options';
 import { useIsMobile } from '../hooks/useViewport';
+import Dialog from './Dialog';
 
 /**
  * The end of the job. Almost nobody reopens a trace — they trace once for one
@@ -11,13 +12,16 @@ import { useIsMobile } from '../hooks/useViewport';
  * terminal action is an image of the plan *with its measurements on it*, and
  * the editable `.floorplan` is the second door out rather than the only one.
  *
+ * It is called "Save image" everywhere, because that is what it does. "Export"
+ * was the app's word for it; nobody asks a floor plan to be exported.
+ *
  * The preview is the very canvas that gets copied or saved, scaled down. A
  * preview drawn by a second code path is a preview that can disagree with the
  * file, which on a document somebody files is the worst kind of bug.
  */
 
 const Toggle = ({ checked, onChange, label, hint, disabled }) => (
-  <label className={`flex items-start gap-3 py-1.5 group
+  <label className={`flex items-start gap-3 py-2 group
     ${disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`}>
     <input
       type="checkbox"
@@ -28,8 +32,8 @@ const Toggle = ({ checked, onChange, label, hint, disabled }) => (
                  cursor-pointer disabled:cursor-default"
     />
     <span className="min-w-0">
-      <span className="block text-[13.5px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
-      {hint && <span className="block text-[12.5px] leading-snug text-fg-3 mt-px">{hint}</span>}
+      <span className="block text-[14.5px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
+      {hint && <span className="block text-[13.5px] leading-snug text-fg-3 mt-px">{hint}</span>}
     </span>
   </label>
 );
@@ -51,7 +55,6 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   // activation and a full-resolution PNG encode outlives it.
   const [shareFile, setShareFile] = useState(null);
 
-  const dialogRef = useRef(null);
   const previewBoxRef = useRef(null);
   const previewCanvasRef = useRef(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -67,8 +70,8 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   }, []);
 
   // ── render ────────────────────────────────────────────────────────────────
-  // Debounced because the subject line re-renders the page on every keystroke,
-  // and the page is a full-size canvas.
+  // Debounced because the title re-renders the page on every keystroke, and
+  // the page is a full-size canvas.
   useEffect(() => {
     let cancelled = false;
     setRendering(true);
@@ -128,43 +131,14 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   }, [result, box]);
 
-  // ── keyboard ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      // A modal that lets Tab wander into the canvas behind it is a modal only
-      // for the mouse.
-      const focusable = dialogRef.current?.querySelectorAll(
-        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-      );
-      if (!focusable?.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-
   // ── actions ───────────────────────────────────────────────────────────────
   const withBusy = async (kind, fn) => {
     setBusy(kind);
     try {
       await fn();
     } catch (err) {
-      console.error('Export failed:', err);
-      notify(err.message || 'The export failed.', { type: 'error', id: 'export' });
+      console.error('Saving the image failed:', err);
+      notify(err.message || 'The image could not be saved.', { type: 'error', id: 'export' });
     } finally {
       setBusy(null);
     }
@@ -214,247 +188,189 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     }
   });
 
-  const ready = !!result && !rendering && !error;
+  const saveProjectInstead = () => { onClose(); onSaveProject(); };
 
-  return (
-    <div
-      className={`fixed inset-0 z-[70] flex items-center justify-center bg-black/55
-                  ${isMobile ? '' : 'p-6'}`}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      {/* Full-bleed on a phone. A centred card with a backdrop wastes the two
-          dimensions the preview most needs, and there is nothing behind it
-          worth showing through. */}
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Export image"
-        className={`flex flex-col bg-panel animate-fade-in overflow-hidden
-          ${isMobile
-            ? 'w-full h-app pt-safe'
-            : 'w-full max-w-[1040px] max-h-[90vh] border border-line rounded-xl shadow-2xl'}`}
-      >
-        <header className="flex items-center gap-3 px-4 py-3 border-b border-line shrink-0">
-          <div className="min-w-0 flex-1">
-            <h2 className={`font-semibold text-fg ${isMobile ? 'text-[15px]' : 'text-[16px]'}`}>
-              Export image
-            </h2>
-            <p className="text-[13px] text-fg-3 mt-0.5">
-              The plan with its outline and every measurement on it, ready for your report.
-            </p>
-          </div>
+  const ready = !!result && !rendering && !error;
+  const spinner = <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />;
+
+  // On a phone the share sheet leads: it is the one route that reaches mail,
+  // Files and a messaging app in one tap, where the clipboard usually refuses
+  // PNGs outright and a download lands somewhere the user then has to go and
+  // find. Save stays, demoted, and Copy drops off the row entirely rather
+  // than sitting there failing.
+  const footer = isMobile ? (
+    <>
+      <div className="flex items-center gap-2">
+        {shareFile && (
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
-            className={`grid place-items-center rounded-md text-fg-3
-                        hover:bg-sunken hover:text-fg transition-colors cursor-pointer
-                        ${isMobile ? 'w-11 h-11 -mr-2' : 'w-8 h-8'}`}
+            onClick={handleShare}
+            disabled={!ready || !!busy}
+            className="btn btn-primary btn-lg flex-1"
           >
-            <X className={isMobile ? 'w-5 h-5' : 'w-[18px] h-[18px]'} aria-hidden="true" />
+            {busy === 'share' ? spinner : <Share2 className="w-[18px] h-[18px]" aria-hidden="true" />}
+            Share image
           </button>
-        </header>
-
-        {/* Side by side where there is width; stacked where there is only
-            height, with the preview taking whatever the options do not. */}
-        <div className={`flex flex-1 min-h-0 ${isMobile ? 'flex-col' : ''}`}>
-          {/* preview */}
-          <div
-            ref={previewBoxRef}
-            className="relative flex-1 min-w-0 grid place-items-center p-4 bg-sunken overflow-hidden"
-          >
-            {error ? (
-              <div className="max-w-[320px] text-center">
-                <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-crit" aria-hidden="true" />
-                <p className="text-[13.5px] text-fg-2">{error}</p>
-              </div>
-            ) : (
-              <canvas
-                ref={previewCanvasRef}
-                className={`shadow-sheet rounded-[2px] transition-opacity duration-150
-                            ${rendering ? 'opacity-40' : 'opacity-100'}`}
-              />
-            )}
-            {rendering && (
-              <span className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5
-                               px-3 h-7 rounded-full bg-panel-2 border border-line
-                               text-[13px] text-fg-3">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                Preparing the image…
-              </span>
-            )}
-          </div>
-
-          {/* options */}
-          <div
-            className={`shrink-0 overflow-y-auto overscroll-contain p-3.5 touch-dense
-              ${isMobile
-                ? 'border-t border-line max-h-[42%]'
-                : 'w-[310px] border-l border-line'}`}
-          >
-            <label htmlFor="export-subject" className="card-heading block mb-1.5">Title</label>
-            <input
-              id="export-subject"
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="123 Main St"
-              autoComplete="off"
-              // The one thing still to type on an unnamed measurement; once it
-              // has a subject, the primary action is what should be under the
-              // cursor instead. Never on a phone: autofocus raises the keyboard
-              // over the preview the dialog exists to show, before the user has
-              // decided they want to type anything.
-              autoFocus={!projectName && !isMobile}
-              className="w-full px-3 py-2 text-[14px] rounded-md bg-panel-2 border border-line
-                         text-fg placeholder-fg-dim select-text
-                         focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
-            />
-            <p className="mt-1.5 text-[12.5px] leading-snug text-fg-3">
-              Usually the property address. It is printed at the top of the image and
-              used as the file name.
-            </p>
-
-            <h3 className="card-heading mt-5 mb-1">Show on the image</h3>
-            <Toggle
-              checked={options.summary}
-              onChange={(v) => setOption('summary', v)}
-              label="Summary of the measurements"
-              hint="The area, its breakdown and where the scale came from"
-            />
-            <Toggle
-              checked={options.outlineLabels}
-              onChange={(v) => setOption('outlineLabels', v)}
-              label="Name and area on each outline"
-            />
-            <Toggle
-              checked={options.sideLengths}
-              onChange={(v) => setOption('sideLengths', v)}
-              label="Wall lengths"
-              hint={calibrated ? undefined : 'Needs a scale first'}
-              disabled={!calibrated}
-            />
-            <Toggle
-              checked={options.annotations}
-              onChange={(v) => setOption('annotations', v)}
-              label="Your own measurements"
-              hint={hasAnnotations ? 'Distances and areas you measured' : 'You haven’t measured anything'}
-              disabled={!hasAnnotations}
-            />
-
-            {result?.model?.flags?.length > 0 && (
-              <div className="mt-5 p-3 rounded-md bg-warn/12 border border-warn/35">
-                <p className="text-[13px] leading-snug text-fg-2">
-                  <b className="text-warn font-semibold">
-                    {result.model.flags.length} thing{result.model.flags.length === 1 ? '' : 's'} to check
-                  </b>
-                  {' — they are printed on the image too, so whoever reads it sees them.'}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* On a phone the share sheet leads: it is the one route that reaches
-            mail, Files and a messaging app in one tap, where the clipboard
-            usually refuses PNGs outright and a download lands somewhere the
-            user then has to go and find. Save image stays, demoted, and Copy
-            drops off the row entirely rather than sitting there failing. */}
-        <footer
-          className={`border-t border-line bg-panel-2 shrink-0
-            ${isMobile
-              ? 'flex flex-col gap-2 px-3 py-3 pb-safe'
-              : 'flex items-center gap-2 px-4 py-3'}`}
+        )}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!ready || !!busy}
+          className={`btn btn-lg ${shareFile ? 'btn-secondary' : 'btn-primary flex-1'}`}
         >
-          {isMobile ? (
-            <>
-              <div className="flex items-center gap-2">
-                {shareFile && (
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    disabled={!ready || !!busy}
-                    className="tap-target flex-1 gap-2 rounded-xl bg-accent text-accent-ink
-                               text-[15px] font-semibold active:brightness-110
-                               disabled:opacity-40"
-                  >
-                    {busy === 'share'
-                      ? <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />
-                      : <Share2 className="w-[18px] h-[18px]" aria-hidden="true" />}
-                    Share image
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={!ready || !!busy}
-                  className={`tap-target gap-2 rounded-xl text-[15px] font-semibold
-                              disabled:opacity-40
-                              ${shareFile
-                                ? 'px-4 border border-line bg-panel-2 text-fg-2 active:bg-sunken'
-                                : 'flex-1 bg-accent text-accent-ink active:brightness-110'}`}
-                >
-                  {busy === 'save'
-                    ? <Loader2 className="w-[18px] h-[18px] animate-spin" aria-hidden="true" />
-                    : <Download className="w-[18px] h-[18px]" aria-hidden="true" />}
-                  {shareFile ? 'Save' : 'Save image'}
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => { onClose(); onSaveProject(); }}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[40px] rounded-lg
-                           text-[13px] text-fg-3 active:bg-sunken active:text-fg"
-              >
-                <FileJson className="w-[15px] h-[15px]" aria-hidden="true" />
-                Save a project file instead
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => { onClose(); onSaveProject(); }}
-                className="btn btn-quiet px-3"
-                title="Save a file you can open in FloorTrace later and keep editing"
-              >
-                <FileJson className="w-4 h-4" aria-hidden="true" />
-                Save a project file instead
-              </button>
-
-              <div className="flex-1" />
-
-              <button
-                type="button"
-                onClick={handleCopy}
-                disabled={!ready || !!busy}
-                className="btn btn-secondary"
-              >
-                {busy === 'copy'
-                  ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  : <Copy className="w-4 h-4" aria-hidden="true" />}
-                Copy image
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!ready || !!busy}
-                autoFocus={!!projectName}
-                className="btn btn-primary px-4"
-              >
-                {busy === 'save'
-                  ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  : <Download className="w-4 h-4" aria-hidden="true" />}
-                Save image
-              </button>
-            </>
-          )}
-        </footer>
+          {busy === 'save' ? spinner : <Download className="w-[18px] h-[18px]" aria-hidden="true" />}
+          {shareFile ? 'Save' : 'Save image'}
+        </button>
       </div>
-    </div>
+      <button type="button" onClick={saveProjectInstead} className="btn btn-quiet btn-sm">
+        <FileJson className="w-4 h-4" aria-hidden="true" />
+        Save a project file instead
+      </button>
+    </>
+  ) : (
+    <>
+      <button
+        type="button"
+        onClick={saveProjectInstead}
+        className="btn btn-quiet"
+        title="A file you can open in FloorTrace later and keep working on"
+      >
+        <FileJson className="w-[18px] h-[18px]" aria-hidden="true" />
+        Save a project file instead
+      </button>
+
+      <button
+        type="button"
+        onClick={handleCopy}
+        disabled={!ready || !!busy}
+        className="btn btn-secondary ml-auto"
+      >
+        {busy === 'copy' ? spinner : <Copy className="w-[18px] h-[18px]" aria-hidden="true" />}
+        Copy image
+      </button>
+
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={!ready || !!busy}
+        // Once the image has a title, the way out is what should be under the
+        // cursor; until then the title field below has the focus.
+        autoFocus={!!projectName}
+        className="btn btn-primary px-5"
+      >
+        {busy === 'save' ? spinner : <Download className="w-[18px] h-[18px]" aria-hidden="true" />}
+        Save image
+      </button>
+    </>
+  );
+
+  return (
+    // Full-bleed on a phone. A centred card with a backdrop wastes the two
+    // dimensions the preview most needs, and there is nothing behind it worth
+    // showing through.
+    <Dialog
+      id="save-image"
+      title="Save image"
+      subtitle="The plan with its outline and every measurement on it, ready for your report."
+      size="lg"
+      mobile="full"
+      onClose={onClose}
+      // Side by side where there is width; stacked where there is only
+      // height, with the preview taking whatever the options do not.
+      bodyClassName={`flex !overflow-hidden ${isMobile ? 'flex-col' : ''}`}
+      footerClassName={isMobile ? 'flex flex-col gap-2 px-4 py-3' : 'flex items-center gap-2.5 px-6 py-3.5'}
+      footer={footer}
+    >
+      {/* preview */}
+      <div
+        ref={previewBoxRef}
+        className="relative flex-1 min-w-0 min-h-[220px] grid place-items-center p-5 bg-sunken overflow-hidden"
+      >
+        {error ? (
+          <div className="max-w-[320px] text-center">
+            <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-crit" aria-hidden="true" />
+            <p className="text-[14px] text-fg-2">{error}</p>
+          </div>
+        ) : (
+          <canvas
+            ref={previewCanvasRef}
+            className={`shadow-sheet rounded-[2px] transition-opacity duration-150
+                        ${rendering ? 'opacity-40' : 'opacity-100'}`}
+          />
+        )}
+        {rendering && (
+          <span className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-2
+                           px-3.5 h-8 rounded-full bg-panel-2 border border-line
+                           text-[13.5px] text-fg-3">
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            Preparing the image…
+          </span>
+        )}
+      </div>
+
+      {/* options */}
+      <div
+        className={`shrink-0 overflow-y-auto overscroll-contain px-5 py-5 touch-dense
+          ${isMobile
+            ? 'border-t border-line-soft max-h-[42%]'
+            : 'w-[330px] border-l border-line-soft'}`}
+      >
+        <label htmlFor="export-subject" className="card-heading block mb-1.5">Title</label>
+        <input
+          id="export-subject"
+          type="text"
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          placeholder="123 Main St"
+          autoComplete="off"
+          // The one thing still to type on an unnamed measurement. Never on a
+          // phone: autofocus raises the keyboard over the preview the dialog
+          // exists to show, before the user has decided to type anything.
+          autoFocus={!projectName && !isMobile}
+          className="field-input text-left"
+        />
+        <p className="mt-1.5 text-[13.5px] leading-snug text-fg-3">
+          Usually the property address. It is printed at the top of the image and
+          used as the file name.
+        </p>
+
+        <h3 className="card-heading mt-6 mb-1">Show on the image</h3>
+        <Toggle
+          checked={options.summary}
+          onChange={(v) => setOption('summary', v)}
+          label="Summary of the measurements"
+          hint="The area, its breakdown and where the scale came from"
+        />
+        <Toggle
+          checked={options.outlineLabels}
+          onChange={(v) => setOption('outlineLabels', v)}
+          label="Name and area on each outline"
+        />
+        <Toggle
+          checked={options.sideLengths}
+          onChange={(v) => setOption('sideLengths', v)}
+          label="Wall lengths"
+          hint={calibrated ? undefined : 'Needs a scale first'}
+          disabled={!calibrated}
+        />
+        <Toggle
+          checked={options.annotations}
+          onChange={(v) => setOption('annotations', v)}
+          label="Your own measurements"
+          hint={hasAnnotations ? 'Distances and areas you measured' : 'You haven’t measured anything'}
+          disabled={!hasAnnotations}
+        />
+
+        {result?.model?.flags?.length > 0 && (
+          <p className="note note-warn mt-5 font-normal text-fg-2">
+            <b className="text-warn font-semibold">
+              {result.model.flags.length} thing{result.model.flags.length === 1 ? '' : 's'} to check
+            </b>
+            {' — they are printed on the image too, so whoever reads it sees them.'}
+          </p>
+        )}
+      </div>
+    </Dialog>
   );
 };
 

@@ -41,7 +41,7 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 
 - `src/App.jsx` — orchestrator: wires the store to the shells and owns cross-cutting workflow (mode transitions, calibration, notifications). Reusable interaction logic lives in `src/hooks/`.
 - `src/store/` — one Zustand store for the plan's working state (`appStore.js`) plus `workspaceStore.js` for workspace-wide UI state and preferences; undo (`undoManager.js`), outlines (`traceManager.js`), open plans (`documentManager.js`) and ownership of async results (`documentRequests.js`).
-- `src/components/` — two shells over one workflow: desktop (`TopBar`, `StatusBar`, `DocumentTabs`, `MeasurementDock`, `ToolRail`) and `mobile/`; the lazily loaded Konva canvas in `canvas/`.
+- `src/components/` — two shells over one workflow: desktop (`AppHeader` with its `PlanTabs`, `ResultsPanel`, `ActionBar`, `ViewControls`) and `mobile/`; the shared `Menu`, `Dialog` and `PanelSection`; the lazily loaded Konva canvas in `canvas/`.
 - `src/utils/detection/` — wall and boundary detection. Pure-JS cores run in `src/workers/detectionWorker.js` and, unchanged, in the Node benchmarks.
 - `src/utils/dimensions/` — dimension OCR (Tesseract, optional PaddleOCR), fronted by `DimensionsOCR.js` and the lazy `ocrLazy.js`.
 - `src/utils/exhibit/` — the exhibit PNG, the primary export. `.floorplan` (`projectSerializer.js`) is the editable project file.

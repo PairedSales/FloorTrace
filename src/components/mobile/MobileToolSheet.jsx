@@ -3,27 +3,28 @@ import { RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { TOOL_GROUPS } from '../toolCatalog';
 import BottomSheet from './BottomSheet';
 
-// Rotate is one rail button with a right-click for the other direction. There
-// is no right-click on a phone, so it becomes the two buttons it always was.
+// Turning the plan is one catalogue entry and two directions. A direction
+// hidden behind a right-click is no direction at all on a phone, so it is two
+// buttons here, as it is two rows in the desktop's Edit plan menu.
 const ROTATIONS = [
   { dir: 'counterclockwise', icon: RotateCcw, label: 'Rotate left' },
   { dir: 'clockwise', icon: RotateCw, label: 'Rotate right' },
 ];
 
 /**
- * The tool rail, re-shaped for a thumb.
+ * The tools, shaped for a thumb.
  *
- * Same twelve tools in the same order as the desktop rail — it imports that
- * list rather than restating it — but as a two-column grid of named tiles
- * instead of a 48 px icon column. Three reasons the rail could not simply be
- * moved here:
+ * The same tools in the same groups as the desktop action bar's menus — it
+ * imports that list rather than restating it — as a two-column grid of named
+ * tiles. Two things a menu row does that a tile has to do differently:
  *
- *  1. The rail teaches itself through hover tooltips. There is no hover on a
- *     phone, so every name and every disabled reason has to be on the tile.
- *  2. Rotate is a right-click for counter-clockwise. That has no touch
- *     equivalent, so it becomes two explicit buttons.
- *  3. Picking a tool is a one-shot decision on a phone — the sheet closes
+ *  1. A row has room for a sentence. A tile has two lines, so its name and,
+ *     when it cannot be used, the reason have to fit on its face.
+ *  2. Picking a tool is a one-shot decision on a phone — the sheet closes
  *     behind it and hands the whole screen back to the plan.
+ *
+ * The desktop's one-off commands ("Find the outline again", "Add another
+ * outline") are not tiles: they are rows in the phone's menu sheet.
  */
 const MobileToolSheet = ({
   open, onClose, activeTool, hasArea, hasToolData, onSelect, onRotate, onClearTools,
@@ -80,9 +81,8 @@ const MobileToolSheet = ({
                                     ${active ? 'text-accent-ink' : 'text-fg'}`}>
                     {tool.short}
                   </span>
-                  {/* The tooltip's job, done in place: the rail could hide the
-                      reason a tool is off until it was hovered, which on touch
-                      is never. */}
+                  {/* What the tool is for or, when it cannot be used, why —
+                      on the tile, because a tooltip on touch is never. */}
                   <span className={`text-[11.5px] leading-tight line-clamp-2
                                     ${active ? 'text-accent-ink/85' : 'text-fg-3'}`}>
                     {disabled ? tool.needsArea : (tool.hint ?? tool.label)}

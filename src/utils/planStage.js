@@ -6,10 +6,22 @@ import { qualitySummary } from './boundaryQuality';
 export const MAX_TRACES = 7;
 
 /**
+ * How many runner-up outlines the search left for the active outline.
+ *
+ * Offered only on an outline the detector produced and the user has not since
+ * edited: once the geometry is theirs, a runner-up scored against the
+ * detector's own is no longer an alternative to it.
+ */
+export const alternativeCount = (traces, activeTraceId) => {
+  const active = (traces ?? []).find((t) => t.id === activeTraceId);
+  return active?.quality?.edited ? 0 : (active?.quality?.alternatives?.length ?? 0);
+};
+
+/**
  * One derivation of "where is this plan in the pipeline", read by the mobile
  * shell's action bar to decide which single verb to offer. (The desktop shell
  * no longer names pipeline stages at all: the pipeline runs by itself when a
- * plan opens, and its corrections live on the dock card each one corrects.)
+ * plan opens, and its corrections live beside the result each one corrects.)
  *
  * The outline stage counts `perimeterTraces`, which is what the area is
  * computed from, rather than the detector's most recent overlay. The area is

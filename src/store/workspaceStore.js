@@ -15,9 +15,9 @@ export const ANNOTATION_SIZE_STEP = 1.1;
 const clampAnnotationSize = (v) =>
   Math.round(Math.min(ANNOTATION_SIZE_MAX, Math.max(ANNOTATION_SIZE_MIN, v)) * 1000) / 1000;
 
-// 'auto' plus the three the dock's pill group offers. Kept here rather than
-// imported from a formatter: this is the *preference's* vocabulary, and 'auto'
-// is not a unit anything can format in.
+// 'auto' plus the three units Settings offers. Kept here rather than imported
+// from a formatter: this is the *preference's* vocabulary, and 'auto' is not a
+// unit anything can format in.
 export const UNIT_PREFERENCES = ['auto', 'decimal', 'inches', 'metric'];
 
 export const UNIT_PREFERENCE_LABEL = {
@@ -85,35 +85,26 @@ const useWorkspaceStore = create((set, get) => ({
   // phone menu's toggle) reads as the guide.
   showHelpModal: false,
 
-  // Whether the Settings dialog is up. The four workspace preferences used to
-  // be checkmarks scattered across File and View with no word of explanation,
-  // one of which freezes the app for ten seconds when switched on.
+  // Whether the Settings dialog is up.
   showSettings: false,
 
-  // Transient confirmation for the status bar ("Area copied"), as {text, at}.
+  // Transient confirmation for the action bar ("Area copied"), as {text, at}.
   // `at` is what makes two identical messages in a row two separate flashes
   // rather than one no-op set.
   statusFlash: null,
 
-  // Whether the measurement dock is open. A collapsed panel is a view
-  // preference, not a fact about the project, so it must never ride along in a
+  // Whether the results panel is open. A panel put away is a view preference,
+  // not a fact about the project, so it must never ride along in a
   // `.floorplan` or be restored by an undo.
-  dockOpen: true,
+  panelOpen: true,
 
-  // The tool the pointer or keyboard focus is resting on, as
-  // {name, detail, digit}, or null. The rail is icon-only, so this is how a
-  // tool says what it is: the status bar prints it while the pointer is on the
-  // button. Unlike `statusFlash` it has a real end — mouseleave/blur — so it is
-  // a plain set/clear pair with no timer, and it lives here rather than in
-  // React state because App re-renders the whole shell and a hover must not.
-  toolHint: null,
-
-  // Whether the Area card's derivation is expanded — the full chain from the
-  // scale's evidence through each outline's pixels to the printed total.
+  // Whether the panel's "How the area was calculated" section is open — the
+  // full chain from the scale's evidence through each outline's pieces to the
+  // printed total.
   //
   // Here rather than in `appStore`: it answers "does this change when I switch
-  // plan?" with no. Persisted, unlike `dockOpen`, because it is an opt-in for
-  // people who audit the number rather than a panel they happened to collapse.
+  // plan?" with no. Persisted, unlike `panelOpen`, because it is an opt-in for
+  // people who audit the number rather than a panel they happened to put away.
   showWork: readShowWork(),
 
   // Which unit the user wants to read every plan in, or 'auto' to take it from
@@ -134,19 +125,28 @@ const useWorkspaceStore = create((set, get) => ({
   // is here and persisted rather than per-plan.
   annotationSize: readAnnotationSize(),
 
+  // Whether the room the scale was taken from is drawn on the plan — the green
+  // box. True while the panel's Scale section is open, which is where the box
+  // is explained and where its size is typed. At rest it is not drawn: it was
+  // an unexplained green rectangle on someone's laundry room, and dragging it
+  // — which is easy to do while trying to move the plan — re-sets the scale
+  // every area is worked out from, without a word.
+  scaleRoomShown: false,
+
   // Whether the export dialog is up. Same reason.
   showExportDialog: false,
 
-  // Which dropdown is open, by id, or null — the top band's menus and the tool
-  // rail's overflow alike. An id rather than a flag so that opening one closes
-  // any other: the two live in different components, and the triggers swallow
-  // their `mousedown`, so neither would otherwise hear the other open.
+  // Which dropdown is open, by id, or null — the header's Menu, the action
+  // bar's task menus and the plan tabs' overflow alike (`components/Menu.jsx`).
+  // An id rather than a flag so that opening one closes any other: they live in
+  // different components, and the triggers swallow their `mousedown`, so
+  // neither would otherwise hear the other open.
   //
   // `keyboardGuard` reads it as a flag: the menus close on a window
   // `mousedown` and on Escape and on nothing else, so with one open, `1`
-  // entered draw mode behind it and `O` toggled the very panel the open View
-  // menu was offering to toggle. State rather than listener ordering, because
-  // both listeners are on `window` and both see the key.
+  // started painting behind it and `O` toggled the very panel the open menu
+  // was offering to toggle. State rather than listener ordering, because both
+  // listeners are on `window` and both see the key.
   menuOpen: null,
 
   // Pending destructive confirmation, as {message, detail, confirmLabel,
@@ -158,14 +158,8 @@ const useWorkspaceStore = create((set, get) => ({
   setShowHelpModal: (v) => set({ showHelpModal: v }),
   setShowSettings: (v) => set({ showSettings: !!v }),
   flashStatus: (text) => set({ statusFlash: { text, at: Date.now() } }),
-  setToolHint: (hint) => set({ toolHint: hint ?? null }),
-
-  // Clearing is by owner, never unconditional. A rail button can vanish under
-  // the pointer — clicking "Clear tools" is what removes the Clear tools
-  // button — and an unmount that fired a blind clear would also wipe the hint
-  // whichever button the pointer landed on next had already set.
-  clearToolHint: (id) => set((s) => (s.toolHint?.id === id ? { toolHint: null } : {})),
-  setDockOpen: (v) => set({ dockOpen: v }),
+  setPanelOpen: (v) => set({ panelOpen: v }),
+  setScaleRoomShown: (v) => set({ scaleRoomShown: !!v }),
 
   setShowWork: (v) => {
     const next = !!v;

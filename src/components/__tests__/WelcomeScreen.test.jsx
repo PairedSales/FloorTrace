@@ -1,18 +1,21 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, fireEvent, cleanup } from '@testing-library/react';
+import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import WelcomeScreen from '../WelcomeScreen';
 import { WELCOME_KEY, markWelcomed } from '../../hooks/useWelcome';
 
 /**
- * The one property worth defending here is that the demo is a *first-run*
- * thing. It is the whole canvas for ten seconds, and a user who has already
- * seen it is closing a plan to open another one — showing it again is a
- * ten-second animation standing between them and their next drawing.
+ * The start screen is the whole window until a plan is open, so what it has to
+ * get right is the first thirty seconds: say what the app is for, offer one
+ * obvious way in, and be honest that "automatic" is not "always right".
  *
- * The flag is read in a `useState` initialiser, so it is per-mount: the empty
- * state unmounts the moment an image exists and remounts when one is closed,
- * which is exactly when it needs to be re-read.
+ * The introduction — the demo and the three steps — is a *first-run* thing. A
+ * user who has already seen it is closing a plan to open another one, and a
+ * ten-second animation standing between them and their next drawing is noise.
+ *
+ * The flag is read in a `useState` initialiser, so it is per-mount: the screen
+ * unmounts the moment an image exists and remounts when one is closed, which
+ * is exactly when it needs to be re-read.
  */
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
@@ -29,7 +32,8 @@ describe('WelcomeScreen', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeTruthy();
-    for (const step of ['Open a floor plan', 'FloorTrace measures it', 'Check it and export']) {
+    expect(view.getByRole('heading', { name: 'Measure a floor plan' })).toBeTruthy();
+    for (const step of ['Open a floor plan', 'FloorTrace measures it', 'Check it and save the image']) {
       expect(view.getByText(step)).toBeTruthy();
     }
     // The pipeline's own vocabulary stays off the first screen anyone sees.
@@ -44,14 +48,23 @@ describe('WelcomeScreen', () => {
     expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
-  it('falls back to the compact empty state once the flag is set', () => {
+  // The introduction never stands between a user and the button.
+  it('puts the way in ahead of the introduction in the reading order', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    const choose = view.getByRole('button', { name: /choose a file/i });
+    const demo = view.container.querySelector('.ft-demo');
+    expect(choose.compareDocumentPosition(demo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('drops the introduction once the flag is set, and keeps the way in and the caveat', () => {
     localStorage.setItem(WELCOME_KEY, '1');
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeNull();
-    expect(view.getByText('No floor plan open')).toBeTruthy();
-    // Still the one clear way in, and still the honest caveat.
-    expect(view.getByRole('button', { name: /open a floor plan/i })).toBeTruthy();
+    expect(view.queryByText('FloorTrace measures it')).toBeNull();
+    expect(view.getByRole('heading', { name: 'Open a floor plan' })).toBeTruthy();
+    expect(view.getByText('Drop a floor plan here')).toBeTruthy();
+    expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
     expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
@@ -66,31 +79,57 @@ describe('WelcomeScreen', () => {
     expect(second.container.querySelector('.ft-demo')).toBeNull();
   });
 
+  // A second plan's empty tab is shown to someone who has already met the app,
+  // and is the one place that says what adding a plan is for.
+  it('says what adding a plan is for on a second plan’s empty tab, without the introduction', () => {
+    const view = render(<WelcomeScreen {...props({ adding: true })} />);
+    expect(view.getByRole('heading', { name: 'Add another plan' })).toBeTruthy();
+    expect(view.getByText(/measures each plan and adds them up/)).toBeTruthy();
+    expect(view.container.querySelector('.ft-demo')).toBeNull();
+    // The sample would be added to the property's total.
+    expect(view.queryByRole('button', { name: /try the sample plan/i })).toBeNull();
+  });
+
   it('fires both actions', () => {
     const onFileOpen = vi.fn();
     const onTryExample = vi.fn();
     const view = render(<WelcomeScreen {...props({ onFileOpen, onTryExample })} />);
 
-    fireEvent.click(view.getByRole('button', { name: /open a floor plan/i }));
-    fireEvent.click(view.getByRole('button', { name: /try a sample plan/i }));
+    fireEvent.click(view.getByRole('button', { name: /choose a file/i }));
+    fireEvent.click(view.getByRole('button', { name: /try the sample plan/i }));
 
     expect(onFileOpen).toHaveBeenCalledTimes(1);
     expect(onTryExample).toHaveBeenCalledTimes(1);
   });
 
-  it('offers no Open button on touch — the action bar below is the route in', () => {
+  // The drop itself is the app root's; the zone only says "yes, here".
+  it('lights the drop zone while a file is dragged over the window', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    const drag = (type) => {
+      const event = new Event(type, { bubbles: true });
+      event.dataTransfer = { types: ['Files'] };
+      act(() => { window.dispatchEvent(event); });
+    };
+    drag('dragenter');
+    expect(view.getByText('Drop it to open it')).toBeTruthy();
+    drag('drop');
+    expect(view.getByText('Drop a floor plan here')).toBeTruthy();
+  });
+
+  it('offers no file button on touch — the action bar below is the route in', () => {
     const view = render(<WelcomeScreen {...props({ isTouch: true })} />);
 
-    expect(view.queryByRole('button', { name: /open a floor plan/i })).toBeNull();
-    expect(view.getByRole('button', { name: /try a sample plan/i })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /choose a file/i })).toBeNull();
+    expect(view.queryByText('Drop a floor plan here')).toBeNull();
+    expect(view.getByRole('button', { name: /try the sample plan/i })).toBeTruthy();
     expect(view.getByText(/photograph a plan/i)).toBeTruthy();
   });
 
   it('hides the sample button until a handler exists', () => {
     const view = render(<WelcomeScreen {...props({ onTryExample: undefined })} />);
 
-    expect(view.queryByRole('button', { name: /try a sample/i })).toBeNull();
-    expect(view.getByRole('button', { name: /open a floor plan/i })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /try the sample/i })).toBeNull();
+    expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
   });
 });
 

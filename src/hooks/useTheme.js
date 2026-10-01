@@ -3,9 +3,8 @@ import { useState, useEffect, useCallback } from 'react';
 const THEME_KEY = 'floortrace:theme';
 export const THEME_MODES = ['system', 'light', 'dark'];
 
-// Two places name the current mode — the command bar's toggle and the View
-// menu's row — so the wording lives with the modes rather than in whichever
-// component happened to render it first.
+// The phone menu's theme row names the current mode, so the wording lives
+// with the modes rather than in the component that happens to render it.
 export const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
 
 const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;

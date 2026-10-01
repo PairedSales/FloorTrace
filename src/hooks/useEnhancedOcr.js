@@ -26,9 +26,9 @@ export function useEnhancedOcr() {
   const warmup = useCallback(() => {
     warmupNeuralOcr().then((api) => {
       if (api) {
-        flash('Enhanced OCR ready');
+        flash('The slower reader is ready');
       } else {
-        notify('Enhanced OCR could not start — scans will use standard OCR.', { type: 'error', id: 'enhanced-ocr' });
+        notify('The slower reader could not start — room sizes will be read the usual way.', { type: 'error', id: 'enhanced-ocr' });
       }
     });
   }, []);
@@ -52,7 +52,7 @@ export function useEnhancedOcr() {
       // persistence is best-effort
     }
     if (enabled) {
-      notify('Preparing enhanced OCR — the app may pause for ~10 seconds.', { type: 'info', id: 'enhanced-ocr' });
+      notify('Getting the slower reader ready — the app may pause for about 10 seconds.', { type: 'info', id: 'enhanced-ocr' });
       warmup();
     }
   }, [warmup]);

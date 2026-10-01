@@ -6,15 +6,14 @@ import { useSyncExternalStore } from 'react';
  * Two independent questions, deliberately not collapsed into one:
  *
  *  - `isMobile` is about **room**. Below this width the desktop shell cannot
- *    exist: the measurement dock and the tool rail are 368 px between them
- *    before the plan gets a pixel, and the tab strip and status bar inset
- *    between them need a strip worth reading.
+ *    exist: the results panel is 360 px before the plan gets a pixel, and the
+ *    action bar over the plan needs a strip worth reading.
  *  - `isTouch` is about **reach**. A 44 px target and a pinch gesture are right
  *    on a touchscreen laptop too, and wrong on a narrow mouse-driven window.
  *
  * The breakpoint is 820 px rather than Tailwind's 768: at 768 the desktop shell
- * is technically laid out but the canvas is 300 px wide with a 320 px panel
- * beside it, which is not a usable plan view. Tablets in landscape (1024) keep
+ * is technically laid out but the plan gets about 400 px beside the panel,
+ * which is not a usable plan view. Tablets in landscape (1024) keep
  * the desktop shell — that is the layout they have the room for — but still get
  * touch targets and gestures, because `isTouch` is a separate query.
  */
@@ -57,7 +56,7 @@ const useMedia = (query) => {
   const { subscribe, getSnapshot } = entry(query);
   // Server snapshot is `false` for both: the desktop shell is the one that
   // renders without JS deciding anything, so a mismatch corrects toward mobile
-  // rather than flashing a 476 px dock onto a phone.
+  // rather than flashing a 360 px panel onto a phone.
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 };
 
