@@ -1,3 +1,4 @@
+import { openSimplifiedVersion } from '../utils/siteVersions';
 import {
   Undo2, Redo2, CircleHelp, Menu as MenuIcon, Check, RefreshCw, AlertTriangle, CloudOff,
 } from 'lucide-react';
@@ -229,6 +230,11 @@ const AppHeader = ({
 
           <MenuSep />
           <MenuItem label="Settings…" onSelect={onOpenSettings} />
+          <MenuItem
+            label="Try the simplified version"
+            title="Opens the version of FloorTrace without the drawing tools, in a new tab"
+            onSelect={openSimplifiedVersion}
+          />
 
           {(image || planCount > 1) && (
             <>

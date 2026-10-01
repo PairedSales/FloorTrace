@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
 import { openTracingTutorial } from '../../utils/tracingTutorial';
+import { openSimplifiedVersion } from '../../utils/siteVersions';
 import useWorkspaceStore, { UNIT_PREFERENCES, UNIT_PREFERENCE_LABEL } from '../../store/workspaceStore';
 
 const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
@@ -223,6 +224,13 @@ const MobileMenuSheet = ({
             onToggle={() => onEnhancedOcrChange(!enhancedOcr)}
           />
           <Row icon={HelpCircle} label="Help" onSelect={onHelpOpen} close={onClose} />
+          <Row
+            icon={ArrowUpRight}
+            label="Try the simplified version"
+            detail="FloorTrace without the drawing tools, in a new tab"
+            onSelect={openSimplifiedVersion}
+            close={onClose}
+          />
         </Section>
 
         <div className="mt-4 pt-2 border-t border-line-soft">

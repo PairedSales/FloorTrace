@@ -120,7 +120,7 @@ describe('the Menu holds what is not on screen', () => {
       'Open a floor plan…', 'Paste a floor plan',
       'Save image…', 'Copy image', 'Save project file', 'Save project file as…',
       'Wall lengths on the plan', 'Snap corners to walls', 'Results panel',
-      'Settings…',
+      'Settings…', 'Try the simplified version',
       'Close this plan',
     ]);
   });
@@ -157,7 +157,7 @@ describe('the Menu holds what is not on screen', () => {
   it('lists only what can be done before a plan is open', () => {
     useAppStore.setState({ image: null });
     expect(rowsOf(openMenu(header({ image: null })))).toEqual([
-      'Open a floor plan…', 'Paste a floor plan', 'Settings…',
+      'Open a floor plan…', 'Paste a floor plan', 'Settings…', 'Try the simplified version',
     ]);
   });
 
