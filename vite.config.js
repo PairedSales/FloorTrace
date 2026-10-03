@@ -19,9 +19,7 @@ const testWorkers = Math.max(1, cores - 1)
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // `FT_BASE` is how the deploy builds the simplified version under
-  // `/FloorTrace/next/` beside the full one (`.github/workflows/deploy.yml`).
-  base: globalThis.process?.env?.FT_BASE || '/FloorTrace/',
+  base: '/FloorTrace/',
   // Honor an externally assigned port (e.g. parallel dev sessions); Vite
   // ignores the PORT env var by default.
   server: globalThis.process?.env?.PORT
