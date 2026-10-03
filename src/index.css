@@ -3,7 +3,16 @@
    woff2 files could not even start downloading until it came back — a
    serialized second hop, ~100-250 ms on a warm connection. It also left an
    offline hole in an app that self-hosts its Tesseract assets precisely so it
-   works offline. Only the weights actually used are imported. */
+   works offline. Only the weights actually used are imported.
+
+   Two text faces, on purpose. Atkinson Hyperlegible is the chrome: it was drawn
+   for readers with low vision, and the people this app is for are mostly past
+   fifty. It ships two weights, so `font-medium` resolves to the regular and
+   `font-semibold` to the bold. Fira Sans stays for what is drawn on the plan
+   and printed on the saved image (`canvasUtils.js`, `exhibit/compose.js`):
+   those labels are measured, and changing their face would move every one. */
+@import '@fontsource/atkinson-hyperlegible/400.css';
+@import '@fontsource/atkinson-hyperlegible/700.css';
 @import '@fontsource/fira-sans/400.css';
 @import '@fontsource/fira-sans/500.css';
 @import '@fontsource/fira-sans/600.css';
@@ -35,31 +44,34 @@
      outranks `:root[data-theme='dark']`, so one declaration serves both. */
   :root,
   :root[data-theme='dark'] .canvas-grid-bg {
-    --shell:      241 243 246;
-    --panel:      247 248 250;
+    --shell:      246 246 249;
+    --panel:      246 246 249;
     --panel-2:    255 255 255;
     --raised:     255 255 255;
-    --sunken:     237 239 243;
-    --line:       211 216 223;
-    --line-soft:  226 230 235;
+    --sunken:     236 236 241;
+    --line:       217 217 224;
+    --line-soft:  230 230 236;
+    /* The edge of something to press or type into. `--line` divides; at
+       1.3:1 on white it cannot be the only thing saying "this is a control". */
+    --line-strong: 138 138 153;
 
     /* the work surface the plan sits on — white in both themes, so a plan
        reads as ink on endless paper instead of a sheet on a slab */
     --surface:    255 255 255;
 
-    --fg:         23 28 34;
-    --fg-2:       69 79 90;
-    --fg-3:       98 108 121;
-    --fg-dim:     102 112 128;
+    --fg:         22 22 29;
+    --fg-2:       69 69 79;
+    --fg-3:       95 95 107;
+    --fg-dim:     102 102 114;
 
-    --accent:     46 107 230;
+    /* Violet, the hue the outline is drawn in on the plan, taken dark enough
+       to carry white text: 6.7:1 on white. */
+    --accent:     91 63 214;
     --accent-ink: 255 255 255;
     /* Accent text standing on an accent *tint*. `bg-accent/12 text-accent`
-       moves the ground toward the text, so the pattern eats its own contrast:
-       #2E6BE6 is 4.81:1 on white but 4.10:1 on its own 12% tint and 3.53:1 on
-       the 10% tint the action bar runs. This is the same hue darkened until
-       the worst of those grounds clears AA — 5.67:1 there, 6.59:1 on the /12. */
-    --accent-strong: 33 80 159;
+       moves the ground toward the text, so the pattern eats its own contrast.
+       This is the same hue darkened: 8.5:1 on white, 7.1:1 on the /12 tint. */
+    --accent-strong: 74 48 191;
 
     --ok:         21 115 71;
     --warn:       166 82 0;
@@ -73,28 +85,29 @@
   }
 
   :root[data-theme='dark'] {
-    --shell:      18 22 27;
-    --panel:      26 31 38;
-    --panel-2:    30 36 44;
-    --raised:     38 46 56;
-    --sunken:     20 25 32;
-    --line:       46 55 66;
-    --line-soft:  36 44 53;
+    --shell:      19 19 24;
+    --panel:      27 27 34;
+    --panel-2:    31 31 39;
+    --raised:     40 40 50;
+    --sunken:     21 21 27;
+    --line:       54 54 66;
+    --line-soft:  42 42 52;
+    --line-strong: 118 118 136;
 
     /* deliberately not darkened: the work surface is paper, not chrome */
     --surface:    255 255 255;
 
-    --fg:         237 241 245;
-    --fg-2:       180 191 203;
-    --fg-3:       139 151 165;
-    --fg-dim:     147 158 171;
+    --fg:         240 240 245;
+    --fg-2:       190 190 202;
+    --fg-3:       152 152 166;
+    --fg-dim:     158 158 171;
 
-    --accent:     91 155 255;
-    --accent-ink: 11 17 25;
-    /* Lightened rather than darkened here, for the same reason — see the light
-       block. Dark survives the /10 and /12 tints already; it is the /20 hover
-       that drops to 4.03:1, and this clears it at 5.05:1. */
-    --accent-strong: 124 176 253;
+    /* 6.5:1 on the panel, and 7.1:1 under the dark ink it carries. */
+    --accent:     165 148 255;
+    --accent-ink: 20 16 36;
+    /* Lightened rather than darkened here, for the same reason as the light
+       block: text on an accent tint has to clear the tint. */
+    --accent-strong: 190 178 255;
 
     --ok:         74 222 128;
     --warn:       251 191 87;
@@ -107,7 +120,6 @@
 
   body {
     @apply bg-shell text-fg antialiased;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
   /* Mobile browsers rubber-band the *page* when a gesture reaches the end of a
@@ -171,8 +183,8 @@
   /* One key cap, wherever a key is named: the menus, the action bar, Help and
      the start screen. The only use of the code face in the app. */
   kbd {
-    @apply inline-flex items-center px-1.5 py-px rounded border border-line bg-panel
-           text-[11.5px] font-medium leading-snug text-fg-3 whitespace-nowrap;
+    @apply inline-flex items-center px-1.5 py-px rounded-md border border-line-strong bg-panel-2
+           text-[13px] font-bold leading-snug text-fg-2 whitespace-nowrap;
   }
 }
 
@@ -187,8 +199,9 @@
      .note (+ -warn / -crit)                      a sentence that needs a frame
      .label-sm                                    the small label over a figure
 
-   Type: 14 px for anything read, 13 px for the line under it, 12 px only for
-   chips and key caps. Numbers are the text face with `tabular-nums`.
+   Type: 16 px for anything read, 15.5 px for the line under it, 13.5 px only
+   for chips and 13 px for key caps. Numbers are the text face with
+   `tabular-nums`. Controls are 40 px or taller.
 
    Menus, dialogs and the panel's sections are components (`Menu.jsx`,
    `Dialog.jsx`, `PanelSection.jsx`) rather than classes: each owns behaviour
@@ -204,8 +217,8 @@
 
   /* ── buttons ── */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg
-           text-[14.5px] font-medium transition duration-150 cursor-pointer select-none
+    @apply inline-flex items-center justify-center gap-2 h-11 px-4 rounded-[10px]
+           text-[16px] font-medium transition duration-150 cursor-pointer select-none
            whitespace-nowrap disabled:opacity-40 disabled:cursor-default;
   }
   /* The one thing to do next. Never a disabled control: filled accent at
@@ -215,8 +228,8 @@
            disabled:hover:brightness-100;
   }
   .btn-secondary {
-    @apply border border-line bg-panel-2 text-fg-2 hover:text-fg hover:border-accent/50
-           disabled:hover:text-fg-2 disabled:hover:border-line;
+    @apply border border-line-strong bg-panel-2 text-fg hover:border-accent
+           disabled:hover:border-line-strong;
   }
   .btn-quiet {
     @apply text-fg-2 hover:text-fg hover:bg-sunken disabled:hover:bg-transparent
@@ -228,14 +241,14 @@
     @apply bg-crit text-accent-ink font-semibold hover:brightness-110;
   }
   .btn-sm {
-    @apply h-8 px-3 gap-1.5 rounded-md text-[13.5px];
+    @apply h-9 px-3 gap-1.5 rounded-lg text-[15px];
   }
   .btn-lg {
-    @apply h-12 px-6 rounded-xl text-[16px];
+    @apply h-14 px-7 rounded-xl text-[18px];
   }
 
   .icon-btn {
-    @apply grid place-items-center w-9 h-9 shrink-0 rounded-lg text-fg-2
+    @apply grid place-items-center w-10 h-10 shrink-0 rounded-[10px] text-fg-2
            transition-colors duration-150 cursor-pointer
            hover:bg-sunken hover:text-fg
            disabled:opacity-40 disabled:cursor-default
@@ -246,9 +259,10 @@
      task menus. `.is-open` rather than `[aria-expanded]` so the look can be
      asserted without parsing an attribute selector out of a class list. */
   .menu-trigger {
-    @apply inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[14.5px] font-medium
-           text-fg-2 transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
-           hover:bg-sunken hover:text-fg;
+    @apply inline-flex items-center gap-1.5 h-10 px-3 rounded-[10px] text-[16px] font-medium
+           text-fg transition-colors duration-150 cursor-pointer select-none whitespace-nowrap
+           hover:bg-sunken
+           disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent;
   }
   .menu-trigger.is-open {
     @apply bg-sunken text-fg;
@@ -256,7 +270,7 @@
 
   /* A text link that is a button: the secondary way out of a section. */
   .link-btn {
-    @apply inline-flex items-center gap-1.5 text-[14px] font-medium text-accent-strong
+    @apply inline-flex items-center gap-1.5 text-[15.5px] font-bold text-accent-strong
            cursor-pointer hover:underline
            disabled:opacity-40 disabled:cursor-default disabled:hover:no-underline;
   }
@@ -266,8 +280,8 @@
      face: the columns still line up, because it is the digits that are
      fixed-width. */
   .field-input {
-    @apply w-full px-3 py-2 text-[14.5px] tabular-nums rounded-lg text-center
-           bg-panel-2 border border-line text-fg
+    @apply w-full px-3 py-2 text-[16px] tabular-nums rounded-[10px] text-center
+           bg-panel-2 border border-line-strong text-fg
            placeholder-fg-dim
            focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent
            transition-colors duration-150 select-text;
@@ -275,7 +289,7 @@
   /* The size of the room the scale is taken from — the one figure on the
      panel a person reads off the plan and checks by eye. */
   .field-input-lg {
-    @apply py-2 text-[18px];
+    @apply py-2 text-[19px];
   }
 
   /* ── a choice between two or three ── */
@@ -283,7 +297,7 @@
     @apply inline-flex p-0.5 gap-0.5 bg-sunken border border-line rounded-lg;
   }
   .seg-option {
-    @apply h-8 px-3 text-[13.5px] font-medium rounded-md text-fg-2
+    @apply h-9 px-3 text-[15px] font-medium rounded-md text-fg-2
            transition-colors duration-150 cursor-pointer select-none hover:text-fg;
   }
   .seg-option[aria-pressed='true'] {
@@ -293,8 +307,8 @@
   /* ── a state, said in a word ── readable as form and colour, not colour
      alone. */
   .chip {
-    @apply inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full
-           text-[12px] font-semibold whitespace-nowrap border;
+    @apply inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full
+           text-[13.5px] font-semibold whitespace-nowrap border;
   }
   .chip-dot {
     @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
@@ -307,7 +321,7 @@
 
   /* ── a sentence that needs a frame ── */
   .note {
-    @apply px-3.5 py-3 rounded-lg border border-line bg-panel text-[14px] leading-snug text-fg-2;
+    @apply px-3.5 py-3 rounded-[10px] border border-line bg-panel text-[15.5px] leading-snug text-fg-2;
   }
   .note-warn { @apply border-warn/35 bg-warn/10 text-warn font-medium; }
   /* Something failed, said where it was asked for — inside a dialog. */
@@ -316,12 +330,12 @@
   /* The small label over a figure or a group. Sentence case at reading size:
      spaced capitals made every one of these look like a form field label. */
   .label-sm {
-    @apply text-[13px] font-medium text-fg-3;
+    @apply text-[15px] font-medium text-fg-3;
   }
 
   /* A heading inside a sheet or a dialog. */
   .card-heading {
-    @apply text-[14.5px] font-semibold text-fg;
+    @apply text-[16.5px] font-semibold text-fg;
   }
 
   /* ── the action bar ──
@@ -408,10 +422,10 @@
      one scope, no JSX churn, and desktop is untouched because nothing there
      carries this class. */
   .touch-dense .seg-option {
-    @apply h-9 px-3.5;
+    @apply h-10 px-3.5;
   }
   .touch-dense .field-input {
-    @apply py-2.5 text-[15px];
+    @apply py-2.5 text-[16px];
   }
   /* Specificity, not preference: `.touch-dense .field-input` is (0,2,0) and
      would otherwise shrink the room size back to 15 px on the phone, where it

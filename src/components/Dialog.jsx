@@ -134,9 +134,9 @@ const Dialog = ({
           <div className="flex items-start gap-3 px-6 pt-4 pb-3.5">
             {icon}
             <div className="min-w-0 flex-1">
-              <h2 id={titleId} className="text-[17px] font-semibold leading-snug text-fg">{title}</h2>
+              <h2 id={titleId} className="text-[19px] font-semibold leading-snug text-fg">{title}</h2>
               {subtitle && (
-                <p id={subtitleId} className="mt-1 text-[14px] leading-snug text-fg-2">{subtitle}</p>
+                <p id={subtitleId} className="mt-1 text-[16px] leading-snug text-fg-2">{subtitle}</p>
               )}
             </div>
             {!hideClose && (

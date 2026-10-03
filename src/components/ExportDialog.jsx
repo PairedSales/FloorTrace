@@ -32,8 +32,8 @@ const Toggle = ({ checked, onChange, label, hint, disabled }) => (
                  cursor-pointer disabled:cursor-default"
     />
     <span className="min-w-0">
-      <span className="block text-[14.5px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
-      {hint && <span className="block text-[13.5px] leading-snug text-fg-3 mt-px">{hint}</span>}
+      <span className="block text-[16px] leading-snug text-fg-2 group-hover:text-fg">{label}</span>
+      {hint && <span className="block text-[15.5px] leading-snug text-fg-3 mt-px">{hint}</span>}
     </span>
   </label>
 );
@@ -295,7 +295,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
         {error ? (
           <div className="max-w-[320px] text-center">
             <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-crit" aria-hidden="true" />
-            <p className="text-[14px] text-fg-2">{error}</p>
+            <p className="text-[16px] text-fg-2">{error}</p>
           </div>
         ) : (
           <canvas
@@ -307,7 +307,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
         {rendering && (
           <span className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-2
                            px-3.5 h-8 rounded-full bg-panel-2 border border-line
-                           text-[13.5px] text-fg-3">
+                           text-[15.5px] text-fg-3">
             <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             Preparing the image…
           </span>
@@ -335,7 +335,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
           autoFocus={!projectName && !isMobile}
           className="field-input text-left"
         />
-        <p className="mt-1.5 text-[13.5px] leading-snug text-fg-3">
+        <p className="mt-1.5 text-[15.5px] leading-snug text-fg-3">
           Usually the property address. It is printed at the top of the image and
           used as the file name.
         </p>

@@ -10,8 +10,10 @@ import { PROGRESS } from '../../utils/progressSteps';
  * The panel's promises to someone who is not going to read its source:
  *
  *  - it leads with the answer, and never prints a pixel count as square feet;
+ *  - under the answer are the four steps it was reached by, the same four it
+ *    lists while it measures;
  *  - at rest it is the answer and four folded lines, not forty controls;
- *  - a section opens by itself when it holds the next thing to do;
+ *  - a step opens by itself when it holds the next thing to do;
  *  - it says what a picture cannot show — a doubtful scale, an area counted
  *    twice — in the section it is about, and nothing about how well the
  *    outline follows the walls;
@@ -330,14 +332,17 @@ describe('the room the scale came from', () => {
 });
 
 describe('while FloorTrace is measuring the plan by itself', () => {
-  it('shows the job in three steps, and nothing to fold or correct', () => {
+  it('shows the job as the four steps, and nothing to fold or correct', () => {
     useAppStore.setState({ processingMessage: PROGRESS.measuringRooms, detectedDimensions: [{}] });
     const view = render(<ResultsPanel {...props({ isProcessing: true })} />);
-    const steps = part(view, 'area').getAllByRole('listitem');
-    expect(steps.map((s) => s.textContent)).toEqual([
-      'Reading the room sizes', 'Working out the scale', 'Finding the outside walls',
+    const steps = part(view, 'steps').getAllByRole('listitem');
+    expect(steps.map((s) => s.querySelector('[data-step-title]').textContent)).toEqual([
+      'Reading the room sizes', 'Working out the scale', 'Finding the outside walls', 'Adding up the area',
     ]);
+    expect(steps.map((s) => s.getAttribute('data-state'))).toEqual(['done', 'active', 'todo', 'todo']);
     expect(steps[1].getAttribute('aria-current')).toBe('step');
+    // Where the figure will be, and that it is coming.
+    expect(part(view, 'area').getByText('The area will show here in a moment.')).toBeTruthy();
     expect(view.container.querySelector('#panel-scale')).toBeNull();
     expect(view.container.querySelector('#panel-outline')).toBeNull();
     expect(view.queryByRole('button', { name: /Save image/ })).toBeNull();
@@ -347,16 +352,17 @@ describe('while FloorTrace is measuring the plan by itself', () => {
   it('does not tick a step that produced nothing', () => {
     useAppStore.setState({ processingMessage: PROGRESS.findingOutline, detectedDimensions: [] });
     const view = render(<ResultsPanel {...props({ isProcessing: true })} />);
-    const [read, scale] = part(view, 'area').getAllByRole('listitem');
-    expect(read.querySelector('.text-ok')).toBeNull();
-    expect(scale.querySelector('.text-ok')).toBeNull();
+    const [read, scale] = part(view, 'steps').getAllByRole('listitem');
+    expect(read.getAttribute('data-state')).toBe('skipped');
+    expect(scale.getAttribute('data-state')).toBe('skipped');
   });
 
   it('says it in a line when the job is not one of the three steps', () => {
     useAppStore.setState({ processingMessage: 'Drawing the outline from your painting…' });
     const view = render(<ResultsPanel {...props({ isProcessing: true })} />);
     expect(part(view, 'area').getByText('Drawing the outline from your painting…')).toBeTruthy();
-    expect(part(view, 'area').queryAllByRole('listitem')).toHaveLength(0);
+    expect(view.queryAllByRole('listitem')).toHaveLength(0);
+    expect(view.container.querySelector('#panel-steps')).toBeNull();
   });
 
   it('keeps the answer on screen while a plan that has one is measured again', () => {
@@ -481,9 +487,9 @@ describe('the outline', () => {
       .toContain('btn-primary');
   });
 
-  // Redrawing an outline that exists is work done on the plan: it is in the
-  // action bar's Outline menu, not repeated here.
-  it('does not repeat the redraw tools once there is an outline', () => {
+  // The ways to change an outline that exists are one menu, not a row of
+  // buttons: opening the step shows the outline, and the tools are a click on.
+  it('does not lay the redraw tools out as buttons once there is an outline', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     open(view, 'outline');
@@ -528,6 +534,68 @@ describe('the outline', () => {
     fireEvent.click(within(group).getByRole('button', { name: 'Inside' }));
     expect(onInteriorWallToggle).toHaveBeenCalledWith(true);
     expect(part(view, 'outline').getByText(/normally measured to the outside/)).toBeTruthy();
+  });
+});
+
+describe('the four steps stay on the panel', () => {
+  const titles = (view) => [...view.container.querySelectorAll('#panel-steps section [data-step-title]')]
+    .map((s) => s.textContent);
+
+  it('says each step as what it came to', () => {
+    useAppStore.setState({
+      calibration: calibrated, perimeterTraces: [outline()], detectedDimensions: [{}, {}, {}],
+    });
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    expect(titles(view)).toEqual([
+      'Read the room sizes', 'Worked out the scale', 'Found the outside walls', 'Added up the area',
+    ]);
+    expect(part(view, 'sizes').getByText('3 room sizes on this plan')).toBeTruthy();
+    expect(part(view, 'work').getByText('The sum behind 800 ft²')).toBeTruthy();
+  });
+
+  it('says a step that has nothing to show as that, and keeps all four', () => {
+    const view = render(<ResultsPanel {...props()} />);
+    expect(titles(view)).toEqual([
+      'No room sizes read', 'The scale is not set', 'No outline yet', 'No area yet',
+    ]);
+    // The sum is only for a measured area.
+    expect(view.container.querySelector('#panel-work')).toBeNull();
+  });
+
+  it('reads the room sizes again from the first step', () => {
+    const onRescan = vi.fn();
+    const view = render(<ResultsPanel {...props({ onRescan })} />);
+    fireEvent.click(part(view, 'sizes').getByRole('button', { name: 'Read again' }));
+    expect(onRescan).toHaveBeenCalledTimes(1);
+  });
+
+  // Changing the outline is the outline step's: its tools are one menu, which
+  // opens beside the panel, over the plan they act on.
+  it('carries the ways to change the outline in the outline step', () => {
+    const picked = [];
+    useWorkspaceStore.setState({ menuOpen: null });
+    useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
+    const view = render(<ResultsPanel {...props({ area: 800, onSelectTool: (id) => picked.push(id) })} />);
+    open(view, 'outline');
+    fireEvent.click(part(view, 'outline').getByRole('button', { name: /Change the outline/ }));
+    const rows = within(view.getByRole('menu')).getAllByRole('menuitem')
+      .map((r) => r.querySelector('.font-medium').textContent.trim());
+    // Adding another outline has its own line under the list.
+    expect(rows).toEqual([
+      'Paint over the walls', 'Click the corners', 'Find the outline again',
+      'Cut out an open area', 'Remove several corners',
+    ]);
+    fireEvent.click(within(view.getByRole('menu')).getByText('Paint over the walls'));
+    expect(picked).toEqual(['draw']);
+    expect(view.queryByRole('menu')).toBeNull();
+  });
+
+  // The phone passes no way to start a tool from here: it has its own sheet.
+  it('offers no such menu to a shell that cannot start a tool', () => {
+    useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
+    const view = render(<ResultsPanel {...props({ area: 800 })} />);
+    open(view, 'outline');
+    expect(part(view, 'outline').queryByRole('button', { name: /Change the outline/ })).toBeNull();
   });
 });
 
@@ -631,7 +699,7 @@ describe('the scale', () => {
     });
     const view = render(<ResultsPanel {...props({ area: 800, isProcessing: true })} />);
     open(view, 'scale');
-    expect(view.getByRole('button', { name: /Read the room sizes again/ }).disabled).toBe(true);
+    expect(part(view, 'sizes').getByRole('button', { name: 'Read again' }).disabled).toBe(true);
     expect(view.getByRole('button', { name: /Use a different room/ }).disabled).toBe(true);
     // A mode is not work.
     expect(view.getByRole('button', { name: /Measure a length you know/ }).disabled).toBe(false);

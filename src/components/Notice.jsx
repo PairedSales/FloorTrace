@@ -76,7 +76,7 @@ const Notice = ({ top, left = 0 }) => {
           className={`mt-0.5 h-5 w-5 shrink-0 ${failed ? 'text-crit' : 'text-warn'}`}
           aria-hidden="true"
         />
-        <p className="min-w-0 flex-1 py-px text-[14.5px] leading-snug text-fg [overflow-wrap:anywhere]">
+        <p className="min-w-0 flex-1 py-px text-[16px] leading-snug text-fg [overflow-wrap:anywhere]">
           {notice.text}
         </p>
         {notice.action && (

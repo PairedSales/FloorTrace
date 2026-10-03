@@ -3,13 +3,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import WelcomeScreen from '../WelcomeScreen';
 import { WELCOME_KEY, markWelcomed } from '../../hooks/useWelcome';
+import { MEASURE_STEPS } from '../../utils/progressSteps';
+import { MOD, SNIP } from '../../utils/keySymbols';
 
 /**
  * The start screen is the whole window until a plan is open, so what it has to
- * get right is the first thirty seconds: say what the app is for, offer one
- * obvious way in, and be honest that "automatic" is not "always right".
+ * get right is the first thirty seconds: say what the app is for, name every
+ * way in, and be honest that "automatic" is not "always right".
  *
- * The introduction — the demo and the three steps — is a *first-run* thing. A
+ * The introduction — the demo and the four steps — is a *first-run* thing. A
  * user who has already seen it is closing a plan to open another one, and a
  * ten-second animation standing between them and their next drawing is noise.
  *
@@ -28,12 +30,18 @@ const props = (over = {}) => ({
 });
 
 describe('WelcomeScreen', () => {
-  it('shows the demo and the job in three plain steps on a first run', () => {
+  it('shows the demo and the job in four plain steps on a first run', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeTruthy();
     expect(view.getByRole('heading', { name: 'Measure a floor plan' })).toBeTruthy();
-    for (const step of ['Open a floor plan', 'FloorTrace measures it', 'Check it and save the image']) {
+    // The steps the results panel will list, by the panel's own names, and
+    // then the one that is the user's.
+    const steps = [...view.container.querySelectorAll('.ft-demo ol li')]
+      .map((li) => li.querySelector('.font-bold + span, span > .font-bold')?.textContent
+        ?? li.textContent);
+    expect(steps).toHaveLength(4);
+    for (const step of MEASURE_STEPS.map((s) => s.label).concat('Adding up the area', 'Check it and save the image')) {
       expect(view.getByText(step)).toBeTruthy();
     }
     // The pipeline's own vocabulary stays off the first screen anyone sees.
@@ -61,9 +69,9 @@ describe('WelcomeScreen', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeNull();
-    expect(view.queryByText('FloorTrace measures it')).toBeNull();
+    expect(view.queryByText('How FloorTrace measures it')).toBeNull();
     expect(view.getByRole('heading', { name: 'Open a floor plan' })).toBeTruthy();
-    expect(view.getByText('Drop a floor plan here')).toBeTruthy();
+    expect(view.getByText('Drop a file here')).toBeTruthy();
     expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
     expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
@@ -102,7 +110,17 @@ describe('WelcomeScreen', () => {
     expect(onTryExample).toHaveBeenCalledTimes(1);
   });
 
-  // The drop itself is the app root's; the zone only says "yes, here".
+  // Most plans arrive as a snip of a PDF or a listing page, so the keys for
+  // that are printed, not left to "you can also paste".
+  it('names the three ways in: a file, a drop, and a pasted screenshot with its keys', () => {
+    const view = render(<WelcomeScreen {...props()} />);
+    expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
+    expect(view.getByText('Drop a file here')).toBeTruthy();
+    const paste = view.getByText('Paste a screenshot').parentElement;
+    expect([...paste.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual([SNIP, `${MOD}+V`]);
+  });
+
+  // The drop itself is the app root's; the row only says "yes, here".
   it('lights the drop zone while a file is dragged over the window', () => {
     const view = render(<WelcomeScreen {...props()} />);
     const drag = (type) => {
@@ -113,14 +131,14 @@ describe('WelcomeScreen', () => {
     drag('dragenter');
     expect(view.getByText('Drop it to open it')).toBeTruthy();
     drag('drop');
-    expect(view.getByText('Drop a floor plan here')).toBeTruthy();
+    expect(view.getByText('Drop a file here')).toBeTruthy();
   });
 
   it('offers no file button on touch — the action bar below is the route in', () => {
     const view = render(<WelcomeScreen {...props({ isTouch: true })} />);
 
     expect(view.queryByRole('button', { name: /choose a file/i })).toBeNull();
-    expect(view.queryByText('Drop a floor plan here')).toBeNull();
+    expect(view.queryByText('Drop a file here')).toBeNull();
     expect(view.getByRole('button', { name: /try the sample plan/i })).toBeTruthy();
     expect(view.getByText(/photograph a plan/i)).toBeTruthy();
   });
@@ -146,7 +164,7 @@ describe('the demo timeline is wired end to end', () => {
 
   const animatedEls = (container) =>
     [...container.querySelectorAll('.ft-demo [class*="ft-"]')]
-      .map((el) => ({ el, beats: [...el.classList].filter((c) => /^ft-(?!a$|demo$|draw$|transient$|wall$|scan$|chip$|label$|area$)/.test(c)) }))
+      .map((el) => ({ el, beats: [...el.classList].filter((c) => /^ft-(?!a$|demo$|plan$|draw$|transient$|wall$|scan$|chip$|label$|area$)/.test(c)) }))
       .filter((e) => e.beats.length > 0);
 
   it('every element with a beat class also carries ft-a', () => {

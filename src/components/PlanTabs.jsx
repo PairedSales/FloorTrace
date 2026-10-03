@@ -42,8 +42,8 @@ import { Menu, MenuItem } from './Menu';
 
 // Below this a tab is a truncated word and a close button, which is the least
 // that still reads as a tab. Above the ceiling they stop growing.
-const TAB_MIN = 120;
-const TAB_MAX = 230;
+const TAB_MIN = 132;
+const TAB_MAX = 260;
 
 // The two controls that share the strip with the tabs, reserved out of the
 // width before the tabs are counted.
@@ -79,11 +79,11 @@ const PlanTab = ({
   return (
     <div
       data-tab-id={docId}
-      className={`group relative flex items-center gap-1 h-9 pl-3 pr-1.5 rounded-lg
-                  text-[14px] select-none transition-colors
+      className={`group relative flex items-center gap-1 h-10 pl-3.5 pr-1.5 rounded-[10px]
+                  text-[16px] select-none transition-colors border-[1.5px]
                   ${isActive
-        ? 'bg-sunken text-fg font-medium'
-        : 'text-fg-3 hover:text-fg-2 hover:bg-sunken/60'}`}
+        ? 'border-fg bg-panel-2 text-fg font-bold'
+        : 'border-transparent text-fg-2 hover:text-fg hover:bg-sunken'}`}
       // `0 1 auto`, not `1 1`: a tab is as wide as its own name and no wider.
       style={{ flex: '0 1 auto', minWidth: TAB_MIN, maxWidth: TAB_MAX, opacity: isDragging ? 0.4 : 1 }}
       // Pointer events, never HTML5 drag. The app root owns `onDragOver` and
@@ -127,7 +127,7 @@ const PlanTab = ({
             }}
             onClick={(e) => e.stopPropagation()}
             className="w-full min-w-0 bg-transparent border-none outline-none
-                       text-[14px] text-fg p-0 m-0 select-text"
+                       text-[16px] text-fg p-0 m-0 select-text"
           />
         ) : (
           <span className="truncate">{label}</span>
@@ -330,9 +330,9 @@ const PlanTabs = ({ onSelect, onClose, onNew, isProcessing }) => {
             title={atLimit
               ? `${MAX_OPEN_DOCUMENTS} plans is the most that can be open at once`
               : 'Add another plan — another level or another sheet of the same property'}
-            className="btn btn-quiet btn-sm shrink-0"
+            className="menu-trigger shrink-0 text-fg-2"
           >
-            <Plus className="w-4 h-4" aria-hidden="true" />
+            <Plus className="w-[17px] h-[17px]" aria-hidden="true" />
             Add plan
           </button>
         </>

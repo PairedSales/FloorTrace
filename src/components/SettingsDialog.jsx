@@ -47,8 +47,8 @@ const Choice = ({ type, name, checked, onChange, label, hint }) => (
       className="mt-[3px] w-4 h-4 accent-accent shrink-0 cursor-pointer"
     />
     <span className="min-w-0">
-      <span className="block text-[14.5px] text-fg leading-snug">{label}</span>
-      {hint && <span className="block text-[13.5px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
+      <span className="block text-[16px] text-fg leading-snug">{label}</span>
+      {hint && <span className="block text-[15.5px] text-fg-3 leading-snug mt-0.5">{hint}</span>}
     </span>
   </label>
 );

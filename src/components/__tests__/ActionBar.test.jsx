@@ -13,7 +13,9 @@ import { beginWork, settleWork, ownerVerdict, resetRequests } from '../../store/
  * is running — that tool's instruction, its brush and its way out.
  *
  * At rest the cases are about the menus: every tool and command has a home,
- * each row says what it is for, and a row that cannot be used says why.
+ * each row says what it is for, and a row that cannot be used says why. The
+ * outline's tools are the results panel's while it is showing (its outline
+ * step), and come back to this bar only while the panel is put away.
  * Running, they are the cases where the instruction and the controls compete
  * for the width of the plan.
  */
@@ -56,15 +58,27 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('ActionBar at rest', () => {
-  it('offers three jobs by name, and a tip — no mode name, no way out', () => {
+  it('offers two jobs by name, and a tip — no mode name, no way out', () => {
     const view = render(<ActionBar {...props()} />);
     const toolbar = view.getByRole('toolbar', { name: 'Tools' });
     expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
-      .toEqual(['Outline', 'Measure', 'Edit plan']);
+      .toEqual(['Measure', 'Edit plan']);
     // The standing answer to "the outline is not right": where the fix is,
     // said once and calmly rather than as a warning about each trace.
-    expect(view.getByText('Outline not right? Drag any corner, or redraw it from the Outline menu.')).toBeTruthy();
+    expect(view.getByText(
+      'Outline not right? Drag any corner, or choose Change beside “Found the outside walls”.',
+    )).toBeTruthy();
     expect(view.queryByText('Cancel')).toBeNull();
+  });
+
+  // The outline's tools must never be unreachable: with the panel that holds
+  // them put away, their menu is here, and the tip points at it.
+  it('takes the outline’s menu back while the results are put away', () => {
+    const view = render(<ActionBar {...props({ panelOpen: false })} />);
+    const toolbar = view.getByRole('toolbar', { name: 'Tools' });
+    expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
+      .toEqual(['Outline', 'Measure', 'Edit plan']);
+    expect(view.getByText('Outline not right? Drag any corner, or redraw it from the Outline menu.')).toBeTruthy();
   });
 
   it('keeps the corner tip until there is an outline to drag', () => {
@@ -250,7 +264,9 @@ describe('the offer to find the outline again, after the plan’s image was edit
 describe('every tool and command has a home', () => {
   // The landing checklist for everything the old rail and the old panel
   // offered. A group without a `menu` is not a bar menu: the scale's
-  // corrections live on the panel.
+  // corrections live on the panel. The cases run with the results put away,
+  // which is when all three menus are in the bar.
+  const away = (over = {}) => props({ panelOpen: false, ...over });
   const homes = [
     ['Outline', ['Paint over the walls', 'Click the corners', 'Find the outline again',
       'Cut out an open area', 'Remove several corners', 'Add another outline']],
@@ -259,11 +275,11 @@ describe('every tool and command has a home', () => {
   ];
 
   it.each(homes)('%s lists %j', (title, expected) => {
-    expect(rowsOf(openMenu(render(<ActionBar {...props()} />), title))).toEqual(expected);
+    expect(rowsOf(openMenu(render(<ActionBar {...away()} />), title))).toEqual(expected);
   });
 
   it('gives every row a sentence saying what it is for', () => {
-    const view = render(<ActionBar {...props()} />);
+    const view = render(<ActionBar {...away()} />);
     for (const [title] of homes) {
       const menu = openMenu(view, title);
       for (const item of within(menu).getAllByRole('menuitem')) {
@@ -275,7 +291,7 @@ describe('every tool and command has a home', () => {
 
   it('hands back the id the catalogue lists, for tools and commands alike', () => {
     const picked = [];
-    const view = render(<ActionBar {...props({ onSelect: (id) => picked.push(id) })} />);
+    const view = render(<ActionBar {...away({ onSelect: (id) => picked.push(id) })} />);
     fireEvent.click(row(openMenu(view, 'Outline'), 'Paint over the walls'));
     fireEvent.click(row(openMenu(view, 'Outline'), 'Find the outline again'));
     fireEvent.click(row(openMenu(view, 'Measure'), 'Measure an angle'));
@@ -289,7 +305,7 @@ describe('every tool and command has a home', () => {
   });
 
   it('prints the digit beside each tool that has one', () => {
-    const view = render(<ActionBar {...props()} />);
+    const view = render(<ActionBar {...away()} />);
     const tools = TOOL_GROUPS.filter((g) => g.menu).flatMap((g) => g.tools.map((t) => [g.title, t]));
     for (const [title, tool] of tools) {
       if (!tool.digit) continue;
@@ -301,7 +317,7 @@ describe('every tool and command has a home', () => {
 
   it('keeps a tool that needs an outline in place, with its reason, and ignores a click on it', () => {
     const picked = [];
-    const view = render(<ActionBar {...props({ hasArea: false, onSelect: (id) => picked.push(id) })} />);
+    const view = render(<ActionBar {...away({ hasArea: false, onSelect: (id) => picked.push(id) })} />);
     const item = row(openMenu(view, 'Measure'), 'Measure an area');
     expect(item.getAttribute('aria-disabled')).toBe('true');
     expect(within(item).getByText('Measuring an area needs an outline first.')).toBeTruthy();
@@ -310,14 +326,14 @@ describe('every tool and command has a home', () => {
   });
 
   it('lists the next-best outline only while there is one, and says how many', () => {
-    let view = render(<ActionBar {...props()} />);
+    let view = render(<ActionBar {...away()} />);
     expect(rowsOf(openMenu(view, 'Outline'))).not.toContain('Try another outline');
     cleanup();
 
     useAppStore.setState({
       perimeterTraces: [{ id: 't1', vertices: square, quality: { alternatives: [{}, {}] } }],
     });
-    view = render(<ActionBar {...props()} />);
+    view = render(<ActionBar {...away()} />);
     expect(rowsOf(openMenu(view, 'Outline'))).toContain('Try another outline (2 more)');
     cleanup();
 
@@ -326,21 +342,21 @@ describe('every tool and command has a home', () => {
     useAppStore.setState({
       perimeterTraces: [{ id: 't1', vertices: square, quality: { edited: true, alternatives: [{}] } }],
     });
-    view = render(<ActionBar {...props()} />);
+    view = render(<ActionBar {...away()} />);
     expect(rowsOf(openMenu(view, 'Outline')).some((r) => r.startsWith('Try another'))).toBe(false);
   });
 
   it('lists Clear only while there is something to clear', () => {
-    let view = render(<ActionBar {...props()} />);
+    let view = render(<ActionBar {...away()} />);
     expect(rowsOf(openMenu(view, 'Measure'))).not.toContain('Clear your measurements');
     cleanup();
-    view = render(<ActionBar {...props({ hasToolData: true })} />);
+    view = render(<ActionBar {...away({ hasToolData: true })} />);
     expect(rowsOf(openMenu(view, 'Measure'))).toContain('Clear your measurements');
   });
 
   it('will not add an outline before the first is drawn', () => {
     useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
-    const view = render(<ActionBar {...props({ hasArea: false })} />);
+    const view = render(<ActionBar {...away({ hasArea: false })} />);
     const menu = openMenu(view, 'Outline');
     expect(row(menu, 'Add another outline').getAttribute('aria-disabled')).toBe('true');
     // With nothing drawn, "again" would be a lie.
@@ -355,7 +371,7 @@ describe('every tool and command has a home', () => {
       isProcessing: true,
       perimeterTraces: [{ id: 't1', vertices: square, quality: { alternatives: [{}] } }],
     });
-    const view = render(<ActionBar {...props()} />);
+    const view = render(<ActionBar {...away()} />);
     const menu = openMenu(view, 'Outline');
     expect(row(menu, 'Find the outline again').getAttribute('aria-disabled')).toBe('true');
     expect(row(menu, 'Try another outline').getAttribute('aria-disabled')).toBe('true');
@@ -365,7 +381,7 @@ describe('every tool and command has a home', () => {
 
   it('makes them wait while an outline is being painted', () => {
     useAppStore.setState({ drawModeActive: true });
-    const view = render(<ActionBar {...props()} />);
+    const view = render(<ActionBar {...away()} />);
     expect(row(openMenu(view, 'Outline'), 'Find the outline again').getAttribute('aria-disabled')).toBe('true');
   });
 });

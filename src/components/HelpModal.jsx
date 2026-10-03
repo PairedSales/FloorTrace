@@ -10,15 +10,15 @@ import Dialog from './Dialog';
  * Help, in two pages: how to use the app, and the keyboard shortcuts.
  *
  * The guide walks the job in the order it happens and names every control
- * exactly as the screen does — the action bar's menus by their titles, the
- * panel's sections by theirs. It is the one place a renamed control goes stale
+ * exactly as the screen does — the menus above the plan by their titles, the
+ * panel's steps by theirs. It is the one place a renamed control goes stale
  * silently, so the names are worth checking whenever one changes.
  */
 
 // ── the guide ────────────────────────────────────────────────────────────
 // Names here must match the screen: the menu titles and rows in
-// `toolCatalog.js`, the panel's sections and buttons in `ResultsPanel.jsx`, and
-// the header's Menu in `AppHeader.jsx`.
+// `toolCatalog.js`, the panel's steps (`progressSteps.js`) and buttons
+// (`ResultsPanel.jsx`), and the header's Menu in `AppHeader.jsx`.
 const GUIDE = [
   {
     title: 'The basics',
@@ -34,23 +34,23 @@ const GUIDE = [
     title: 'If the outline is wrong',
     items: [
       'Drag any corner to move it. Right-click a corner to delete it.',
-      'Open Outline, above the plan, and choose “Paint over the walls”. Paint roughly over the outside walls, then click “Draw the outline”. It only needs to be close — FloorTrace follows the walls.',
-      'Or choose “Click the corners” and click each outside corner of the house in turn.',
-      'Notes or a legend drawn inside the house can confuse FloorTrace. Open Edit plan and choose “Erase marks on the plan” to white them out, or “Crop the plan” to keep just the house. Then choose Outline ▸ Find the outline again.',
+      'In the panel on the left, choose Change beside “Found the outside walls”, then Change the outline ▸ “Paint over the walls”. Paint roughly over the outside walls, then click “Draw the outline”. It only needs to be close — FloorTrace follows the walls.',
+      'Or choose “Click the corners” from the same list and click each outside corner of the house in turn.',
+      'Notes or a legend drawn inside the house can confuse FloorTrace. Open Edit plan, above the plan, and choose “Erase marks on the plan” to white them out, or “Crop the plan” to keep just the house. Then choose Change the outline ▸ Find the outline again.',
     ],
   },
   {
     title: 'If the area looks wrong',
     items: [
-      'The area depends on the scale. Open Scale, in the panel on the left, to see where it came from.',
+      'The area depends on the scale. In the panel on the left, choose Change beside “Worked out the scale” to see where it came from.',
       'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Measure a length you know” and type in the length.',
-      'If the room sizes on the plan disagree with each other, Scale opens by itself with a note saying so and what to do about it.',
+      'If the room sizes on the plan disagree with each other, that step opens by itself with a note saying so and what to do about it.',
     ],
   },
   {
     title: 'Garages, porches and other levels',
     items: [
-      'Choose Outline ▸ Add another outline and click its corners. Then open Outline in the panel and set what it counts as — living area (GLA), garage, porch and so on. Only living area counts toward GLA.',
+      'Choose Change beside “Found the outside walls”, then “Add another outline”, and click its corners. Then set what it counts as — living area (GLA), garage, porch and so on. Only living area counts toward GLA.',
       'A level drawn on a separate sheet: click “Add plan”, beside the plan’s name at the top. The panel adds the plans together for the whole property.',
     ],
   },
@@ -141,7 +141,7 @@ const PageTab = ({ active, onClick, children }) => (
     role="tab"
     aria-selected={active}
     onClick={onClick}
-    className={`h-10 px-1 text-[14.5px] font-medium border-b-2 -mb-px transition-colors cursor-pointer
+    className={`h-10 px-1 text-[16px] font-medium border-b-2 -mb-px transition-colors cursor-pointer
       ${active ? 'border-accent text-fg' : 'border-transparent text-fg-3 hover:text-fg'}`}
   >
     {children}
@@ -150,7 +150,7 @@ const PageTab = ({ active, onClick, children }) => (
 
 const KeyRow = ({ keys, description }) => (
   <div className="flex items-center justify-between gap-4">
-    <span className="text-[14.5px] text-fg-2">{description}</span>
+    <span className="text-[16px] text-fg-2">{description}</span>
     <kbd className="shrink-0">{keys}</kbd>
   </div>
 );
@@ -182,12 +182,12 @@ const HelpModal = ({ onClose, initialTab = 'guide' }) => {
               const List = section.ordered ? 'ol' : 'ul';
               return (
                 <section key={section.title} className="mb-6">
-                  <h3 className="text-[15.5px] font-semibold text-fg mb-2.5">{section.title}</h3>
+                  <h3 className="text-[17px] font-semibold text-fg mb-2.5">{section.title}</h3>
                   <List className="space-y-2.5">
                     {section.items.map((item, i) => (
-                      <li key={item} className="flex gap-3 text-[14.5px] leading-relaxed text-fg-2">
+                      <li key={item} className="flex gap-3 text-[16px] leading-relaxed text-fg-2">
                         <span className={`shrink-0 ${section.ordered
-                          ? 'grid place-items-center w-6 h-6 mt-px rounded-full bg-accent/12 text-accent-strong text-[13px] font-semibold'
+                          ? 'grid place-items-center w-6 h-6 mt-px rounded-full bg-accent/12 text-accent-strong text-[15px] font-semibold'
                           : 'text-accent mt-px'}`}>
                           {section.ordered ? i + 1 : '•'}
                         </span>
@@ -221,7 +221,7 @@ const HelpModal = ({ onClose, initialTab = 'guide' }) => {
         ) : (
           SHORTCUTS.map((group) => (
             <section key={group.title} className="mb-6 last:mb-1">
-              <h3 className="text-[15.5px] font-semibold text-fg mb-2.5">{group.title}</h3>
+              <h3 className="text-[17px] font-semibold text-fg mb-2.5">{group.title}</h3>
               <div className="space-y-2">
                 {group.rows.map(([keys, description]) => (
                   <KeyRow key={`${keys}-${description}`} keys={keys} description={description} />

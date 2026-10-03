@@ -25,22 +25,22 @@ const ViewControls = ({ onZoomIn, onZoomOut, onFitToWindow }) => {
       className="absolute right-4 bottom-4 z-10 flex items-center gap-0.5 p-1
                  bg-panel-2 border border-line rounded-xl shadow-float select-none"
     >
-      <button type="button" onClick={onZoomOut} aria-label="Zoom out" title="Zoom out" className="icon-btn w-8 h-8">
-        <Minus className="w-4 h-4" aria-hidden="true" />
+      <button type="button" onClick={onZoomOut} aria-label="Zoom out" title="Zoom out" className="icon-btn">
+        <Minus className="w-[18px] h-[18px]" aria-hidden="true" />
       </button>
-      <span className="min-w-[48px] text-center text-[13.5px] tabular-nums text-fg-2">{zoomPct}%</span>
-      <button type="button" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in" className="icon-btn w-8 h-8">
-        <Plus className="w-4 h-4" aria-hidden="true" />
+      <span className="min-w-[52px] text-center text-[15.5px] tabular-nums text-fg-2">{zoomPct}%</span>
+      <button type="button" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in" className="icon-btn">
+        <Plus className="w-[18px] h-[18px]" aria-hidden="true" />
       </button>
       <span className="w-px h-5 mx-1 bg-line" aria-hidden="true" />
       <button
         type="button"
         onClick={onFitToWindow}
         title="Show the whole plan (F)"
-        className="btn btn-quiet btn-sm"
+        className="btn btn-quiet btn-sm h-10"
       >
         <Maximize className="w-4 h-4" aria-hidden="true" />
-        Fit
+        Fit to window
       </button>
     </div>
   );

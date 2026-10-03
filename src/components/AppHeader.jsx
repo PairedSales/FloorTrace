@@ -13,7 +13,7 @@ import * as undoManager from '../store/undoManager';
  * The frame around the work: whose app this is, which plan is open, and the
  * handful of things that are about the whole window rather than about the plan.
  *
- *   [ ▣ FloorTrace ]  [ plan ][ plan ][ + Add plan ]        ✓ Autosaved  ↶ ↷  Help  Menu
+ *   [ ▣ FloorTrace ]  [ plan ][ plan ][ + Add plan ]   ✓ Autosaved  ↶ Undo  ↷ Redo  Help  Menu
  *
  * ## What it no longer is
  *
@@ -48,6 +48,13 @@ import * as undoManager from '../store/undoManager';
  *
  * The mark is not a button: closing lives in the Menu, where it says what it
  * does.
+ *
+ * ## Every button here has a word on it
+ *
+ * Undo and Redo were two arrows. An arrow curling left is a convention, and a
+ * convention is something a reader either already has or does not; the people
+ * this app is for are not all people who have it. So they are labelled, like
+ * Help and Menu beside them.
  */
 
 const DRAFT = {
@@ -86,7 +93,7 @@ const DraftState = () => {
     // A fixed minimum, so "Saving…" turning into "Autosaved" does not nudge
     // the buttons beside it on every edit.
     <span
-      className="inline-flex items-center justify-end gap-1.5 min-w-[92px] mr-1.5 text-[13px] text-fg-3 whitespace-nowrap"
+      className="inline-flex items-center justify-end gap-1.5 min-w-[104px] mr-1.5 text-[15px] text-fg-3 whitespace-nowrap"
       title={draft.title}
     >
       <Icon
@@ -98,7 +105,7 @@ const DraftState = () => {
   );
 };
 
-const Rule = () => <span className="w-px h-6 mx-1 bg-line shrink-0" aria-hidden="true" />;
+const Rule = () => <span className="w-px h-[26px] mx-1.5 bg-line shrink-0" aria-hidden="true" />;
 
 const AppHeader = ({
   image,
@@ -131,9 +138,9 @@ const AppHeader = ({
   const { canUndo, canRedo } = useUndoHistory();
 
   return (
-    <header className="flex items-center gap-2 h-[52px] px-3 bg-panel-2 border-b border-line select-none shrink-0">
-      <span className="flex items-center gap-2 pl-1 pr-2 shrink-0 text-[16px] font-semibold text-fg">
-        <FloorTraceMark className="w-5 h-5 text-accent" />
+    <header className="flex items-center gap-2.5 h-[60px] px-4 bg-panel-2 border-b border-line select-none shrink-0">
+      <span className="flex items-center gap-2.5 pr-2.5 shrink-0 text-[19px] font-bold text-fg">
+        <FloorTraceMark className="w-[22px] h-[22px] text-accent" />
         <span>FloorTrace</span>
       </span>
 
@@ -152,21 +159,21 @@ const AppHeader = ({
               type="button"
               onClick={undoManager.undo}
               disabled={!canUndo}
-              className="icon-btn"
-              aria-label="Undo"
+              className="menu-trigger"
               title={`Undo (${MOD}+Z)`}
             >
               <Undo2 className="w-[18px] h-[18px]" aria-hidden="true" />
+              Undo
             </button>
             <button
               type="button"
               onClick={undoManager.redo}
               disabled={!canRedo}
-              className="icon-btn"
-              aria-label="Redo"
+              className="menu-trigger"
               title={`Redo (${MOD}+Shift+Z)`}
             >
               <Redo2 className="w-[18px] h-[18px]" aria-hidden="true" />
+              Redo
             </button>
             <Rule />
           </>
@@ -182,7 +189,7 @@ const AppHeader = ({
           Help
         </button>
 
-        <Menu id="main" label="Menu" icon={MenuIcon} caret={false} align="right" width="w-[300px]">
+        <Menu id="main" label="Menu" icon={MenuIcon} caret={false} align="right" width="w-[340px]">
           <MenuItem label="Open a floor plan…" keys={`${MOD}+O`} disabled={isProcessing} onSelect={onFileOpen} />
           <MenuItem label="Paste a floor plan" keys={`${MOD}+V`} disabled={isProcessing} onSelect={onPasteImage} />
 

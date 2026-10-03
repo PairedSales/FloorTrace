@@ -49,7 +49,7 @@ describe('WorkSection is optional', () => {
   it('is one folded line while the preference is off, with none of the working', () => {
     useWorkspaceStore.setState({ showWork: false });
     const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByRole('button', { name: /How the area was calculated/ }).getAttribute('aria-expanded'))
+    expect(view.getByRole('button', { name: /Added up the area/ }).getAttribute('aria-expanded'))
       .toBe('false');
     expect(view.queryByText('10.0 × 5.0')).toBeNull();
   });
@@ -59,7 +59,7 @@ describe('WorkSection is optional', () => {
   it('opens from its own heading, and remembers', () => {
     useWorkspaceStore.setState({ showWork: false });
     const view = render(<WorkSection unit="decimal" />);
-    fireEvent.click(view.getByRole('button', { name: /How the area was calculated/ }));
+    fireEvent.click(view.getByRole('button', { name: /Added up the area/ }));
     expect(useWorkspaceStore.getState().showWork).toBe(true);
     expect(view.getByText('10.0 × 5.0')).toBeTruthy();
   });
