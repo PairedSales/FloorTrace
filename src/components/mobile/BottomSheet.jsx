@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 /**
  * The mobile equivalent of the desktop's results panel.
  *
- * A phone has no room for a 360 px panel beside the plan, and hiding the plan
+ * A phone has no room for a 420 px panel beside the plan, and hiding the plan
  * behind a full-screen page to read a number off it is the wrong trade — the
  * outline and the area it produced have to be legible together, because
  * checking one against the other is the whole job. A sheet at 58 % leaves the

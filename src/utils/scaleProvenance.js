@@ -1,7 +1,7 @@
 // Where the project scale came from, in one sentence.
 //
 // A leaf module because three surfaces state it and they may not disagree: the
-// panel's Scale section, its calculation and the workfile exhibit. It used to
+// panel's scale step, its calculation and the workfile exhibit. It used to
 // live in `exhibit/model.js` under a comment claiming the panel shared it, and
 // the panel did not — it counted `state.rooms.length` instead, which
 // is every room the detector ever confirmed. So after the user picked one room

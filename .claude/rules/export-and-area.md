@@ -28,7 +28,7 @@ paths:
 
 ## Area working (`WorkSection.jsx`, `areaDerivation.js`, `areaDecomposition.js`)
 
-- Total GLA only, laid out like an appraisal workfile's calculation page: one line per rectangle or right triangle (`13.7 × 11.8 = 161.7`), summed per level. The panel's "How the area was calculated" section, folded by default; whether it is open is the saved `workspaceStore.showWork`, and nothing is derived while it is shut. It is the one place a scale is stated in pixels.
+- Total GLA only, laid out like an appraisal workfile's calculation page: one line per rectangle or right triangle (`13.7 × 11.8 = 161.7`), summed per level. It is the panel's last step, "Added up the area", folded by default behind "Show the sum"; whether it is open is the saved `workspaceStore.showWork`, and nothing is derived while it is shut. It is the one place a scale is stated in pixels.
 - `areaDecomposition.js` documents its algorithm in its header. The decisions not to undo: peel by the largest `min(width, height)` then by area (two comparisons, never a packed numeric key); rotate onto the outline's dominant direction only when enough of the perimeter agrees; snap only float noise (`SNAP_REL`), since a physical tolerance chains across staircases; emit a trapezoid's two wedges separately; compute products from unrounded lengths and apportion rounding by largest remainder so the column adds up exactly.
-- When no cut reproduces the shoelace area the result is `exact: false` and the section states the area without a breakdown. Refuse rather than mislead.
+- When no cut reproduces the shoelace area the result is `exact: false` and the step states the area without a breakdown. Refuse rather than mislead.
 - Areas are square feet internally. Convert factors for display units; never relabel them.

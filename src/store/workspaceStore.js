@@ -112,7 +112,7 @@ const useWorkspaceStore = create((set, get) => ({
   // `.floorplan` or be restored by an undo.
   panelOpen: true,
 
-  // Whether the panel's "How the area was calculated" section is open — the
+  // Whether the panel's last step, "Added up the area", is open — the
   // full chain from the scale's evidence through each outline's pieces to the
   // printed total.
   //
@@ -140,7 +140,7 @@ const useWorkspaceStore = create((set, get) => ({
   annotationSize: readAnnotationSize(),
 
   // Whether the room the scale was taken from is drawn on the plan — the green
-  // box. True while the panel's Scale section is open, which is where the box
+  // box. True while the panel's scale step is open, which is where the box
   // is explained and where its size is typed. At rest it is not drawn: it was
   // an unexplained green rectangle on someone's laundry room, and dragging it
   // — which is easy to do while trying to move the plan — re-sets the scale

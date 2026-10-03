@@ -12,7 +12,7 @@ import { resolveLineScale } from '../utils/detection/validate';
  * thing a pure function cannot do lives here.
  *
  * Nothing is announced. A line that disagrees with the rooms the app measured
- * is written into the calibration's `quality`, and the panel's Scale section —
+ * is written into the calibration's `quality`, and the panel's scale step —
  * open, because this tool opens it — says so directly over the length the user
  * has just typed, for as long as that scale is in force.
  */

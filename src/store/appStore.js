@@ -455,7 +455,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
         // area is rendered from it for as long as the plan is open, and "is
-        // this number right" must stay answerable — the panel's Scale section
+        // this number right" must stay answerable — the panel's scale step
         // reads it.
         quality,
       },
