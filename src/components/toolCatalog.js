@@ -88,7 +88,7 @@ export const TOOL_GROUPS = [
   {
     // Not a menu on the desktop. The scale is a number the area is worked out
     // from, not something drawn, so the ways to change it sit in the results
-    // panel's Scale section, beside the scale they change. The tool is listed
+    // panel's scale step, beside the scale they change. The tool is listed
     // here for its digit and for the phone's tool sheet.
     id: 'scale',
     title: 'Scale',

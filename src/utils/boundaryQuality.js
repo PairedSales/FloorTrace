@@ -197,7 +197,7 @@ const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 1
 // is what was observed — how many rooms agreed, and how far apart they were.
 const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
 
-// The two ways out of a doubtful scale, named as the panel's Scale section
+// The two ways out of a doubtful scale, named as the panel's scale step
 // names them. "Below", because a remedy is only ever read inside that section,
 // directly over the buttons it names.
 const PICK_A_ROOM = 'choose “Use a different room” below';

@@ -172,7 +172,7 @@ const MobileMenuSheet = ({
             onToggle={() => onAutoSnapChange(!autoSnapEnabled)}
           />
           <Toggle
-            label="How the area was calculated"
+            label="Show the sum behind the area"
             detail="The sums behind the living area, in the measurement sheet"
             checked={showWork}
             onToggle={() => setShowWork(!showWork)}

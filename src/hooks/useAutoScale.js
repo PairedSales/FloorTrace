@@ -80,7 +80,7 @@ export function useAutoScale() {
    * `keptByHand: {agrees}` — whether the rooms just measured bear it out. It is
    * the caller's to say, as the last line of the run: said from here it was
    * replaced a second later by the trace's own. Whether, and not by how much:
-   * the Scale section states the size of a disagreement, from the verdict
+   * the scale step states the size of a disagreement, from the verdict
    * stored with the scale, and a second figure worked out here from a
    * different set of rooms would not match it.
    */
@@ -152,7 +152,7 @@ export function useAutoScale() {
       return { ...decision, keptByHand: { agrees: gap <= 0.03 } };
     }
 
-    // A 'check' verdict is not announced here: the panel's Scale section says
+    // A 'check' verdict is not announced here: the panel's scale step says
     // it, and keeps saying it for as long as the scale is in force. A message
     // said it once and then left the doubt invisible.
     return decision;

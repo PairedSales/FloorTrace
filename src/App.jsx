@@ -998,7 +998,7 @@ function App() {
     });
     if (!resolved) return;
 
-    // Deliberately silent. The panel's Scale section carries this verdict for
+    // Deliberately silent. The panel's scale step carries this verdict for
     // as long as the scale is in force, which is where the question is
     // actually asked — a message said it once and then left the doubt invisible.
 
@@ -1533,7 +1533,7 @@ function App() {
     || !!currentMeasurementLine || !!currentCustomShape;
 
   // The room the scale was taken from — the green box — is on the plan only
-  // while it is the subject: the panel's Scale section is open, there is no
+  // while it is the subject: the panel's scale step is open, there is no
   // scale yet and the box is how one is set, or a room is being picked. At
   // rest it was an unexplained rectangle on one room of the house, and it is
   // draggable: moving it re-sets the scale every area is worked out from, which

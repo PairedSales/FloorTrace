@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react';
  * Two independent questions, deliberately not collapsed into one:
  *
  *  - `isMobile` is about **room**. Below this width the desktop shell cannot
- *    exist: the results panel is 360 px before the plan gets a pixel, and the
+ *    exist: the results panel is 420 px before the plan gets a pixel, and the
  *    action bar over the plan needs a strip worth reading.
  *  - `isTouch` is about **reach**. A 44 px target and a pinch gesture are right
  *    on a touchscreen laptop too, and wrong on a narrow mouse-driven window.
@@ -56,7 +56,7 @@ const useMedia = (query) => {
   const { subscribe, getSnapshot } = entry(query);
   // Server snapshot is `false` for both: the desktop shell is the one that
   // renders without JS deciding anything, so a mismatch corrects toward mobile
-  // rather than flashing a 360 px panel onto a phone.
+  // rather than flashing a 420 px panel onto a phone.
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 };
 

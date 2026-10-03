@@ -44,7 +44,7 @@ const isVisible = (trace) => trace?.visible !== false;
 
 /**
  * `kind` says which section an entry belongs to: `scale` and `rescale` are the
- * Scale section's, `double-counted` and `stale-void` are the Outline section's.
+ * scale step's, `double-counted` and `stale-void` are the outline step's.
  *
  * `needsRescale` is a scale this plan measured while it was parked and that
  * was held back rather than applied late. It is a reason to doubt the area
