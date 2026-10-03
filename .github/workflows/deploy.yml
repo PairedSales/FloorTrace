@@ -1,23 +1,9 @@
 name: Deploy to GitHub Pages
 
-# Two versions of the app are published side by side while the simplified one
-# is being worked on:
-#
-#   master      → /FloorTrace/        the full version
-#   simplified  → /FloorTrace/next/   the simplified version
-#
-# GitHub Pages takes one artifact per repository and its environment only
-# accepts deploys from `master`, so the site is always built and published by a
-# run on `master`: it builds itself, then checks `simplified` out beside it and
-# builds that under `next/`. A push to `simplified` runs the checks on its own
-# code and then starts that `master` run, rather than deploying anything itself.
-# When `simplified` is merged and the branch deleted, the `next/` steps skip
-# themselves and this goes back to publishing one site.
 on:
   push:
     branches:
       - master
-      - simplified
   # Run the checks on the PR too. Triggering on push-to-master alone made this
   # a deploy gate rather than a merge gate: a failing lint/test/benchmark
   # blocked the deploy but not the merge, so master could carry a regression
@@ -25,14 +11,12 @@ on:
   pull_request:
     branches:
       - master
-      - simplified
   workflow_dispatch:  # Allows manual trigger from Actions tab
 
 permissions:
   contents: read
   pages: write
   id-token: write
-  actions: write  # a push to `simplified` starts the publishing run on master
 
 # The deploy must stay serialised on "pages": GitHub Pages accepts one
 # deployment at a time, and two racing to publish is a site that ends up
@@ -50,11 +34,8 @@ permissions:
 # Cancelling in progress is right for a PR and wrong for a deploy, for the same
 # reason: a second push to a branch makes the first run's answer worthless,
 # while a second push to master still has to publish.
-#
-# A push to `simplified` publishes nothing itself, so it stays out of the
-# "pages" queue too — it would only be a third arrival evicting a real deploy.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || (github.ref == 'refs/heads/master' && 'pages' || format('branch-{0}', github.ref)) }}
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -106,38 +87,6 @@ jobs:
       - name: Check bundle shape
         run: npm run check:bundle
 
-      # The simplified version, built from its own branch into `dist/next/`.
-      # Its checks ran on its own push; here it is only built. Every step is
-      # allowed to fail: a broken preview must never stop the full version from
-      # publishing, and a branch that no longer exists is simply not built.
-      - name: Look for the simplified branch
-        id: next
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-        run: |
-          if git ls-remote --exit-code --heads origin simplified > /dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout the simplified version
-        if: steps.next.outputs.exists == 'true'
-        continue-on-error: true
-        uses: actions/checkout@v7
-        with:
-          ref: simplified
-          path: next-src
-
-      - name: Build the simplified version into next/
-        if: steps.next.outputs.exists == 'true'
-        continue-on-error: true
-        working-directory: next-src
-        env:
-          FT_BASE: /FloorTrace/next/
-        run: |
-          npm ci
-          npm run build
-          rm -rf ../dist/next
-          cp -r dist ../dist/next
-
       # Pages steps are for the real deploy only. On a pull_request the job
       # exists to run the checks above; configuring Pages from a PR would at
       # best waste a step and at worst publish unmerged code.
@@ -153,13 +102,6 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: './dist'
-
-      # The simplified branch has passed its checks: have master publish it.
-      - name: Publish through master
-        if: github.event_name == 'push' && github.ref == 'refs/heads/simplified'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run deploy.yml --ref master --repo "$GITHUB_REPOSITORY"
 
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
