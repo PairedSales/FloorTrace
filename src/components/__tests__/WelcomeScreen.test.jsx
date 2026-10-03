@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import WelcomeScreen from '../WelcomeScreen';
-import { WELCOME_KEY, markWelcomed } from '../../hooks/useWelcome';
 import { MEASURE_STEPS } from '../../utils/progressSteps';
 import { MOD, SNIP } from '../../utils/keySymbols';
 
@@ -11,13 +10,9 @@ import { MOD, SNIP } from '../../utils/keySymbols';
  * get right is the first thirty seconds: say what the app is for, name every
  * way in, and be honest that "automatic" is not "always right".
  *
- * The introduction — the demo and the four steps — is a *first-run* thing. A
- * user who has already seen it is closing a plan to open another one, and a
- * ten-second animation standing between them and their next drawing is noise.
- *
- * The flag is read in a `useState` initialiser, so it is per-mount: the screen
- * unmounts the moment an image exists and remounts when one is closed, which
- * is exactly when it needs to be re-read.
+ * The introduction — the demo and the four steps — is there every time the
+ * start screen is. It was once a first-run thing; the owner wants it kept. The
+ * ways in lead the page, so it never stands between a user and the button.
  */
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
@@ -30,7 +25,7 @@ const props = (over = {}) => ({
 });
 
 describe('WelcomeScreen', () => {
-  it('shows the demo and the job in four plain steps on a first run', () => {
+  it('shows the demo and the job in four plain steps', () => {
     const view = render(<WelcomeScreen {...props()} />);
 
     expect(view.container.querySelector('.ft-demo')).toBeTruthy();
@@ -64,36 +59,27 @@ describe('WelcomeScreen', () => {
     expect(choose.compareDocumentPosition(demo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('drops the introduction once the flag is set, and keeps the way in and the caveat', () => {
-    localStorage.setItem(WELCOME_KEY, '1');
+  // It used to stand down once a plan had been opened, behind a flag in
+  // storage. A browser that still carries that flag must see it all the same.
+  it('keeps the introduction on every visit, not only the first', () => {
+    localStorage.setItem('floortrace:welcomed', '1');
     const view = render(<WelcomeScreen {...props()} />);
 
-    expect(view.container.querySelector('.ft-demo')).toBeNull();
-    expect(view.queryByText('How FloorTrace measures it')).toBeNull();
-    expect(view.getByRole('heading', { name: 'Open a floor plan' })).toBeTruthy();
+    expect(view.container.querySelector('.ft-demo')).toBeTruthy();
+    expect(view.getByText('How FloorTrace measures it')).toBeTruthy();
+    expect(view.getByRole('heading', { name: 'Measure a floor plan' })).toBeTruthy();
     expect(view.getByText('Drop a file here')).toBeTruthy();
     expect(view.getByRole('button', { name: /choose a file/i })).toBeTruthy();
     expect(view.getByText(/paint roughly over the walls/i)).toBeTruthy();
   });
 
-  it('markWelcomed is what flips it, and survives a re-mount', () => {
-    const first = render(<WelcomeScreen {...props()} />);
-    expect(first.container.querySelector('.ft-demo')).toBeTruthy();
-    cleanup();
-
-    markWelcomed();
-
-    const second = render(<WelcomeScreen {...props()} />);
-    expect(second.container.querySelector('.ft-demo')).toBeNull();
-  });
-
-  // A second plan's empty tab is shown to someone who has already met the app,
-  // and is the one place that says what adding a plan is for.
-  it('says what adding a plan is for on a second plan’s empty tab, without the introduction', () => {
+  // A second plan's empty tab is the one place that says what adding a plan is
+  // for. It is the start screen, so the introduction is there too.
+  it('says what adding a plan is for on a second plan’s empty tab', () => {
     const view = render(<WelcomeScreen {...props({ adding: true })} />);
     expect(view.getByRole('heading', { name: 'Add another plan' })).toBeTruthy();
     expect(view.getByText(/measures each plan and adds them up/)).toBeTruthy();
-    expect(view.container.querySelector('.ft-demo')).toBeNull();
+    expect(view.container.querySelector('.ft-demo')).toBeTruthy();
     // The sample would be added to the property's total.
     expect(view.queryByRole('button', { name: /try the sample plan/i })).toBeNull();
   });

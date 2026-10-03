@@ -4,17 +4,18 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 import { useTheme } from '../useTheme';
 
 /**
- * The theme is light until the user says otherwise, and what they say is kept.
+ * The theme is light until the user turns night mode on, and that is kept.
  *
  * It used to follow the computer, so a Windows set to dark handed the app's
- * dark shell to someone who had never asked for it here.
+ * dark shell to someone who had never asked for it here. Following the
+ * computer is no longer an option at all.
  */
 const stamped = () => document.documentElement.getAttribute('data-theme');
+const saved = () => localStorage.getItem('floortrace:theme');
 
-// A computer set to dark, which is the case the default must not follow.
-const osPrefersDark = () => {
+const osPrefers = (scheme) => {
   vi.stubGlobal('matchMedia', (query) => ({
-    matches: query.includes('dark'),
+    matches: query.includes(scheme),
     addEventListener: () => {},
     removeEventListener: () => {},
   }));
@@ -23,7 +24,8 @@ const osPrefersDark = () => {
 beforeEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
-  osPrefersDark();
+  // A computer set to dark, which is the case the default must not follow.
+  osPrefers('dark');
 });
 afterEach(() => {
   cleanup();
@@ -37,9 +39,9 @@ describe('useTheme', () => {
     expect(stamped()).toBe('light');
   });
 
-  it('keeps dark once the user has chosen it', () => {
+  it('keeps night mode once the user has turned it on', () => {
     const first = renderHook(() => useTheme());
-    act(() => first.result.current.setTheme('dark'));
+    act(() => first.result.current.toggleTheme());
     expect(stamped()).toBe('dark');
     first.unmount();
 
@@ -50,23 +52,34 @@ describe('useTheme', () => {
     expect(stamped()).toBe('dark');
   });
 
-  it('still follows the computer for someone who asks it to', () => {
+  it('turns night mode off again', () => {
     const { result } = renderHook(() => useTheme());
-    act(() => result.current.setTheme('system'));
-    expect(stamped()).toBe('dark');
+    act(() => result.current.toggleTheme());
+    act(() => result.current.toggleTheme());
+    expect(result.current.theme).toBe('light');
+    expect(saved()).toBe('light');
   });
 
-  it('falls back to light on a saved value it does not know', () => {
+  // "Match my computer" was a third choice. Someone who had picked it keeps
+  // what they were looking at, written down as their own choice.
+  it('settles a saved "match my computer" on what that computer shows, once', () => {
+    localStorage.setItem('floortrace:theme', 'system');
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.theme).toBe('dark');
+    expect(saved()).toBe('dark');
+    cleanup();
+
+    localStorage.setItem('floortrace:theme', 'system');
+    osPrefers('light');
+    expect(renderHook(() => useTheme()).result.current.theme).toBe('light');
+    expect(saved()).toBe('light');
+  });
+
+  it('will not be set to anything but light or dark', () => {
     localStorage.setItem('floortrace:theme', 'sepia');
     const { result } = renderHook(() => useTheme());
     expect(result.current.theme).toBe('light');
-  });
-
-  it('cycles from the default: light, dark, then the computer', () => {
-    const { result } = renderHook(() => useTheme());
-    act(() => result.current.cycleTheme());
-    expect(result.current.theme).toBe('dark');
-    act(() => result.current.cycleTheme());
-    expect(result.current.theme).toBe('system');
+    act(() => result.current.setTheme('system'));
+    expect(result.current.theme).toBe('light');
   });
 });

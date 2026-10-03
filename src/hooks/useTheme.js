@@ -1,75 +1,73 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const THEME_KEY = 'floortrace:theme';
-// In the order the phone's theme row cycles through them: from the default.
-export const THEME_MODES = ['light', 'dark', 'system'];
+const THEMES = ['light', 'dark'];
 const DEFAULT_THEME = 'light';
 
-// The phone menu's theme row names the current mode, so the wording lives
-// with the modes rather than in the component that happens to render it.
-export const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
-
-const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
-
 // Stamped on <html>, which is what index.css keys the dark token block off.
-// Only ever 'light' or 'dark' — 'system' is resolved here rather than left for
-// CSS, so a token can never be defined in a media block the toggle cannot beat.
-const apply = (mode) => {
-  const resolved = mode === 'system' ? (prefersDark() ? 'dark' : 'light') : mode;
-  document.documentElement.setAttribute('data-theme', resolved);
-  return resolved;
+const apply = (theme) => {
+  document.documentElement.setAttribute('data-theme', theme);
+};
+
+const save = (theme) => {
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // persistence is best-effort
+  }
+};
+
+// What this browser was last set to. There used to be a third answer, "match
+// my computer"; someone who had picked it keeps what they were looking at —
+// whichever way their computer is set today — written down as their choice, so
+// the option going away does not change their screen.
+const stored = () => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (THEMES.includes(saved)) return saved;
+    if (saved === 'system') {
+      const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      save(theme);
+      return theme;
+    }
+  } catch {
+    // unreadable storage is a first visit
+  }
+  return DEFAULT_THEME;
 };
 
 /**
  * useTheme
  *
- * Light/dark/system, persisted. Light until the user says otherwise: the plan
- * is white paper in every theme, and the people this app is for read dark
- * text on a light page more easily than the reverse. It used to follow the
- * computer, which handed a dark shell to anyone whose Windows happened to be
- * set dark, whether or not they would have chosen it here. Dark, or following
- * the computer, is a choice made in Settings, and a choice made there is kept.
+ * Light, or night mode. Light until the user says otherwise: the plan is white
+ * paper in every theme, and the people this app is for read dark text on a
+ * light page more easily than the reverse. Night mode is one switch in
+ * Settings, and it is kept.
  *
- * @returns {{ theme: string, resolved: 'light'|'dark', cycleTheme: () => void,
- *             setTheme: (mode: string) => void }}
+ * It does not follow the computer, and there is no option to. It did once,
+ * which handed the dark shell to anyone whose Windows happened to be set dark,
+ * whether or not they would have chosen it here; and as a third choice beside
+ * Light and Dark it was a question most people could not answer.
+ *
+ * @returns {{ theme: 'light'|'dark', setTheme: (theme: string) => void,
+ *             toggleTheme: () => void }}
  */
 export function useTheme() {
-  const [theme, setThemeState] = useState(() => {
-    try {
-      const saved = localStorage.getItem(THEME_KEY);
-      return THEME_MODES.includes(saved) ? saved : DEFAULT_THEME;
-    } catch {
-      return DEFAULT_THEME;
-    }
-  });
-  const [resolved, setResolved] = useState(() => (
-    typeof document === 'undefined' ? DEFAULT_THEME : apply(theme)
+  const [theme, setThemeState] = useState(() => (
+    typeof document === 'undefined' ? DEFAULT_THEME : stored()
   ));
 
-  useEffect(() => {
-    setResolved(apply(theme));
-    if (theme !== 'system') return;
-    // Only 'system' listens: a pinned choice must not move when the OS does.
-    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!mq) return;
-    const onChange = () => setResolved(apply('system'));
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, [theme]);
+  useEffect(() => { apply(theme); }, [theme]);
 
-  const setTheme = useCallback((mode) => {
-    if (!THEME_MODES.includes(mode)) return;
-    setThemeState(mode);
-    try {
-      localStorage.setItem(THEME_KEY, mode);
-    } catch {
-      // persistence is best-effort
-    }
+  const setTheme = useCallback((next) => {
+    if (!THEMES.includes(next)) return;
+    setThemeState(next);
+    save(next);
   }, []);
 
-  const cycleTheme = useCallback(() => {
-    setTheme(THEME_MODES[(THEME_MODES.indexOf(theme) + 1) % THEME_MODES.length]);
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
   }, [theme, setTheme]);
 
-  return { theme, resolved, cycleTheme, setTheme };
+  return { theme, setTheme, toggleTheme };
 }

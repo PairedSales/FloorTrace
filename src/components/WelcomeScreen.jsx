@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, FolderOpen, Scissors } from 'lucide-react';
-import { useWelcome } from '../hooks/useWelcome';
 import { MOD, SNIP } from '../utils/keySymbols';
 import { STEP_TITLES } from '../utils/progressSteps';
 
@@ -23,7 +22,7 @@ import { STEP_TITLES } from '../utils/progressSteps';
  *
  * ## The four steps, shown and said
  *
- * On a first run the screen also shows the job instead of describing it: a
+ * The screen also shows the job instead of describing it: a
  * small floor plan draws itself, its printed room sizes are read one by one,
  * the scale is set from them, the outline sweeps round, and the area lands.
  * Beside it are the same four steps in words — the ones the results panel will
@@ -33,11 +32,14 @@ import { STEP_TITLES } from '../utils/progressSteps';
  * see it. Steps on the left and the plan on the right, as they will be once a
  * plan is open.
  *
- * Every run after that the introduction stands down; it is charming once and
- * tiresome the fifth time a plan is closed.
+ * It is there every time this screen is. It used to be a first-run thing that
+ * stood down once a plan had been opened, on the theory that it is charming
+ * once and tiresome the fifth time; the owner likes it and wants it kept
+ * (October 2026). The ways in lead the page, so it never stands between a
+ * returning user and the button.
  *
- * The same screen is what a second plan's empty tab shows (`adding`), where it
- * says what adding a plan is for.
+ * The same screen is what a second plan's empty tab shows (`adding`), where
+ * the title says what adding a plan is for.
  *
  * The demo is inline SVG and CSS keyframes, deliberately. This module is
  * reached by the eager shell through `Canvas.jsx`, and anything it imports
@@ -280,8 +282,7 @@ const PipelineDemo = () => (
   </svg>
 );
 
-// The first run's introduction: the four steps, and the small plan that acts
-// them out. One card, steps on the left and the plan on the right, as the
+// The introduction: the four steps, and the small plan that acts them out. One card, steps on the left and the plan on the right, as the
 // results and the plan will be.
 const Introduction = () => (
   <section
@@ -443,18 +444,10 @@ const Caveat = () => (
 );
 
 const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample, adding = false }) => {
-  const firstRun = useWelcome();
-  // The demo and the steps introduce the app; a second plan's empty tab is
-  // shown to someone who has already met it.
-  const introduce = firstRun && !adding;
-
-  const title = adding ? 'Add another plan'
-    : introduce ? 'Measure a floor plan' : 'Open a floor plan';
+  const title = adding ? 'Add another plan' : 'Measure a floor plan';
   const lead = adding
     ? 'Another level, or another sheet of the same property. FloorTrace measures each plan and adds them up.'
-    : introduce
-      ? 'Open a floor plan sketch and FloorTrace works out its gross living area for you.'
-      : 'FloorTrace works out its gross living area for you.';
+    : 'Open a floor plan sketch and FloorTrace works out its gross living area for you.';
 
   const heading = (
     <div className="text-center">
@@ -467,10 +460,10 @@ const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample, adding = false }) =>
   const wayIn = (
     <WayIn isTouch={isTouch} onFileOpen={onFileOpen} onTryExample={adding ? undefined : onTryExample} />
   );
-  // On a first run at a desk the ways in lead the page, above its name: the
-  // introduction below is tall, and it must never stand between a user and the
-  // button. Everywhere else the screen is short, and reads title first.
-  const waysFirst = introduce && !isTouch;
+  // At a desk the ways in lead the page, above its name: the introduction
+  // below is tall, and it must never stand between a user and the button. On
+  // touch the way in is the bar at the bottom, so the page reads title first.
+  const waysFirst = !isTouch;
 
   return (
     // Scrolls rather than clips: on a short window the introduction runs past
@@ -482,7 +475,7 @@ const WelcomeScreen = ({ isTouch, onFileOpen, onTryExample, adding = false }) =>
       <div className="min-h-full flex items-center justify-center px-6 py-7 lg:px-10">
         <div className="flex w-full max-w-[65rem] flex-col gap-[18px]">
           {waysFirst ? <>{wayIn}{heading}</> : <>{heading}{wayIn}</>}
-          {introduce && <Introduction />}
+          <Introduction />
           <Caveat />
         </div>
       </div>

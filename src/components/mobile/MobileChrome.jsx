@@ -85,7 +85,7 @@ const MobileChrome = ({
   enhancedOcr,
   onEnhancedOcrChange,
   theme,
-  onCycleTheme,
+  onToggleTheme,
 }) => {
   const [sheet, setSheet] = useState(null); // 'menu' | 'tools' | 'panel' | 'plans'
 
@@ -281,7 +281,7 @@ const MobileChrome = ({
         enhancedOcr={enhancedOcr}
         onEnhancedOcrChange={onEnhancedOcrChange}
         theme={theme}
-        onCycleTheme={onCycleTheme}
+        onToggleTheme={onToggleTheme}
         onHelpOpen={onHelpOpen}
       />
 

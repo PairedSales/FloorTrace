@@ -1,13 +1,11 @@
 import {
   ArrowUpRight, Camera, Check, Copy, FileJson, FolderOpen, HelpCircle, Layers, Maximize,
-  Moon, Brush, Route, ScanSearch, ScanText, Share, Waypoints, Sun, Trash2, MonitorSmartphone,
+  Brush, Route, ScanSearch, ScanText, Share, Waypoints, Trash2,
 } from 'lucide-react';
 import BottomSheet from './BottomSheet';
 import { openTracingTutorial } from '../../utils/tracingTutorial';
 import useWorkspaceStore, { UNIT_PREFERENCES, UNIT_PREFERENCE_LABEL } from '../../store/workspaceStore';
 
-const THEME_ICON = { system: MonitorSmartphone, light: Sun, dark: Moon };
-const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' };
 
 const Section = ({ title, children }) => (
   <>
@@ -63,9 +61,8 @@ const MobileMenuSheet = ({
   onFitToWindow, showSideLengths, onShowSideLengthsChange,
   autoSnapEnabled, onAutoSnapChange, onUnitChange,
   saveOnExit, onSaveOnExitChange, enhancedOcr, onEnhancedOcrChange,
-  theme, onCycleTheme, onHelpOpen,
+  theme, onToggleTheme, onHelpOpen,
 }) => {
-  const ThemeIcon = THEME_ICON[theme] ?? MonitorSmartphone;
   // Window state, read where it is used rather than threaded through
   // MobileChrome — the same two fields the panel and Settings read.
   const showWork = useWorkspaceStore((s) => s.showWork);
@@ -188,11 +185,11 @@ const MobileMenuSheet = ({
               onToggle={() => (id === 'auto' ? setUnitPreference(id) : onUnitChange(id))}
             />
           ))}
-          <Row
-            icon={ThemeIcon}
-            label="Theme"
-            detail={THEME_LABEL[theme]}
-            onSelect={onCycleTheme}
+          <Toggle
+            label="Night mode"
+            detail="Dark colours around the plan"
+            checked={theme === 'dark'}
+            onToggle={onToggleTheme}
           />
           {/* The same page desktop Help links to; a touch list has room to
               say what it is. */}
