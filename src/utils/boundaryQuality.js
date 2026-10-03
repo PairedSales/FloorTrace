@@ -197,11 +197,10 @@ const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 1
 // is what was observed — how many rooms agreed, and how far apart they were.
 const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
 
-// The two ways out of a doubtful scale, named as the panel's scale step
-// names them. "Below", because a remedy is only ever read inside that section,
-// directly over the buttons it names.
+// The way out of a doubtful scale, named as the panel's scale step names it.
+// "Below", because a remedy is only ever read inside that step, directly over
+// the button it names.
 const PICK_A_ROOM = 'choose “Use a different room” below';
-const BACK_TO_AUTOMATIC = 'Choose “Go back to the automatic scale” below to return to the measured average.';
 
 const autoScaleSummary = (quality) => {
   const rooms = roomsPhrase(quality.roomCount ?? 0);
@@ -272,7 +271,7 @@ const lineScaleSummary = (quality) => {
       detail: `The line you drew implies a scale about ${pct}% from the rooms the app `
         + `measured itself, which moves every area by roughly ${areaPct}%. Your line is `
         + 'in use.',
-      remedy: BACK_TO_AUTOMATIC,
+      remedy: `Check the length you typed, or ${PICK_A_ROOM} to set the scale from a room instead.`,
     };
   }
 
@@ -338,7 +337,7 @@ export const scaleQualitySummary = (quality) => {
       short: `Scale from this room, areas ~${areaPct}% different`,
       detail: `This room implies a scale about ${pct}% from the ${rooms} the app measured `
         + `itself, which moves every area by roughly ${areaPct}%. Your choice is in use.`,
-      remedy: BACK_TO_AUTOMATIC,
+      remedy: `Check the green box against its room, or ${PICK_A_ROOM} and pick another.`,
     };
   }
 

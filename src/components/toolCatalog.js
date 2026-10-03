@@ -94,7 +94,7 @@ export const TOOL_GROUPS = [
     title: 'Scale',
     icon: Scaling,
     tools: [
-      { id: 'scale',   digit: '4',  icon: Scaling,            short: 'Scale', label: 'Measure a length you know',
+      { id: 'scale',   digit: '4',  icon: Scaling,            short: 'Scale', label: 'Set scale from a known length',
         hint: 'Click both ends of something whose length you know, then type its length' },
     ],
   },
