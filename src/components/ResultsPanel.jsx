@@ -782,29 +782,15 @@ const ResultsPanel = ({
               )
             ) : (
               <>
-                {/* The ways to change an outline that exists, as one menu that
-                    opens beside the panel, over the plan they act on. "Add
-                    another outline" is left out of it: it has its own line
-                    under the list, where what it is for can be said. */}
-                {onSelectTool && OUTLINE_GROUP && (
-                  <div className="mb-3.5">
-                    <TaskMenu
-                      group={OUTLINE_GROUP}
-                      menuGroup="panel"
-                      label="Change the outline"
-                      rowState={toolRowState}
-                      onSelect={onSelectTool}
-                      omit={['addOutline']}
-                      placement="side"
-                      triggerClassName="btn btn-secondary w-full justify-start"
-                    />
-                  </div>
-                )}
-
                 {overlapNotes.map((issue, i) => (
-                  <CheckNote key={`overlap-${i}`} issue={issue} className="mb-3.5" />
+                  <CheckNote key={`overlap-${i}`} issue={issue} className="mb-3" />
                 ))}
-                <div className="-ml-3 -mr-7 border-y border-line">
+
+                {/* The outlines as one card: a row each, and under the last of
+                    them the one setting they all share. A card rather than a
+                    list bled to the panel's edge, so everything in the step —
+                    the rows, the setting, the two buttons — has one width. */}
+                <div className="overflow-hidden rounded-xl border border-line bg-panel-2">
                   {perimeterTraces.map((trace) => {
                     const isActive = trace.id === activeTraceId;
                     const drawn = trace.vertices && trace.vertices.length >= 3;
@@ -817,7 +803,7 @@ const ResultsPanel = ({
                       <div
                         key={trace.id}
                         onClick={() => switchPerimeterTrace(trace.id)}
-                        className={`pl-3 pr-5 py-3 border-t border-line first:border-t-0 cursor-pointer transition-colors
+                        className={`pl-3.5 pr-2 py-3 border-t border-line first:border-t-0 cursor-pointer transition-colors
                           ${isActive && perimeterTraces.length > 1
                             ? 'bg-accent/10 shadow-[inset_3px_0_0_rgb(var(--accent))]'
                             : 'hover:bg-sunken/60'}`}
@@ -877,9 +863,10 @@ const ResultsPanel = ({
 
                         {/* What this outline *is*. How well it follows the walls
                             is on the plan, to be looked at, and is not said
-                            here. */}
-                        <div className="flex flex-wrap items-center gap-2 mt-2 pl-5 text-[15.5px] text-fg-2">
-                          <label htmlFor={`type-${trace.id}`}>Counts as</label>
+                            here. The choice runs the width of the row, so it
+                            lines up with the card's other controls. */}
+                        <div className="flex items-center gap-2.5 mt-2 pr-1.5 text-[15.5px] text-fg-2">
+                          <label htmlFor={`type-${trace.id}`} className="shrink-0">Counts as</label>
                           <select
                             id={`type-${trace.id}`}
                             value={normalizeTraceType(trace.type)}
@@ -891,7 +878,7 @@ const ResultsPanel = ({
                             title={trace.typeSource === 'detected' && trace.typeEvidence?.text
                               ? `Read from "${trace.typeEvidence.text.trim()}" on the plan`
                               : 'What this outline counts as in the total'}
-                            className="h-10 px-2 rounded-lg border border-line-strong bg-panel-2
+                            className="flex-1 min-w-0 h-10 px-2 rounded-lg border border-line-strong bg-panel-2
                                        text-[15.5px] text-fg cursor-pointer hover:border-accent
                                        focus:outline-none focus:ring-2 focus:ring-accent"
                           >
@@ -905,19 +892,19 @@ const ResultsPanel = ({
                             out of the living area — so where it read that from
                             is on the page, not in a tooltip. */}
                         {trace.typeSource === 'detected' && trace.typeEvidence?.text && (
-                          <p className="mt-1.5 pl-5 text-[15px] leading-snug text-fg-3">
+                          <p className="mt-1.5 pr-1.5 text-[15px] leading-snug text-fg-3">
                             Set from “{trace.typeEvidence.text.trim()}” on the plan.
                           </p>
                         )}
 
                         {!drawn && (
-                          <p className="mt-2 pl-5 text-[15.5px] leading-snug text-fg-3">
+                          <p className="mt-2 pr-1.5 text-[15.5px] leading-snug text-fg-3">
                             Not drawn yet — click its corners on the plan, or paint over its walls.
                           </p>
                         )}
 
                         {staleByTrace.has(trace.id) && (
-                          <p className="mt-2 pl-5 text-[15.5px] leading-snug text-warn">
+                          <p className="mt-2 pr-1.5 text-[15.5px] leading-snug text-warn">
                             <span className="font-semibold">{staleByTrace.get(trace.id).label}.</span>
                             {' '}{staleByTrace.get(trace.id).detail}
                           </p>
@@ -925,34 +912,20 @@ const ResultsPanel = ({
                       </div>
                     );
                   })}
-                </div>
 
-                {canAddOutline && (
-                  <div className="mt-3.5">
-                    <button type="button" onClick={() => onAddOutline()} className="link-btn">
-                      <Plus className="w-4 h-4" aria-hidden="true" />
-                      Add another outline
-                    </button>
-                    <p className="mt-1 text-[15.5px] leading-snug text-fg-3">
-                      For a garage, a porch or another level. Click its corners on the plan,
-                      then choose what it counts as.
-                    </p>
-                  </div>
-                )}
-
-                {/* One setting for every outline, not just the selected one —
-                    two outlines measured to different wall faces is an area
-                    nobody can reconcile. */}
-                {measured && canSwitchWallFace && (
-                  <div className="mt-4 pt-4 border-t border-line">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[15.5px] text-fg-2">Measure to the</span>
-                      <div className="seg" role="group" aria-label="Measure every outline to">
+                  {/* One setting for every outline, not just the selected one —
+                      two outlines measured to different wall faces is an area
+                      nobody can reconcile. So it is the card's last row, under
+                      all of them, as a two-way switch the width of the card. */}
+                  {measured && canSwitchWallFace && (
+                    <div className="px-3.5 py-3 border-t border-line bg-panel">
+                      <p className="text-[15.5px] text-fg-2">Measured to the</p>
+                      <div className="seg mt-1.5 flex w-full" role="group" aria-label="Measure every outline to">
                         <button
                           type="button"
                           onClick={() => onInteriorWallToggle(false)}
                           aria-pressed={!useInteriorWalls}
-                          className="seg-option"
+                          className="seg-option flex-[3] whitespace-nowrap"
                         >
                           Outside of walls
                         </button>
@@ -960,16 +933,53 @@ const ResultsPanel = ({
                           type="button"
                           onClick={() => onInteriorWallToggle(true)}
                           aria-pressed={!!useInteriorWalls}
-                          className="seg-option"
+                          className="seg-option flex-[2] whitespace-nowrap"
                         >
                           Inside
                         </button>
                       </div>
+                      <p className="mt-1.5 text-[15px] leading-snug text-fg-3">
+                        Living area is normally measured to the outside of the walls.
+                      </p>
                     </div>
-                    <p className="mt-2 text-[15.5px] leading-snug text-fg-3">
-                      Living area is normally measured to the outside of the walls.
-                    </p>
+                  )}
+                </div>
+
+                {/* What can be done about the outlines, last: two buttons of one
+                    size. "Change the outline" is the menu of ways to change one
+                    that exists, opening beside the panel over the plan they act
+                    on; "Add another outline" is left out of that menu because
+                    it is the button under it. */}
+                {((onSelectTool && OUTLINE_GROUP) || canAddOutline) && (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {onSelectTool && OUTLINE_GROUP && (
+                      <TaskMenu
+                        group={OUTLINE_GROUP}
+                        menuGroup="panel"
+                        label="Change the outline"
+                        rowState={toolRowState}
+                        onSelect={onSelectTool}
+                        omit={['addOutline']}
+                        placement="side"
+                        triggerClassName="btn btn-secondary w-full justify-start [&>span]:flex-1 [&>span]:text-left"
+                      />
+                    )}
+                    {canAddOutline && (
+                      <button
+                        type="button"
+                        onClick={() => onAddOutline()}
+                        className="btn btn-secondary w-full justify-start"
+                      >
+                        <Plus className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
+                        Add another outline
+                      </button>
+                    )}
                   </div>
+                )}
+                {canAddOutline && (
+                  <p className="mt-2 text-[15px] leading-snug text-fg-3">
+                    Add one for a garage, a porch or another level, then choose what it counts as.
+                  </p>
                 )}
               </>
             )}
