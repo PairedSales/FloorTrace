@@ -1398,7 +1398,7 @@ function App() {
 
   // ── Shell wiring ──────────────────────────────────────────────────────────
   usePlanAreaIndex();
-  const { theme, cycleTheme, setTheme } = useTheme();
+  const { theme, toggleTheme, setTheme } = useTheme();
   const showSettings = useWorkspaceStore((s) => s.showSettings);
   const scaleRoomShown = useWorkspaceStore((s) => s.scaleRoomShown);
   const panelOpen = useWorkspaceStore((s) => s.panelOpen);
@@ -1688,7 +1688,7 @@ function App() {
           enhancedOcr={enhancedOcr}
           onEnhancedOcrChange={handleEnhancedOcrChange}
           theme={theme}
-          onCycleTheme={cycleTheme}
+          onToggleTheme={toggleTheme}
         >
           {canvasElement}
         </MobileChrome>

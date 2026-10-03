@@ -41,8 +41,8 @@ const sheet = (props = {}) => render(
     onSaveOnExitChange={noop}
     enhancedOcr={false}
     onEnhancedOcrChange={noop}
-    theme="system"
-    onCycleTheme={noop}
+    theme="light"
+    onToggleTheme={noop}
     onHelpOpen={noop}
     {...props}
   />,

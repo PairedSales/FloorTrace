@@ -1,7 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useIsTouch } from '../hooks/useViewport';
-import { markWelcomed } from '../hooks/useWelcome';
 import WelcomeScreen from './WelcomeScreen';
 
 // The Konva stage and everything under it load on demand. `manualChunks`
@@ -42,13 +41,6 @@ const Canvas = React.memo(forwardRef((props, ref) => {
     const handle = idle(() => { import('./CanvasStage').catch(() => {}); }, { timeout: 4000 });
     return () => cancel(handle);
   }, []);
-
-  // A plan has been opened, so the first-run introduction has done its job.
-  // Marked here rather than on the button, because a drop, a paste and a
-  // restored draft are all first runs that never touch it.
-  useEffect(() => {
-    if (image) markWelcomed();
-  }, [image]);
 
   // The paper is white in every theme; the start screen is not paper. Only a
   // plan (or one on its way) gets the paper and, under the dark theme, the

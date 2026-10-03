@@ -8,13 +8,13 @@ import { shortcutsBlocked } from '../../utils/keyboardGuard';
 /**
  * The workspace's preferences, each with a sentence. The cases are the ones
  * where a setting could land in the wrong place: a unit that should be pinned
- * and is not, a theme that cycles instead of being chosen, and a dialog that
+ * and is not, night mode that is not one plain switch, and a dialog that
  * lets the keyboard reach the plan behind it.
  */
 const props = (over = {}) => ({
   onClose: () => {},
   onUnitChange: () => {},
-  theme: 'system',
+  theme: 'light',
   onThemeChange: () => {},
   saveOnExit: true,
   onSaveOnExitChange: () => {},
@@ -43,11 +43,21 @@ describe('SettingsDialog', () => {
     expect(useWorkspaceStore.getState().unitPreference).toBe('auto');
   });
 
-  it('chooses a theme rather than cycling one', () => {
+  it('offers night mode as one switch, and nothing about matching the computer', () => {
     const onThemeChange = vi.fn();
-    const view = render(<SettingsDialog {...props({ onThemeChange })} />);
-    fireEvent.click(view.getByLabelText('Dark'));
-    expect(onThemeChange).toHaveBeenCalledWith('dark');
+    let view = render(<SettingsDialog {...props({ onThemeChange })} />);
+    const night = view.getByLabelText(/Night mode/);
+    expect(night.checked).toBe(false);
+    fireEvent.click(night);
+    expect(onThemeChange).toHaveBeenLastCalledWith('dark');
+    expect(view.queryByText(/match my computer/i)).toBeNull();
+    expect(view.queryByLabelText('Light')).toBeNull();
+    cleanup();
+
+    view = render(<SettingsDialog {...props({ theme: 'dark', onThemeChange })} />);
+    expect(view.getByLabelText(/Night mode/).checked).toBe(true);
+    fireEvent.click(view.getByLabelText(/Night mode/));
+    expect(onThemeChange).toHaveBeenLastCalledWith('light');
   });
 
   it('says what the slow reader costs before it is switched on', () => {

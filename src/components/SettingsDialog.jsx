@@ -23,12 +23,6 @@ const UNITS = [
   { id: 'metric', label: 'Meters', hint: 'For example 3.81 m' },
 ];
 
-// Light leads: it is what the app wears until one of the others is chosen.
-const THEMES = [
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
-  { id: 'system', label: 'Match my computer' },
-];
 
 const Group = ({ title, children }) => (
   <fieldset className="py-5 border-t border-line-soft first:border-t-0 first:pt-0 last:pb-0">
@@ -100,17 +94,16 @@ const SettingsDialog = ({
         ))}
       </Group>
 
+      {/* One switch, not a choice of three: the app is light, and this is
+          the way to make it dark. */}
       <Group title="Appearance">
-        {THEMES.map((t) => (
-          <Choice
-            key={t.id}
-            type="radio"
-            name="theme"
-            checked={theme === t.id}
-            onChange={() => onThemeChange(t.id)}
-            label={t.label}
-          />
-        ))}
+        <Choice
+          type="checkbox"
+          checked={theme === 'dark'}
+          onChange={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+          label="Night mode"
+          hint="Dark colours around the plan. The plan itself stays on white paper."
+        />
       </Group>
 
       <Group title="Saving and reading plans">
