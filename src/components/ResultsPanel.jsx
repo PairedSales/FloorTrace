@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
   ScanSearch, Ruler, MousePointerClick, RotateCcw,
@@ -230,7 +230,6 @@ const ResultsPanel = ({
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
-  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
   const switchPerimeterTrace = useAppStore((s) => s.switchPerimeterTrace);
   const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
@@ -397,19 +396,9 @@ const ResultsPanel = ({
   const canAddOutline = !!onAddOutline && traced.length > 0 && perimeterTraces.length < MAX_TRACES;
   const outlineSummary = traced.length === 0 ? null : outlinesInALine(perimeterTraces);
 
-  // ── which steps are open ──
-  // A step opens by itself when it holds the next thing to do, and stays
-  // however it was last set by hand.
-  // The scale is not one of them: it is always on show (see its step below).
-  const autoOpen = {
-    outline: traced.length === 0 || perimeterTraces.length > 1 || outlineNeedsLook,
-  };
-  const [byHand, setByHand] = useState({});
-  const isOpen = (key) => byHand[key] ?? autoOpen[key];
-  const toggle = (key) => setByHand((prev) => ({ ...prev, [key]: !(prev[key] ?? autoOpen[key]) }));
-
-  // A different plan is a different set of questions.
-  useEffect(() => { setByHand({}); }, [activeDocumentId]);
+  // Neither the scale nor the outline folds (the owner's decision, October
+  // 2026): what each came to and the ways to change it are always on show.
+  // Only the sum does, behind its own saved preference (`WorkSection`).
 
   // The room the scale came from is drawn on the plan while the scale step is
   // on show, which is where it is explained — and the step is always on show
@@ -738,8 +727,7 @@ const ResultsPanel = ({
             title={traced.length > 0 ? STEP_TITLES.outline.done : STEP_TITLES.outline.missing}
             summary={outlineSummary}
             badge={outlineNeedsLook ? <CheckChip /> : null}
-            open={isOpen('outline')}
-            onToggle={() => toggle('outline')}
+            open
           >
             {traced.length === 0 ? (
               painting || placingCorners ? (

@@ -66,8 +66,9 @@ const props = (over = {}) => ({
 });
 
 const part = (view, id) => within(view.container.querySelector(`#panel-${id}`));
-const header = (view, id) => view.container.querySelector(`#panel-${id} button[aria-expanded]`);
-// A step with no fold (the scale) is open whenever its body is on the page.
+const header = (view, id) => view.container.querySelector(`#panel-${id} > h3 > button[aria-expanded]`);
+// A step with no fold (the scale, the outline) is open whenever its body is
+// on the page.
 const isOpen = (view, id) => (header(view, id)
   ? header(view, id).getAttribute('aria-expanded') === 'true'
   : !!view.container.querySelector(`#panel-${id}-body`));
@@ -153,17 +154,18 @@ describe('the area', () => {
 describe('at rest it is the answer and its folded parts', () => {
   beforeEach(() => useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] }));
 
-  it('folds the outline and the sum on a clean plan, and always shows the scale', () => {
+  it('folds only the sum on a clean plan, and always shows the scale and the outline', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    for (const id of ['outline', 'work']) expect(isOpen(view, id), id).toBe(false);
-    expect(part(view, 'outline').getByText('1st Floor')).toBeTruthy();
-    // The scale does not fold: where it came from and the ways to change it.
-    expect(header(view, 'scale')).toBeNull();
-    expect(isOpen(view, 'scale')).toBe(true);
+    expect(isOpen(view, 'work')).toBe(false);
+    // Neither the scale nor the outline folds.
+    for (const id of ['scale', 'outline']) {
+      expect(header(view, id), id).toBeNull();
+      expect(isOpen(view, id), id).toBe(true);
+    }
     expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
     expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
-    // Nothing to correct is on show: no fields, no fixes.
-    expect(view.container.querySelectorAll('input, select')).toHaveLength(0);
+    expect(part(view, 'outline').getByLabelText('Outline name').value).toBe('1st Floor');
+    expect(part(view, 'outline').getByLabelText('Counts as')).toBeTruthy();
   });
 
   it('has no unit switch — the units are a setting', () => {
@@ -171,23 +173,15 @@ describe('at rest it is the answer and its folded parts', () => {
     expect(view.queryByRole('group', { name: 'Units' })).toBeNull();
   });
 
-  it('opens and folds a section by hand, and it stays how it was left', () => {
+  it('opens and folds the sum by hand, and it stays how it was left', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    fireEvent.click(header(view, 'outline'));
-    expect(isOpen(view, 'outline')).toBe(true);
-    expect(part(view, 'outline').getByLabelText('Outline name')).toBeTruthy();
+    fireEvent.click(header(view, 'work'));
+    expect(isOpen(view, 'work')).toBe(true);
     // A change elsewhere does not fold it again.
     act(() => useAppStore.setState({ rooms: [{ rect: {} }] }));
-    expect(isOpen(view, 'outline')).toBe(true);
-    fireEvent.click(header(view, 'outline'));
-    expect(isOpen(view, 'outline')).toBe(false);
-  });
-
-  it('starts over on a different plan', () => {
-    const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    fireEvent.click(header(view, 'outline'));
-    act(() => useAppStore.setState({ activeDocumentId: 'doc-2' }));
-    expect(isOpen(view, 'outline')).toBe(false);
+    expect(isOpen(view, 'work')).toBe(true);
+    fireEvent.click(header(view, 'work'));
+    expect(isOpen(view, 'work')).toBe(false);
   });
 });
 
@@ -202,7 +196,6 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     expect(isOpen(view, 'scale')).toBe(true);
-    expect(isOpen(view, 'outline')).toBe(false);
     expect(part(view, 'scale').getByText(/Rooms disagree by/)).toBeTruthy();
     // What it means for the area, and the way out of it, in the same place.
     expect(part(view, 'scale').getByText(/imply sizes about .* apart/)).toBeTruthy();
@@ -234,7 +227,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     expect(part(view, 'outline').getByText('Garage sits inside 1st Floor')).toBeTruthy();
     expect(part(view, 'outline').getByText(/counted twice/)).toBeTruthy();
-    expect(within(header(view, 'outline')).getByText('Check')).toBeTruthy();
+    expect(part(view, 'outline').getByText('Check')).toBeTruthy();
   });
 
   it('opens the scale when there is none', () => {
@@ -398,7 +391,6 @@ describe('saving the image', () => {
     expect(view.container.querySelector('#panel-checks')).toBeNull();
     expect(view.queryByText(/to check/i)).toBeNull();
     expect(view.queryByText(/gap|never closed|wall match|%/i)).toBeNull();
-    expect(isOpen(view, 'outline')).toBe(false);
   });
 
   it('is not the filled button while the area has no scale behind it', () => {
