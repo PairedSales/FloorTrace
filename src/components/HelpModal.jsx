@@ -43,7 +43,7 @@ const GUIDE = [
     title: 'If the area looks wrong',
     items: [
       'The area depends on the scale. In the panel on the left, choose Change beside “Worked out the scale” to see where it came from.',
-      'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Measure a length you know” and type in the length.',
+      'To change it, choose “Use a different room” and click a room whose printed size you trust, or choose “Set scale from a known length” and type in the length.',
       'If the room sizes on the plan disagree with each other, that step opens by itself with a note saying so and what to do about it.',
     ],
   },

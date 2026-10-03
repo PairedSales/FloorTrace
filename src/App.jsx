@@ -227,7 +227,7 @@ function App() {
   // Workspace-level, and the reason the pinned unit survives a scan, a new
   // plan and a project someone else saved in metres.
   const { chooseUnit } = useUnitPreference();
-  const { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale } = useAutoScale();
+  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
   // The scan runs before the exterior trace is even defined in this file, and
   // the automatic path needs both. Refs rather than a reordering: moving
   // handleManualMode below the tracer would drag handleFindRoomSize and its
@@ -1678,7 +1678,6 @@ function App() {
           canSwitchWallFace={canSwitchWallFace}
           onScaleTool={handleScaleToolToggle}
           onSelectRoom={handleSelectRoom}
-          onRestoreAutoScale={restoreAutoScale}
           showSideLengths={showSideLengths}
           onShowSideLengthsChange={handleShowSideLengthsChange}
           autoSnapEnabled={autoSnapEnabled}
@@ -1739,7 +1738,6 @@ function App() {
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
             onSelectRoom={handleSelectRoom}
-            onRestoreAutoScale={restoreAutoScale}
             onExport={openExport}
             onFindOutline={handleTracePerimeter}
             onPaintOutline={handlePaintOutline}
