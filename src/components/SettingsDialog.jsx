@@ -23,10 +23,11 @@ const UNITS = [
   { id: 'metric', label: 'Meters', hint: 'For example 3.81 m' },
 ];
 
+// Light leads: it is what the app wears until one of the others is chosen.
 const THEMES = [
-  { id: 'system', label: 'Match my computer' },
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
+  { id: 'system', label: 'Match my computer' },
 ];
 
 const Group = ({ title, children }) => (
