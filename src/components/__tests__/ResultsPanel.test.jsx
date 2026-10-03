@@ -67,7 +67,10 @@ const props = (over = {}) => ({
 
 const part = (view, id) => within(view.container.querySelector(`#panel-${id}`));
 const header = (view, id) => view.container.querySelector(`#panel-${id} button[aria-expanded]`);
-const isOpen = (view, id) => header(view, id).getAttribute('aria-expanded') === 'true';
+// A step with no fold (the scale) is open whenever its body is on the page.
+const isOpen = (view, id) => (header(view, id)
+  ? header(view, id).getAttribute('aria-expanded') === 'true'
+  : !!view.container.querySelector(`#panel-${id}-body`));
 const open = (view, id) => { if (!isOpen(view, id)) fireEvent.click(header(view, id)); };
 
 beforeEach(() => {
@@ -150,11 +153,15 @@ describe('the area', () => {
 describe('at rest it is the answer and its folded parts', () => {
   beforeEach(() => useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] }));
 
-  it('folds every section on a clean plan, each stating its own conclusion', () => {
+  it('folds the outline and the sum on a clean plan, and always shows the scale', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    for (const id of ['outline', 'scale', 'work']) expect(isOpen(view, id), id).toBe(false);
+    for (const id of ['outline', 'work']) expect(isOpen(view, id), id).toBe(false);
     expect(part(view, 'outline').getByText('1st Floor')).toBeTruthy();
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan')).toBeTruthy();
+    // The scale does not fold: where it came from and the ways to change it.
+    expect(header(view, 'scale')).toBeNull();
+    expect(isOpen(view, 'scale')).toBe(true);
+    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
     // Nothing to correct is on show: no fields, no fixes.
     expect(view.container.querySelectorAll('input, select')).toHaveLength(0);
   });
@@ -166,21 +173,21 @@ describe('at rest it is the answer and its folded parts', () => {
 
   it('opens and folds a section by hand, and it stays how it was left', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    fireEvent.click(header(view, 'scale'));
-    expect(isOpen(view, 'scale')).toBe(true);
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    fireEvent.click(header(view, 'outline'));
+    expect(isOpen(view, 'outline')).toBe(true);
+    expect(part(view, 'outline').getByLabelText('Outline name')).toBeTruthy();
     // A change elsewhere does not fold it again.
     act(() => useAppStore.setState({ rooms: [{ rect: {} }] }));
-    expect(isOpen(view, 'scale')).toBe(true);
-    fireEvent.click(header(view, 'scale'));
-    expect(isOpen(view, 'scale')).toBe(false);
+    expect(isOpen(view, 'outline')).toBe(true);
+    fireEvent.click(header(view, 'outline'));
+    expect(isOpen(view, 'outline')).toBe(false);
   });
 
   it('starts over on a different plan', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    fireEvent.click(header(view, 'scale'));
+    fireEvent.click(header(view, 'outline'));
     act(() => useAppStore.setState({ activeDocumentId: 'doc-2' }));
-    expect(isOpen(view, 'scale')).toBe(false);
+    expect(isOpen(view, 'outline')).toBe(false);
   });
 });
 
@@ -200,9 +207,8 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     // What it means for the area, and the way out of it, in the same place.
     expect(part(view, 'scale').getByText(/imply sizes about .* apart/)).toBeTruthy();
     expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
-    // Folded, it still says there is something in it.
-    fireEvent.click(header(view, 'scale'));
-    expect(within(header(view, 'scale')).getByText('Check')).toBeTruthy();
+    // And its heading says there is something in it.
+    expect(part(view, 'scale').getByText('Check')).toBeTruthy();
   });
 
   it('opens the outline when a cut-out is no longer taken off, and says so on its row', () => {
@@ -212,7 +218,6 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     expect(isOpen(view, 'outline')).toBe(true);
-    expect(isOpen(view, 'scale')).toBe(false);
     expect(part(view, 'outline').getByText(/A cut-out is no longer inside this outline/)).toBeTruthy();
     expect(part(view, 'outline').getByText(/no longer taken off the area/)).toBeTruthy();
   });
@@ -243,7 +248,6 @@ describe('a section opens by itself when it holds the next thing to do', () => {
   it('opens the scale when the length tool starts, wherever it was left', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    expect(isOpen(view, 'scale')).toBe(false);
     act(() => useAppStore.setState({ scaleToolActive: true }));
     expect(isOpen(view, 'scale')).toBe(true);
     expect(part(view, 'scale').getByText('Lengths you measured')).toBeTruthy();
@@ -262,8 +266,6 @@ describe('a section opens by itself when it holds the next thing to do', () => {
   it('takes the “Set the scale” button to the scale', () => {
     useAppStore.setState({ perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 500000 })} />);
-    fireEvent.click(header(view, 'scale'));
-    expect(isOpen(view, 'scale')).toBe(false);
     fireEvent.click(part(view, 'area').getByRole('button', { name: 'Set the scale' }));
     expect(isOpen(view, 'scale')).toBe(true);
   });
@@ -273,7 +275,8 @@ describe('a section opens by itself when it holds the next thing to do', () => {
  * The green box on the plan is the room the scale was taken from. At rest it
  * was an unexplained rectangle on one room of the house — and it is draggable,
  * so moving it by accident re-set the scale every area is worked out from. It
- * is drawn while Scale is open, which is where it is explained.
+ * is drawn while the scale step is on show, which is where it is explained —
+ * and that step no longer folds, so the box is there whenever the steps are.
  */
 describe('the room the scale came from', () => {
   const shown = () => useWorkspaceStore.getState().scaleRoomShown;
@@ -282,42 +285,33 @@ describe('the room the scale came from', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()], mode: 'normal' });
   });
 
-  it('is drawn on the plan only while Scale is open', () => {
-    const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    expect(shown()).toBe(false);
-    fireEvent.click(header(view, 'scale'));
+  it('is drawn on the plan while the panel shows the scale', () => {
+    render(<ResultsPanel {...props({ area: 800 })} />);
     expect(shown()).toBe(true);
-    fireEvent.click(header(view, 'scale'));
-    expect(shown()).toBe(false);
   });
 
   it('goes when the panel does', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    fireEvent.click(header(view, 'scale'));
     view.unmount();
     expect(shown()).toBe(false);
   });
 
   // Picking a room ends with checking its green box and its size.
-  it('opens Scale when a room is being picked', () => {
+  it('shows the scale while a room is being picked', () => {
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    expect(isOpen(view, 'scale')).toBe(false);
     act(() => useAppStore.setState({ mode: 'manual', detectedDimensions: [{ text: '12x14' }] }));
     expect(isOpen(view, 'scale')).toBe(true);
     expect(shown()).toBe(true);
   });
 
-  // The automatic run passes through the same state — the sizes are read, the
-  // rooms not yet measured — and opening Scale for it left the section open,
-  // green box and all, on every plan FloorTrace had just finished by itself.
-  it('does not open Scale for the automatic run passing through the same state', () => {
-    const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    act(() => useAppStore.setState({
-      isProcessing: true, processingMessage: 'Measuring the rooms…',
-      mode: 'manual', detectedDimensions: [{ text: '12x14' }],
-    }));
-    act(() => useAppStore.setState({ isProcessing: false, processingMessage: '', mode: 'normal' }));
-    expect(isOpen(view, 'scale')).toBe(false);
+  // While FloorTrace is first measuring a plan there is no scale step yet,
+  // and no box to explain.
+  it('is not drawn while a plan is first being measured', () => {
+    useAppStore.setState({
+      calibration: { calibrated: false, feetPerPixel: { x: 1, y: 1 }, source: null, quality: null },
+      perimeterTraces: [], processingMessage: 'Measuring the rooms…',
+    });
+    render(<ResultsPanel {...props({ isProcessing: true })} />);
     expect(shown()).toBe(false);
   });
 
@@ -325,7 +319,6 @@ describe('the room the scale came from', () => {
   // always and this flag is not its to set.
   it('is left alone by the phone sheet', () => {
     const view = render(<ResultsPanel {...props({ area: 800, mobile: true })} />);
-    fireEvent.click(header(view, 'scale'));
     expect(isOpen(view, 'scale')).toBe(true);
     expect(shown()).toBe(false);
   });

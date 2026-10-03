@@ -33,8 +33,10 @@ import { Check, Loader2, Minus } from 'lucide-react';
  *
  * With `onToggle` the whole header is one button, and its last word says what
  * pressing it does: `actionLabel` ("Change", "Show the sum") while folded,
- * "Close" while open. Without it the step does not fold, and `action` is
- * whatever belongs on its right (a real button of its own).
+ * "Close" while open. Without it the step does not fold: `action` is whatever
+ * belongs on its right (a real button of its own), and any children are always
+ * on show under it (pass `open` so the mark is filled and the summary, which
+ * the body says in full, is not repeated).
  *
  * `summary` is said only while folded: open, the step says it in full. `badge`
  * is a state (a chip) and is never dropped.
@@ -135,7 +137,7 @@ const PanelSection = ({
           </div>
         )}
       </h3>
-      {foldable && open && (
+      {(foldable ? open : !!children) && (
         <div id={`${id}-body`} className="pl-[70px] pr-7 pt-1 pb-4">
           {children}
         </div>

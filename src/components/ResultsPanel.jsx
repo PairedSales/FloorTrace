@@ -4,7 +4,7 @@ import {
   ScanSearch, Ruler, MousePointerClick, RotateCcw,
 } from 'lucide-react';
 import useAppStore, {
-  selectActiveAreaByType, selectWorkspaceArea, selectPickingRoom,
+  selectActiveAreaByType, selectWorkspaceArea,
 } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { formatArea, areaDisplayValue, formatAreaValue } from '../utils/unitConverter';
@@ -247,11 +247,6 @@ const ResultsPanel = ({
   const processingMessage = useAppStore((s) => s.processingMessage);
   const roomOverlay = useAppStore((s) => s.roomOverlay);
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
-  // The room sizes FloorTrace read are on the plan as buttons, to pick one.
-  // Never during the automatic run, which passes through the same state: opening
-  // the scale for that left it open — green box, fields and all — on every plan
-  // FloorTrace had just finished measuring by itself.
-  const pickingRoom = useAppStore(selectPickingRoom);
   const setScaleRoomShown = useWorkspaceStore((s) => s.setScaleRoomShown);
   // An outline being drawn by hand right now. The step then says how to
   // finish it instead of offering three other ways to start.
@@ -405,9 +400,9 @@ const ResultsPanel = ({
   // ── which steps are open ──
   // A step opens by itself when it holds the next thing to do, and stays
   // however it was last set by hand.
+  // The scale is not one of them: it is always on show (see its step below).
   const autoOpen = {
     outline: traced.length === 0 || perimeterTraces.length > 1 || outlineNeedsLook,
-    scale: !calibrated || scaleNotes.length > 0,
   };
   const [byHand, setByHand] = useState({});
   const isOpen = (key) => byHand[key] ?? autoOpen[key];
@@ -415,19 +410,12 @@ const ResultsPanel = ({
 
   // A different plan is a different set of questions.
   useEffect(() => { setByHand({}); }, [activeDocumentId]);
-  // Measuring a known length ends with typing it into the scale step, and
-  // picking a room ends with checking its green box and its size there — so
-  // starting either opens the step wherever it was left.
-  // After the reset above, and on a plan switch too: a plan that comes back
-  // mid-measurement comes back with the scale open.
-  useEffect(() => {
-    if (scaleToolActive || pickingRoom) setByHand((prev) => ({ ...prev, scale: true }));
-  }, [scaleToolActive, pickingRoom, activeDocumentId]);
 
   // The room the scale came from is drawn on the plan while the scale step is
-  // open, which is where it is explained. The phone draws it always: its sheet
-  // has to be closed to reach the plan, and the box with it would be gone.
-  const scaleOpen = !measuringByItself && isOpen('scale');
+  // on show, which is where it is explained — and the step is always on show
+  // once the panel has steps at all. The phone draws it always: its sheet has
+  // to be closed to reach the plan, and the box with it would be gone.
+  const scaleOpen = !measuringByItself;
   useEffect(() => {
     if (mobile) return undefined;
     setScaleRoomShown(scaleOpen);
@@ -435,8 +423,6 @@ const ResultsPanel = ({
   }, [mobile, scaleOpen, setScaleRoomShown]);
 
   const reveal = (key) => {
-    setByHand((prev) => ({ ...prev, [key]: true }));
-    // After the step has opened, so there is something to scroll to.
     setTimeout(() => {
       scrollRef.current?.querySelector(`#panel-${key}`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -658,8 +644,12 @@ const ResultsPanel = ({
               A bad room implies a scale that can be 58-90% out, and area goes
               as scale squared. Unlike a wrong outline, a wrong scale looks
               exactly like a right one, so a doubt about it is the one thing
-              this panel says without being asked: the step opens by itself
-              and the doubt is its first paragraph. */}
+              this panel says without being asked, as the step's first
+              paragraph.
+
+              It does not fold (the owner's decision, October 2026): the room
+              the scale came from and the ways to change it are always on
+              show, with the green box on the plan beside them. */}
           <PanelSection
             id="panel-scale"
             number={2}
@@ -667,8 +657,7 @@ const ResultsPanel = ({
             title={calibrated ? STEP_TITLES.scale.done : STEP_TITLES.scale.missing}
             summary={calibrated ? provenance.replace(/\.$/, '') : null}
             badge={scaleNotes.length > 0 ? <CheckChip /> : null}
-            open={isOpen('scale')}
-            onToggle={() => toggle('scale')}
+            open
           >
             {calibrated ? (
               <>
