@@ -23,7 +23,7 @@ const ViewControls = ({ onZoomIn, onZoomOut, onFitToWindow }) => {
       role="group"
       aria-label="Zoom"
       className="absolute right-4 bottom-4 z-10 flex items-center gap-0.5 p-1
-                 bg-panel-2 border border-line rounded-xl shadow-float select-none"
+                 bg-panel-2 border border-line rounded-xl select-none"
     >
       <button type="button" onClick={onZoomOut} aria-label="Zoom out" title="Zoom out" className="icon-btn">
         <Minus className="w-[18px] h-[18px]" aria-hidden="true" />

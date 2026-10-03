@@ -227,7 +227,7 @@ const ActionBar = ({
         : 'action-row-idle'}`}>
         {!running && (
           <div className="flex items-center gap-0.5 shrink-0 p-1 rounded-xl border border-line
-                          bg-panel-2 shadow-float">
+                          bg-panel-2">
             {!panelOpen && onShowPanel && (
               <button
                 type="button"
