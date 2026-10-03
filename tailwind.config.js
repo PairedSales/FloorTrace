@@ -18,7 +18,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Fira Sans', 'system-ui', '-apple-system', 'sans-serif'],
+        // The chrome's face. What is drawn on the plan and printed on the saved
+        // image stays in Fira Sans (see index.css).
+        sans: ['Atkinson Hyperlegible', 'Verdana', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['Fira Code', 'ui-monospace', 'monospace'],
       },
       colors: {
@@ -29,6 +31,7 @@ export default {
         sunken:   token('sunken'),
         line:     token('line'),
         'line-soft': token('line-soft'),
+        'line-strong': token('line-strong'),
         surface:  token('surface'),
 
         fg:       token('fg'),

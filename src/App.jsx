@@ -57,13 +57,13 @@ import { useCornerPlacement } from './hooks/useCornerPlacement';
 import Notice from './components/Notice';
 import useUnitPreference from './hooks/useUnitPreference';
 
-// The desktop chrome a notice has to clear: the header's 52, the action bar's
-// 48 when there is a plan for it to act on, and 10 px of air. A function of
+// The desktop chrome a notice has to clear: the header's 60, the action bar's
+// row of 64 when there is a plan for it to act on, and 10 px of air. A function of
 // what is actually on screen, because the bar comes and goes.
-const desktopChromePx = (hasPlan) => 52 + (hasPlan ? 48 : 0) + 10;
-// The results panel's width (`ResultsPanel.jsx`, `w-[360px]`), which is what a
+const desktopChromePx = (hasPlan) => 60 + (hasPlan ? 64 : 0) + 10;
+// The results panel's width (`ResultsPanel.jsx`, `w-[420px]`), which is what a
 // notice has to clear to sit over the plan rather than half over the panel.
-const RESULTS_PANEL_PX = 360;
+const RESULTS_PANEL_PX = 420;
 
 // One string for both trace entry points, matching the command that starts it.
 // The toolbar said "Detecting exterior boundary…" and the post-scan path said
@@ -1746,6 +1746,7 @@ function App() {
             onPlaceCorners={handleDrawExterior}
             onAddOutline={handleAddOutline}
             onRescan={handleFindRoomSize}
+            onSelectTool={handleToolSelect}
           />
         )}
 

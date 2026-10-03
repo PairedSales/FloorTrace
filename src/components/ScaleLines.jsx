@@ -96,12 +96,12 @@ const ScaleLines = ({ unit }) => {
   return (
     <div className="mt-3.5">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-[14px] font-semibold text-fg">Lengths you measured</p>
+        <p className="text-[16px] font-semibold text-fg">Lengths you measured</p>
         {(scaleLines.length > 0 || calibration?.source === 'line-calibration') && (
           <button
             type="button"
             onClick={clearAll}
-            className="text-[13px] font-medium text-crit hover:underline cursor-pointer"
+            className="text-[15px] font-medium text-crit hover:underline cursor-pointer"
             title="Remove these lines and the scale they set"
           >
             Remove all

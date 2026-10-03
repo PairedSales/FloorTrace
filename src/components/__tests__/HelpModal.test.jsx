@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
 import HelpModal from '../HelpModal';
 import { TOOL_GROUPS } from '../toolCatalog';
+import { STEP_TITLES } from '../../utils/progressSteps';
 
 /**
  * Help names controls, so it is the one place a renamed control goes stale
@@ -33,12 +34,18 @@ describe('HelpModal', () => {
   });
 
   // The guide tells people which menu to open and which row to choose. Each
-  // name it quotes must be one the action bar actually prints.
+  // name it quotes must be one the screen actually prints: the menus above the
+  // plan by their titles, and the outline's — which is in the results panel —
+  // by its button there and the step it sits in.
   it('names the menus and tools the way the screen does', () => {
     const view = help();
     const guide = view.getByRole('tabpanel').textContent;
-    for (const group of TOOL_GROUPS.filter((g) => g.menu)) {
+    for (const group of TOOL_GROUPS.filter((g) => g.menu && g.id !== 'outline')) {
       expect(guide, `the ${group.title} menu`).toContain(group.title);
+    }
+    expect(guide).toContain('Change the outline');
+    for (const step of [STEP_TITLES.scale.done, STEP_TITLES.outline.done]) {
+      expect(guide, step).toContain(step);
     }
     const quoted = ['draw', 'vertex', 'eraser', 'crop', 'scale'];
     const tools = TOOL_GROUPS.flatMap((g) => g.tools);

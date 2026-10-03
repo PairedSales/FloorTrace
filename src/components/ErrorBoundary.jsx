@@ -66,12 +66,12 @@ class ErrorBoundary extends Component {
     return (
       <div role="alert" className="fixed inset-0 flex items-center justify-center p-6 bg-shell">
         <div className="max-w-md text-center">
-          <p className="text-[18px] font-semibold text-fg mb-2">
+          <p className="text-[20px] font-semibold text-fg mb-2">
             {stale ? 'Updating to the latest version…' : 'FloorTrace hit an error'}
           </p>
           {!stale && (
             <>
-              <p className="text-[14px] text-fg-2 leading-relaxed mb-5">
+              <p className="text-[16px] text-fg-2 leading-relaxed mb-5">
                 {promise}
               </p>
               <button
@@ -81,7 +81,7 @@ class ErrorBoundary extends Component {
               >
                 Reload FloorTrace
               </button>
-              <pre className="mt-5 text-[12px] text-fg-3 whitespace-pre-wrap text-left">
+              <pre className="mt-5 text-[13.5px] text-fg-3 whitespace-pre-wrap text-left">
                 {String(error?.message || error)}
               </pre>
             </>

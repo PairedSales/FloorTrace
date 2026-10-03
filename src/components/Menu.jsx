@@ -1,4 +1,4 @@
-import { createContext, useContext, useRef } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, ChevronDown } from 'lucide-react';
 import useWorkspaceStore from '../store/workspaceStore';
 import { useMenu } from '../hooks/useMenu';
@@ -6,9 +6,9 @@ import { useMenu } from '../hooks/useMenu';
 /**
  * The one dropdown in the app.
  *
- * The header's Menu, the action bar's four task menus and the plan tabs'
- * overflow are all this component, so they open, close, look and read the same
- * way. Before it there were three hand-built dropdowns — the top band's, the
+ * The header's Menu, the task menus above the plan, the results panel's
+ * "Change the outline" and the plan tabs' overflow are all this component, so
+ * they open, close, look and read the same way. Before it there were three hand-built dropdowns — the top band's, the
  * tool rail's and the tab strip's — each with its own copy of the dismissal
  * logic and its own idea of what a row looked like.
  *
@@ -40,6 +40,15 @@ import { useMenu } from '../hooks/useMenu';
  * had an icon, one word and a tooltip. A row that cannot be used right now
  * stays where it is, greyed, and its `description` becomes the reason — a row
  * never moves out from under the pointer.
+ *
+ * ## Beside its trigger, for a menu inside the panel
+ *
+ * `placement="side"` opens the panel to the right of the trigger instead of
+ * under it, over the plan. The results panel scrolls and clips, so a menu hung
+ * under a trigger half-way down it would be cut off at the panel's foot; fixed
+ * to the window it cannot be. It is placed once, when it opens, from where the
+ * trigger is — it closes on any press outside it, so it never has to follow a
+ * scroll.
  */
 
 const MenuContext = createContext({ close: () => {} });
@@ -54,6 +63,18 @@ const itemsOf = (panel) => [...(panel?.querySelectorAll('[role="menuitem"]:not([
  * hangs the panel off the trigger's right edge, for a trigger near the right
  * of the window.
  */
+const EDGE = 8;
+
+// Where a side menu goes: beside the trigger, level with it, and never off the
+// bottom or the right of the window.
+const sidePosition = (trigger, panel) => {
+  const at = trigger.getBoundingClientRect();
+  const size = panel.getBoundingClientRect();
+  const left = Math.max(EDGE, Math.min(at.right + 10, window.innerWidth - size.width - EDGE));
+  const top = Math.max(EDGE, Math.min(at.top - 6, window.innerHeight - size.height - EDGE));
+  return { left, top };
+};
+
 export const Menu = ({
   id,
   group,
@@ -62,8 +83,9 @@ export const Menu = ({
   ariaLabel,
   title,
   align = 'left',
+  placement = 'below',
   caret = true,
-  width = 'w-[330px]',
+  width = 'w-[380px]',
   triggerClassName = 'menu-trigger',
   children,
 }) => {
@@ -72,6 +94,16 @@ export const Menu = ({
   const triggerId = `menu-${menuId.replace(/[^a-z0-9]+/gi, '-')}`;
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
+  const side = placement === 'side';
+  const [sideAt, setSideAt] = useState(null);
+
+  // Before the paint, so the panel is never seen where it is not.
+  useLayoutEffect(() => {
+    if (!open || !side) return;
+    if (triggerRef.current && panelRef.current) {
+      setSideAt(sidePosition(triggerRef.current, panelRef.current));
+    }
+  }, [open, side]);
 
   // Hover only switches between neighbours once one of them is already open.
   const onMouseEnter = () => {
@@ -134,7 +166,10 @@ export const Menu = ({
             aria-labelledby={triggerId}
             onMouseDown={(e) => e.stopPropagation()}
             onKeyDown={onPanelKeyDown}
-            className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+6px)]
+            style={side ? { left: sideAt?.left ?? 0, top: sideAt?.top ?? 0 } : undefined}
+            className={`${side
+              ? 'fixed max-h-[calc(100vh-16px)] overflow-y-auto'
+              : `absolute ${align === 'right' ? 'right-0' : 'left-0'} top-[calc(100%+6px)]`}
                         z-[60] ${width} max-w-[calc(100vw-16px)] p-1.5
                         bg-panel-2 border border-line rounded-xl shadow-float animate-fade-in`}
           >
@@ -204,12 +239,12 @@ export const MenuItem = ({
       )}
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-4">
-          <span className="text-[14.5px] font-medium leading-snug">{label}</span>
+          <span className="text-[16px] font-medium leading-snug">{label}</span>
           {keys && <kbd className="shrink-0">{keys}</kbd>}
           {!keys && external && <ArrowUpRight className="w-4 h-4 shrink-0 text-fg-dim" aria-hidden="true" />}
         </span>
         {description && (
-          <span className="block mt-0.5 text-[13px] leading-snug text-fg-3">{description}</span>
+          <span className="block mt-0.5 text-[15px] leading-snug text-fg-3">{description}</span>
         )}
       </span>
     </button>
@@ -219,5 +254,5 @@ export const MenuItem = ({
 export const MenuSep = () => <div className="h-px bg-line-soft my-1.5 mx-1.5" role="separator" />;
 
 export const MenuLabel = ({ children }) => (
-  <p className="px-3 pt-2 pb-1 text-[12.5px] font-medium text-fg-3">{children}</p>
+  <p className="px-3 pt-2 pb-1 text-[14px] font-medium text-fg-3">{children}</p>
 );

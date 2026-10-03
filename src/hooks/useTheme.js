@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const THEME_KEY = 'floortrace:theme';
-export const THEME_MODES = ['system', 'light', 'dark'];
+// In the order the phone's theme row cycles through them: from the default.
+export const THEME_MODES = ['light', 'dark', 'system'];
+const DEFAULT_THEME = 'light';
 
 // The phone menu's theme row names the current mode, so the wording lives
 // with the modes rather than in the component that happens to render it.
@@ -21,10 +23,12 @@ const apply = (mode) => {
 /**
  * useTheme
  *
- * Light/dark/system, persisted. Defaults to 'system': this app is a desktop
- * tool and Windows users expect it to follow the OS, and the alternative —
- * the hardcoded dark shell it had before — put a #ffffff canvas against
- * #21222C chrome, a 15.8:1 step at the panel edge.
+ * Light/dark/system, persisted. Light until the user says otherwise: the plan
+ * is white paper in every theme, and the people this app is for read dark
+ * text on a light page more easily than the reverse. It used to follow the
+ * computer, which handed a dark shell to anyone whose Windows happened to be
+ * set dark, whether or not they would have chosen it here. Dark, or following
+ * the computer, is a choice made in Settings, and a choice made there is kept.
  *
  * @returns {{ theme: string, resolved: 'light'|'dark', cycleTheme: () => void,
  *             setTheme: (mode: string) => void }}
@@ -33,13 +37,13 @@ export function useTheme() {
   const [theme, setThemeState] = useState(() => {
     try {
       const saved = localStorage.getItem(THEME_KEY);
-      return THEME_MODES.includes(saved) ? saved : 'system';
+      return THEME_MODES.includes(saved) ? saved : DEFAULT_THEME;
     } catch {
-      return 'system';
+      return DEFAULT_THEME;
     }
   });
   const [resolved, setResolved] = useState(() => (
-    typeof document === 'undefined' ? 'dark' : apply(theme)
+    typeof document === 'undefined' ? DEFAULT_THEME : apply(theme)
   ));
 
   useEffect(() => {

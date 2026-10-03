@@ -77,7 +77,7 @@ const Canvas = React.memo(forwardRef((props, ref) => {
         <div className="absolute inset-0 grid place-items-center p-6" role="status" aria-live="polite">
           <div className="flex flex-col items-center gap-3 text-center">
             <Loader2 className="w-8 h-8 animate-spin text-accent" aria-hidden="true" />
-            <p className="text-[16px] font-medium text-fg">{processingMessage || 'Opening the plan…'}</p>
+            <p className="text-[17px] font-medium text-fg">{processingMessage || 'Opening the plan…'}</p>
           </div>
         </div>
       )}

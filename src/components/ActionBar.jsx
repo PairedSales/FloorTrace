@@ -3,17 +3,26 @@ import { Loader2, PanelLeftOpen, X } from 'lucide-react';
 import useAppStore from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { cancelActiveWork, hasStoppableWork } from '../store/documentRequests';
-import { MAX_TRACES, alternativeCount as countAlternatives } from '../utils/planStage';
+import { useToolRows } from '../hooks/useToolRows';
 import { TOOL_MODES } from './toolModes';
 import { TOOL_GROUPS } from './toolCatalog';
-import { Menu, MenuItem, MenuSep } from './Menu';
+import TaskMenu from './TaskMenu';
 
 /**
  * The one strip above the plan: what you can do to it, and — while you are
  * doing something — what to do next.
  *
- *   at rest   [ Outline ▾ ][ Measure ▾ ][ Edit plan ▾ ]   tip
- *   in a tool   Painting the outline — paint roughly over…   brush  Cancel  Done
+ *   at rest   ( Measure ▾  Edit plan ▾ )   tip
+ *   in a tool ( Painting the outline — paint roughly over…   brush  Cancel  Done )
+ *
+ * It sits on the paper, as a small toolbar floating at the top of the plan, and
+ * takes its own row there rather than lying over the drawing: a plan fitted to
+ * the window must never have its top edge under a toolbar.
+ *
+ * The outline's own tools are not here. Changing the outline is the outline
+ * step's "Change", in the results panel, beside the outline it changes — and
+ * only while that panel is put away does the Outline menu come back to this
+ * bar, so that the tools are never unreachable.
  *
  * ## What it replaces
  *
@@ -95,47 +104,10 @@ const ELAPSED_AFTER_MS = 5000;
 // looking — that the outline's corners move, and where redrawing it lives. It
 // is the standing answer to "the outline is not right", said once and calmly
 // rather than as a warning about each trace.
-const IDLE_TIP = 'Outline not right? Drag any corner, or redraw it from the Outline menu.';
-
-const BUSY_REASON = 'Wait until FloorTrace has finished what it is doing.';
-
-// A leading, trailing or doubled rule is what a menu looks like after one of
-// its rows has stood down.
-const tidy = (rows) => {
-  const out = [];
-  for (const row of rows) {
-    if (row === '-' && (out.length === 0 || out[out.length - 1] === '-')) continue;
-    out.push(row);
-  }
-  while (out[out.length - 1] === '-') out.pop();
-  return out;
-};
-
-const TaskMenu = ({ group, rowState, onSelect }) => {
-  const byId = new Map([...group.tools, ...(group.commands ?? [])].map((entry) => [entry.id, entry]));
-  const rows = tidy(group.menu
-    .map((id) => (id === '-' ? '-' : { entry: byId.get(id), state: rowState(byId.get(id)) }))
-    .filter((row) => row === '-' || (row.entry && row.state)));
-
-  return (
-    <Menu id={group.id} group="bar" label={group.title} icon={group.icon} title={group.hint}>
-      {rows.map((row, i) => (row === '-'
-        ? <MenuSep key={`rule-${i}`} />
-        : (
-          <MenuItem
-            key={row.entry.id}
-            icon={row.entry.icon}
-            label={row.state.label ?? row.entry.label}
-            description={row.state.disabled ? (row.state.reason ?? row.entry.hint) : row.entry.hint}
-            keys={row.entry.digit ?? row.entry.keys}
-            disabled={row.state.disabled}
-            danger={row.entry.danger}
-            onSelect={() => onSelect(row.entry.id)}
-          />
-        )))}
-    </Menu>
-  );
-};
+// It names the control by what is on screen: the outline step's "Change" while
+// the results are showing, the Outline menu here while they are put away.
+const IDLE_TIP = 'Outline not right? Drag any corner, or choose Change beside “Found the outside walls”.';
+const IDLE_TIP_NO_PANEL = 'Outline not right? Drag any corner, or redraw it from the Outline menu.';
 
 const ActionBar = ({
   tool,
@@ -154,15 +126,17 @@ const ActionBar = ({
   const isProcessing = useAppStore((s) => s.isProcessing);
   const processingMessage = useAppStore((s) => s.processingMessage);
   const perimeterTraces = useAppStore((s) => s.perimeterTraces);
-  const activeTraceId = useAppStore((s) => s.activeTraceId);
-  const painting = useAppStore((s) => s.drawModeActive);
   const activeDocumentId = useAppStore((s) => s.activeDocumentId);
   const retraceOfferFor = useWorkspaceStore((s) => s.retraceOfferFor);
   const setRetraceOfferFor = useWorkspaceStore((s) => s.setRetraceOfferFor);
 
   const traces = perimeterTraces ?? [];
   const tracedCount = traces.filter((t) => t.vertices?.length >= 3).length;
-  const alternatives = countAlternatives(traces, activeTraceId);
+  // What each row of the menus is allowed to do right now.
+  const rowState = useToolRows({ hasArea, hasToolData });
+  // The outline's tools live in the results panel's outline step; they are
+  // listed here only while that panel is put away.
+  const groups = TOOL_GROUPS.filter((group) => group.menu && (group.id !== 'outline' || !panelOpen));
 
   // What just happened to the plan lands here rather than over it.
   const flash = useWorkspaceStore((s) => s.statusFlash);
@@ -232,60 +206,33 @@ const ActionBar = ({
 
   const mode = TOOL_MODES[tool];
   const running = !!mode;
-  const tinted = running || isProcessing;
-  const hint = running ? mode.hint : (tracedCount > 0 ? IDLE_TIP : null);
+  const idleTip = panelOpen ? IDLE_TIP : IDLE_TIP_NO_PANEL;
+  const hint = running ? mode.hint : (tracedCount > 0 ? idleTip : null);
   // Only at rest, and only for the plan it was raised on: a tool's instruction
   // and a running job both outrank it.
   const offerRetrace = !running && !isProcessing && tracedCount > 0
     && retraceOfferFor != null && retraceOfferFor === activeDocumentId;
 
-  // What each row of the menus is allowed to do right now: `null` to stand
-  // down, otherwise whether it is usable and, when it is not, why.
-  const rowState = (entry) => {
-    if (!entry) return null;
-    switch (entry.id) {
-      case 'alternative':
-        if (!alternatives) return null;
-        return {
-          label: alternatives > 1 ? `Try another outline (${alternatives} more)` : entry.label,
-          disabled: isProcessing || painting,
-          reason: BUSY_REASON,
-        };
-      case 'findOutline':
-        return {
-          label: tracedCount > 0 ? entry.label : 'Find the outline',
-          disabled: isProcessing || painting,
-          reason: BUSY_REASON,
-        };
-      case 'addOutline':
-        if (tracedCount === 0) {
-          return { disabled: true, reason: 'Draw the first outline before adding another.' };
-        }
-        return traces.length >= MAX_TRACES
-          ? { disabled: true, reason: `${MAX_TRACES} outlines is the most one plan can have.` }
-          : { disabled: false };
-      case 'clearMeasurements':
-        return hasToolData ? { disabled: false } : null;
-      default:
-        return { disabled: !!entry.needsArea && !hasArea, reason: entry.needsArea };
-    }
-  };
 
   return (
     // `action-bar` is the query container; the row inside it wraps onto a
     // second line only while a tool runs in a narrow bar (see index.css).
-    <div className="action-bar w-full min-w-0 shrink-0">
-      <div className={`flex items-center gap-1 w-full min-w-0 min-h-[48px] px-2 py-1.5
-                       text-[14px] select-none border-b
-                       ${running ? 'action-row-running' : 'action-row-idle'}
-                       ${tinted ? 'bg-accent/10 border-accent/40' : 'bg-panel border-line-soft'}`}>
+    // `canvas-grid-bg` because this row is paper: the bar floats on the same
+    // white sheet as the plan under it, in both themes.
+    <div className="action-bar canvas-grid-bg w-full min-w-0 shrink-0 px-4 pt-3">
+      <div className={`flex items-center gap-1 w-full min-w-0 min-h-[52px]
+                       text-[16px] select-none
+                       ${running
+        ? 'action-row-running px-2 py-1.5 rounded-xl border border-accent/40 bg-accent/10'
+        : 'action-row-idle'}`}>
         {!running && (
-          <>
+          <div className="flex items-center gap-0.5 shrink-0 p-1 rounded-xl border border-line
+                          bg-panel-2 shadow-float">
             {!panelOpen && onShowPanel && (
               <button
                 type="button"
                 onClick={onShowPanel}
-                className="btn btn-quiet btn-sm shrink-0"
+                className="btn btn-quiet btn-sm h-10 shrink-0"
                 title="Show the area and its details again (O)"
               >
                 <PanelLeftOpen className="w-[18px] h-[18px]" aria-hidden="true" />
@@ -293,11 +240,11 @@ const ActionBar = ({
               </button>
             )}
             <div role="toolbar" aria-label="Tools" className="flex items-center gap-0.5 shrink-0">
-              {TOOL_GROUPS.filter((group) => group.menu).map((group) => (
+              {groups.map((group) => (
                 <TaskMenu key={group.id} group={group} rowState={rowState} onSelect={onSelect} />
               ))}
             </div>
-          </>
+          </div>
         )}
 
         {/* The lead: what is happening and what to do about it. It takes the
@@ -420,19 +367,19 @@ const ActionBar = ({
         {running && (
           <span className="inline-flex items-center gap-2 shrink-0 ml-auto pl-1">
             {mode.leaveLabel ? (
-              <button type="button" onClick={onCancel} className="btn btn-primary btn-sm">
+              <button type="button" onClick={onCancel} className="btn btn-primary btn-sm h-10">
                 {mode.leaveLabel}
                 <kbd className="action-optional border-accent-ink/30 bg-transparent text-accent-ink">Esc</kbd>
               </button>
             ) : (
-              <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">
+              <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm h-10">
                 Cancel
                 <kbd className="action-optional">Esc</kbd>
               </button>
             )}
 
             {onDone && mode.doneLabel && (
-              <button type="button" onClick={onDone} className="btn btn-primary btn-sm">
+              <button type="button" onClick={onDone} className="btn btn-primary btn-sm h-10">
                 {mode.doneLabel}
                 {mode.doneKey && (
                   <kbd className="action-optional border-accent-ink/30 bg-transparent text-accent-ink">

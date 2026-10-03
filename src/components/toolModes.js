@@ -62,7 +62,7 @@ export const TOOL_MODES = {
   scale: {
     icon: Scaling,
     name: 'Setting the scale',
-    hint: 'Click both ends of something whose length you know, then type its length under Scale in the panel.',
+    hint: 'Click both ends of something whose length you know, then type its length in the panel, under the scale.',
     touchHint: 'Tap both ends of a length you know, then type it in the Measurement panel.',
     leaveLabel: 'Done',
   },

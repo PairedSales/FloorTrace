@@ -104,7 +104,7 @@ describe('PlanTabs', () => {
     const view = render(<PlanTabs {...props()} />);
     const [first] = [...view.container.querySelectorAll('[data-tab-id]')];
     expect(first.style.flex).toBe('0 1 auto');
-    expect(first.style.maxWidth).toBe('230px');
+    expect(first.style.maxWidth).toBe('260px');
     const tablist = view.getByRole('tablist');
     expect(tablist.className).not.toMatch(/flex-1/);
     expect(tablist.parentElement.contains(view.getByRole('button', { name: /Add plan/ }))).toBe(true);
