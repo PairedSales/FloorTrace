@@ -172,12 +172,10 @@ export function useVoidTool({ voidToolActive, getCanvasCoords, scaleRef }) {
   return {
     isVoidingRef,
     candidate,
-    voidPolygon: polygon,
     handleVoidMouseDown,
     handleVoidMouseMove,
     handleVoidMouseUp,
     closeVoidPolygon,
     cancelVoid,
-    resetVoidState: reset,
   };
 }

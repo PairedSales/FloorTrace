@@ -1111,8 +1111,6 @@ export function useToolRouter({
 
   return {
     currentMousePos,
-    setCurrentMousePos,
-    roomStart,
     draggingRoom,
     draggingRoomCorner,
     draggingAngle,

@@ -1,3 +1,5 @@
+import { formatLength } from '../../utils/unitConverter';
+
 // These named Inter, which the app has never loaded — so every canvas label
 // silently rendered in system-ui while the rest of the UI used Fira Sans. The
 // string is shared rather than repeated because it is measured here and
@@ -58,12 +60,11 @@ export const SQ_M_TO_SQ_CM = 10000;
 /** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
 export const MIN_SQ_M_DISPLAY = 0.1;
 
-/** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
+/** Layout for a measurement line's label: on the line's middle, lifted off it when the segment is too short to carry it.
  *  @param {object} options
  *  @param {boolean} [options.forceAbove=false] Always lift the label above the line (used during live preview). 
  *  @param {string|null} [options.unitStyle=null] Specific format style inferred from OCR. */
 export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forceAbove = false, unitStyle = null } = {}) => {
-  const { formatLength } = getMeasurementLineLayout._deps;
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const lenPx = Math.sqrt(dx * dx + dy * dy);
@@ -90,7 +91,6 @@ export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forc
   const extentAlongLine =
     (approxTextWidth * Math.abs(ux) + approxTextHeight * Math.abs(uy)) / 2 + approxPad;
   const maxHalfGap = Math.max(0, lenPx / 2 - 0.5 / scale);
-  const halfGap = Math.min(extentAlongLine, maxHalfGap);
   const needsPerpendicularLift = forceAbove || maxHalfGap < extentAlongLine - 1e-3;
   const halfExtentOnNormal =
     (approxTextWidth / 2) * Math.abs(nx) + (approxTextHeight / 2) * Math.abs(ny);
@@ -99,24 +99,8 @@ export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forc
   const labelX = mx + nx * liftPerp;
   const labelY = my + ny * liftPerp;
 
-  const line1End = { x: mx - ux * halfGap, y: my - uy * halfGap };
-  const line2Start = { x: mx + ux * halfGap, y: my + uy * halfGap };
-
-  return {
-    textStr,
-    fontSize,
-    labelX,
-    labelY,
-    approxTextWidth,
-    approxTextHeight,
-    line1Points: [line.start.x, line.start.y, line1End.x, line1End.y],
-    line2Points: [line2Start.x, line2Start.y, line.end.x, line.end.y],
-  };
+  return { textStr, fontSize, labelX, labelY };
 };
-
-// Inject formatLength dependency to avoid circular import issues
-import { formatLength } from '../../utils/unitConverter';
-getMeasurementLineLayout._deps = { formatLength };
 
 /** Helper function to convert screen coordinates to canvas coordinates */
 export const getCanvasCoordinates = (stage, scaleRef, contentNodeRef = null) => {

@@ -85,7 +85,6 @@ export const summariseIssues = (traces, scaleNote, doubleCounted, needsRescale =
       remedy: named
         ? `Redraw ${pair.outerName} so that it leaves ${pair.innerName} out, or cut that area out of it with Outline ▸ Cut out an open area.`
         : 'Redraw the outer outline so that it leaves the inner one out, or cut that area out of it with Outline ▸ Cut out an open area.',
-      pair,
     });
   }
 

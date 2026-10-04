@@ -32,12 +32,6 @@ export function usePerimeterEditor({
   const lastDraggedVertexRef = useRef(null);
   const lastDragStartPosRef = useRef(null);
 
-  const activePerimeterOverlay = useMemo(() => {
-    return localPerimeterVertices 
-      ? { ...perimeterOverlay, vertices: localPerimeterVertices }
-      : perimeterOverlay;
-  }, [perimeterOverlay, localPerimeterVertices]);
-
   const isSelfIntersecting = useMemo(() => {
     if (draggingVertex !== null && draggedVertexCoords && perimeterOverlay?.vertices) {
       return !validateVertexMove(perimeterOverlay.vertices, draggingVertex, draggedVertexCoords, true);
@@ -107,14 +101,6 @@ export function usePerimeterEditor({
     setPerimeterVertices(newVertices);
   }, [perimeterVertices, setPerimeterVertices, onSaveUndoPoint]);
 
-  const handleRemovePerimeterVertex = useCallback(() => {
-    if (perimeterVertices && perimeterVertices.length > 0) {
-      onSaveUndoPoint?.();
-      const newVertices = perimeterVertices.slice(0, -1);
-      setPerimeterVertices(newVertices);
-    }
-  }, [perimeterVertices, setPerimeterVertices, onSaveUndoPoint]);
-
   const handleClosePerimeterShape = useCallback(() => {
     if (perimeterVertices && perimeterVertices.length > 2) {
       // App's onClosePerimeter owns the undo save — saving here too pushed
@@ -163,14 +149,12 @@ export function usePerimeterEditor({
     setSelectedVertexIndex,
     localPerimeterVertices,
     setLocalPerimeterVertices,
-    activePerimeterOverlay,
     isSelfIntersecting,
     isPreviewInvalid,
     handleVertexDragStart,
     handleVertexDragMove,
     handleVertexDragEnd,
     handleAddPerimeterVertex,
-    handleRemovePerimeterVertex,
     handleClosePerimeter: handleClosePerimeterShape,
     handleInsertPerimeterVertex,
   };

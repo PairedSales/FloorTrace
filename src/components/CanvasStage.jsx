@@ -656,7 +656,6 @@ const CanvasStage = React.memo(({
             />
             
             <PerimeterPlacementLayer
-              roomOverlay={router.activeRoomOverlay}
               traceInteractionMode={traceInteractionMode}
               perimeterVertices={perimeterVertices}
               currentMousePos={router.currentMousePos}

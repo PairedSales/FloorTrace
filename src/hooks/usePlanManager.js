@@ -204,5 +204,5 @@ export function usePlanManager() {
     return true;
   }, [closePlan]);
 
-  return { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan, hydrate };
+  return { openPlan, closePlan, closeAllPlans, switchPlan, stepPlan };
 }

@@ -346,18 +346,10 @@ export const scaleQualitySummary = (quality) => {
     };
 };
 
-export const qualitySummary = (quality) => {
-  const confidence = quality?.confidence ?? null;
-  const edited = Boolean(quality?.edited);
-  const level = qualityLevel(confidence, edited);
-  return {
-    level,
-    edited,
-    confidence,
-    reason: primaryWarning(quality?.warnings),
-    warnings: quality?.warnings ?? [],
-  };
-};
+export const qualitySummary = (quality) => ({
+  level: qualityLevel(quality?.confidence ?? null, Boolean(quality?.edited)),
+  reason: primaryWarning(quality?.warnings),
+});
 
 /**
  * Which warnings a hand edit can answer, and which it cannot.

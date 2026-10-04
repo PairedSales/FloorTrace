@@ -8,10 +8,8 @@ const loadImageElement = (src) => new Promise((resolve, reject) => {
 });
 
 const CORNER_BOX_HALF = 15; // 30x30 search
-const WALL_STRIP_HALF = 15; // 30 columns / rows
 const QUADRANT_OFFSET = 4;
 const MIN_CORNER_SCORE = 2.15;
-const WALL_DARK_RATIO = 0.4;
 
 /**
  * @param {Uint8Array} isDark

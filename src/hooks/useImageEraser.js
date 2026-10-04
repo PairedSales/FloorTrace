@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import useAppStore from '../store/appStore';
 
 /**
@@ -32,10 +32,9 @@ export function useImageEraser({
   onImageUpdate,
   getCanvasCoords,
 }) {
-  // The stroke in progress, in image space — rendered as the live white band so
-  // the user sees what they are about to remove before it is committed.
-  const [eraseStroke, setEraseStroke] = useState(null);
   const isErasingRef = useRef(false);
+  // The stroke in progress, in image space. Nothing draws it while it grows —
+  // the brush cursor is the preview — so it is a ref, not state.
   const strokeRef = useRef([]);
   const startPosRef = useRef(null);
   const axisRef = useRef(null);
@@ -54,7 +53,6 @@ export function useImageEraser({
     strokeRef.current = [];
     startPosRef.current = null;
     axisRef.current = null;
-    setEraseStroke(null);
   }, []);
 
   const handleEraserMouseDown = useCallback((stage) => {
@@ -66,7 +64,6 @@ export function useImageEraser({
     startPosRef.current = pos;
     axisRef.current = null;
     strokeRef.current = [pos];
-    setEraseStroke([pos]);
     return true;
   }, [imageEraserActive, imageObj, getCanvasCoords]);
 
@@ -95,7 +92,6 @@ export function useImageEraser({
     }
 
     strokeRef.current = [...strokeRef.current, { x, y }];
-    setEraseStroke(strokeRef.current);
     return true;
   }, [getCanvasCoords]);
 
@@ -179,7 +175,6 @@ export function useImageEraser({
   }, [resetStroke]);
 
   return {
-    eraseStroke,
     isErasingRef,
     handleEraserMouseDown,
     handleEraserMouseMove,

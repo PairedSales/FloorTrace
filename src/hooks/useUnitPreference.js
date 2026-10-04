@@ -21,8 +21,7 @@ import useWorkspaceStore from '../store/workspaceStore';
  * Workspace-level: it follows whichever plan is live, so it must never sit
  * inside a keyed subtree.
  *
- * @returns {{ unitPreference: string, setUnitPreference: (v: string) => void,
- *             chooseUnit: (unit: string) => void }}
+ * @returns {{ chooseUnit: (unit: string) => void }}
  */
 export default function useUnitPreference() {
   const unit = useAppStore((s) => s.unit);
@@ -46,5 +45,5 @@ export default function useUnitPreference() {
     setUnit(next);
   }, [setUnit, setUnitPreference]);
 
-  return { unitPreference, setUnitPreference, chooseUnit };
+  return { chooseUnit };
 }
