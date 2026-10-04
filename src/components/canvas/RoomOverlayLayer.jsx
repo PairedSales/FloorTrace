@@ -17,9 +17,9 @@ const LABEL = 'Scale room';
  * The room the scale was taken from — "the green box" the panel's scale step
  * talks about — with its name on it, so the box explains itself on the plan.
  *
- * It is a tinted box with a label and a solid square on each corner, always
- * drawn: the corners are how the scale is corrected, and the squares keep them
- * apart from the outline's ring-shaped corners.
+ * It is a tinted box with a label and a solid corner bracket on each corner,
+ * always drawn: the corners are how the scale is corrected, and the brackets
+ * keep them apart from the outline's ring-shaped corners.
  */
 const RoomOverlayLayer = ({
   roomOverlay,
@@ -110,40 +110,37 @@ const RoomOverlayLayer = ({
         />
       </Group>
 
-      {/* Room Corner Handles: solid green squares, always drawn. Squares, not
-          the outline's rings, so a scale corner is never mistaken for an
-          outline corner. */}
+      {/* Room Corner Handles: an L of solid green on each corner, always drawn,
+          running along the two walls it joins. Brackets, not the outline's
+          rings, so a scale corner is never mistaken for an outline corner. */}
       {[
-        { x: roomOverlay.x1, y: roomOverlay.y1, corner: 'tl' },
-        { x: roomOverlay.x2, y: roomOverlay.y1, corner: 'tr' },
-        { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
-        { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
-      ].map((handle, i) => {
-        const side = ((isTouch ? 15 : 10) + (over ? 2 : 0)) / scale;
-        const reach = (TOUCH_HIT_RADIUS / scale);
+        { x: roomOverlay.x1, y: roomOverlay.y1, dx: roomOverlay.x2 - roomOverlay.x1, dy: roomOverlay.y2 - roomOverlay.y1, corner: 'tl' },
+        { x: roomOverlay.x2, y: roomOverlay.y1, dx: roomOverlay.x1 - roomOverlay.x2, dy: roomOverlay.y2 - roomOverlay.y1, corner: 'tr' },
+        { x: roomOverlay.x1, y: roomOverlay.y2, dx: roomOverlay.x2 - roomOverlay.x1, dy: roomOverlay.y1 - roomOverlay.y2, corner: 'bl' },
+        { x: roomOverlay.x2, y: roomOverlay.y2, dx: roomOverlay.x1 - roomOverlay.x2, dy: roomOverlay.y1 - roomOverlay.y2, corner: 'br' }
+      ].map((handle) => {
+        // The arms point into the room and never run past a third of a side.
+        const arm = Math.min((isTouch ? 22 : 16) / scale, width / 3, height / 3);
+        const ax = Math.sign(handle.dx) * arm;
+        const ay = Math.sign(handle.dy) * arm;
+        const points = [ax, 0, 0, 0, 0, ay];
+        const reach = (isTouch ? TOUCH_HIT_RADIUS : 14) / scale;
         return (
-          <Rect
-            key={i}
-            x={handle.x - side / 2}
-            y={handle.y - side / 2}
-            width={side}
-            height={side}
-            fill={SCALE}
-            stroke={PAPER}
-            strokeWidth={1.5 / scale}
-            // Touch grabs from a fingertip away; the drawn square stays small.
-            hitFunc={isTouch ? (ctx, shape) => {
-              ctx.beginPath();
-              ctx.rect(side / 2 - reach, side / 2 - reach, reach * 2, reach * 2);
-              ctx.closePath();
-              ctx.fillStrokeShape(shape);
-            } : undefined}
+          <Group
+            key={handle.corner}
+            x={handle.x}
+            y={handle.y}
             onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
             onTouchStart={(e) => onRoomCornerMouseDown(handle.corner, e)}
             onMouseEnter={enter}
             onMouseLeave={leave}
-            perfectDrawEnabled={false}
-          />
+          >
+            {/* The grabbable region: a fingertip around the corner, invisible. */}
+            <Rect x={-reach} y={-reach} width={reach * 2} height={reach * 2} fill="rgba(0,0,0,0.001)" />
+            {/* A white casing keeps the bracket readable over the plan's ink. */}
+            <Line points={points} stroke={PAPER} strokeWidth={6 / scale} lineCap="square" lineJoin="miter" listening={false} perfectDrawEnabled={false} />
+            <Line points={points} stroke={SCALE} strokeWidth={3.5 / scale} lineCap="square" lineJoin="miter" listening={false} perfectDrawEnabled={false} />
+          </Group>
         );
       })}
     </>
