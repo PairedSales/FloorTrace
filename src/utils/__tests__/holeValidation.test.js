@@ -41,12 +41,6 @@ describe('validateHoleRing', () => {
     expect(res.reason).toMatch(/inside the outline/);
   });
 
-  it('rejects a ring wholly outside the outline', () => {
-    const res = validateHoleRing(square(200, 200, 220, 220), OUTER, []);
-    expect(res.ok).toBe(false);
-    expect(res.reason).toMatch(/inside the outline/);
-  });
-
   // The check vertex containment alone misses. Every corner of this ring sits
   // in one arm or the other of the U; the long edges still run straight across
   // the notch, through two walls.

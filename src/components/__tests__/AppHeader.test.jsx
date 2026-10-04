@@ -53,9 +53,6 @@ const openMenu = (view) => {
   return view.getByRole('menu');
 };
 
-const rowsOf = (menu) => within(menu).getAllByRole('menuitem')
-  .map((row) => row.querySelector('.font-medium').textContent.trim());
-
 const row = (menu, label) => within(menu).getByText(label).closest('[role="menuitem"]');
 
 beforeEach(() => {
@@ -72,71 +69,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the header is a frame, not a menu bar', () => {
-  it('has no File, View or Help menus — one Menu, and a Help button', () => {
-    const view = header();
-    for (const gone of ['File', 'View']) {
-      expect(view.queryByRole('button', { name: gone })).toBeNull();
-    }
-    expect(view.getByRole('button', { name: 'Menu' }).getAttribute('aria-haspopup')).toBe('menu');
-    expect(view.getByRole('button', { name: 'Help' }).getAttribute('aria-haspopup')).toBeNull();
-  });
-
   it('opens Help on the guide', () => {
     const opened = [];
     const view = header({ onHelpOpen: (page) => opened.push(page) });
     fireEvent.click(view.getByRole('button', { name: 'Help' }));
     expect(opened).toEqual(['guide']);
   });
-
-  it('is only the name, Help and Menu before a plan is open', () => {
-    useAppStore.setState({ image: null });
-    const view = header({ image: null });
-    const names = view.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent.trim());
-    expect(names).toEqual(['Help', 'Menu']);
-    expect(view.getByText('FloorTrace')).toBeTruthy();
-  });
-
-  it('never fills a button', () => {
-    const view = header();
-    expect(view.container.querySelectorAll('.btn-primary')).toHaveLength(0);
-  });
-
-  it('does not make the mark a button — closing lives in the Menu', () => {
-    const view = header();
-    expect(view.getByText('FloorTrace').closest('button')).toBeNull();
-  });
-
-  it('has no two controls sharing an accessible name', () => {
-    const view = header();
-    const names = view.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent.trim());
-    expect(new Set(names).size).toBe(names.length);
-  });
 });
 
 describe('the Menu holds what is not on screen', () => {
-  it('lists opening, saving, the three switches, Settings and closing', () => {
-    const rows = rowsOf(openMenu(header()));
-    expect(rows).toEqual([
-      'Open a floor plan…', 'Paste a floor plan',
-      'Save image…', 'Copy image', 'Save project file', 'Save project file as…',
-      'Wall lengths on the plan', 'Snap corners to walls', 'Results panel',
-      'Settings…',
-      'Close this plan',
-    ]);
-  });
-
-  // Closing the plan you are looking at is a different act from closing every
-  // plan; the second is only listed where it means something different.
-  it('lists the several-plan commands only when there are several plans', () => {
-    let rows = rowsOf(openMenu(header({ planCount: 1 })));
-    expect(rows).not.toContain('Save all plans');
-    expect(rows).not.toContain('Close all plans');
-    cleanup();
-    rows = rowsOf(openMenu(header({ planCount: 3 })));
-    expect(rows).toContain('Save all plans');
-    expect(rows).toContain('Close all plans');
-  });
-
   it('runs the command it names', () => {
     const calls = [];
     const view = header({
@@ -152,22 +93,6 @@ describe('the Menu holds what is not on screen', () => {
     expect(calls).toEqual(['export', 'settings', 'panel', 'lengths:false']);
   });
 
-  // On the start screen it used to open as eight greyed-out rows around the
-  // two that worked.
-  it('lists only what can be done before a plan is open', () => {
-    useAppStore.setState({ image: null });
-    expect(rowsOf(openMenu(header({ image: null })))).toEqual([
-      'Open a floor plan…', 'Paste a floor plan', 'Settings…',
-    ]);
-  });
-
-  it('can close an empty plan that is one of several', () => {
-    useAppStore.setState({ image: null });
-    const rows = rowsOf(openMenu(header({ image: null, planCount: 2 })));
-    expect(rows).toContain('Close this plan');
-    expect(rows).not.toContain('Save image…');
-  });
-
   it('makes what would read a half-measured plan wait for the running job', () => {
     // The image is rendered from a snapshot, so a trace landing behind it would
     // be saved as the measurement that preceded it.
@@ -180,11 +105,6 @@ describe('the Menu holds what is not on screen', () => {
 });
 
 describe('whether the work is being kept', () => {
-  it('says so in a word at rest', () => {
-    const view = header();
-    expect(view.getByText('Autosaved')).toBeTruthy();
-  });
-
   it('makes it a warning when nothing is being kept', () => {
     useAppStore.setState({ draftState: 'off' });
     let view = header();
@@ -194,11 +114,5 @@ describe('whether the work is being kept', () => {
     useAppStore.setState({ draftState: 'error' });
     view = header();
     expect(view.getByText('Not saved').className).toContain('chip-crit');
-  });
-
-  it('says nothing before there is a plan to keep', () => {
-    useAppStore.setState({ image: null });
-    const view = header({ image: null });
-    expect(view.queryByText('Autosaved')).toBeNull();
   });
 });

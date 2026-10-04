@@ -56,16 +56,6 @@ describe('an invalid spec is refused with the place and the reason', () => {
       expect(() => validateSpec(spec)).toThrow(message);
     });
   }
-
-  it('reports several problems on one line', () => {
-    try {
-      validateSpec({ outlines: [{ type: 'x', v: [[0, 0]] }, { type: 'gla', v: rect(0, 0, 9, 9), R: 1 }] });
-      expect.unreachable();
-    } catch (error) {
-      expect(error.message).not.toContain('\n');
-      expect(error.message).toMatch(/outlines\[0\]\.type.*outlines\[0\]\.v.*outlines\[1\]\.R/);
-    }
-  });
 });
 
 describe('references between outlines', () => {

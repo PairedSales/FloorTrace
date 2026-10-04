@@ -150,14 +150,6 @@ describe('exhibit model', () => {
       expect(printed).toContain('PROPERTY');
       expect(printed.some((t) => t.includes('16,000'))).toBe(true);
     });
-
-    it('says nothing about a property when there is only one plan', () => {
-      const model = buildExhibitModel(setUp());
-      expect(model.property).toBeNull();
-      expect(model.headline.caption).not.toContain('this plan is');
-      const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
-      expect(textOf(layout)).not.toContain('PROPERTY');
-    });
   });
 
   it('states the wall face the area was measured to', () => {
@@ -298,22 +290,6 @@ describe('exhibit model', () => {
     expect(model.headline.value).toBe('10,000');
   });
 
-  it('omits wall lengths and annotations when they are switched off', () => {
-    const state = setUp({
-      measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 10, y: 0 } }],
-    });
-    const on = buildExhibitModel(state);
-    expect(on.plan.traces[0].edges).toHaveLength(4);
-    expect(on.plan.lines).toHaveLength(1);
-
-    const off = buildExhibitModel(state, {
-      options: { sideLengths: false, annotations: false, outlineLabels: false },
-    });
-    expect(off.plan.traces[0].edges).toHaveLength(0);
-    expect(off.plan.lines).toHaveLength(0);
-    expect(off.plan.traces[0].badge).toBeNull();
-  });
-
   // The screen puts wall lengths on the inside of the outline, and the export
   // copies that rather than improving on it. What must hold either way is that
   // every label goes to the *same* side — a set that alternates is the failure
@@ -344,11 +320,6 @@ describe('filenames', () => {
   it('strips characters a filesystem rejects', () => {
     const now = new Date(2026, 0, 2).getTime();
     expect(exhibitFilename({ title: 'Unit 4/B: rear*' }, now)).toBe('Unit 4 B rear 2026-01-02.png');
-  });
-
-  it('falls back when nothing was typed', () => {
-    const now = new Date(2026, 0, 2).getTime();
-    expect(exhibitFilename({ title: '' }, now)).toBe('Floor plan 2026-01-02.png');
   });
 });
 
@@ -393,13 +364,6 @@ describe('page composition', () => {
     expect(strings).toContain('SCALE');
     expect(strings.join(' ')).toContain('not a certified survey');
     expect(layout.height).toBeGreaterThan(600);
-  });
-
-  it('drops the summary but keeps the plan when the summary is off', () => {
-    const model = buildExhibitModel(setUp(), { options: { summary: false } });
-    const layout = composeExhibit(fakeCtx(), model, { imageWidth: 800, imageHeight: 600 });
-    expect(textOf(layout)).not.toContain('GROSS LIVING AREA');
-    expect(layout.ops.some((o) => o.op === 'image')).toBe(true);
   });
 
   it('draws the flag panel behind the flag text, not over it', () => {

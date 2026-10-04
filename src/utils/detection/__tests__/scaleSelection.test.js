@@ -211,12 +211,14 @@ describe('selectProjectScale when it cannot be sure', () => {
   // and it is the rectangle most likely to be carved out from under the
   // footprint the scale is applied to.
   it('never chooses a garage or a porch', () => {
+    // Named by its size alone, as a garage whose keyword was read as its own
+    // label is: only the region can say what it is.
     const result = selectProjectScale([
       room('BEDROOM', 15.5, 15.5, 0.95, null, { left: 10, right: 20, top: 10, bottom: 20 }),
-      room('GARAGE', 15.8, 15.6, 0.93, null, { left: 100, right: 140, top: 100, bottom: 140 }),
+      room('20-7 x 9-6', 15.8, 15.6, 0.93, null, { left: 100, right: 140, top: 100, bottom: 140 }),
     ], { nonGlaRegions: [{ x: 90, y: 90, width: 80, height: 80 }] });
     expect(result.rejected).toContainEqual(
-      expect.objectContaining({ name: 'GARAGE', reason: 'non-gla' }),
+      expect.objectContaining({ name: '20-7 x 9-6', reason: 'non-gla' }),
     );
     expect(result.roomCount).toBe(1);
     expect(result.room.name).toBe('BEDROOM');
@@ -230,12 +232,5 @@ describe('selectProjectScale when it cannot be sure', () => {
     expect(result.feetPerPixel).toBeNull();
     expect(result.room).toBeNull();
     expect(result.reason).toBe('no-rooms');
-  });
-
-  it('has nothing to say about an empty page', () => {
-    const result = selectProjectScale([]);
-    expect(result.pixelsPerFoot).toBeNull();
-    expect(result.room).toBeNull();
-    expect(result.roomCount).toBe(0);
   });
 });

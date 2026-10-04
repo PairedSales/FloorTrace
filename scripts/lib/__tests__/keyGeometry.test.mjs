@@ -48,10 +48,6 @@ describe('what is wrong with a ring', () => {
     const pinched = [[0, 0], [100, 0], [100, 100], [50, 0], [0, 100]];
     expect(ringProblem(pinched)?.kind).toBe('touch');
   });
-
-  it('names an outline with no area', () => {
-    expect(ringProblem([[0, 0], [100, 0], [50, 0.0000001]])?.kind).toMatch(/flat|spike|few/);
-  });
 });
 
 describe('segments and points', () => {

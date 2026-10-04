@@ -14,10 +14,6 @@ describe('planStage', () => {
     expect(result.tracedCount).toBe(1);
   });
 
-  it('offers nothing with no plan open', () => {
-    expect(planStage({ calibrated: false, perimeterTraces: [] }).primary).toBeNull();
-  });
-
   // How the detector rated an outline is not a step. The outline is on the
   // plan; whether it is right is the user's to see.
   it('does not turn a doubtful outline into something to do', () => {

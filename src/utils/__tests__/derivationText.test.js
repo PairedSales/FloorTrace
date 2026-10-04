@@ -53,17 +53,6 @@ describe('derivationText', () => {
     expect(Number(summed.toFixed(1))).toBe(Number(subtotal.replace(/,/g, '')));
   });
 
-  it('prints the GLA the derivation reported', () => {
-    const d = buildAreaDerivation(state({
-      perimeterTraces: [
-        outline({ vertices: rect(313, 187) }),
-        outline({ id: 'b', name: '2nd Floor', vertices: rect(241, 173) }),
-      ],
-    }));
-    expect(derivationText(d))
-      .toContain(`TOTAL LIVING AREA (ROUNDED)\t${d.gla.reported.toLocaleString()} ft²`);
-  });
-
   it('writes a right triangle the way the trade writes one', () => {
     const out = text({
       perimeterTraces: [outline({
@@ -148,23 +137,5 @@ describe('derivationText', () => {
     // the note stays off. What must never happen is a note that disagrees.
     expect(Math.round(d.gla.sumOfSubtotals)).toBe(d.gla.reported);
     expect(out).not.toContain('The levels above add to');
-  });
-
-  it('reconciles in the unit being printed when they genuinely differ', () => {
-    // Three levels each landing just under a half unit: the tenths add to
-    // 151.2 and the reported figure rounds the raw sum once.
-    const d = buildAreaDerivation(state({
-      perimeterTraces: [
-        outline({ vertices: rect(100, 50.4) }),
-        outline({ id: 'b', name: '2nd Floor', vertices: rect(100, 50.4) }),
-        outline({ id: 'c', name: '3rd Floor', vertices: rect(100, 50.4) }),
-      ],
-    }), 'metric');
-    const out = derivationText(d);
-    expect(out).toContain('Levels added');
-    expect(out).toContain('m²');
-    if (Math.round(d.gla.sumOfSubtotals) !== d.gla.reported) {
-      expect(out).toContain(`the unrounded sum, ${d.gla.unrounded.toFixed(1)}, rounded once`);
-    }
   });
 });

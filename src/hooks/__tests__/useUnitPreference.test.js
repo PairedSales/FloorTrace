@@ -57,9 +57,12 @@ describe('useUnitPreference', () => {
   it('handing the choice back to the plan leaves the current unit standing', () => {
     useAppStore.setState({ unit: 'metric' });
     const { rerender } = renderHook(() => useUnitPreference());
+    act(() => useWorkspaceStore.getState().setUnitPreference('inches'));
+    rerender();
+    expect(app().unit).toBe('inches');
     act(() => useWorkspaceStore.getState().setUnitPreference('auto'));
     rerender();
-    expect(app().unit).toBe('metric');
+    expect(app().unit).toBe('inches');
   });
 
   it('ignores a unit it cannot format', () => {

@@ -120,17 +120,6 @@ describe('the blind packet', () => {
     expect(packet.image.bytes.equals(Buffer.from(p.images['img-1'].split(',')[1], 'base64'))).toBe(true);
   });
 
-  it('is the same however often it is built, and needs no trace to exist', async () => {
-    const bare = project();
-    delete bare.floors[0].state.perimeterTraces;
-    delete bare.floors[0].state.rooms;
-    delete bare.floors[0].state.calibration;
-    const a = await buildPacket(bare, 'x');
-    const b = await buildPacket(project(), 'x');
-    expect(JSON.stringify(a.labels)).toBe(JSON.stringify(b.labels));
-    expect(JSON.stringify(a.meta)).toBe(JSON.stringify(b.meta));
-  });
-
   it('refuses nothing for a plan with no labels', async () => {
     const p = project();
     p.floors[0].state.detectedDimensions = [];

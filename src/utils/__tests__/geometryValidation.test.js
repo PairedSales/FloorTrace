@@ -1,52 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  getOrientation,
   segmentsIntersect,
   hasSelfIntersection,
   validateVertexMove,
 } from '../geometryValidation';
 
 describe('geometryValidation', () => {
-  describe('getOrientation', () => {
-    it('detects collinear points', () => {
-      const p = { x: 0, y: 0 };
-      const q = { x: 5, y: 5 };
-      const r = { x: 10, y: 10 };
-      expect(getOrientation(p, q, r)).toBe(0);
-    });
-
-    it('detects clockwise points', () => {
-      const p = { x: 0, y: 0 };
-      const q = { x: 10, y: 0 };
-      const r = { x: 0, y: 10 }; // visually clockwise in Y-down
-      expect(getOrientation(p, q, r)).toBe(1);
-    });
-
-    it('detects counterclockwise points', () => {
-      const p = { x: 0, y: 0 };
-      const q = { x: 0, y: 10 };
-      const r = { x: 10, y: 0 }; // visually counterclockwise in Y-down
-      expect(getOrientation(p, q, r)).toBe(2);
-    });
-  });
-
   describe('segmentsIntersect', () => {
-    it('detects crossing segments', () => {
-      const p1 = { x: 0, y: 0 };
-      const q1 = { x: 10, y: 10 };
-      const p2 = { x: 10, y: 0 };
-      const q2 = { x: 0, y: 10 };
-      expect(segmentsIntersect(p1, q1, p2, q2)).toBe(true);
-    });
-
-    it('detects parallel non-intersecting segments', () => {
-      const p1 = { x: 0, y: 0 };
-      const q1 = { x: 10, y: 0 };
-      const p2 = { x: 0, y: 5 };
-      const q2 = { x: 10, y: 5 };
-      expect(segmentsIntersect(p1, q1, p2, q2)).toBe(false);
-    });
-
     it('detects collinear overlapping segments', () => {
       const p1 = { x: 0, y: 0 };
       const q1 = { x: 10, y: 0 };

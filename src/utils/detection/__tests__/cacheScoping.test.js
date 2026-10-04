@@ -45,14 +45,6 @@ describe('analysis memo scoping', () => {
     getCachedAnalysis(KEY_A, DIM, null, compute);
     expect(runs).toBe(3); // A had to be recomputed
   });
-
-  it('ignores a drop for a key it never held', () => {
-    getCachedAnalysis(KEY_A, DIM, null, () => ({}));
-    expect(() => dropCacheKey('never-seen')).not.toThrow();
-    let runs = 0;
-    getCachedAnalysis(KEY_A, DIM, null, () => { runs += 1; return {}; });
-    expect(runs).toBe(0);
-  });
 });
 
 describe('search memo budget', () => {

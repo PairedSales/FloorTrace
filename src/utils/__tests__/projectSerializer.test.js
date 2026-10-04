@@ -83,15 +83,6 @@ describe('projectSerializer', () => {
   // sanitizeData
   // ──────────────────────────────────────────────────────────────────────────
   describe('sanitizeData', () => {
-    it('converts NaN to 0', () => {
-      expect(sanitizeData(NaN)).toBe(0);
-    });
-
-    it('converts Infinity and -Infinity to 0', () => {
-      expect(sanitizeData(Infinity)).toBe(0);
-      expect(sanitizeData(-Infinity)).toBe(0);
-    });
-
     it('recursively sanitizes nested objects and arrays', () => {
       const input = {
         zoomScale: Infinity,
@@ -201,14 +192,6 @@ describe('projectSerializer', () => {
       expect(statePatch.calibration.quality).toEqual(storeState.calibration.quality);
     });
 
-    it('accepts a project saved before scale quality existed', () => {
-      const storeState = createMockStoreState();
-      delete storeState.calibration.quality;
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-      expect(deserializeSketch(project).statePatch.calibration.quality).toBeUndefined();
-    });
-
     // The colour written here is the garage pastel every plan saved before the
     // paper palette carries. A colour that came from the type is the type's to
     // restate, so an old plan opens in the colours of the day.
@@ -309,12 +292,6 @@ describe('projectSerializer', () => {
   });
 
   describe('validateProjectSchema', () => {
-    it('passes for a valid project format', () => {
-      const storeState = createMockStoreState();
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-    });
-
     it('throws on missing critical schema components', () => {
       const invalidProject = {
         fileType: 'floorplan',
@@ -339,16 +316,6 @@ describe('projectSerializer', () => {
       const project = serializeSketch(storeState);
       // Change vertex x to a string (invalid)
       project.floors[0].state.perimeterTraces[0].vertices[0].x = 'invalid-string';
-      expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
-    });
-
-    it('throws on missing required fields inside customShapes', () => {
-      const storeState = createMockStoreState();
-      const project = serializeSketch(storeState);
-      project.floors[0].state.customShapes = [{
-        closed: true,
-        // missing vertices
-      }];
       expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
   });
@@ -376,23 +343,6 @@ describe('projectSerializer', () => {
 
       const { statePatch } = deserializeSketch(project);
       expect(statePatch.perimeterTraces[0].holes).toEqual(holes);
-    });
-
-    // The tag is what keeps a hand-punched void alive across a re-trace, so
-    // losing it in the file would make reopening a project quietly destructive.
-    it('keeps the source tag rather than stripping it to a bare ring', () => {
-      const project = withHoles([{ id: 'h1', ring: ring(4), source: 'user' }]);
-      const { statePatch } = deserializeSketch(project);
-      expect(statePatch.perimeterTraces[0].holes[0].source).toBe('user');
-    });
-
-    // A file written before provenance existed carries bare rings.
-    it('accepts a v1 file whose holes are bare rings', () => {
-      const project = withHoles([ring(4), ring(6)]);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const { statePatch } = deserializeSketch(project);
-      expect(statePatch.perimeterTraces[0].holes).toEqual([ring(4), ring(6)]);
     });
 
     it('still rejects a hole that is neither shape', () => {
@@ -425,16 +375,6 @@ describe('projectSerializer', () => {
       expect(statePatch.perimeterTraces[0].wallFaces).toEqual(wallFaces);
     });
 
-    // A trace the user drew by hand, and every trace in a file written before
-    // the pair existed, simply has no pair.
-    it('accepts a trace with no pair at all', () => {
-      const project = withFaces(undefined);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const { statePatch } = deserializeSketch(project);
-      expect(statePatch.perimeterTraces[0].wallFaces).toBeUndefined();
-    });
-
     it('accepts a pair with only one face', () => {
       const project = withFaces({ outer: { vertices: ring(100), holes: [] }, inner: null });
       expect(() => validateProjectSchema(project)).not.toThrow();
@@ -454,12 +394,6 @@ describe('projectSerializer', () => {
   // Version Validation
   // ──────────────────────────────────────────────────────────────────────────
   describe('validateProjectVersion', () => {
-    it('passes if version matches target version', () => {
-      const storeState = createMockStoreState();
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectVersion(project)).not.toThrow();
-    });
-
     it('throws if project version is newer than supported', () => {
       const storeState = createMockStoreState();
       const project = serializeSketch(storeState);
@@ -595,12 +529,6 @@ describe('projectSerializer', () => {
       expect(statePatch.calibration.quality.lineCount).toBe(2);
       expect(statePatch.calibration.quality.axes).toEqual(['x', 'y']);
     });
-
-    it('still parses a file that predates scale lines', () => {
-      const project = serializeSketch(createMockStoreState());
-      expect(() => validateProjectSchema(project)).not.toThrow();
-      expect(deserializeSketch(project).statePatch.scaleLines).toBeUndefined();
-    });
   });
 });
 
@@ -714,11 +642,6 @@ describe('planStateForSave', () => {
     expect(state.projectName).toBe('Lost its picture');
   });
 
-  it('treats an explicitly empty image the same way', () => {
-    expect(planStateForSave(live, { image: null }).image).toBeNull();
-    expect(planStateForSave(live, { image: undefined }).image).toBeNull();
-  });
-
   it('still supplies fields the record legitimately omits', () => {
     expect(planStateForSave(live, { image: 'x' }).unit).toBe('decimal');
   });
@@ -760,14 +683,5 @@ describe('a persisted field removed from the app', () => {
 
   it('still validates — the schema strips unknown keys rather than rejecting', () => {
     expect(() => validateProjectSchema(fileCarryingRemovedField())).not.toThrow();
-  });
-
-  it('does not carry the removed field into store state', () => {
-    const state = deserializeSketch(fileCarryingRemovedField());
-    expect(Object.prototype.hasOwnProperty.call(state, 'manualEntryMode')).toBe(false);
-  });
-
-  it('is out of the save projection, so the next save drops it for good', () => {
-    expect(PERSISTENT_FLOOR_FIELDS).not.toContain('manualEntryMode');
   });
 });

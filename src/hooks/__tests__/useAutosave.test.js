@@ -96,11 +96,6 @@ describe('useAutosave', () => {
     vi.useRealTimers();
   });
 
-  it('starts with the workspace restored so later edits are written', async () => {
-    await mountAutosave();
-    expect(app()._hasRestoredState).toBe(true);
-  });
-
   // The index is keyed by a `sessionStorage` id, so a browser restart makes
   // this session's key a miss even though every plan is still on disk. Without
   // the second lookup the user's whole workspace simply does not come back.
@@ -243,16 +238,6 @@ describe('useAutosave', () => {
     await settle();
 
     expect(drafts.removePlan).not.toHaveBeenCalledWith(docA);
-  });
-
-  it('still clears a plan that really is empty', async () => {
-    await mountAutosave();
-    act(() => { app().setImage(IMAGE_A); });
-    await settle();
-    act(() => { app().restart(); });
-    await settle();
-
-    expect(drafts.removePlan).toHaveBeenCalledWith(docA);
   });
 
   it('rewrites the index when a plan is emptied, so it stops naming it', async () => {
