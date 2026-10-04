@@ -6,6 +6,7 @@ import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
 import { containmentRatio, markStaleHoles } from '../utils/geometryValidation';
 import { retireOnEdit } from '../utils/boundaryQuality';
+import { movedLabelsAt } from '../utils/labelLayout';
 import {
   DEFAULT_TRACE_TYPE,
   makeTrace,
@@ -58,6 +59,13 @@ const workingStateDefaults = () => {
   // for a robust multi-room scale; a single `roomOverlay` could hold neither.
   rooms: [],
   showSideLengths: true,
+  // Labels the user has dragged, `{ scale, rotation, moved: { [key]: {x, y, sig?} } }`
+  // with `x`/`y` the label's middle in original image px. Only for the zoom and
+  // turn it was made at — labels are a fixed size on screen, so a place chosen
+  // at one zoom means something else at another, and the layout drops it
+  // (`wallLabelLayout.js`). Undoable, so it is in the snapshot; and so not
+  // worth a draft or a project file, which is where it would outlive its zoom.
+  labelPlacements: null,
   useInteriorWalls: false,
   autoSnapEnabled: true,
   ocrFailed: false,
@@ -179,6 +187,7 @@ const SNAPSHOT_CLONED_FIELDS = SNAPSHOT_FIELDS.filter(
  * carries it, which would make reopening a project better than restoring a draft.
  */
 const EXCLUDED_AUTOSAVE_FIELDS = [
+  'labelPlacements',     // good for one zoom only; see its declaration
   'isProcessing',
   'processingMessage',
   'isDirty',
@@ -229,6 +238,7 @@ const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
  * project silently degraded every later trace to geometry-only.
  */
 const EXCLUDED_PERSISTENT_FIELDS = [
+  'labelPlacements',
   'isProcessing', 'processingMessage', 'traceInteractionMode',
   'lineToolActive', 'angleToolActive', 'drawAreaActive', 'eraserToolActive',
   'cornerEraserActive',
@@ -489,6 +499,13 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     return { rooms: mergeRooms(state.rooms, incoming) };
   }),
   setShowSideLengths: (v) => set({ showSideLengths: v }),
+  // Put one label where the user dragged it. Placements made at another zoom or
+  // turn are dropped here, the same rule the layout applies when it reads them.
+  // Call `undoManager.save()` first.
+  moveLabel: (key, at, view) => set((s) => {
+    const moved = { ...movedLabelsAt(s.labelPlacements, view), [key]: at };
+    return { labelPlacements: { scale: view.scale, rotation: view.rotation, moved } };
+  }),
   setUseInteriorWalls: (v) => set({ useInteriorWalls: v }),
   setAutoSnapEnabled: (v) => set({ autoSnapEnabled: v }),
   setOcrFailed: (v) => set({ ocrFailed: v }),

@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
-import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
-import { circleHit, measureSideLenWidth, pointToLineDistance } from './canvasUtils';
+import { formatArea } from '../../utils/unitConverter';
+import { circleHit, measureSideLenWidth, tabSize } from './canvasUtils';
 import { calculateArea, getCentroid, holeRings, holeKey, isSubtracted } from '../../utils/areaCalculator';
 import { labelAnchor } from '../../utils/labelAnchor';
 import { inkMapFor } from '../../utils/inkMap';
@@ -12,6 +12,10 @@ import {
 } from './overlayStyle';
 import CanvasTab from './CanvasTab';
 import OutlineSticker from './OutlineSticker';
+import { stickerLayout } from './stickerLayout';
+import { layoutLabels, stickerKey, cutoutKey } from './wallLabelLayout';
+import { movedLabelsAt } from '../../utils/labelLayout';
+import * as undoManager from '../../store/undoManager';
 import { useIsTouch } from '../../hooks/useViewport';
 
 /* ── touch ────────────────────────────────────────────────────────────────
@@ -177,134 +181,6 @@ const useAnimatedVertices = (targetVertices) => {
 };
 
 /**
- * Compute label layout data for every edge of the perimeter polygon.
- * This is extracted into a pure function so it can be memoized via useMemo.
- */
-const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex) => {
-  const unitStyle = getUnitStyleFromDimensions(detectedDimensions, unit);
-  const rad = ((canvasRotation || 0) * Math.PI) / 180;
-  const cos = Math.abs(Math.cos(rad));
-  const sin = Math.abs(Math.sin(rad));
-
-  // Compute the polygon winding order using Shoelace formula to establish a stable label sideSign.
-  // This replaces array-index parity (i % 2 === 0), preventing label flipping when vertices are added.
-  let sum = 0;
-  for (let idx = 0; idx < vertices.length; idx++) {
-    const v1 = vertices[idx];
-    const v2 = vertices[(idx + 1) % vertices.length];
-    sum += (v2.x - v1.x) * (v2.y + v1.y);
-  }
-  const isCCW = vertices.length >= 3 ? sum > 0 : true;
-  const sideSign = isCCW ? 1 : -1;
-
-  return vertices.map((vertex, i) => {
-    const nextVertex = vertices[(i + 1) % vertices.length];
-
-    const dx = nextVertex.x - vertex.x;
-    const dy = nextVertex.y - vertex.y;
-    const lengthInPixels = Math.sqrt(dx * dx + dy * dy);
-    const dxFeet = dx * feetPerPixel.x;
-    const dyFeet = dy * feetPerPixel.y;
-    const lengthInFeet = Math.sqrt(dxFeet * dxFeet + dyFeet * dyFeet);
-    const formattedLength = formatLength(lengthInFeet, unit, unitStyle);
-
-    const midX = (vertex.x + nextVertex.x) / 2;
-    const midY = (vertex.y + nextVertex.y) / 2;
-
-    const angle = Math.atan2(dy, dx);
-
-    const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
-      ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
-      : 14;
-    const idealFs = Math.max(15, ocrRefScreenPx) / scale;
-    const minFs = 9 / scale;
-
-    const padX = 8 / scale;
-    const minW = 30 / scale;
-    const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
-    const widthForFs = (fs) => measureSideLenWidth(formattedLength, fs) + padX * 2;
-
-    let fontSize = idealFs;
-    if (widthForFs(fontSize) > maxWByEdge) {
-      let lo = minFs, hi = fontSize;
-      for (let iter = 0; iter < 10; iter++) {
-        const mid = (lo + hi) / 2;
-        if (widthForFs(mid) > maxWByEdge) hi = mid; else lo = mid;
-      }
-      fontSize = Math.max(minFs, lo);
-    }
-
-    const labelWidth = Math.min(Math.max(minW, widthForFs(fontSize)), maxWByEdge);
-    const labelHeight = Math.max(fontSize * 1.45, 18 / scale);
-
-    // Outside the wall, clear of it. `sideSign` points into the outline, and
-    // inside is where the band lies over the wall and where the plan prints its
-    // rooms; outside there is only the veil.
-    const offsetDistance = -sideSign * (labelHeight / 2 + 9 / scale);
-    const offsetX = Math.sin(angle) * offsetDistance;
-    const offsetY = -Math.cos(angle) * offsetDistance;
-
-    // Calculate the effective bounding box in layer-space for collision detection.
-    // Since the label is kept upright (unrotated) in viewport-space, its projection
-    // onto the layer-space axes depends on the layer rotation.
-    const effectiveWidth = labelWidth * cos + labelHeight * sin;
-    const effectiveHeight = labelWidth * sin + labelHeight * cos;
-
-    const cx0 = midX + offsetX;
-    const cy0 = midY + offsetY;
-
-    const len = lengthInPixels;
-    const ex = len > 0 ? dx / len : 1;
-    const ey = len > 0 ? dy / len : 0;
-    const halfAlong = (effectiveWidth * Math.abs(ex) + effectiveHeight * Math.abs(ey)) / 2;
-    const vertexClearance = 8 / scale;
-    const maxShift = Math.max(0, len / 2 - halfAlong - vertexClearance);
-
-    let edgeShift = 0;
-    
-    // Lightweight mode: skip collision detection if we are actively dragging any vertex.
-    // This keeps the 60fps interaction smooth, and layout snaps to correct position on drag end.
-    if (draggingVertex === null || draggingVertex === undefined) {
-      // Find candidate vertices to check for collision.
-      // We always check the endpoints, and check other vertices only if they are close.
-      const maxPerpDistance = Math.abs(offsetDistance) + labelHeight / 2 + vertexClearance;
-      const candidateVertices = vertices.filter(v => {
-        const isEndpoint = (v.x === vertex.x && v.y === vertex.y) || 
-                           (v.x === nextVertex.x && v.y === nextVertex.y);
-        if (isEndpoint) return true;
-        const dist = pointToLineDistance(v, vertex, nextVertex);
-        return dist < (maxPerpDistance + 5 / scale);
-      });
-
-      for (const v of candidateVertices) {
-        const pcx = cx0 + edgeShift * ex;
-        const pcy = cy0 + edgeShift * ey;
-        const nearX = Math.max(pcx - effectiveWidth / 2, Math.min(v.x, pcx + effectiveWidth / 2));
-        const nearY = Math.max(pcy - effectiveHeight / 2, Math.min(v.y, pcy + effectiveHeight / 2));
-        const dist2 = (v.x - nearX) ** 2 + (v.y - nearY) ** 2;
-        if (dist2 < vertexClearance * vertexClearance) {
-          const projEdge = (v.x - pcx) * ex + (v.y - pcy) * ey;
-          const required = halfAlong + vertexClearance - Math.abs(projEdge);
-          if (required > 0) {
-            const dir = projEdge > 0 ? -1 : 1;
-            edgeShift = Math.max(-maxShift, Math.min(maxShift, edgeShift + dir * required));
-          }
-        }
-      }
-    }
-
-    return {
-      formattedLength,
-      fontSize,
-      labelWidth,
-      labelHeight,
-      finalCx: cx0 + edgeShift * ex,
-      finalCy: cy0 + edgeShift * ey,
-    };
-  });
-};
-
-/**
  * PerimeterLayer draws every visible outline's edge, the corners and wall
  * lengths of the one being edited, the cut-outs, and each outline's name and
  * area. The veil and the bands that go with them are `SpotlightLayer`'s.
@@ -313,6 +189,8 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
 // A room size is about 0.013 of a label's box and a stretch of wall 0.03; the
 // faint end of a door swing is 0.003.
 const CLEAR_ENOUGH = 0.006;
+// The type size of what a cut-out takes off, in screen px.
+const CUTOUT_FONT_PX = 12.5;
 
 const PerimeterLayer = ({
   image,
@@ -345,6 +223,8 @@ const PerimeterLayer = ({
 
   const isTouch = useIsTouch();
   const canvasRotation = useAppStore((s) => s.canvasRotation);
+  const labelPlacements = useAppStore((s) => s.labelPlacements);
+  const moveLabel = useAppStore((s) => s.moveLabel);
 
   /* A vertex handle is the topmost thing on the canvas and it is draggable, so
      while another drag tool is running it steals that tool's gesture: a crop
@@ -505,20 +385,11 @@ const PerimeterLayer = ({
   // During animation, render the interpolated path; otherwise the local/drag state.
   const renderVertices = displayVertices || localVertices;
 
-  // Memoize label layout so we don't recompute O(n²) collision avoidance
-  // on every pan/zoom/render unless the actual data changes.
-  const labelLayouts = useMemo(
-    () => (showSideLengths && feetPerPixel && renderVertices)
-      ? computeLabelLayouts(renderVertices, scale, feetPerPixel, detectedDimensions, unit, canvasRotation, draggingVertex)
-      : [],
-    [renderVertices, scale, feetPerPixel, showSideLengths, detectedDimensions, unit, canvasRotation, draggingVertex]
-  );
-
   // Enclosed voids (courtyards, light wells, and anything punched by hand) are
   // drawn as dashed inner rings and are already subtracted from the trace's
   // area. Shapes go through the shared `holeRings` normalizer so a tagged hole
   // and a v1 file's bare ring cannot render differently.
-  const holeShapes = (perimeterTraces || []).flatMap((trace) => {
+  const holeShapes = useMemo(() => (perimeterTraces || []).flatMap((trace) => {
     if (!trace.visible) return [];
     const holes = trace.holes ?? [];
     return holeRings(holes).flatMap((ring, i) => {
@@ -542,7 +413,7 @@ const PerimeterLayer = ({
         selected: selectedHole?.traceId === trace.id && selectedHole?.holeId === id,
       }];
     });
-  });
+  }), [perimeterTraces, selectedHole]);
 
   // The label is a fixed size on screen, so how much of the plan it covers
   // depends on the zoom. It is placed for the zoom rounded down to a step of an
@@ -596,6 +467,98 @@ const PerimeterLayer = ({
   const count = renderVertices?.length ?? 0;
   const isHeldWall = (i) => heldIndex !== null && heldIndex !== undefined && count > 0
     && (i === heldIndex || i === (heldIndex - 1 + count) % count);
+
+  // What each outline's name and area says. Worked out once, because the layout
+  // of the wall lengths has to keep off the sticker as it will be drawn, and the
+  // drawing has to say the same thing.
+  const stickers = useMemo(() => {
+    if (quiet || !feetPerPixel) return [];
+    const list = [];
+    for (const trace of perimeterTraces || []) {
+      if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) continue;
+      const anchor = anchors.get(trace.id);
+      if (!anchor) continue;
+
+      // The outline under the mouse, so the figure follows a drag.
+      const isActive = trace.id === activeTraceId;
+      const vertices = isActive ? renderVertices : trace.vertices;
+      if (!vertices || vertices.length < 3) continue;
+
+      const areaOf = (ring) => {
+        const { value, suffix } = formatArea(calculateArea(ring, feetPerPixel, trace.holes), unit);
+        return `${value} ${suffix}`;
+      };
+      // No scale, no figure: the store's 1 px = 1 ft fallback is never
+      // printed as square feet. Nor is an outline that crosses itself given
+      // one — its lobes cancel, and the shoelace of that is not an area.
+      const crossed = isActive && isSelfIntersecting;
+      const areaText = calibrated && !crossed ? areaOf(vertices) : '—';
+      const counted = normalizeTraceType(trace.type) === DEFAULT_TRACE_TYPE;
+      const before = isActive && dragging && calibrated ? areaOf(trace.vertices) : null;
+      const note = counted
+        ? (before && before !== areaText ? `was ${before}` : null)
+        : 'Not in GLA';
+      const content = { roomy: anchor.roomy, name: trace.name, areaText, note, counted };
+      const { width, height } = stickerLayout(content, 1);
+      list.push({
+        id: trace.id,
+        x: anchor.x,
+        y: anchor.y,
+        width,
+        height,
+        content,
+        color: crossed ? CRIT : (trace.color || ACCENT),
+      });
+    }
+    return list;
+  }, [quiet, feetPerPixel, perimeterTraces, anchors, activeTraceId, renderVertices, calibrated, unit, isSelfIntersecting, dragging]);
+
+  // What each cut-out takes off the total, as a label at its middle.
+  const cutouts = useMemo(() => {
+    if (quiet || !feetPerPixel || !calibrated) return [];
+    return holeShapes.flatMap((hole) => {
+      const centre = getCentroid(hole.ring);
+      const holeArea = calculateArea(hole.ring, feetPerPixel);
+      if (!(holeArea > 0)) return [];
+      const { value: areaText, suffix: areaSuffix } = formatArea(holeArea, unit);
+      // A stale cut-out is not subtracted, so it must not claim a minus sign.
+      const text = hole.stale
+        ? `Cut-out outside the outline · ${areaText} ${areaSuffix}`
+        : `Cut-out −${areaText} ${areaSuffix}`;
+      const { width, height } = tabSize(text, CUTOUT_FONT_PX, 1);
+      return [{ key: hole.key, hole, centre, text, width, height }];
+    });
+  }, [quiet, feetPerPixel, calibrated, holeShapes, unit]);
+
+  // Where every label goes: all of them at once, round every outline's walls and
+  // corners (`wallLabelLayout.js`). Not one wall at a time.
+  const labelPlan = useMemo(() => layoutLabels({
+    outlines: (perimeterTraces || [])
+      .filter((t) => t.visible && t.vertices?.length >= 3)
+      .map((t) => ({ id: t.id, vertices: t.vertices, holes: holeRings(t.holes ?? []) })),
+    activeId: activeTrace?.visible ? activeTraceId : null,
+    activeVertices: renderVertices,
+    scale,
+    rotation: canvasRotation,
+    feetPerPixel,
+    detectedDimensions,
+    unit,
+    wallLengths: !!showSideLengths && !quiet,
+    handles: !quiet && !isAnimating,
+    touch: isTouch,
+    stickers,
+    cutouts,
+    moved: movedLabelsAt(labelPlacements, { scale, rotation: canvasRotation }),
+  }), [labelPlacements, perimeterTraces, activeTrace, activeTraceId, renderVertices, scale, canvasRotation, feetPerPixel,
+    detectedDimensions, unit, showSideLengths, quiet, isAnimating, isTouch, stickers, cutouts]);
+
+  // A label let go somewhere else stays there until the zoom changes. One undo
+  // point per drag, saved before the move like every other edit.
+  const placeLabel = (key, at, sig) => {
+    undoManager.save();
+    moveLabel(key, sig ? { ...at, sig } : at, { scale, rotation: canvasRotation });
+  };
+  const onMovedFor = (key, sig) => (handlesLocked ? undefined : (at) => placeLabel(key, at, sig));
 
   // What a drag shows besides the outline itself: where the corner was, and
   // whether it now sits square to the walls either side of it.
@@ -706,26 +669,22 @@ const PerimeterLayer = ({
 
       {/* 2c. What each cut-out takes off the total. The outline's label shows
               the net area, which on its own never accounts for the difference. */}
-      {!quiet && feetPerPixel && calibrated && holeShapes.map((hole) => {
-        const centroid = getCentroid(hole.ring);
-        const holeArea = calculateArea(hole.ring, feetPerPixel);
-        if (!(holeArea > 0)) return null;
-        const { value: areaText, suffix: areaSuffix } = formatArea(holeArea, unit);
-        // A stale cut-out is not subtracted, so it must not claim a minus sign.
-        const labelText = hole.stale
-          ? `Cut-out outside the outline · ${areaText} ${areaSuffix}`
-          : `Cut-out −${areaText} ${areaSuffix}`;
+      {cutouts.map(({ key, hole, text, width, height }) => {
+        const at = labelPlan.cutouts.get(key) ?? getCentroid(hole.ring);
         return (
           <CanvasTab
-            key={`void-label-${hole.key}`}
-            x={centroid.x}
-            y={centroid.y}
-            text={labelText}
-            fontSize={12.5 / scale}
+            key={`void-label-${key}`}
+            x={at.x}
+            y={at.y}
+            width={width / scale}
+            height={height / scale}
+            text={text}
+            fontSize={CUTOUT_FONT_PX / scale}
             scale={scale}
             rotation={canvasRotation}
             color={hole.ink}
             edge={hole.stale ? CRIT : tintColor(hole.color)}
+            onMoved={onMovedFor(cutoutKey(key))}
           />
         );
       })}
@@ -891,7 +850,7 @@ const PerimeterLayer = ({
 
       {/* 6. Wall lengths, outside the walls. The two the held corner moves are
              filled; while it moves, the rest stand back. */}
-      {activeTrace && activeTrace.visible && !quiet && labelLayouts.map((layout, i) => (
+      {activeTrace && activeTrace.visible && !quiet && labelPlan.walls.map((layout, i) => layout && (
         <CanvasTab
           key={`active-label-${activeTrace.id}-${i}`}
           x={layout.finalCx}
@@ -906,50 +865,25 @@ const PerimeterLayer = ({
           edge={tintColor(activeSolid)}
           solid={isHeldWall(i)}
           opacity={dragging && !isHeldWall(i) ? 0.45 : 1}
+          onMoved={dragging ? undefined : onMovedFor(layout.key, layout.sig)}
         />
       ))}
 
       {/* 7. Each outline's name and area. Always, not only when there are
              several: a lone outline's label is where the eye checks the figure
              the panel leads with against the shape it came from. */}
-      {!quiet && feetPerPixel && (perimeterTraces || []).map((trace) => {
-        if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
-        const anchor = anchors.get(trace.id);
-        if (!anchor) return null;
-
-        // The outline under the mouse, so the figure follows a drag.
-        const isActive = trace.id === activeTraceId;
-        const vertices = isActive ? renderVertices : trace.vertices;
-        if (!vertices || vertices.length < 3) return null;
-
-        const areaOf = (ring) => {
-          const { value, suffix } = formatArea(calculateArea(ring, feetPerPixel, trace.holes), unit);
-          return `${value} ${suffix}`;
-        };
-        // No scale, no figure: the store's 1 px = 1 ft fallback is never
-        // printed as square feet. Nor is an outline that crosses itself given
-        // one — its lobes cancel, and the shoelace of that is not an area.
-        const crossed = isActive && isSelfIntersecting;
-        const areaText = calibrated && !crossed ? areaOf(vertices) : '—';
-        const counted = normalizeTraceType(trace.type) === DEFAULT_TRACE_TYPE;
-        const before = isActive && dragging && calibrated ? areaOf(trace.vertices) : null;
-        const note = counted
-          ? (before && before !== areaText ? `was ${before}` : null)
-          : 'Not in GLA';
-
+      {stickers.map((sticker) => {
+        const at = labelPlan.stickers.get(sticker.id) ?? sticker;
         return (
           <OutlineSticker
-            key={`sticker-${trace.id}`}
-            x={anchor.x}
-            y={anchor.y}
-            roomy={anchor.roomy}
-            name={trace.name}
-            areaText={areaText}
-            note={note}
-            counted={counted}
-            color={crossed ? CRIT : (trace.color || ACCENT)}
+            key={`sticker-${sticker.id}`}
+            x={at.x}
+            y={at.y}
+            {...sticker.content}
+            color={sticker.color}
             scale={scale}
             rotation={canvasRotation}
+            onMoved={dragging ? undefined : onMovedFor(stickerKey(sticker.id))}
           />
         );
       })}
