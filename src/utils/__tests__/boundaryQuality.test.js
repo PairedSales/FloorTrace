@@ -132,11 +132,24 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     }
   });
 
-  // Both messages a hand-set scale raises point at the same way back, by the
-  // name the panel prints on it.
-  it('sends a scale set by hand back by the name on the button', () => {
+  // The scale is one room's, so a doubtful one is changed by changing the
+  // room — by the name the panel prints on that button. No remedy names a
+  // button the panel does not have.
+  it('sends a doubtful scale to another room, by the name on the button', () => {
     for (const key of ['a line against the rooms', 'a room against the scan']) {
-      expect(scaleQualitySummary(cases[key]).remedy).toContain('“Go back to the automatic scale”');
+      expect(scaleQualitySummary(cases[key]).remedy).toContain('“Use a different room”');
+    }
+    for (const quality of Object.values(cases)) {
+      expect(scaleQualitySummary(quality).remedy ?? '').not.toMatch(/automatic scale/i);
+    }
+  });
+
+  // Nothing said about the scale may describe it as made from several rooms.
+  it('never says the scale is the middle or the average of the rooms', () => {
+    for (const quality of Object.values(cases)) {
+      const { short, detail } = scaleQualitySummary(quality);
+      expect(`${short} ${detail}`).not.toMatch(/middle of them is in use|is the middle of what|rather than one|measured average/i);
+      expect(short).not.toMatch(/Scale from \d+ rooms/);
     }
   });
 });

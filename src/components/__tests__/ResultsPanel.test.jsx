@@ -55,7 +55,6 @@ const props = (over = {}) => ({
   onDimensionBlur: noop,
   onScaleTool: noop,
   onSelectRoom: noop,
-  onRestoreAutoScale: noop,
   onExport: noop,
   onFindOutline: noop,
   onPaintOutline: noop,
@@ -162,7 +161,7 @@ describe('at rest it is the answer and its folded parts', () => {
       expect(header(view, id), id).toBeNull();
       expect(isOpen(view, id), id).toBe(true);
     }
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
     expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
     expect(part(view, 'outline').getByLabelText('Outline name').value).toBe('1st Floor');
     expect(part(view, 'outline').getByLabelText('Counts as')).toBeTruthy();
@@ -607,7 +606,7 @@ describe('the scale', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     open(view, 'scale');
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
     expect(view.container.querySelector('#panel-scale').textContent).not.toMatch(/px/);
   });
 
@@ -690,34 +689,26 @@ describe('the scale', () => {
     expect(view.getByRole('button', { name: /Measure a length you know/ }).disabled).toBe(false);
   });
 
-  // The messages a hand-set scale raises tell the user to choose this by
-  // name, so it has to be there for every kind of hand-set scale.
-  it('offers the way back to the automatic scale for a scale set by hand, when there is one to go back to', () => {
+  // The scale is one room's, and the ways to change it are another room and a
+  // known length. There is no third button back to an "automatic" scale.
+  it('offers another room and a known length, and no way back to an automatic scale', () => {
     const byHand = (quality, source = 'room-calibration') => ({ ...calibrated, source, quality });
     for (const calibration of [
+      calibrated,
       byHand({ source: 'line', lineCount: 1, feet: 20 }, 'line-calibration'),
       byHand({ source: 'manual', reason: 'room-vs-auto', roomCount: 3, disagreement: 0.2 }),
     ]) {
-      useAppStore.setState({ calibration, perimeterTraces: [outline()], rooms: [{ rect: {} }] });
+      useAppStore.setState({
+        calibration,
+        perimeterTraces: [outline()],
+        rooms: [{ rect: {} }],
+        detectedDimensions: [{ text: '12 x 10', width: 12, height: 10, bbox: { x: 0, y: 0, width: 9, height: 9 } }],
+      });
       const view = render(<ResultsPanel {...props({ area: 800 })} />);
-      open(view, 'scale');
-      expect(view.getByRole('button', { name: /Go back to the automatic scale/ })).toBeTruthy();
+      expect(view.queryByRole('button', { name: /automatic scale/i })).toBeNull();
+      expect(view.getByRole('button', { name: /Use a different room/ })).toBeTruthy();
+      expect(view.getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
       cleanup();
     }
-
-    // Already automatic: nowhere to go back to.
-    useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()], rooms: [{ rect: {} }] });
-    let view = render(<ResultsPanel {...props({ area: 800 })} />);
-    open(view, 'scale');
-    expect(view.queryByRole('button', { name: /Go back to the automatic scale/ })).toBeNull();
-    cleanup();
-
-    // Set by hand, but no measured rooms to go back to.
-    useAppStore.setState({
-      calibration: byHand({ source: 'line', lineCount: 1, feet: 20 }, 'line-calibration'), rooms: [],
-    });
-    view = render(<ResultsPanel {...props({ area: 800 })} />);
-    open(view, 'scale');
-    expect(view.queryByRole('button', { name: /Go back to the automatic scale/ })).toBeNull();
   });
 });

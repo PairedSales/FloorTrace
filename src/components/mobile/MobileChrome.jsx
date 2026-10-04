@@ -74,7 +74,6 @@ const MobileChrome = ({
   canSwitchWallFace,
   onScaleTool,
   onSelectRoom,
-  onRestoreAutoScale,
   // preferences
   showSideLengths,
   onShowSideLengthsChange,
@@ -317,7 +316,6 @@ const MobileChrome = ({
           onDimensionBlur={onDimensionBlur}
           onScaleTool={() => { closeSheet(); onScaleTool(); }}
           onSelectRoom={() => { closeSheet(); onSelectRoom?.(); }}
-          onRestoreAutoScale={onRestoreAutoScale}
           // The sheet covers the plan the corners are about to be tapped on.
           onAddOutline={() => { closeSheet(); onAddFloor(); }}
           onExport={() => { closeSheet(); onExport(); }}

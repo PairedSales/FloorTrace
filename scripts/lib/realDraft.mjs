@@ -140,7 +140,7 @@ const measureRooms = (image, dimensions) => {
 // useAutoScale.applyDecision, as the store records it.
 const calibrationOf = (decision, at) => ({
   calibrated: true,
-  feetPerPixel: { x: decision.feetPerPixel, y: decision.feetPerPixel },
+  feetPerPixel: decision.feetPerPixel,
   source: 'room-calibration',
   calibratedRoomId: null,
   createdAt: at,

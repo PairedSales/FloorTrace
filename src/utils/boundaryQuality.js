@@ -197,11 +197,11 @@ const percentApart = (logDistance) => Math.round((Math.exp(logDistance) - 1) * 1
 // is what was observed — how many rooms agreed, and how far apart they were.
 const roomsPhrase = (count) => `${count} room${count === 1 ? '' : 's'}`;
 
-// The two ways out of a doubtful scale, named as the panel's scale step
-// names them. "Below", because a remedy is only ever read inside that section,
-// directly over the buttons it names.
+// The way out of a doubtful scale, named as the panel's scale step names it:
+// the scale is one room's, so it is changed by changing the room. "Below",
+// because a remedy is only ever read inside that section, directly over the
+// button it names.
 const PICK_A_ROOM = 'choose “Use a different room” below';
-const BACK_TO_AUTOMATIC = 'Choose “Go back to the automatic scale” below to return to the measured average.';
 
 const autoScaleSummary = (quality) => {
   const rooms = roomsPhrase(quality.roomCount ?? 0);
@@ -210,9 +210,9 @@ const autoScaleSummary = (quality) => {
   if (quality.reason === 'too-few-rooms') {
     return {
       level: 'check',
-      short: `Scale from ${rooms}`,
-      detail: `Only ${rooms} on this plan could be measured well enough to set the `
-        + 'scale, so nothing outvoted them. Areas rest on that.',
+      short: 'Too few rooms to check the scale',
+      detail: `Only ${rooms} on this plan could be measured well enough to compare, `
+        + 'so there was little to check the scale against. Areas rest on one room.',
       remedy: `Check the green box against its room, or ${PICK_A_ROOM} and pick a room you trust.`,
     };
   }
@@ -220,10 +220,10 @@ const autoScaleSummary = (quality) => {
     return {
       level: 'check',
       short: `Rooms disagree by ~${apart}%`,
-      detail: `The ${rooms} used to set the scale imply sizes about ${apart}% apart, `
-        + 'which is more than printed dimensions normally vary. The middle of them is '
-        + 'in use.',
-      remedy: `Check the outline, or ${PICK_A_ROOM} to set the scale from one room.`,
+      detail: `The ${rooms} measured on this plan imply sizes about ${apart}% apart, `
+        + 'which is more than printed dimensions normally vary. The scale comes from '
+        + 'the one nearest the middle of them.',
+      remedy: `Check the green box against its room, or ${PICK_A_ROOM}.`,
     };
   }
   if (quality.reason === 'area-implausible') {
@@ -236,27 +236,16 @@ const autoScaleSummary = (quality) => {
       remedy: `To set the scale from a plainly rectangular room instead, ${PICK_A_ROOM}.`,
     };
   }
-  // auto-consensus: worth stating, never worth worrying about. The area is read
-  // for as long as the plan is open, and "where did this number come from"
-  // stays asked.
-  //
-  // The visible line is the room count alone. The spread belongs in the detail:
-  // rooms that set a good scale can still span 30% (ExampleFloorplan6 does, and
-  // lands 0.4% from truth), and "agreeing within 30%" reads as a claim of
-  // precision that the number itself contradicts.
+  // Nothing wrong: worth stating, never worth worrying about.
   return {
     level: 'note',
-    short: `Scale from ${rooms}`,
-    detail: `The scale was measured from ${rooms} on this plan rather than one, and is `
-      + `the middle of what they imply — individually they span about ${apart}%, which `
-      + 'is normal for printed dimensions.',
-    remedy: `To set the scale from a single room instead, ${PICK_A_ROOM}.`,
+    short: 'Scale from one room',
+    detail: 'The scale comes from one room on this plan, the one that agrees best with '
+      + `the ${rooms} measured — individually they span about ${apart}%, which is `
+      + 'normal for printed dimensions.',
+    remedy: `To set the scale from another room instead, ${PICK_A_ROOM}.`,
   };
 };
-
-// The verdicts a single room's measurement produces, as opposed to a whole
-// scan's. Disjoint from the reasons autoScaleSummary knows.
-const ROOM_REASONS = new Set(['room-vs-auto', 'room-vs-project', 'room-internal']);
 
 // A scale the user asserted by drawing a line. Unlike every other source this
 // has a clean case worth stating: a hand-set scale that looks identical to an
@@ -272,7 +261,7 @@ const lineScaleSummary = (quality) => {
       detail: `The line you drew implies a scale about ${pct}% from the rooms the app `
         + `measured itself, which moves every area by roughly ${areaPct}%. Your line is `
         + 'in use.',
-      remedy: BACK_TO_AUTOMATIC,
+      remedy: `To set the scale from a room instead, ${PICK_A_ROOM}.`,
     };
   }
 
@@ -311,12 +300,7 @@ const lineScaleSummary = (quality) => {
 
 export const scaleQualitySummary = (quality) => {
   if (!quality) return null;
-  // Reason before source: a room the project outvoted leaves the pooled scale
-  // in force, so its source is 'auto', but what needs saying is that this room
-  // was not used — not where the surviving scale came from.
-  if (quality.source === 'auto' && !ROOM_REASONS.has(quality.reason)) {
-    return autoScaleSummary(quality);
-  }
+  if (quality.source === 'auto') return autoScaleSummary(quality);
   // Before the early return below, deliberately: a clean line calibration has
   // no `reason`, so placed after it this branch would render nothing — and
   // that panel line is the only statement of where the number came from.
@@ -326,40 +310,23 @@ export const scaleQualitySummary = (quality) => {
   if (quality.level === 'ok' || !quality.reason) return null;
   const pct = percentApart(quality.disagreement ?? 0);
 
-  // The user picked one room out of a set the app had already measured. Their
-  // choice stands, but the area moves with the square of the scale, so a gap
-  // that reads as unremarkable between two rooms is not unremarkable in the
-  // number they are about to act on — say what it did.
-  if (quality.reason === 'room-vs-auto') {
+  // The room the scale comes from disagrees with the others the app measured.
+  // The scale is still that room's, but the area moves with the square of it,
+  // so a gap that reads as unremarkable between two rooms is not unremarkable
+  // in the number the user is about to act on — say what it did.
+  // (`room-vs-project` is the same finding as plans saved before October 2026
+  // recorded it.)
+  if (quality.reason === 'room-vs-auto' || quality.reason === 'room-vs-project') {
     const areaPct = Math.round((Math.exp(2 * (quality.disagreement ?? 0)) - 1) * 100);
     const rooms = roomsPhrase(quality.roomCount ?? 0);
     return {
       level: quality.level === 'check' ? 'check' : 'note',
       short: `Scale from this room, areas ~${areaPct}% different`,
-      detail: `This room implies a scale about ${pct}% from the ${rooms} the app measured `
-        + `itself, which moves every area by roughly ${areaPct}%. Your choice is in use.`,
-      remedy: BACK_TO_AUTOMATIC,
+      detail: `This room implies a scale about ${pct}% from the other ${rooms} measured `
+        + `on this plan, which moves every area by roughly ${areaPct}%. The scale comes `
+        + 'from this room.',
+      remedy: `Check the green box against the room’s printed size, or ${PICK_A_ROOM}.`,
     };
-  }
-
-  if (quality.reason === 'room-vs-project') {
-    const rooms = `${quality.roomCount} room${quality.roomCount === 1 ? '' : 's'}`;
-    return quality.adopted
-      ? {
-        level: 'check',
-        short: 'This room disagrees with the last one',
-        detail: `This room is about ${pct}% out from the ${rooms} measured before it, `
-          + 'and the newer measurement is the one now in use. One of the two outlines '
-          + 'or labels is wrong.',
-        remedy: 'Pick a third room to settle it — choose “Use a different room” below.',
-      }
-      : {
-        level: 'check',
-        short: 'Kept the scale from earlier rooms',
-        detail: `This room implies a scale about ${pct}% different from the ${rooms} `
-          + 'measured before it, so it was not used — areas are unchanged.',
-        remedy: 'Check this room’s green box against its printed size.',
-      };
   }
 
   // room-internal

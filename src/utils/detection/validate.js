@@ -309,14 +309,15 @@ export const scaleIsotropy = (scaleX, scaleY, tolerance = ISOTROPY_TOLERANCE) =>
 };
 
 // How far from the median an estimate may sit and still be one of the rooms
-// that sets the scale. Named because the scale selector has to reproduce the
-// same partition to report which rooms were used, and two copies of 0.25 would
+// that agree. Named because the scale selector has to reproduce the same
+// partition to report which rooms those were, and two copies of 0.25 would
 // have drifted the first time either was tuned.
 export const ROBUST_KEEP_WINDOW = 0.25;
 
-// Robust global scale from many per-room estimates: the median rejects the
-// individual rooms whose rectangle or label went wrong, which a single-room
-// calibration cannot do.
+// The middle of many per-room estimates: the median rejects the individual
+// rooms whose rectangle or label went wrong. It is a yardstick and never a
+// scale — it says which room to put the box on and how far a room sits from
+// the others. The scale in force is always one room's own (`settleRoomAxes`).
 export const robustScale = (estimates) => {
   const values = estimates.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
   if (!values.length) return null;
@@ -327,25 +328,26 @@ export const robustScale = (estimates) => {
   return { value: refined, median, spread, samples: values.length, kept: kept.length };
 };
 
-// The feet per pixel one room implies: the label oriented to the rectangle,
-// and, where the two axes still disagree, one scalar instead of two — a plan
-// is drawn at one scale, so a disagreement is measurement error and not
-// anisotropic pixels. `samples` are the feet per pixel of the rooms measured
-// so far; their median survives one bad rectangle, which this room's own pair
-// cannot. Falls back to the geometric mean, the isotropic scale that preserves
-// the area the room's label states.
-// One function because two callers must never answer differently: the numbers
-// the canvas shows while a room corner is being dragged are the calibration
-// that same drag commits on release.
-export const resolveRoomScale = (dimWidth, dimHeight, boxWidth, boxHeight, samples = []) => {
-  const dim = orientDimsToBox(dimWidth, dimHeight, boxWidth, boxHeight);
-  const x = dim.width / boxWidth;
-  const y = dim.height / boxHeight;
+// The scale one room's two axes settle on. Where they agree each keeps its
+// own; where they do not, one scalar instead of two — a plan is drawn at one
+// scale, so a disagreement is measurement error and not anisotropic pixels —
+// and that scalar is the geometric mean, the isotropic scale that preserves
+// the area the room's label states. Nothing from any other room goes in: the
+// scale is the room under the box (the owner's decision, October 2026).
+export const settleRoomAxes = (x, y) => {
   const isotropy = scaleIsotropy(x, y);
   if (isotropy.ok) return { x, y, isotropy, resolved: false };
-  const robust = samples.length >= 4 ? robustScale(samples) : null;
-  const value = robust && robust.spread <= 2 ? robust.value : Math.sqrt(x * y);
+  const value = Math.sqrt(x * y);
   return { x: value, y: value, isotropy, resolved: true };
+};
+
+// The feet per pixel one room implies: the label oriented to the rectangle,
+// then settled as above. One function because every caller must answer the
+// same: the numbers the canvas shows while a room corner is being dragged are
+// the calibration that same drag commits on release.
+export const resolveRoomScale = (dimWidth, dimHeight, boxWidth, boxHeight) => {
+  const dim = orientDimsToBox(dimWidth, dimHeight, boxWidth, boxHeight);
+  return settleRoomAxes(dim.width / boxWidth, dim.height / boxHeight);
 };
 
 // How far apart two rooms on one real plan may legitimately land. Printed
@@ -356,66 +358,50 @@ export const resolveRoomScale = (dimWidth, dimHeight, boxWidth, boxHeight, sampl
 // SCALE_TOLERANCE, kept separate so neither is tuned by accident.
 const PLAN_SPREAD_TOLERANCE = 0.22;
 
-// The scale the whole project should use once this room has been measured, and
-// how much to trust it. Two independent things can be wrong, and the app can
-// only resolve one of them on its own:
+// The scale this room sets, and how much to trust it. The scale is the room's
+// own, always: the other rooms are what it is compared with, and nothing here
+// can put their number in its place. Two things can be wrong with a room:
 //
-//   - the room against itself: its label and its rectangle imply different
-//     scales. Resolvable (one scalar), but the disagreement is evidence that
-//     one of the two is wrong, and the area moves with it.
-//   - the room against the rooms already measured: nothing inside one room can
-//     detect this, and it is the case where both of a room's numbers are wrong
-//     together — a label read from the neighbouring room, an outline a whole
-//     bay out. Two rooms outvote one, so an outlier no longer rescales the
-//     project; it is reported instead.
+//   - against itself: its label and its rectangle imply different scales. One
+//     scalar is used, but one of the two is wrong and the area moves with it.
+//   - against the other rooms measured on the plan, which nothing inside one
+//     room can detect: a label read from the room next door, an outline a
+//     whole bay out. One room 13% from the others moved the area by 27% on
+//     ExampleFloorplan6, so anything past a few percent is stated.
+//
+// `otherSamples` are the feet per pixel of every *other* measured room.
 export const decideProjectScale = ({
   dimWidth, dimHeight, boxWidth, boxHeight, otherSamples = [],
 }) => {
-  const room = resolveRoomScale(dimWidth, dimHeight, boxWidth, boxHeight, otherSamples);
-  const roomScale = room.x;
+  const room = resolveRoomScale(dimWidth, dimHeight, boxWidth, boxHeight);
+  const roomScale = Math.sqrt(room.x * room.y);
   const others = otherSamples.length >= 2 ? robustScale(otherSamples) : null;
-  const authoritative = !!others && otherSamples.length >= 4 && others.spread <= 2;
   const gap = others ? Math.abs(Math.log(roomScale / others.value)) : 0;
-
-  if (others && gap > PLAN_SPREAD_TOLERANCE) {
-    return authoritative
-      ? {
-        scale: { x: others.value, y: others.value },
-        adopted: false,
-        level: 'check',
-        reason: 'room-vs-project',
-        disagreement: gap,
-        roomScale,
-        projectScale: others.value,
-        roomCount: Math.floor(otherSamples.length / 2),
-      }
-      : {
-        // A single earlier room is a second opinion, not a majority: take the
-        // new measurement, but say that the two do not agree.
-        scale: { x: roomScale, y: room.y },
-        adopted: true,
-        level: 'check',
-        reason: 'room-vs-project',
-        disagreement: gap,
-        roomScale,
-        projectScale: others.value,
-        roomCount: Math.floor(otherSamples.length / 2),
-      };
-  }
-
-  // Graded, because the size of the disagreement is the size of the doubt: a
-  // few percent is a printed dimension being nominal and is worth stating but
-  // not worrying about; a third is a rectangle or a label that is simply wrong.
-  const d = room.isotropy.logDistance;
-  return {
+  const base = {
     scale: { x: room.x, y: room.y },
     adopted: true,
-    level: room.isotropy.ok ? 'ok' : d > 0.25 ? 'check' : 'note',
-    reason: room.isotropy.ok ? null : 'room-internal',
-    disagreement: room.isotropy.ok ? 0 : d,
     roomScale,
     projectScale: others ? others.value : null,
     roomCount: Math.floor(otherSamples.length / 2),
+  };
+
+  if (gap > 0.03) {
+    return {
+      ...base,
+      level: gap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note',
+      reason: 'room-vs-auto',
+      disagreement: gap,
+    };
+  }
+  // Graded, because the size of the disagreement is the size of the doubt: a
+  // few percent is a printed dimension being nominal; a third is a rectangle
+  // or a label that is simply wrong.
+  const d = room.isotropy.logDistance;
+  return {
+    ...base,
+    level: room.isotropy.ok ? 'ok' : d > 0.25 ? 'check' : 'note',
+    reason: room.isotropy.ok ? null : 'room-internal',
+    disagreement: room.isotropy.ok ? 0 : d,
   };
 };
 
@@ -428,18 +414,16 @@ export const PINNED_SOURCES = new Set(['manual', 'line']);
 export const isUserAsserted = (calibration) =>
   PINNED_SOURCES.has(calibration?.quality?.source);
 
-// One room's label and overlay resolved into the scale the project should hold,
-// the quality to record beside it, and whether either differs from what is in
-// force. Pure, and separate from the store write, because the asymmetry it
-// fixes was only reachable through two consecutive UI gestures: the same drag
-// was outvoted the first time and adopted the second, since the first one wrote
-// `source: 'manual'` even when the project had overruled it, and that write is
-// what `pinned` reads on the way back in.
+// One room's label and overlay resolved into the scale the project holds, the
+// quality to record beside it, and whether either differs from what is in
+// force. Pure, and separate from the store write. The room always sets the
+// scale: the other rooms used to be able to outvote it, which left a scale in
+// force that the box on the plan did not show.
 //
 // `otherSamples` (feet per pixel of every *other* measured room) is passed in
 // rather than derived, so this stays free of the store.
 export const resolveScaleUpdate = ({
-  dimensions, overlay, otherSamples = [], calibration = null, pinned = false,
+  dimensions, overlay, otherSamples = [], calibration = null,
 }) => {
   if (!dimensions?.width || !dimensions?.height || !overlay) return null;
 
@@ -449,60 +433,38 @@ export const resolveScaleUpdate = ({
   const boxHeight = Math.abs(overlay.y2 - overlay.y1);
   if (!(dimWidth > 0) || !(dimHeight > 0) || !(boxWidth > 0) || !(boxHeight > 0)) return null;
 
-  // Picking or dragging a room by hand is the user overruling the automatic
-  // consensus, and it has to win: after a scan the project already holds every
-  // room on the page, so decideProjectScale would find that majority
-  // authoritative and refuse to adopt the very room the user just placed. Once
-  // pinned it stays pinned, or a later nudge of the same overlay would hand the
-  // scale back to the rooms the user just rejected.
-  const isPinned = !!pinned || isUserAsserted(calibration);
   const decision = decideProjectScale({
-    dimWidth, dimHeight, boxWidth, boxHeight,
-    otherSamples: isPinned ? [] : otherSamples,
+    dimWidth, dimHeight, boxWidth, boxHeight, otherSamples,
   });
+  const scale = { x: decision.scale.x, y: decision.scale.y };
 
-  // Pinned, but still told. The area is what moves: picking one room out of a
-  // measured consensus changed it by 27% on ExampleFloorplan6 at a scale gap of
-  // only 13%, because area goes as scale squared — and at 13% the existing
-  // room-to-room tolerance says nothing, so that landed silently. Anything past
-  // a few percent is now stated, and a gap wide enough to be a mistake is
-  // stated as one.
-  if (isPinned && otherSamples.length >= 2) {
-    const project = robustScale(otherSamples);
-    const gap = project ? Math.abs(Math.log(decision.roomScale / project.value)) : 0;
-    if (gap > 0.03) {
-      decision.level = gap > PLAN_SPREAD_TOLERANCE ? 'check' : 'note';
-      decision.reason = 'room-vs-auto';
-      decision.disagreement = gap;
-      decision.adopted = true;
-      decision.roomCount = Math.floor(otherSamples.length / 2);
-    }
+  const currentScale = calibration?.feetPerPixel;
+  const sameScale = !!calibration?.calibrated
+    && typeof currentScale === 'object'
+    && Math.abs((currentScale?.x ?? 0) - scale.x) <= 1e-9
+    && Math.abs((currentScale?.y ?? 0) - scale.y) <= 1e-9;
+
+  // A gesture that moved nothing asserted nothing: clicking into a size field
+  // and out again must not turn the app's choice into a scale set by hand.
+  if (sameScale && calibration.quality?.source === 'auto') {
+    return { scale, quality: calibration.quality, changed: false };
   }
 
-  // The source is the provenance of the scale actually left in force. A
-  // decision the project outvoted keeps the pooled scale, so it is still the
-  // automatic one — calling it 'manual' pinned every later update to a room the
-  // app had just declined to use, and permanently disabled the footprint
-  // cross-check, which only revisits an automatic scale.
   const quality = {
     level: decision.level,
     reason: decision.reason,
     disagreement: decision.disagreement,
-    adopted: decision.adopted,
+    adopted: true,
     roomCount: decision.roomCount,
-    source: decision.adopted ? 'manual' : 'auto',
+    source: 'manual',
   };
 
-  const currentScale = calibration?.feetPerPixel;
-  const changed = !calibration?.calibrated
-    || typeof currentScale !== 'object'
-    || Math.abs((currentScale?.x ?? 0) - decision.scale.x) > 1e-9
-    || Math.abs((currentScale?.y ?? 0) - decision.scale.y) > 1e-9
+  const changed = !sameScale
     || (calibration.quality?.level ?? 'ok') !== quality.level
     || (calibration.quality?.reason ?? null) !== quality.reason
     || (calibration.quality?.source ?? null) !== quality.source;
 
-  return { scale: { x: decision.scale.x, y: decision.scale.y }, quality, changed };
+  return { scale, quality, changed };
 };
 
 // How far off axis a line may run and still be read as one axis's length. The
@@ -539,8 +501,7 @@ export const classifyScaleLine = (line) => {
 // else — a second parallel line, a second diagonal — is a fresh isotropic
 // assertion that supersedes rather than a new axis.
 //
-// Deliberately not pooled through robustScale: that exists because the *app*
-// measured those rooms, and a median over two deliberate user assertions would
+// Deliberately not pooled: a median over two deliberate user assertions would
 // be theatre. `roomSamples` are feet per pixel, the unit resolveScaleUpdate
 // already takes, and are reported against — never applied.
 export const resolveLineScale = ({ lines = [], roomSamples = [], calibration = null }) => {

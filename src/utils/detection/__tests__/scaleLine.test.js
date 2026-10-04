@@ -182,28 +182,24 @@ describe('isUserAsserted', () => {
     expect(PINNED_SOURCES.has('manual')).toBe(true);
   });
 
-  // The widening is inert today by design — no caller reaches resolveScaleUpdate
-  // with pinned:false after a line calibration — so this pins the behaviour it
-  // will have when one does, rather than a behaviour change now.
-  it('makes a line calibration outrank the room pool in resolveScaleUpdate', () => {
+  // Dragging the box over a room after a line was drawn sets the scale from
+  // that room, the same as after anything else: what was in force before does
+  // not decide whether the room is used.
+  it('lets a room set the scale whatever was in force before it', () => {
     const others = [1 / 16, 1 / 16, 1 / 16.4, 1 / 15.6, 1 / 16.2, 1 / 15.8];
     const args = {
       dimensions: { width: '10', height: '12' },
       overlay: { x1: 0, y1: 0, x2: 120, y2: 144 },
       otherSamples: others,
-      pinned: false,
     };
-    const againstAuto = resolveScaleUpdate({
-      ...args,
-      calibration: { calibrated: true, feetPerPixel: { x: 1 / 16, y: 1 / 16 }, quality: { source: 'auto' } },
-    });
-    const againstLine = resolveScaleUpdate({
-      ...args,
-      calibration: { calibrated: true, feetPerPixel: { x: 1 / 16, y: 1 / 16 }, quality: { source: 'line' } },
-    });
-
-    expect(againstAuto.quality.adopted).toBe(false);
-    expect(againstLine.quality.adopted).toBe(true);
-    expect(againstLine.scale.x).toBeCloseTo(1 / 12, 9);
+    for (const source of ['auto', 'line', 'manual']) {
+      const resolved = resolveScaleUpdate({
+        ...args,
+        calibration: { calibrated: true, feetPerPixel: { x: 1 / 16, y: 1 / 16 }, quality: { source } },
+      });
+      expect(resolved.quality.adopted).toBe(true);
+      expect(resolved.quality.source).toBe('manual');
+      expect(resolved.scale.x).toBeCloseTo(1 / 12, 9);
+    }
   });
 });

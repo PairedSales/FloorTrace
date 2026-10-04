@@ -2,11 +2,12 @@
  * Project-scale benchmark: does the app pick the right scale on its own?
  *
  * The question this answers is not "is this room's rectangle right" — that is
- * detectionBenchmark's job — but "given every labelled room on the page, is the
- * one scale the app settles on the scale the drawing is at". It reports the
- * consensus against `truth.scale.pixelsPerFoot`, and next to it the worst error
- * a single room could have produced, because a single room is what the app used
- * to calibrate from and that number is the exposure being removed.
+ * detectionBenchmark's job — but "given every labelled room on the page, does
+ * the app choose a room whose scale is the scale the drawing is at". The scale
+ * is one room's, the one the green box is put on; every room is measured so
+ * that the choice is a good one. It reports the chosen room's scale against
+ * `truth.scale.pixelsPerFoot`, and next to it the worst error a room on the
+ * page could have produced, because that is what choosing badly costs.
  *
  * Usage:  node scripts/scaleBenchmark.mjs [image.png|folder ...] [--ocr] [--json]
  *
@@ -18,14 +19,14 @@
  *
  * The default run is the one to keep green. `--ocr` over ExampleFloorplan3/4/5
  * currently fails several checks and is expected to: on those plans the room
- * rectangles themselves are wrong, so there is no room set a selector could
- * pick from. What it does show is that all three come back `check` rather than
+ * rectangles themselves are wrong, so there is no room a selector could
+ * choose. What it does show is that all three come back `check` rather than
  * confidently wrong, which is the behaviour those fixtures are here to hold.
  *
  * Scale truth is authored per fixture in a `scale` block:
  *   "scale": { "pixelsPerFoot": 15.5, "tolerance": 0.04, "provenance": "..." }
  * Fixtures without one are still run and reported, scored only on
- * self-consistency (how many rooms were accepted, how far apart they landed).
+ * self-consistency (how many rooms agreed, how far apart they landed).
  */
 import fs from 'fs';
 import path from 'path';
@@ -92,9 +93,9 @@ const labelsFromOcr = async (file) => {
   };
 };
 
-// What one room, chosen alone, would have set the project to — the flow the
-// user has today. Reported as its worst case, because nothing in the app
-// steered them away from the worst room.
+// What each room on the page would set the project to if it were the one
+// chosen. Reported as the worst case: it is what the choice is protecting
+// against, and what a user picking a room by hand can still walk into.
 const singleRoomExposure = (rooms, truthPpf) => {
   let worst = 0;
   let worstName = null;
@@ -173,12 +174,12 @@ const run = async () => {
     const selected = selectProjectScale(rooms, { footprintAreaPx, nonGlaRegions });
     out.push(`   ${labels.length} labels -> ${rooms.length} rooms measured in ${batchMs}ms`);
     for (const c of selected.contributors) {
-      out.push(`   used   ${String(c.name).padEnd(30)} ${c.pixelsPerFoot.x.toFixed(2)} / ${c.pixelsPerFoot.y.toFixed(2)} px/ft  conf=${c.confidence.toFixed(2)}  axes=${c.axes.join('')}`);
+      out.push(`   ${c.name === selected.room?.name ? 'SCALE ' : 'agrees'} ${String(c.name).padEnd(30)} ${c.pixelsPerFoot.x.toFixed(2)} / ${c.pixelsPerFoot.y.toFixed(2)} px/ft  conf=${c.confidence.toFixed(2)}  axes=${c.axes.join('')}`);
     }
     for (const r of selected.rejected) {
       out.push(`   drop   ${String(r.name).padEnd(30)} ${r.pixelsPerFoot ? r.pixelsPerFoot.toFixed(2) : '  -  '} px/ft  ${r.reason}`);
     }
-    out.push(`   scale: ${selected.pixelsPerFoot ? selected.pixelsPerFoot.toFixed(2) : 'none'} px/ft  ${selected.level}/${selected.reason}  rooms=${selected.roomCount}  spread=${pct(Math.exp(selected.spread) - 1)}  areaRatio=${selected.areaRatio ? selected.areaRatio.toFixed(2) : '-'}`);
+    out.push(`   scale: ${selected.pixelsPerFoot ? selected.pixelsPerFoot.toFixed(2) : 'none'} px/ft from ${selected.room?.name ?? 'no room'}  ${selected.level}/${selected.reason}  rooms=${selected.roomCount}  spread=${pct(Math.exp(selected.spread) - 1)}  areaRatio=${selected.areaRatio ? selected.areaRatio.toFixed(2) : '-'}`);
 
     const check = (ok, label) => {
       totalChecks += 1;
@@ -187,26 +188,30 @@ const run = async () => {
     };
 
     const truthPpf = truth?.scale?.pixelsPerFoot;
-    let consensusErr = null;
+    let chosenErr = null;
     let exposure = null;
     if (truthPpf && selected.pixelsPerFoot) {
       const tol = truth.scale.tolerance ?? 0.04;
-      consensusErr = Math.log(selected.pixelsPerFoot / truthPpf);
+      chosenErr = Math.log(selected.pixelsPerFoot / truthPpf);
       exposure = singleRoomExposure(rooms, truthPpf);
-      out.push(`   worst single room: ${pct(Math.exp(exposure.worst) - 1)} (${exposure.worstName})`);
-      const label = `consensus ${selected.pixelsPerFoot.toFixed(2)} vs ${truthPpf} px/ft (err ${(consensusErr >= 0 ? '+' : '')}${pct(Math.exp(consensusErr) - 1)}, tol ${pct(tol)})`;
-      // A fixture can carry a defect that no selection strategy can fix: when
-      // every room's rectangle is biased the same way, pooling them preserves
-      // the bias exactly. Reported loudly and not counted, because a check that
-      // fails for a reason recorded in the truth file is not news, and one that
-      // silently passes is worse.
-      if (truth.scale.knownBias && Math.abs(consensusErr) > tol) {
+      out.push(`   worst room on the page: ${pct(Math.exp(exposure.worst) - 1)} (${exposure.worstName})`);
+      const label = `chosen room ${selected.pixelsPerFoot.toFixed(2)} vs ${truthPpf} px/ft (err ${(chosenErr >= 0 ? '+' : '')}${pct(Math.exp(chosenErr) - 1)}, tol ${pct(tol)})`;
+      // A fixture can carry a defect that no choice can fix: when every room's
+      // rectangle is biased the same way, whichever one is chosen carries the
+      // bias. Reported loudly and not counted, because a check that fails for
+      // a reason recorded in the truth file is not news, and one that silently
+      // passes is worse.
+      if (truth.scale.knownBias && Math.abs(chosenErr) > tol) {
         out.push(`   KNOWN ${label} — ${truth.scale.knownBias}`);
       } else {
-        check(Math.abs(consensusErr) <= tol, label);
+        check(Math.abs(chosenErr) <= tol, label);
       }
-      check(Math.abs(consensusErr) < exposure.worst,
-        `consensus beats the worst single room (${pct(Math.exp(exposure.worst) - 1)})`);
+      // Only where there was a choice to make: with one room measured, the
+      // chosen room is the worst room.
+      if (rooms.length > 1) {
+        check(Math.abs(chosenErr) < exposure.worst,
+          `chosen room beats the worst room on the page (${pct(Math.exp(exposure.worst) - 1)})`);
+      }
     } else {
       out.push('   no scale truth — self-consistency only');
     }
@@ -217,12 +222,12 @@ const run = async () => {
     // a sidecar that lists two rooms is measuring the truth file, not the app.
     if (labels.length >= MIN_CONSENSUS_ROOMS) {
       check(selected.roomCount >= MIN_CONSENSUS_ROOMS,
-        `accepted ${selected.roomCount} of ${labels.length} labels (>= ${MIN_CONSENSUS_ROOMS})`);
+        `${selected.roomCount} of ${labels.length} labelled rooms agree (>= ${MIN_CONSENSUS_ROOMS})`);
     } else {
-      out.push(`   ....  accepted ${selected.roomCount} of ${labels.length} labels (too few labels to score)`);
+      out.push(`   ....  ${selected.roomCount} of ${labels.length} labelled rooms agree (too few labels to score)`);
     }
     check(selected.spread <= CONSENSUS_SPREAD_LIMIT,
-      `accepted rooms agree within ${pct(Math.exp(CONSENSUS_SPREAD_LIMIT) - 1)} (spread ${pct(Math.exp(selected.spread) - 1)})`);
+      `those rooms agree within ${pct(Math.exp(CONSENSUS_SPREAD_LIMIT) - 1)} (spread ${pct(Math.exp(selected.spread) - 1)})`);
 
     report.push({
       file: path.basename(file),
@@ -230,13 +235,14 @@ const run = async () => {
       labels: labels.length,
       measured: rooms.length,
       pixelsPerFoot: selected.pixelsPerFoot,
+      room: selected.room?.name ?? null,
       level: selected.level,
       reason: selected.reason,
       roomCount: selected.roomCount,
       spread: selected.spread,
       areaRatio: selected.areaRatio,
       truthPixelsPerFoot: truthPpf ?? null,
-      consensusErr,
+      chosenErr,
       worstSingleRoomErr: exposure?.worst ?? null,
     });
     if (!asJson) for (const line of out) console.log(line);

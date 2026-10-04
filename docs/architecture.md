@@ -16,8 +16,8 @@ FloorTrace is a single-page React app with all image processing in-browser. The 
 1. User loads floor plan image.
 2. OCR reads the dimension labels, plus the keywords that mark non-GLA regions and level names.
 3. The worker grows a room rectangle from every parsed label (wall-coverage stops; each label's bbox and parsed feet are passed through as hints, the other labels as places the room is not).
-4. `scale.js` pools those rooms into one project scale — the rooms outvote each other, and the user never has to pick one. The user can still correct it: choose a room by hand, or measure a length they know. If no room size could be read there is no scale, and the trace in step 6 runs anyway — the plan is left one thing short of an area, not two.
-5. App stores the confirmed rooms and shows the representative one.
+4. `scale.js` chooses one of those rooms — the one that agrees best with the others — and the project scale is that room's alone: its printed size against its own rectangle. The rooms are measured together so the choice is a good one; none of the others' numbers reaches the scale. The user can still correct it: choose another room, drag the box, or measure a length they know. If no room size could be read there is no scale, and the trace in step 6 runs anyway — the plan is left one thing short of an area, not two.
+5. App stores the rooms that agree and draws the green box on the one the scale came from.
 6. The perimeter trace runs automatically, with the confirmed rooms and the parsed dimension labels passed in as constraints.
 7. Worker generates several candidate footprints per wall network, scores them against wall evidence and those constraints, and returns the winner with `quality: {confidence, warnings[]}` alongside the inner and outer polygons and any enclosed voids.
 8. If that winner is doubtful, or leaves a constrained room outside itself, the worker searches again (`remediate.js`) and keeps whichever attempt holds more of what is known without trusting itself less.

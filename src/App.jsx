@@ -26,7 +26,6 @@ import {
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
-import { representativeRoom } from './utils/detection/scale';
 import { ringSetArea } from './utils/detection/polygon';
 import { boundaryConstraints, nonGlaExcludeRegions } from './utils/traceInputs';
 import { useAutoScale } from './hooks/useAutoScale';
@@ -227,7 +226,7 @@ function App() {
   // Workspace-level, and the reason the pinned unit survives a scan, a new
   // plan and a project someone else saved in metres.
   const { chooseUnit } = useUnitPreference();
-  const { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale } = useAutoScale();
+  const { measureAndCalibrate, reviewAgainstFootprint } = useAutoScale();
   // The scan runs before the exterior trace is even defined in this file, and
   // the automatic path needs both. Refs rather than a reordering: moving
   // handleManualMode below the tracer would drag handleFindRoomSize and its
@@ -451,7 +450,7 @@ function App() {
           // beside the next step's "Measuring the rooms…" was two things said
           // at once about a job that was not over.
           // Everything from here is automatic: every label is measured, the
-          // rooms that agree set the scale, the room the scale came from is
+          // room that agrees best with the others sets the scale and is
           // placed as the overlay, and the exterior is traced. The pills stay
           // lit only when that fails — with an overlay on screen, dragging it
           // is how the user overrules a room the app chose badly.
@@ -983,18 +982,18 @@ function App() {
 
 
 
-  // Set the project scale from one room. The decision — which rooms get a
-  // vote, what the verdict is, whether anything moved — is resolveScaleUpdate's
-  // and is unit-tested there; what is left here is the store write, the one
-  // thing a pure function cannot do.
-  const updateScale = useCallback((dimensions, overlay, options = {}) => {
+  // Set the project scale from the room under the green box: its size as
+  // typed against the box as drawn, and no other room's. The other rooms are
+  // passed only to be compared with — the verdict, and whether anything moved,
+  // is resolveScaleUpdate's and is unit-tested there; what is left here is the
+  // store write, the one thing a pure function cannot do.
+  const updateScale = useCallback((dimensions, overlay) => {
     const state = useAppStore.getState();
     const resolved = resolveScaleUpdate({
       dimensions,
       overlay,
       otherSamples: otherRoomScaleSamples(state.rooms, overlay),
       calibration: state.calibration,
-      pinned: !!options.pinned,
     });
     if (!resolved) return;
 
@@ -1007,15 +1006,14 @@ function App() {
     }
   }, [applyRoomCalibration]);
 
-  // Update room overlay position. Pinned: dragging the overlay is the user
-  // correcting the room the app got wrong, and unpinned it was outvoted by the
-  // consensus that produced the wrong room — then adopted verbatim on the very
-  // next drag, once the rejected write had pinned the calibration.
+  // Update room overlay position. The scale is the room under the box, so
+  // moving the box moves the scale: dragging it is how the user corrects a
+  // room the app measured badly.
   const updateRoomOverlay = useCallback((overlay, saveAction = true) => {
     if (saveAction) undoManager.save();
     setRoomOverlay(overlay);
     if (roomDimensions.width && roomDimensions.height) {
-      updateScale(roomDimensions, overlay, { pinned: true });
+      updateScale(roomDimensions, overlay);
     }
   }, [setRoomOverlay, roomDimensions, updateScale]);
 
@@ -1068,12 +1066,12 @@ function App() {
   // showed every pill lit and a Room size card reading 0.0 ft — the screen said
   // "pick a room" about a decision that had been made.
   //
-  // Deliberately no updateScale call. The scale in force is the median over
-  // every measured room; re-deriving it from this one rectangle would pin it to
-  // that room and switch the footprint cross-check off, which is exactly what
-  // dragging the overlay is *supposed* to do and must stay the user's choice.
+  // No updateScale call, and none needed: the scale already in force is this
+  // room's own, worked out by the rule a drag of this box would apply, so the
+  // box and the size fields describe exactly the number the areas use. Calling
+  // it would only record the app's choice as the user's.
   const showAutoScaleRoom = useCallback((decision) => {
-    const room = representativeRoom(decision);
+    const room = decision?.room;
     if (!room || !(room.labelDims?.width > 0) || !(room.labelDims?.height > 0)) return false;
     const { left, right, top, bottom } = room.rect;
     if (!(right > left) || !(bottom > top)) return false;
@@ -1097,8 +1095,9 @@ function App() {
 
   /**
    * The automatic path, run once a scan has found labels: measure every one of
-   * them, calibrate from the rooms that agree, trace the exterior with those
-   * rooms as evidence, then judge the scale against the building it produced.
+   * them, calibrate from the one that agrees best with the others, trace the
+   * exterior with the rooms that agree as evidence, then judge the scale
+   * against the building it produced.
    */
   const runAutoScale = useCallback(async (dimensions) => {
     const labels = dimensions
@@ -1127,7 +1126,11 @@ function App() {
     // Before the trace, not after: the tracer reads `detectedDimensions` for its
     // interior points, so the labels stay in the store either way, but the user
     // sees which room was chosen while the exterior is still being traced.
-    if (showAutoScaleRoom(decision)) {
+    //
+    // Not when a scale the user set by hand stood. The box is the room the
+    // scale comes from, and theirs did not move: putting the box on the room
+    // the app would have chosen would show one room and measure from another.
+    if (!decision.keptByHand && showAutoScaleRoom(decision)) {
       setMode('normal');
     }
 
@@ -1242,7 +1245,7 @@ function App() {
     const dimStrings = { width: String(placed.width), height: String(placed.height) };
     setRoomDimensions(dimStrings);
     setRoomOverlay(overlay);
-    updateScale(dimStrings, overlay, { pinned: true });
+    updateScale(dimStrings, overlay);
 
     setPerimeterVertices(null);
     setMode('normal');
@@ -1300,7 +1303,7 @@ function App() {
   const handleDimensionsChange = useCallback((dims) => {
     setRoomDimensions(dims);
     if (!useAppStore.getState().roomOverlay) return;
-    updateScale(dims, useAppStore.getState().roomOverlay, { announce: false });
+    updateScale(dims, useAppStore.getState().roomOverlay);
     clearTimeout(dimensionWarnTimerRef.current);
     dimensionWarnTimerRef.current = setTimeout(() => {
       // Backstop for an edit that never blurs (Enter, or the panel closing).
@@ -1678,7 +1681,6 @@ function App() {
           canSwitchWallFace={canSwitchWallFace}
           onScaleTool={handleScaleToolToggle}
           onSelectRoom={handleSelectRoom}
-          onRestoreAutoScale={restoreAutoScale}
           showSideLengths={showSideLengths}
           onShowSideLengthsChange={handleShowSideLengthsChange}
           autoSnapEnabled={autoSnapEnabled}
@@ -1739,7 +1741,6 @@ function App() {
             onDimensionBlur={handleDimensionBlur}
             onScaleTool={handleScaleToolToggle}
             onSelectRoom={handleSelectRoom}
-            onRestoreAutoScale={restoreAutoScale}
             onExport={openExport}
             onFindOutline={handleTracePerimeter}
             onPaintOutline={handlePaintOutline}

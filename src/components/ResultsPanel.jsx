@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
   Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
-  ScanSearch, Ruler, MousePointerClick, RotateCcw,
+  ScanSearch, Ruler, MousePointerClick,
 } from 'lucide-react';
 import useAppStore, {
   selectActiveAreaByType, selectWorkspaceArea,
@@ -12,7 +12,6 @@ import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator'
 import { scaleProvenance } from '../utils/scaleProvenance';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import { MAX_TRACES } from '../utils/planStage';
-import { isUserAsserted } from '../utils/detection/validate';
 import { MEASURE_STEPS, STEP_TITLES, measureStepIndex } from '../utils/progressSteps';
 import { usePlanIssues } from '../hooks/usePlanIssues';
 import { useToolRows } from '../hooks/useToolRows';
@@ -212,7 +211,6 @@ const ResultsPanel = ({
   // none. Optional: a step with no handler simply does not offer the action.
   onScaleTool,
   onSelectRoom,
-  onRestoreAutoScale,
   onRescan,
   onFindOutline,
   onPaintOutline,
@@ -251,9 +249,6 @@ const ResultsPanel = ({
   // finish it instead of offering three other ways to start.
   const painting = useAppStore((s) => s.drawModeActive);
   const placingCorners = useAppStore((s) => s.perimeterVertices !== null);
-  // The rooms the detector confirmed — whether there are any is what decides
-  // if "go back to the automatic scale" has anything to go back to.
-  const rooms = useAppStore((s) => s.rooms);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
   // What a picture cannot show, from the one place it is gathered, sorted into
   // the step each belongs to.
@@ -367,11 +362,6 @@ const ResultsPanel = ({
   // The room the scale is measured against, as a box on the plan. Not while a
   // drawn line is the scale: the box would then be evidence for nothing.
   const showRoomFields = !!roomOverlay && calibrationSource !== 'line-calibration';
-  // The way back from a scale set by hand — a drawn line, or a room the user
-  // picked or resized — to the one the rooms agreed on. Only where there are
-  // measured rooms to go back to.
-  const canRestore = !!onRestoreAutoScale && rooms?.length > 0
-    && isUserAsserted({ quality: scaleQuality });
   const roomFields = showRoomFields && (
     <div className="mt-3.5">
       <p className="mb-2 text-[15.5px] leading-snug text-fg-2">
@@ -703,14 +693,6 @@ const ResultsPanel = ({
                     </p>
                   )}
                 </>
-              )}
-              {/* The way back, which two of the scale messages promise by name:
-                  `applyDecision` refuses to write over a user-asserted scale
-                  forever, so without it a hand-set scale is permanent. */}
-              {canRestore && (
-                <ChoiceButton icon={RotateCcw} onClick={onRestoreAutoScale}>
-                  Go back to the automatic scale
-                </ChoiceButton>
               )}
             </div>
 

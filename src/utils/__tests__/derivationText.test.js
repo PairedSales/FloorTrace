@@ -26,7 +26,7 @@ const text = (over) => derivationText(buildAreaDerivation(state(over)));
 describe('derivationText', () => {
   it('carries the whole page, from the scale to the total', () => {
     const out = text();
-    expect(out).toContain('Measured from 4 rooms on this plan.');
+    expect(out).toContain('Measured from one room on this plan, chosen by FloorTrace.');
     expect(out).toContain('Scale in force\t1 ft = 10.00 px');
     expect(out).toContain('LIVING AREA');
     expect(out).toContain('1st Floor\t50.0 ft²');
