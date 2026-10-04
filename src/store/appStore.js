@@ -677,8 +677,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     // Deliberately NOT `normalizeTraces` here, unlike `applySnapshot` and
     // `restoreFromSaved`. That is a migration for traces coming off disk — a
     // draft or a `.floorplan` written before types existed. A parked record was
-    // live state in this session moments ago, so there is nothing to migrate,
-    // and normalising rebuilds every trace object: the array identity is what
+    // live state in this session moments ago, or was migrated as it was read
+    // back (`usePlanManager`), so there is nothing to migrate here, and
+    // normalising rebuilds every trace object: the array identity is what
     // the area memo and every subscribed component compare on, so a switch
     // would re-render and recompute the whole plan for no reason.
     const traces = patch.perimeterTraces || [];
