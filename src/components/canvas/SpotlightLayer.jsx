@@ -42,7 +42,9 @@ const SpotlightLayer = ({ image, outlines, veil, scale }) => {
       c.save();
       c.globalAlpha = VEIL.opacity;
       c.fillStyle = VEIL.color;
-      c.fillRect(-FAR, -FAR, image.width + 2 * FAR, image.height + 2 * FAR);
+      // Over the plan only: the canvas around it is paper, and a veil out
+      // there greys it against the white toolbar row above.
+      c.fillRect(0, 0, image.width, image.height);
       c.restore();
 
       for (const outline of lit) {
@@ -66,7 +68,7 @@ const SpotlightLayer = ({ image, outlines, veil, scale }) => {
           c.clip();
           c.globalAlpha = VEIL.opacity;
           c.fillStyle = VEIL.color;
-          c.fillRect(-FAR, -FAR, image.width + 2 * FAR, image.height + 2 * FAR);
+          c.fillRect(0, 0, image.width, image.height);
           c.restore();
         }
       }
