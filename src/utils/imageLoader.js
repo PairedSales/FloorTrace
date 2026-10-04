@@ -52,18 +52,44 @@ const validateImageSize = (fileOrBlob) => {
   }
 };
 
+// How large the image is, from the file's own bytes where the browser can
+// (`createImageBitmap`, which decodes off the page) rather than from the data
+// URL: handing a data URL to an <img> parses and un-base64s the whole string
+// on the page's thread — 475 ms for a 30 MB one — and for an image that fits
+// that was being paid only to read two numbers. Null when a bitmap cannot say
+// (an SVG, an older browser); the <img> then has the last word, as before.
+const sizeOf = async (blob) => {
+  if (!blob || typeof createImageBitmap !== 'function') return null;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const { width, height } = bitmap;
+    bitmap.close();
+    return { width, height };
+  } catch {
+    return null;
+  }
+};
+
+const fits = ({ width, height }) => (
+  width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION
+);
+
 /**
  * The image as the app will hold it.
  *
  * @returns {Promise<{dataUrl: string, mimeType: string, width: number, height: number}>}
  */
-const prepareDataUrl = async (dataUrl, mimeType = 'image/png') => {
+const prepareDataUrl = async (dataUrl, mimeType = 'image/png', blob = null) => {
+  const size = await sizeOf(blob);
+  if (size && fits(size)) return { dataUrl, mimeType, ...size };
+
+  // Too large, or not yet known. The smaller copy is drawn from the <img> and
+  // not from a bitmap of the same file: the two are resampled differently (the
+  // same 12 MP photo came out as a 29.7 MB PNG from one and 21.7 MB from the
+  // other), and these are the pixels the scan and the tracer read.
   const image = await dataUrlToImageElement(dataUrl);
 
-  if (
-    image.width <= MAX_IMAGE_DIMENSION &&
-    image.height <= MAX_IMAGE_DIMENSION
-  ) {
+  if (fits(image)) {
     return {
       dataUrl,
       mimeType,
@@ -107,7 +133,7 @@ const loadImageFromFile = async (file) => {
 
   validateImageSize(file);
   const dataUrl = await fileOrBlobToDataUrl(file);
-  return prepareDataUrl(dataUrl, file.type);
+  return prepareDataUrl(dataUrl, file.type, file);
 };
 
 /**
@@ -180,7 +206,7 @@ export const loadImageFromClipboard = async () => {
   if (!blob) throw new Error('Nothing to paste — copy an image first.');
   validateImageSize(blob);
   const dataUrl = await fileOrBlobToDataUrl(blob);
-  return prepareDataUrl(dataUrl, blob.type);
+  return prepareDataUrl(dataUrl, blob.type, blob);
 };
 
 // Convert data URL to Image object
