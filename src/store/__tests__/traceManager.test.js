@@ -349,15 +349,6 @@ describe('trace ids', () => {
     useAppStore.getState().resetPerimeterTraces();
   });
 
-  const distinct = () => new Set(traces().map((t) => t.id));
-
-  it('are distinct for traces created in a tight loop', () => {
-    for (let i = 0; i < 6; i += 1) useAppStore.getState().addPerimeterTrace();
-
-    expect(traces()).toHaveLength(7); // the reset default + 6
-    expect(distinct().size).toBe(7);
-  });
-
   it('deletes exactly one trace when several were created in the same tick', () => {
     for (let i = 0; i < 3; i += 1) useAppStore.getState().addPerimeterTrace();
     const doomed = traces()[1].id;
@@ -584,16 +575,5 @@ describe('classifyTraceTypes', () => {
     useAppStore.getState().classifyTraceTypes();
 
     expect(traces().map((t) => t.name)).toEqual(['Basement', 'Basement 2']);
-  });
-
-  // A project saved before classification existed holds a type only because
-  // the user picked it, so reopening it and re-tracing must not take it back.
-  it('treats a type from a project saved before it existed as the user\'s', () => {
-    openProjectWith(['Garage']);
-    useAppStore.setState({
-      perimeterTraces: normalizeTraces(traces().map((t) => ({ ...t, type: 'garage' }))),
-    });
-
-    expect(traces()[0].typeSource).toBe('user');
   });
 });

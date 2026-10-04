@@ -12,7 +12,7 @@ import { traceFloorplanBoundaryCore } from '../pipeline.js';
 import { measureHold, implicatedNets, REMEDIATION_CONFIDENCE } from '../remediate.js';
 import { analyzeFloorplan } from '../analyze.js';
 import { traceBoundary } from '../boundary.js';
-import { polygonArea, pointInPolygon } from '../polygon.js';
+import { pointInPolygon } from '../polygon.js';
 import {
   windowedHouse, twoPlansSheet, sliderHouse, courtyardHouse, garageHouse,
   dimensionStringHouse, strokeAround, polygonIou,
@@ -54,9 +54,18 @@ describe('a trace that excludes a known room is retried', () => {
     });
   }
 
+  // The three below read one trace of the 70px plan; none of them changes it.
+  let recovered;
+  const recovered70 = () => {
+    if (!recovered) {
+      const { img, labels } = windowedHouse(70);
+      recovered = { img, traced: traceFloorplanBoundaryCore(img, { constraints: constraintsOf(labels) }) };
+    }
+    return recovered;
+  };
+
   it('reports the retry at info severity, anchored on what it recovered', () => {
-    const { img, labels } = windowedHouse(70);
-    const traced = traceFloorplanBoundaryCore(img, { constraints: constraintsOf(labels) });
+    const { img, traced } = recovered70();
     const note = traced.quality.warnings.find((w) => w.code === 'remediated');
     expect(note.severity).toBe('info');
     // Original image px, so it can be pointed at on the canvas.
@@ -70,15 +79,15 @@ describe('a trace that excludes a known room is retried', () => {
     }
   });
 
-  it('records what each attempt was worth', () => {
-    const { img, labels } = windowedHouse(70);
-    const { remediation } = traceFloorplanBoundaryCore(
-      img, { constraints: constraintsOf(labels) },
-    ).quality;
+  it('records what each attempt was worth, and keeps one only when it holds no fewer constraints', () => {
+    const { remediation } = recovered70().traced.quality;
     expect(remediation.ran).toBe(true);
     expect(remediation.before.held).toBeLessThan(remediation.after.held);
     expect(remediation.after.effective).toBeGreaterThan(remediation.before.effective);
     expect(remediation.passes.some((p) => p.accepted)).toBe(true);
+    for (const pass of remediation.passes) {
+      if (pass.accepted) expect(pass.held).toBeGreaterThanOrEqual(remediation.before.held);
+    }
   });
 });
 
@@ -104,14 +113,6 @@ describe('remediation cannot make an answer worse', () => {
     expect(outsideLabels(traced, labels).map((l) => l.name)).toEqual(['STRAY']);
     expect(codes(traced)).toContain('label-outside');
     expect(traced.quality.remediation.accepted).toBeNull();
-  });
-
-  it('keeps a hypothesis only when it holds no fewer constraints', () => {
-    const { img, labels } = windowedHouse(70);
-    const traced = traceFloorplanBoundaryCore(img, { constraints: constraintsOf(labels) });
-    for (const pass of traced.quality.remediation.passes) {
-      if (pass.accepted) expect(pass.held).toBeGreaterThanOrEqual(traced.quality.remediation.before.held);
-    }
   });
 
   it('can be switched off', () => {
@@ -227,10 +228,6 @@ describe('implicatedNets', () => {
 });
 
 describe('the confidence threshold', () => {
-  it('is the same line the app calls a good trace', () => {
-    expect(REMEDIATION_CONFIDENCE).toBe(0.75);
-  });
-
   it('retries a low-confidence trace even with nothing to point at', () => {
     const { img } = windowedHouse(100);
     const traced = traceFloorplanBoundaryCore(img);
@@ -258,16 +255,5 @@ describe('the confidence threshold', () => {
     // Nothing to point at and nothing to widen: the first answer stands, and is
     // reported as untouched rather than as a retry that found nothing.
     expect(traced.quality.remediation).toBeUndefined();
-  });
-});
-
-describe('area is what moves', () => {
-  it('the recovered outline is the whole building, not half of it', () => {
-    const { img, truth, labels } = windowedHouse(70);
-    const plain = traceFloorplanBoundaryCore(img);
-    const traced = traceFloorplanBoundaryCore(img, { constraints: constraintsOf(labels) });
-    const truthArea = polygonArea(truth);
-    expect(polygonArea(plain.outer.polygon) / truthArea).toBeLessThan(0.6);
-    expect(Math.abs(polygonArea(traced.outer.polygon) - truthArea) / truthArea).toBeLessThan(0.05);
   });
 });

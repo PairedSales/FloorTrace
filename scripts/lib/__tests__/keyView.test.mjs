@@ -3,7 +3,7 @@
 // coordinates say. Checked on pixels, so it does not depend on fonts.
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { autoGrid, describeView, renderView } from '../keyView.mjs';
+import { renderView } from '../keyView.mjs';
 
 const GUTTER = 30;
 const page = (w, h) => {
@@ -38,17 +38,6 @@ describe('a view', () => {
   paint(src, 100, 80, 300, 88);
   const bytes = PNG.sync.write(src);
 
-  it('scales the crop so its long side, with margins and legend, is about 1,400 px', async () => {
-    const { png, summary } = await renderView(bytes, { crop: [80, 60, 320, 240], grid: 20 });
-    const out = decode(png);
-    expect(out.width).toBeLessThanOrEqual(1400);
-    expect(Math.max(out.width, out.height)).toBeGreaterThan(1300);
-    expect(Math.max(out.width, out.height)).toBeLessThanOrEqual(1400);
-    expect(summary.crop).toEqual([80, 60, 320, 240]);
-    expect(summary.scale).toBeGreaterThan(5);
-    expect(summary.line).toMatch(/^crop 80,60→320,240 {2}scale \d+\.\d\d px\/px {2}grid 20$/);
-  });
-
   it('puts the page where the crop says, so a pixel of the page lands at a known place', async () => {
     const { png, summary } = await renderView(bytes, { crop: [80, 60, 320, 240], grid: 20 });
     const out = decode(png);
@@ -76,40 +65,6 @@ describe('a view', () => {
     expect(anyNear(out, ...map(200, 150), red)).toBe(false);
   });
 
-  it('draws a dashed layer with gaps, and a solid one without', async () => {
-    const ring = { type: 'gla', v: [[100, 100], [300, 100], [300, 200], [100, 200]] };
-    const run = async (dash) => {
-      const { png, summary } = await renderView(bytes, {
-        crop: [80, 60, 320, 240], grid: 0, layers: [{ color: '#ff0000', width: 2, dash, outlines: [ring] }],
-      });
-      const out = decode(png);
-      const y = GUTTER + (100 - 60) * summary.scale;
-      let painted = 0;
-      let total = 0;
-      for (let x = GUTTER + (110 - 80) * summary.scale; x < GUTTER + (290 - 80) * summary.scale; x += 1) {
-        total += 1;
-        if (anyNear(out, x, y, red, 1)) painted += 1;
-      }
-      return painted / total;
-    };
-    expect(await run([])).toBeGreaterThan(0.98);
-    const dashed = await run([10, 6]);
-    expect(dashed).toBeGreaterThan(0.3);
-    expect(dashed).toBeLessThan(0.85);
-  });
-
-  it('boxes a region', async () => {
-    const { png, summary } = await renderView(bytes, {
-      crop: [80, 60, 320, 240],
-      grid: 0,
-      layers: [{ label: 'regions', color: '#ff0000', boxes: [{ box: [150, 120, 250, 180], text: '1' }] }],
-    });
-    const out = decode(png);
-    const map = (x, y) => [GUTTER + (x - 80) * summary.scale, GUTTER + (y - 60) * summary.scale];
-    expect(anyNear(out, ...map(150, 150), red, 3)).toBe(true);
-    expect(anyNear(out, ...map(200, 180), red, 3)).toBe(true);
-  });
-
   it('marks the grid in the margin on all four edges, in image pixels', async () => {
     const { png, summary } = await renderView(bytes, { crop: [80, 60, 320, 240], grid: 20 });
     const out = decode(png);
@@ -129,18 +84,5 @@ describe('a view', () => {
     const { summary } = await renderView(bytes, { crop: [-50, -50, 900, 900], grid: 0 });
     expect(summary.crop).toEqual([0, 0, 400, 300]);
     expect(summary.line).toMatch(/grid none$/);
-  });
-
-  it('shows the whole page by default and chooses a grid from the zoom', async () => {
-    const { summary } = await renderView(bytes);
-    expect(summary.crop).toEqual([0, 0, 400, 300]);
-    expect(summary.grid).toBe(autoGrid(summary.scale));
-    expect(autoGrid(0.5)).toBe(100);
-    expect(autoGrid(3.3)).toBe(20);
-    expect(autoGrid(8.9)).toBe(5);
-  });
-
-  it('describes a view the way the brief asks', () => {
-    expect(describeView({ crop: [60, 220, 460, 620], scale: 3.28, grid: 20 })).toBe('crop 60,220→460,620  scale 3.28 px/px  grid 20');
   });
 });

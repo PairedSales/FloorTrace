@@ -25,27 +25,21 @@ beforeEach(() => {
 });
 
 describe('search memo: a warm trace equals a cold trace', () => {
-  it.each(FIXTURES)('%s traces identically on the second run', (name) => {
+  // One test per plan, sharing its traces: every comparison below is against
+  // the same unmemoised answer, so tracing it once per claim only bought time.
+  it.each(FIXTURES)('%s traces identically cold, warm, unkeyed and after a room clamp', (name) => {
     const image = images.get(name);
+    const unmemoised = geometryOf(traceFloorplanBoundaryCore(image, {}));
+
+    clearDetectionCache();
     const cold = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
     const warm = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
-    expect(warm).toEqual(cold);
-  });
+    expect(cold, 'first keyed run vs no cacheKey at all').toEqual(unmemoised);
+    expect(warm, 'second run on the same key').toEqual(unmemoised);
 
-  it.each(FIXTURES)('%s traces identically with no cacheKey at all', (name) => {
-    const image = images.get(name);
-    const memoised = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
-    clearDetectionCache();
-    const unmemoised = geometryOf(traceFloorplanBoundaryCore(image, {}));
-    expect(memoised).toEqual(unmemoised);
-  });
-
-  // A room placement runs an `inclusive` clamp trace and then a perimeter
-  // trace over the same cacheKey — the exact sequence App.jsx performs, and
-  // the one the memo exists to serve. The clamp trace must not poison it.
-  it.each(FIXTURES)('%s traces identically after a room-clamp trace on the same key', (name) => {
-    const image = images.get(name);
-    const alone = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
+    // A room placement runs an `inclusive` clamp trace and then a perimeter
+    // trace over the same cacheKey — the exact sequence App.jsx performs, and
+    // the one the memo exists to serve. The clamp trace must not poison it.
     clearDetectionCache();
     detectRoomFromClickCore(
       image,
@@ -53,6 +47,6 @@ describe('search memo: a warm trace equals a cold trace', () => {
       { cacheKey: name },
     );
     const afterClamp = geometryOf(traceFloorplanBoundaryCore(image, { cacheKey: name }));
-    expect(afterClamp).toEqual(alone);
+    expect(afterClamp, 'after a room-clamp trace on the same key').toEqual(unmemoised);
   });
 });

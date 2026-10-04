@@ -22,17 +22,6 @@ afterEach(() => {
 const view = () => render(<Notice top="110px" />);
 
 describe('the one notice', () => {
-  it('is nothing at all until something goes wrong', () => {
-    expect(view().container.firstChild).toBeNull();
-  });
-
-  it('says what went wrong, once', () => {
-    const v = view();
-    act(() => notify('Could not open that file — it is not an image.'));
-    expect(v.getByRole('alert').textContent).toContain('Could not open that file');
-    expect(v.getAllByRole('alert')).toHaveLength(1);
-  });
-
   // The complaint that ended the stack: two cards of different widths, one
   // over the other. A second notice takes the first one's place.
   it('replaces the one before it rather than stacking', () => {

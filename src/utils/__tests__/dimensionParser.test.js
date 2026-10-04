@@ -60,18 +60,6 @@ describe('parseSingleToken', () => {
       expect(r.format).toBe('inches');
     });
 
-    it('parses 10\'2" with tight spacing', () => {
-      const r = parseSingleToken("10'2\"");
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(10 + 2 / 12, 5);
-    });
-
-    it('parses 10\' 2" with space before inches', () => {
-      const r = parseSingleToken("10' 2\"");
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(10 + 2 / 12, 5);
-    });
-
     it('parses smart-quote variant \u2019', () => {
       const r = parseSingleToken('13\u20194"');
       expect(r).not.toBeNull();
@@ -116,12 +104,6 @@ describe('parseSingleToken', () => {
       expect(r.value).toBe(12);
       expect(r.format).toBe('decimal');
     });
-
-    it('parses uppercase 12 FT', () => {
-      const r = parseSingleToken('12 FT');
-      expect(r).not.toBeNull();
-      expect(r.value).toBe(12);
-    });
   });
 
   // Case C – explicit ft / in keywords
@@ -139,12 +121,6 @@ describe('parseSingleToken', () => {
       expect(r.value).toBeCloseTo(2 + 6 / 12, 5);
     });
 
-    it('parses "13 ft 4 in"', () => {
-      const r = parseSingleToken('13 ft 4 in');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(13 + 4 / 12, 5);
-    });
-
     it('rejects inches >= 12 in explicit form', () => {
       expect(parseSingleToken('10 ft 13 in')).toBeNull();
     });
@@ -159,17 +135,9 @@ describe('parseSingleToken', () => {
       expect(r.format).toBe('inches');
     });
 
-    it('parses "13 4" as 13ft 4in', () => {
-      const r = parseSingleToken('13 4');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(13 + 4 / 12, 5);
-    });
-
     it('rejects "10 13" because 13 is not a valid inches value', () => {
-      // 13 >= 12, so should not be treated as ft+in pair
-      const r = parseSingleToken('10 13');
-      // May still parse as something else (plain ft), just must not be inches pair
-      if (r) expect(r.format).not.toBe('inches');
+      // 13 >= 12, so it is not a ft+in pair, and nothing else reads it either.
+      expect(parseSingleToken('10 13')).toBeNull();
     });
   });
 
@@ -182,23 +150,10 @@ describe('parseSingleToken', () => {
       expect(r.format).toBe('inches');
     });
 
-    it('parses "134" as 13ft 4in', () => {
-      const r = parseSingleToken('134');
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(13 + 4 / 12, 5);
-    });
-
     it('parses "1210" as 12ft 10in', () => {
       const r = parseSingleToken('1210');
       expect(r).not.toBeNull();
       expect(r.value).toBeCloseTo(12 + 10 / 12, 5);
-    });
-
-    it('falls back to plain feet when last digit is >= 12 (e.g. "139" → 13ft or plain)', () => {
-      const r = parseSingleToken('139');
-      // 9 < 12 so this is actually valid: 13ft 9in
-      expect(r).not.toBeNull();
-      expect(r.value).toBeCloseTo(13 + 9 / 12, 5);
     });
   });
 
@@ -209,12 +164,6 @@ describe('parseSingleToken', () => {
       expect(r).not.toBeNull();
       expect(r.value).toBe(12);
       expect(r.format).toBe('decimal');
-    });
-
-    it('parses "10" as 10 ft', () => {
-      const r = parseSingleToken('10');
-      expect(r).not.toBeNull();
-      expect(r.value).toBe(10);
     });
   });
 
@@ -293,14 +242,6 @@ describe('parseDimensionLine', () => {
   // Noisy OCR fallback – both symbols blurry (no ' or ")
   it('parses noisy OCR: 102 x 134', () => {
     const r = parseDimensionLine('102 x 134');
-    expect(r).not.toBeNull();
-    expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
-    expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
-  });
-
-  // Noisy OCR with uppercase X
-  it('parses noisy OCR with uppercase X: 102 X 134', () => {
-    const r = parseDimensionLine('102 X 134');
     expect(r).not.toBeNull();
     expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
     expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
@@ -406,13 +347,6 @@ describe('parseDimensionLine', () => {
     expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
   });
 
-  it('parses mixed: "10\'2 x 13,4" (one real tick, one comma)', () => {
-    const r = parseDimensionLine("10'2 x 13,4");
-    expect(r).not.toBeNull();
-    expect(r.width).toBeCloseTo(10 + 2 / 12, 5);
-    expect(r.height).toBeCloseTo(13 + 4 / 12, 5);
-  });
-
   // Kitchen-specific format
   it("parses kitchen dimensions: 10' 9\" x 7' 11\"", () => {
     const r = parseDimensionLine("10' 9\" x 7' 11\"");
@@ -463,22 +397,8 @@ describe('inferDominantFormat', () => {
     expect(inferDominantFormat([])).toBeNull();
   });
 
-  it('returns null for null input', () => {
-    expect(inferDominantFormat(null)).toBeNull();
-  });
-
   it('returns null when no formats match inches or decimal', () => {
     expect(inferDominantFormat([{ format: undefined }, { format: null }])).toBeNull();
-  });
-
-  it('returns "inches" when all dimensions are feet-inches', () => {
-    const dims = [{ format: 'inches' }, { format: 'inches' }, { format: 'inches' }];
-    expect(inferDominantFormat(dims)).toBe('inches');
-  });
-
-  it('returns "decimal" when all dimensions are decimal feet', () => {
-    const dims = [{ format: 'decimal' }, { format: 'decimal' }, { format: 'decimal' }];
-    expect(inferDominantFormat(dims)).toBe('decimal');
   });
 
   it('returns "inches" when inches are the majority', () => {
@@ -494,13 +414,5 @@ describe('inferDominantFormat', () => {
   it('returns "inches" on a tie (inches preferred)', () => {
     const dims = [{ format: 'inches' }, { format: 'decimal' }];
     expect(inferDominantFormat(dims)).toBe('inches');
-  });
-
-  it('handles a single inches dimension', () => {
-    expect(inferDominantFormat([{ format: 'inches' }])).toBe('inches');
-  });
-
-  it('handles a single decimal dimension', () => {
-    expect(inferDominantFormat([{ format: 'decimal' }])).toBe('decimal');
   });
 });

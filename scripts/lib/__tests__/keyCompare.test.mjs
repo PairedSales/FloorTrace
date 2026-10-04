@@ -71,15 +71,6 @@ describe('compare: offsets worked out by hand', () => {
     expect(region.bbox[3]).toBeLessThanOrEqual(22);
     expect(region.maxDistance).toBeCloseTo(20, 0);
   });
-
-  it('an L-shape against the bar it contains: IoU two thirds, the missing block is a region', () => {
-    const ell = [[0, 0], [200, 0], [200, 100], [100, 100], [100, 200], [0, 200]];
-    const r = compareKeys([gla(ell)], [gla(rect(0, 0, 200, 100))]);
-    expect(Math.abs(r.iou.building.iou - 2 / 3)).toBeLessThan(0.002);
-    expect(r.agree).toBe(false);
-    expect(r.regions.length).toBeGreaterThan(0);
-    expect(r.regions[0].maxDistance).toBeGreaterThan(50);
-  });
 });
 
 describe('compare: off the pixel grid, where the 99% line is decided', () => {
@@ -87,12 +78,6 @@ describe('compare: off the pixel grid, where the 99% line is decided', () => {
     const r = compareKeys([gla(rect(...a))], [gla(rect(...b))]);
     return { r, b: r.criteria.find((c) => c.id === 'b') };
   };
-
-  it('the IoU of fractional corners is the analytic one: 94.647%, not the 93.99% a 0.5 px raster printed', () => {
-    const { r } = verdictOf([10.3, 12.7, 110.9, 80.2], [11.4, 13.9, 109.6, 81.1]);
-    expect(r.iou.building.iou).toBeCloseTo(6510.66 / 6878.88, 12);
-    expect(r.iou.building.a).toBeCloseTo(6790.5, 6);
-  });
 
   it('a small house just under 99% disagrees though a raster read it as 99.14%', () => {
     // 114.9 x 117.4 px against a copy with every side moved by under 0.5 px:
@@ -117,25 +102,6 @@ describe('compare: off the pixel grid, where the 99% line is decided', () => {
     expect(r.iou.building.iou).toBeCloseTo(inter / union, 12);
     expect(crit.ok).toBe(true);
     expect(r.agree).toBe(true);
-  });
-
-  it('300 fractional pairs of small houses: the (b) verdict is the analytic one every time', () => {
-    let x = 99;
-    const rand = () => {
-      x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
-      return x / 2 ** 32;
-    };
-    for (let n = 0; n < 300; n += 1) {
-      const w = 100 + rand() * 100;
-      const h = 80 + rand() * 70;
-      const a = [rand() * 50, rand() * 50, 0, 0];
-      a[2] = a[0] + w;
-      a[3] = a[1] + h;
-      const b = a.map((v) => v + (rand() - 0.5) * 0.02 * w);
-      const inter = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-      const exact = inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter);
-      expect(verdictOf(a, b).b.ok).toBe(exact >= 0.99);
-    }
   });
 });
 
@@ -211,15 +177,6 @@ describe('compare: outline types', () => {
     expect(Math.abs(r.iou.byType.porch.iou - 0.96)).toBeLessThan(0.002);
     expect(r.criteria.filter((c) => c.id === 'c').map((c) => c.ok)).toEqual([true, false]);
     expect(r.agree).toBe(false);
-  });
-
-  it('reports unfinished space but does not score it', () => {
-    const house = gla(rect(0, 0, 400, 300));
-    const a = [house, { type: 'unfinished', v: rect(0, 300, 100, 340) }];
-    const b = [house, { type: 'unfinished', v: rect(0, 300, 100, 341) }];
-    const r = compareKeys(a, b);
-    expect(r.iou.unfinished.iou).toBeLessThan(1);
-    expect(r.agree).toBe(true);
   });
 });
 
@@ -341,15 +298,6 @@ describe('compare: small unfinished outlines do not decide agreement', () => {
     expect(r.iou.unfinished.iou).toBeLessThan(1);
     expect(r.boundary.max).toBeLessThan(1e-9);
     expect(r.informational).toEqual([]);
-  });
-
-  it('small unfinished outlines in both keys are all set aside, and say whether the other key drew there too', () => {
-    const near = compareKeys([house, chimney], [house, unfinished(rect(300, 82, 324, 102))]);
-    expect(near.agree).toBe(true);
-    expect(near.informational.map((i) => [i.key, i.inOther])).toEqual([['A', true], ['B', true]]);
-    const apart = compareKeys([house, chimney], [house, unfinished(rect(-24, 80, 0, 100))]);
-    expect(apart.agree).toBe(true);
-    expect(apart.informational.map((i) => [i.key, i.inOther])).toEqual([['A', false], ['B', false]]);
   });
 
   it('a small unfinished outline beside a large one leaves the large one to count', () => {

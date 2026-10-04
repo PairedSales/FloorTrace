@@ -53,11 +53,15 @@ describe('documentRequests', () => {
   // the other's staleness test exactly.
   it('tells two plans holding identical images apart', () => {
     const work = beginWork('scan');
-    // Same pixels, different plan, and the owning plan is closed.
-    useAppStore.setState({ documents: {}, activeDocumentId: 'doc-the-other-one', image: IMAGE_A });
+    // Same pixels on a second plan, which is now the live one. The owner is
+    // still open, so the write is held for it rather than run on its twin.
+    app().openDocument();
+    useAppStore.setState({ image: IMAGE_A });
 
     expect(work.image).toBe(useAppStore.getState().image);
-    expect(deliver(work, () => {})).toBe('dropped');
+    let ran = false;
+    expect(deliver(work, () => { ran = true; })).toBe('routed');
+    expect(ran).toBe(false);
   });
 
   // The distinction this layer gained once a plan could be open without being
@@ -102,16 +106,6 @@ describe('documentRequests', () => {
 
       // A calibration is the case: area goes as scale squared, so applying one
       // late is a wrong number wearing the same green as a right one.
-      expect(ownerVerdict(work)).toBe('routed');
-      expect(parkedInboxSize(work.docId)).toBe(0);
-    });
-
-    it('is a question, not a delivery — it queues nothing however often it is asked', () => {
-      useAppStore.setState({ image: IMAGE_A });
-      const work = beginWork('measure');
-      app().openDocument();
-
-      expect(ownerVerdict(work)).toBe('routed');
       expect(ownerVerdict(work)).toBe('routed');
       expect(parkedInboxSize(work.docId)).toBe(0);
     });
@@ -190,13 +184,6 @@ describe('documentRequests', () => {
       const mine = beginWork('trace');
       expect(detachDocument('doc-not-mine')).toBe(0);
       expect(deliver(mine, () => {})).toBe('applied');
-    });
-
-    it('exposes a signal for work that can stop early', () => {
-      const work = beginWork('scan');
-      expect(signalOf(work).aborted).toBe(false);
-      detachActiveDocument();
-      expect(signalOf(work).aborted).toBe(true);
     });
   });
 

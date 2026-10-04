@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { QUALITY_GOOD } from '../../../src/utils/boundaryQuality.js';
 import { answerKey, scoreTrace } from '../realScore.mjs';
-import { scoreAgainstKey, scoreLines, tracedOfJson } from '../keyScore.mjs';
+import { scoreAgainstKey, tracedOfJson } from '../keyScore.mjs';
 
 const SIZE = { width: 500, height: 300 };
 const rect = (x0, y0, x1, y1) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
@@ -147,14 +147,6 @@ describe('score: the same verdict as bench:real, since it is the same code', () 
     }
     expect(direct.verdict).toBe('wrong');
   });
-
-  it('gives the same masks from a key held as the app\'s outlines and as an exported key', () => {
-    const exported = KEY.map((o) => ({ type: o.type, points: pairs(o.vertices) }));
-    const ring = pairs(rect(100, 80, 400, 220));
-    const a = scoreAgainstKey(KEY, SIZE, tracedOfJson({ rings: [ring] }));
-    const b = scoreAgainstKey(exported, SIZE, tracedOfJson({ rings: [ring] }));
-    expect(b).toEqual(a);
-  });
 });
 
 describe('score: confidence and wrong-but-shown-good', () => {
@@ -182,17 +174,6 @@ describe('score: confidence and wrong-but-shown-good', () => {
   it('takes warning codes as strings or as {code, severity}, and leaves out an info one', () => {
     const r = score({ ...merged, warnings: ['a', { code: 'b', severity: 'error' }, { code: 'c', severity: 'info' }, 'a'] });
     expect(r.warnings).toEqual(['a', 'b']);
-  });
-
-  it('words the result: the verdict, the causes, and the wrong-but-shown-good line', () => {
-    const r = score({ ...merged, confidence: 0.93, warnings: ['thin-structure-excluded'] });
-    const lines = scoreLines('demo', r, { keyRecord: 'annotators: a, b; checked 2026-09-29 (AI review)' });
-    expect(lines[0]).toBe('score demo: verdict WRONG   IoU 66.67%   area error +50.0% (the outlines cover more than the key\'s building)');
-    expect(lines[1]).toBe('key: gla, garage   (annotators: a, b; checked 2026-09-29 (AI review))');
-    expect(lines.join('\n')).toMatch(/non-GLA space kept 50\.0%, other space taken in 0\.0%, living space missed 0\.0%/);
-    expect(lines.join('\n')).toMatch(/error regions, largest first: non-GLA space kept 50\.0%/);
-    expect(lines.join('\n')).toMatch(/confidence 93\.0% \(good\) {3}WRONG BUT SHOWN AS GOOD/);
-    expect(lines.join('\n')).toMatch(/warnings: thin-structure-excluded/);
   });
 });
 

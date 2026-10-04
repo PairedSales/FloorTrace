@@ -56,20 +56,13 @@ describe('multi-floor boundary tracing on ExampleFloorplan.png', () => {
   it('excludes the garage geometrically, without any OCR label', () => {
     expect(traced.excludedRegions).toBe(1);
     expect(traced.excludedGarages).toBe(1);
-    const bottom = traced.floors[1];
-    const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
-    // Living area only (~893 sq ft); with the garage the wing pushed this
-    // above 1030 sq ft.
-    expect(bottomSqFt).toBeGreaterThan(840);
-    expect(bottomSqFt).toBeLessThan(950);
-  });
-
-  it('keeps the floors as separate polygons with plausible areas', () => {
     const [top, bottom] = traced.floors;
     const topSqFt = polygonArea(top.outer.polygon) / (PPF * PPF);
     const bottomSqFt = polygonArea(bottom.outer.polygon) / (PPF * PPF);
     expect(topSqFt).toBeGreaterThan(850);
     expect(topSqFt).toBeLessThan(980);
+    // Living area only (~893 sq ft); with the garage the wing pushed this
+    // above 1030 sq ft.
     expect(bottomSqFt).toBeGreaterThan(840);
     expect(bottomSqFt).toBeLessThan(950);
   });
