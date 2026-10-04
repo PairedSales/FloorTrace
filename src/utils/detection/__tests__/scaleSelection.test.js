@@ -207,6 +207,41 @@ describe('selectProjectScale when it cannot be sure', () => {
     expect(result.areaRatio).toBeGreaterThan(1);
   });
 
+  // A plan dimensioned in meters, read as feet: 50 px to the meter, so 50
+  // "px/ft". The rooms agree perfectly and the footprint (10 m x 12 m) against
+  // the labels' 44.7 "sq ft" passes both area checks, because a uniform unit
+  // error cancels in their ratio. Only the labels' own sizes give it away.
+  it('says when the room sizes read too small to be feet', () => {
+    const result = selectProjectScale([
+      room('LIVING', 50.1, 49.9, 0.95, { width: 3.5, height: 4.2 }),
+      room('BEDROOM', 49.8, 50.2, 0.95, { width: 3, height: 3.6 }),
+      room('KITCHEN', 50, 50.1, 0.95, { width: 4, height: 4.8 }),
+    ], { footprintAreaPx: 500 * 600 });
+    expect(result.level).toBe('check');
+    expect(result.reason).toBe('labels-look-metric');
+    expect(result.areaRatio).toBeGreaterThan(0.7);
+    expect(result.areaRatio).toBeLessThan(3.5);
+  });
+
+  // The direction nothing else sees: the rooms agree, and only the footprint
+  // is too big for them (a garage the carve missed, a flood into the next
+  // plan on the sheet). Four labels state 475 sq ft; 600000 px^2 at 15.5 px/ft
+  // is about 2500 sq ft.
+  it('catches a footprint far larger than its rooms account for', () => {
+    const rooms = () => [
+      room('KITCHEN', 15.4, 15.6, 0.95, { width: 10, height: 10 }),
+      room('DINING', 15.6, 15.5, 0.95, { width: 11, height: 9 }),
+      room('PRIMARY BEDROOM', 15.5, 15.5, 0.95, { width: 12, height: 13 }),
+      room('BEDROOM', 15.5, 15.4, 0.95, { width: 10, height: 12 }),
+    ];
+    const result = selectProjectScale(rooms(), { footprintAreaPx: 600000 });
+    expect(result.level).toBe('check');
+    expect(result.reason).toBe('footprint-implausible');
+    expect(result.areaRatio).toBeGreaterThan(3.5);
+
+    expect(selectProjectScale(rooms(), { footprintAreaPx: 200000 }).level).toBe('ok');
+  });
+
   // A garage is inside the drawing but is not the building the area serves,
   // and it is the rectangle most likely to be carved out from under the
   // footprint the scale is applied to.
