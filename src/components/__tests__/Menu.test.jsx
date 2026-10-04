@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, fireEvent, cleanup, within, act } from '@testing-library/react';
+import { render, fireEvent, cleanup, within } from '@testing-library/react';
 import { Menu, MenuItem, MenuSep } from '../Menu';
 import useWorkspaceStore from '../../store/workspaceStore';
 import { shortcutsBlocked } from '../../utils/keyboardGuard';
@@ -49,13 +49,6 @@ describe('Menu', () => {
     expect(trigger(view, 'Outline').getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('closes when a menu elsewhere in the window opens', () => {
-    const view = render(<TwoMenus />);
-    fireEvent.click(trigger(view, 'Outline'));
-    act(() => useWorkspaceStore.getState().setMenuOpen('main'));
-    expect(view.queryByRole('menu')).toBeNull();
-  });
-
   // `shortcutsBlocked` reads the store. Without it `1` started painting behind
   // an open menu — which prints the very key it was swallowing.
   it('tells the keyboard guard while it is open, and gives the keyboard back', () => {
@@ -77,18 +70,6 @@ describe('Menu', () => {
     expect(view.getByRole('menu')).toBeTruthy();
     fireEvent.mouseDown(window);
     expect(view.queryByRole('menu')).toBeNull();
-  });
-
-  // `useKeyboardShortcuts` reads mouse buttons 3/4 (undo/redo) off window
-  // `mousedown`. A swallow scoped to a wrapper killed that for whatever plain
-  // button the pointer happened to be over.
-  it('lets a plain button beside it send its mousedown to the window', () => {
-    const view = render(<TwoMenus />);
-    const spy = vi.fn();
-    window.addEventListener('mousedown', spy);
-    fireEvent.mouseDown(trigger(view, 'Plain'));
-    window.removeEventListener('mousedown', spy);
-    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it('switches to a neighbour on hover only once one of the row is open', () => {

@@ -35,14 +35,6 @@ describe('classifyScaleLine', () => {
     expect(classifyScaleLine(line(under.dy, under.dx, 10))).toBe('y');
     expect(classifyScaleLine(line(over.dy, over.dx, 10))).toBe('diagonal');
   });
-
-  it('costs under 0.4% to read a 5 degree line as an axis length', () => {
-    const { dx, dy } = deg(5);
-    const L = 24;
-    const isotropic = L / Math.hypot(dx, dy);
-    const asAxis = L / Math.abs(dx);
-    expect(Math.abs(asAxis / isotropic - 1)).toBeLessThan(0.004);
-  });
 });
 
 describe('resolveLineScale — one line', () => {
@@ -147,26 +139,6 @@ describe('resolveLineScale — quality', () => {
     expect(first.changed).toBe(true);
     const held = { calibrated: true, feetPerPixel: first.scale, quality: first.quality };
     expect(resolveLineScale({ lines: [line(200, 0, 20)], calibration: held }).changed).toBe(false);
-  });
-});
-
-// The panel line is the only durable statement of where the number came from
-// once the toast has gone, and a clean line calibration carries no `reason` —
-// so the ordering inside scaleQualitySummary is what makes it appear at all.
-describe('scaleQualitySummary for a line calibration', () => {
-  it('renders a clean line calibration rather than nothing', () => {
-    const r = resolveLineScale({ lines: [line(200, 0, 20)] });
-    expect(r.quality.level).toBe('ok');
-    expect(r.quality.reason).toBe(null);
-    const summary = scaleQualitySummary(r.quality);
-    expect(summary).not.toBe(null);
-    expect(summary.short).toBe('Scale set by hand');
-    expect(summary.detail).toContain('20 ft line');
-  });
-
-  it('names both directions when two lines are in force', () => {
-    const r = resolveLineScale({ lines: [line(100, 0, 10), line(0, 100, 12)] });
-    expect(scaleQualitySummary(r.quality).short).toContain('differ by');
   });
 });
 

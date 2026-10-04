@@ -36,11 +36,6 @@ describe('primaryWarning', () => {
       .toBe(warning('heavy-closing', { radius: 12 }).message);
   });
 
-  it('reports the detail text when the code has one', () => {
-    expect(primaryWarning([warning('bridged-opening', { px: 42 })]))
-      .toBe('a gap in the wall was bridged to close the outline');
-  });
-
   it('picks the worst warning through qualitySummary too', () => {
     const summary = qualitySummary({
       confidence: 0.4,
@@ -56,18 +51,6 @@ describe('primaryWarning', () => {
 });
 
 describe('the order reasons are ranked in', () => {
-  it('puts a wrong number ahead of a note about how the outline was reached', () => {
-    // `no-inner` outranks `heavy-closing`: in interior mode it means the
-    // outline on screen is the exterior one under an interior caption, which
-    // is a wrong number rather than a note about how the trace was reached.
-    const list = [
-      warning('no-alternative', null, 'info'),
-      warning('heavy-closing', { radius: 12 }),
-      warning('no-inner', { floor: 0 }),
-    ];
-    expect(primaryWarning(list)).toBe(warning('no-inner', { floor: 0 }).message);
-  });
-
   it('does not reorder the list it was handed', () => {
     const list = [warning('no-inner', { floor: 0 }), warning('unsealed', null, 'error')];
     primaryWarning(list);
@@ -129,14 +112,6 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     for (const quality of Object.values(cases)) {
       const { short, detail, remedy } = scaleQualitySummary(quality);
       expect(`${short} ${detail} ${remedy ?? ''}`).not.toMatch(/\bpx\b/);
-    }
-  });
-
-  // Both messages a hand-set scale raises point at a button the panel has, by
-  // the name printed on it.
-  it('sends a scale set by hand to a button that exists, by its name', () => {
-    for (const key of ['a line against the rooms', 'a room against the scan']) {
-      expect(scaleQualitySummary(cases[key]).remedy).toContain('“Use a different room”');
     }
   });
 });

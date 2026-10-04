@@ -177,11 +177,6 @@ describe('undoManager stack bounds', () => {
     return { undo: undoStack.length, redo: redoStack.length, total: undoStack.length + redoStack.length };
   };
 
-  it('caps the undo stack', () => {
-    for (let i = 0; i < MAX_UNDO + 20; i += 1) undoManager.save();
-    expect(depth().undo).toBe(MAX_UNDO);
-  });
-
   it('never exceeds the combined cap under any save/undo/redo sequence', () => {
     let worst = 0;
     const note = () => { worst = Math.max(worst, depth().total); };

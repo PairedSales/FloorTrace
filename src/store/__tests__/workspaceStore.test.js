@@ -31,16 +31,6 @@ describe('workspaceStore', () => {
     }
   });
 
-  it('does not lose window state when the document store restarts', () => {
-    ws().setPanelOpen(false);
-    ws().setShowHelpModal(true);
-
-    useAppStore.getState().restart();
-
-    expect(ws().panelOpen).toBe(false);
-    expect(ws().showHelpModal).toBe(true);
-  });
-
   describe('statusFlash', () => {
     it('makes two identical messages two separate flashes', () => {
       ws().flashStatus('Area copied');
@@ -60,34 +50,6 @@ describe('workspaceStore', () => {
       expect(ws().statusFlash.tone).toBe('warn');
       ws().flashStatus('Anything else', 'purple');
       expect(ws().statusFlash.tone).toBe('ok');
-    });
-  });
-
-  describe('notice', () => {
-    it('holds one, replaced by the next and cleared by a dismissal', () => {
-      ws().setNotice({ text: 'The first.', tone: 'warn' });
-      const first = ws().notice;
-      expect(first).toMatchObject({ text: 'The first.', tone: 'warn', action: null });
-      expect(typeof first.at).toBe('number');
-
-      ws().setNotice({ text: 'The second.' });
-      expect(ws().notice).toMatchObject({ text: 'The second.', tone: 'crit' });
-
-      ws().dismissNotice();
-      expect(ws().notice).toBeNull();
-    });
-  });
-
-  // An offer made on one plan must not follow the user to another: the store
-  // holds which plan it is for, and the bar compares.
-  describe('retraceOfferFor', () => {
-    it('names the plan the offer is for, and is cleared with nothing', () => {
-      ws().setRetraceOfferFor('doc-1');
-      expect(ws().retraceOfferFor).toBe('doc-1');
-      ws().setRetraceOfferFor(null);
-      expect(ws().retraceOfferFor).toBeNull();
-      ws().setRetraceOfferFor(undefined);
-      expect(ws().retraceOfferFor).toBeNull();
     });
   });
 

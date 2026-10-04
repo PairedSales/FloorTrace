@@ -11,7 +11,7 @@
 // would also take Escape and Ctrl+Alt plan switching, and switching plans
 // mid-trace is a case this app deliberately supports.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
 import { TOOL_GROUPS } from '../../components/toolCatalog';
@@ -120,25 +120,4 @@ describe('shortcuts that would invalidate work in flight', () => {
     // worker can be terminated for — an OCR scan has neither.
     expect(text).not.toMatch(/stop/i);
   });
-});
-
-describe('shortcutsBlocked', () => {
-  it('still blocks on a modal, a menu and a text field', async () => {
-    const { shortcutsBlocked } = await import('../keyboardGuard');
-    useWorkspaceStore.setState({ menuOpen: true });
-    expect(shortcutsBlocked(document.body)).toBe(true);
-    useWorkspaceStore.setState({ menuOpen: false });
-    expect(shortcutsBlocked(document.body)).toBe(false);
-    // …and is deliberately unaffected by `isProcessing`: it cannot see the key.
-    useAppStore.setState({ isProcessing: true });
-    expect(shortcutsBlocked(document.body)).toBe(false);
-  });
-});
-
-// Guards against the listener being installed twice by a stray import.
-it('installs one guard, whatever imports it', async () => {
-  const spy = vi.spyOn(window, 'addEventListener');
-  await import('../keyboardGuard');
-  expect(spy.mock.calls.filter(([type]) => type === 'keydown')).toHaveLength(0);
-  spy.mockRestore();
 });

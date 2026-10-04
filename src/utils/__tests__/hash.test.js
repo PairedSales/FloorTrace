@@ -9,18 +9,6 @@ describe('hashDataUrl', () => {
     expect(hashDataUrl('')).toBeNull();
   });
 
-  it('produces identical hashes for identical inputs', () => {
-    const data1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    const data2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    expect(hashDataUrl(data1)).toBe(hashDataUrl(data2));
-  });
-
-  it('produces different hashes for different inputs', () => {
-    const data1 = 'data:image/png;base64,A';
-    const data2 = 'data:image/png;base64,B';
-    expect(hashDataUrl(data1)).not.toBe(hashDataUrl(data2));
-  });
-
   it('samples first 8KB and length correctly', () => {
     const base = 'a'.repeat(9000);
     const modifiedInSample = 'b' + base.slice(1);

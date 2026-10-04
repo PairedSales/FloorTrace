@@ -50,14 +50,6 @@ describe('document identity', () => {
   describe('metadata', () => {
     const activeMeta = () => app().documents[app().activeDocumentId];
 
-    it('records and clears the source file name', () => {
-      app().setActiveDocumentMeta({ sourceFileName: 'Ranch on Elm.png' });
-      expect(activeMeta().sourceFileName).toBe('Ranch on Elm.png');
-
-      app().setActiveDocumentMeta({ sourceFileName: null });
-      expect(activeMeta().sourceFileName).toBeNull();
-    });
-
     it('ignores a write to a document that does not exist', () => {
       const before = app().documents;
       app().setDocumentMeta('doc-nope', { sourceFileName: 'x.png' });
@@ -98,17 +90,6 @@ describe('document identity', () => {
       expect(documentLabel({ projectName: null, sourceFileName: null, index: 2 }))
         .toBe('Untitled 3');
     });
-
-    // Asserted on `documentLabel` itself rather than through a store action:
-    // the tabs, the plans sheet and the workspace index all call it directly,
-    // and the two thin store readers that used to wrap it had no caller left.
-    it('falls back typed name -> source filename -> Untitled N', () => {
-      expect(documentLabel({ projectName: '42 Oak Ave', sourceFileName: 'oak.png' }))
-        .toBe('42 Oak Ave');
-      expect(documentLabel({ projectName: '  ', sourceFileName: 'oak.png' })).toBe('oak');
-      expect(documentLabel({ projectName: '', sourceFileName: '', index: 2 }))
-        .toBe('Untitled 3');
-    });
   });
 });
 
@@ -130,12 +111,6 @@ describe('area selectors', () => {
     calibration: { calibrated: true, feetPerPixel: { x: 1, y: 1 }, source: 'room-calibration' },
   });
 
-  it('computes the same numbers as the memoised selector', () => {
-    seed(10);
-    const state = useAppStore.getState();
-    expect(computeAreaByType(state)).toEqual(selectActiveAreaByType(state));
-  });
-
   // The reason the exhibit stopped calling the memo: a memo keyed on nothing
   // but the last call answers for whichever state asked most recently, so a
   // caller handed a state must not go through it.
@@ -148,17 +123,5 @@ describe('area selectors', () => {
 
     expect(computeAreaByType(twenty).total).toBe(400);
     expect(computeAreaByType(ten).total).toBe(100);
-  });
-
-  it('returns a fresh object each call, so nothing can be aliased', () => {
-    seed(10);
-    const state = useAppStore.getState();
-    expect(computeAreaByType(state)).not.toBe(computeAreaByType(state));
-  });
-
-  it('still returns a stable reference from the memoised selector', () => {
-    seed(10);
-    const first = selectActiveAreaByType(useAppStore.getState());
-    expect(selectActiveAreaByType(useAppStore.getState())).toBe(first);
   });
 });

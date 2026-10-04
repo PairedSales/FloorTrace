@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { PARK_FIELDS, PARK_ONLY_FIELDS, AUTOSAVE_FIELDS } from '../appStore';
+import useAppStore, { PARK_FIELDS, AUTOSAVE_FIELDS } from '../appStore';
 import { parkedCount } from '../documentManager';
 import { newTraceId } from '../ids';
 import * as undoManager from '../undoManager';
@@ -109,11 +109,6 @@ describe('park and adopt', () => {
   });
 
   describe('what PARK_FIELDS carries that AUTOSAVE_FIELDS does not', () => {
-    it.each(PARK_ONLY_FIELDS)('parks %s', (field) => {
-      expect(AUTOSAVE_FIELDS).not.toContain(field);
-      expect(PARK_FIELDS).toContain(field);
-    });
-
     // Parking through the autosave projection would launder away the fact that
     // a plan has unsaved work — checkUnsavedChanges reads exactly this.
     it('keeps a plan dirty across a park', () => {

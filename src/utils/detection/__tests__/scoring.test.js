@@ -48,11 +48,6 @@ describe('pickCandidate is a total order', () => {
       }
     });
 
-    it(`picks the same candidate from the reversed ${name} set`, () => {
-      expect(key(pickCandidate([...set].reverse()).best)).toBe(expected);
-      expect(key(pickCandidate(set).best)).toBe(expected);
-    });
-
     it(`ranks the ${name} set identically from every permutation`, () => {
       const reference = pickCandidate(set).ranked.map(key);
       for (const order of permutations(set)) {

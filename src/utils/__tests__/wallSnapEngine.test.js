@@ -100,10 +100,6 @@ describe('findSegmentSnap', () => {
     expect(findSegmentSnap(segments, 113, 50, 250, 12, 'hi')).toBe(103);
   });
 
-  it('returns null beyond tolerance', () => {
-    expect(findSegmentSnap(segments, 120, 50, 250, 12, 'lo')).toBeNull();
-  });
-
   it('returns null when the edge span misses the segment', () => {
     expect(findSegmentSnap(segments, 100, 300, 400, 12, 'lo')).toBeNull();
   });

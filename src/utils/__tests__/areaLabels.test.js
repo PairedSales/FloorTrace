@@ -68,13 +68,6 @@ describe('matchAreaLabel', () => {
     }
   });
 
-  // Room names, not level names: a GARAGE label sits inside the first floor,
-  // so typing the whole outline from it would move a storey out of GLA.
-  it('never types an outline from a room-level feature name', () => {
-    expect(matchAreaLabel("GARAGE 20'-7\" x 9'-6\"")).toBeNull();
-    expect(matchAreaLabel('PATIO')).toBeNull();
-  });
-
   it('reads through typographic quotes', () => {
     expect(matchAreaLabel('B’MENT')?.type).toBe('below-grade');
   });

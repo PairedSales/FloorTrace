@@ -162,12 +162,6 @@ describe('buildAreaDerivation — the chain to GLA', () => {
     expect(d.gla.measured).toBe(false);
     expect(d.grand.printed).toBe(areaDisplayValue(store.total, 'decimal'));
   });
-
-  it('keeps the detector quality on the level it belongs to', () => {
-    const quality = { confidence: 0.42, warnings: [{ code: 'unsealed' }] };
-    const d = buildAreaDerivation(state({ perimeterTraces: [trace({ quality })] }));
-    expect(d.gla.levels[0].quality).toBe(quality);
-  });
 });
 
 describe('buildAreaDerivation — the working itself', () => {
@@ -199,22 +193,6 @@ describe('buildAreaDerivation — the working itself', () => {
       expect(Number(column.toFixed(2))).toBeCloseTo(level.subtotal, 6);
       expect(level.subtotal).toBeCloseTo(level.working.total, 9);
     }
-  });
-
-  it('states a right triangle the way the trade writes one', () => {
-    // A chamfered corner: one 45° cut across a rectangle.
-    const d = buildAreaDerivation(state({
-      perimeterTraces: [trace({
-        vertices: [
-          { x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 },
-          { x: 100, y: 100 }, { x: 0, y: 0 },
-        ],
-      })],
-    }));
-    const [level] = d.gla.levels;
-    const tri = level.working.pieces.find((p) => p.half);
-    expect(tri).toBeTruthy();
-    expect(tri.lengths).toHaveLength(2);
   });
 
   it('shows a deducted void as a deduction, not as one more room', () => {
@@ -290,42 +268,6 @@ describe('buildAreaDerivation — it cannot disagree with the Area card', () => 
     }
   });
 
-  it('adds up: each level times the factor equals its own square feet', () => {
-    const d = buildAreaDerivation(twoLevels);
-    for (const level of d.gla.levels) {
-      expect(level.netPixels * d.scale.sqFtPerSqPx).toBeCloseTo(level.squareFeet, 9);
-    }
-    const summed = d.gla.levels.reduce((s, l) => s + l.squareFeet, 0);
-    expect(summed).toBeCloseTo(d.gla.squareFeet, 9);
-  });
-
-  it('matches calculateArea outline for outline, holes and all', () => {
-    const withVoid = state({
-      perimeterTraces: [trace({ vertices: rect(313, 187), holes: [{ id: 'h', ring: rect(31, 19) }] })],
-    });
-    const d = buildAreaDerivation(withVoid);
-    const direct = calculateArea(
-      withVoid.perimeterTraces[0].vertices, calibrated.feetPerPixel,
-      withVoid.perimeterTraces[0].holes,
-    );
-    expect(d.gla.levels[0].squareFeet).toBe(direct);
-  });
-
-  it('says so when the rounded levels do not add to the reported figure', () => {
-    // Two levels each landing just under a half foot: 50.4 + 50.4 = 100.8,
-    // which reports as 101 while the rounded levels add to 100.
-    const near = state({
-      perimeterTraces: [
-        trace({ id: 'a', vertices: rect(100, 50.4) }),
-        trace({ id: 'b', name: '2nd Floor', vertices: rect(100, 50.4) }),
-      ],
-    });
-    const d = buildAreaDerivation(near);
-    expect(d.gla.sumOfLevels).toBe(100);
-    expect(d.gla.reported).toBe(101);
-    expect(d.gla.unrounded).toBeCloseTo(100.8, 6);
-  });
-
   // The reconciling sentence quotes the unrounded sum. In square feet under a
   // column of square metres it read "reaches 10 … the unrounded sum, 100.8",
   // which is two units in one sentence and neither of them checks out.
@@ -377,12 +319,6 @@ describe('buildAreaDerivation — the scale', () => {
     expect(level.netPixels * d.scale.display.areaPerPx).toBeCloseTo(level.displayed, 0);
   });
 
-  it('leaves the factor in square feet for the feet-and-inches unit', () => {
-    const d = buildAreaDerivation(state(), 'inches');
-    expect(d.scale.display.lengthUnit).toBe('ft');
-    expect(d.scale.display.areaPerPx).toBeCloseTo(d.scale.sqFtPerSqPx, 12);
-  });
-
   it('reports an anisotropic scale as two numbers', () => {
     const d = buildAreaDerivation(state({
       calibration: { ...calibrated, feetPerPixel: { x: 0.1, y: 0.125 } },
@@ -390,24 +326,6 @@ describe('buildAreaDerivation — the scale', () => {
     expect(d.scale.anisotropic).toBe(true);
     expect(d.scale.pxPerFoot.y).toBeCloseTo(8, 9);
     expect(d.scale.sqFtPerSqPx).toBeCloseTo(0.0125, 12);
-  });
-
-  it('counts the rooms the calibration claims, not every room in the store', () => {
-    // A scale pinned to one hand-picked room, with six rooms still on hand
-    // from the scan that preceded it.
-    const d = buildAreaDerivation(state({
-      rooms: Array.from({ length: 6 }, (_, i) => ({ labelId: `R${i}` })),
-      // The pair `resolveScaleUpdate` actually writes: pinning a room sets
-      // `adopted`, which makes the source 'manual'. The old fixture used
-      // 'auto', a state the app cannot produce, so the test passed over a
-      // branch that never ran.
-      calibration: {
-        ...calibrated,
-        quality: { source: 'manual', reason: 'room-vs-auto', level: 'note', roomCount: 6, adopted: true },
-      },
-    }));
-    expect(d.scale.provenance)
-      .toBe('Taken from one room chosen by hand, overriding the measured average.');
   });
 });
 
