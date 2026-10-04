@@ -64,12 +64,6 @@ const sameBuilding = (prev, floor) => {
  * translation is encapsulated inside the serialization layer.
  */
 
-// Minted in `ids.js`, which imports nothing: this module sits in a cycle with
-// appStore and undoManager, and appStore mints a default trace id at module
-// load — so whoever entered the cycle first decided whether the minter existed
-// yet. Re-exported here because this is where callers expect to find it.
-export { newTraceId } from './ids';
-
 // A trace's stored wall-face pair is read repeatedly — every flip of the
 // exterior/interior switch — so what lands on the trace is a copy. Sharing the
 // arrays would let a later vertex drag edit the face it came from, and the
@@ -83,9 +77,9 @@ const cloneHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
 const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
 
 /**
- * How far back an outline can be walked. The list rides inside every undo
- * snapshot, every draft and every `.floorplan`, so the cap has to bound it by
- * the plan rather than by the length of the session.
+ * How many earlier versions of an outline are kept. The list rides inside
+ * every undo snapshot, every draft and every `.floorplan`, so the cap has to
+ * bound it by the plan rather than by the length of the session.
  */
 export const MAX_TRACE_ATTEMPTS = 5;
 
@@ -99,8 +93,7 @@ export const MAX_TRACE_ATTEMPTS = 5;
  *
  * `wallFaces` is absent. It is by far the heaviest thing on a trace (two full
  * face polygons with their own holes), and the pair belongs to the result that
- * produced it — which is why `revertTraceToAttempt` drops the pair rather than
- * leaving a switch that would jump this outline to a different building.
+ * produced it, not to the outline as it stood before.
  *
  * `quality` is shared rather than cloned: a trace's quality object is replaced
  * wholesale by every setter that touches it and never mutated in place, so the
@@ -108,7 +101,7 @@ export const MAX_TRACE_ATTEMPTS = 5;
  * is the one part of an attempt that is not trivially small — the cap is what
  * bounds it.
  */
-export const makeAttempt = (trace) => ({
+const makeAttempt = (trace) => ({
   at: Date.now(),
   source: trace?.quality?.source ?? 'manual',
   confidence: trace?.quality?.confidence ?? null,
@@ -120,9 +113,6 @@ export const makeAttempt = (trace) => ({
   // without reaching through; the same object, not a second copy.
   remediation: trace?.quality?.remediation ?? null,
 });
-
-const samePoints = (a, b) => (a?.length ?? 0) === (b?.length ?? 0)
-  && (a ?? []).every((p, i) => p.x === b[i].x && p.y === b[i].y);
 
 // Only geometry worth returning to is recorded — an outline with no ring is
 // not a state anyone wants back, and recording it would spend the cap.
@@ -151,7 +141,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: newId,
         traceInteractionMode: 'drawing',
         perimeterVertices: [], // start drawing immediately
-        isDirty: true,
       });
     },
 
@@ -200,7 +189,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: nextActiveId,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
       });
     },
 
@@ -214,7 +202,7 @@ export function createTraceSlice(set, get) {
         // has typed one, changing the type must not take it back.
         t.id === traceId ? { ...t, name: newName, nameSource: 'user' } : t
       );
-      set({ perimeterTraces: updated, isDirty: true });
+      set({ perimeterTraces: updated });
     },
 
     /**
@@ -244,7 +232,6 @@ export function createTraceSlice(set, get) {
             }
             : t))
         ),
-        isDirty: true,
       });
     },
 
@@ -296,7 +283,7 @@ export function createTraceSlice(set, get) {
       }
 
       if (!changes.length) return [];
-      set({ perimeterTraces: assignTypeColors(next), isDirty: true });
+      set({ perimeterTraces: assignTypeColors(next) });
       return changes;
     },
 
@@ -312,7 +299,6 @@ export function createTraceSlice(set, get) {
       );
       set({
         perimeterTraces: updated,
-        isDirty: true,
       });
     },
 
@@ -379,7 +365,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: activeStillExists ? state.activeTraceId : coloured[0].id,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
       });
     },
 
@@ -425,7 +410,6 @@ export function createTraceSlice(set, get) {
           perimeterTraces: updated,
           traceInteractionMode: 'idle',
           perimeterVertices: null,
-          isDirty: true,
         });
       }
       return carried;
@@ -443,52 +427,6 @@ export function createTraceSlice(set, get) {
       set({
         perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
       });
-    },
-
-    /**
-     * Put an outline back to what it was at `index` of its own attempt list.
-     *
-     * The state being left is itself recorded first — a feature that exists to
-     * end destructive recovery must not make its own move the destructive one.
-     * That does mean the indices shift once the cap is reached, so callers read
-     * `attempts` fresh rather than holding an index across a revert.
-     *
-     * `wallFaces` is dropped rather than kept: the pair describes the result
-     * that produced it, and this outline is no longer that result. A switch
-     * that reports "nothing to switch" is honest; one that jumps the outline to
-     * a different building is the wrong-answer-that-looks-green failure.
-     *
-     * User voids survive on the same rule a re-trace and the face switch use —
-     * kept, then re-checked against the outline that just moved under them.
-     */
-    revertTraceToAttempt: (traceId, index) => {
-      const state = get();
-      const traces = state.perimeterTraces || [];
-      const trace = traces.find((t) => t.id === traceId);
-      const attempt = trace?.attempts?.[index];
-      if (!attempt || (attempt.vertices?.length ?? 0) < 3) return false;
-      // Already there. Without this, a second click on the same row records a
-      // duplicate of the geometry it is standing on, and five of those push the
-      // detector's own result off the end of the cap — the one state this
-      // feature exists to keep reachable.
-      if (samePoints(trace.vertices, attempt.vertices)) return false;
-      undoManager.save();
-
-      const vertices = clonePoints(attempt.vertices);
-      set({
-        perimeterTraces: traces.map((t) => (t.id === traceId ? {
-          ...recordAttempt(t),
-          vertices,
-          holes: markStaleHoles(mergeHoles(t.holes, cloneHoles(attempt.holes)), vertices),
-          quality: attempt.quality ?? null,
-          wallFaces: null,
-          closed: true,
-        } : t)),
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
-        isDirty: true,
-      });
-      return true;
     },
 
     /**

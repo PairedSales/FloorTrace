@@ -36,8 +36,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
    * Make room for an incoming plan.
    *
    * This used to be a discard prompt — opening anything with an image loaded
-   * asked whether to throw the current work away, on `isDirty || image`, which
-   * is essentially always. Opening now adds a plan instead of replacing one, so
+   * asked whether to throw the current work away, which was essentially always. Opening now adds a plan instead of replacing one, so
    * there is nothing to discard and nothing to ask.
    *
    * The empty plan the app starts with is reused rather than left behind, so
@@ -161,10 +160,7 @@ export function useProjectIO(handleManualMode, fileInputRef, openPlan) {
         storeState, historyState, isSaveAs, storeState.activeDocumentId,
       );
 
-      if (success) {
-        useAppStore.getState().setIsDirty(false);
-        flash('Project file saved');
-      }
+      if (success) flash('Project file saved');
     } catch (error) {
       console.error('Error exporting project:', error);
       notify(`Could not save the project file — ${error?.message || 'the browser refused to write it'}`);

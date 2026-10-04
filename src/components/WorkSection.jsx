@@ -33,13 +33,13 @@ const SKIPPED_REASON = {
   open: 'fewer than three corners, so it encloses nothing',
 };
 
-const Row = ({ label, value, tone, strong }) => (
+const Row = ({ label, value, strong }) => (
   <div className="flex items-baseline justify-between gap-3 py-[3px]">
     <span className={`text-[15.5px] leading-snug min-w-0 ${strong ? 'text-fg font-semibold' : 'text-fg-3'}`}>
       {label}
     </span>
     <span className={`tabular-nums text-[15.5px] shrink-0
-                      ${strong ? 'text-fg font-semibold' : (tone ?? 'text-fg-2')}`}>
+                      ${strong ? 'text-fg font-semibold' : 'text-fg-2'}`}>
       {value}
     </span>
   </div>

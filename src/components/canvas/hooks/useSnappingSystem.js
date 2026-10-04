@@ -294,7 +294,6 @@ export function useSnappingSystem({ autoSnapEnabled, image }) {
     findVertexSnapPoint,
     snapRoomOverlayMove,
     snapRoomOverlayResize,
-    ensureImageSnapAnalyzer,
     ensureWallSnapEngine,
   };
 }

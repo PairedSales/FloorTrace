@@ -140,11 +140,12 @@ const useWorkspaceStore = create((set, get) => ({
   annotationSize: readAnnotationSize(),
 
   // Whether the room the scale was taken from is drawn on the plan — the green
-  // box. True while the panel's scale step is open, which is where the box
-  // is explained and where its size is typed. At rest it is not drawn: it was
-  // an unexplained green rectangle on someone's laundry room, and dragging it
-  // — which is easy to do while trying to move the plan — re-sets the scale
-  // every area is worked out from, without a word.
+  // box. True while the results panel is showing its steps: the scale step,
+  // which explains the box and is where its size is typed, is always on show
+  // there. With the panel put away, or while a plan is first being measured,
+  // it is not drawn: unexplained, it was a green rectangle on someone's laundry
+  // room, and dragging it — easy to do while trying to move the plan — re-sets
+  // the scale every area is worked out from, without a word.
   scaleRoomShown: false,
 
   // Whether the export dialog is up. Same reason.

@@ -412,7 +412,7 @@ export const detectDimensionsCore = async (imageData, env) => {
   // normalising at native resolution and enlarging afterwards costs six
   // detections. Bilinear zoom is what creates the local contrast gradients
   // this pass exists to flatten, so it has to come second.
-  // Awaited, not peeked. `openCvIfReady()` here could never see the module on
+  // Awaited, not peeked. A synchronous peek here could never see the module on
   // the first scan of a session: a dynamic `import()` cannot settle before the
   // synchronous code that follows it in the same job, so scan 1 always took the
   // JS `clahe()` fallback and scans 2..N took cv.CLAHE + optional medianBlur —

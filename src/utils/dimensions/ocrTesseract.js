@@ -255,7 +255,7 @@ export const recognizeLine = async (input, { mode = 'line' } = {}) => {
 export const lineText = (line) =>
   line.words ? line.words.map((w) => w.text).join(' ') : (line.text || '');
 
-export const collectLinesAndWords = (result) => {
+const collectLinesAndWords = (result) => {
   const lines = [];
   const words = [];
   if (!result?.data?.blocks) return { lines, words };

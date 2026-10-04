@@ -32,9 +32,8 @@ const Row = ({ icon: Icon, label, detail, onSelect, disabled, danger, close, tra
 
 const Check_ = () => <Check className="w-[18px] h-[18px] text-accent shrink-0" aria-hidden="true" />;
 
-const Toggle = ({ icon, label, detail, checked, onToggle }) => (
+const Toggle = ({ label, detail, checked, onToggle }) => (
   <Row
-    icon={icon}
     label={label}
     detail={detail}
     onSelect={onToggle}

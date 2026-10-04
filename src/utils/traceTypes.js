@@ -46,7 +46,7 @@ const AUTO_NAME = new RegExp(`^(?:\\d+(?:st|nd|rd|th) Floor|(?:${NOUNS})(?: \\d+
 // Whether a name is one this module would have produced. Used to infer
 // `nameSource` for traces saved before it existed — a name the user typed must
 // never be overwritten by a type change.
-export const isAutoTraceName = (name) => AUTO_NAME.test((name ?? '').trim());
+const isAutoTraceName = (name) => AUTO_NAME.test((name ?? '').trim());
 
 // A name for `type` that does not collide with `others`. Storey numbering
 // counts from the highest "Nth Floor" on hand rather than a module counter:

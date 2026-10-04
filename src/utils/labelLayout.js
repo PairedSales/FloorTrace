@@ -328,7 +328,7 @@ export function outwardNormals(ring) {
 // Below this, on screen, the whole outline is a thumbnail: its labels are bigger
 // than its detail, crowding is expected, and keeping them apart is work whose
 // result nobody can read.
-export const FAR_OUT_PX = 200;
+const FAR_OUT_PX = 200;
 
 /** Whether an outline, in layout space, is too small on screen for labels to be kept apart. */
 export function isFarOut(ring) {

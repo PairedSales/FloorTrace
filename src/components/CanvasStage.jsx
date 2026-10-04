@@ -381,7 +381,12 @@ const CanvasStage = React.memo(({
       const contentLayer = contentLayerRef.current;
       const screenCenter = { x: stage.width() / 2, y: stage.height() / 2 };
       try {
-        const localCenter = contentLayer.getAbsoluteTransform().invert().point(screenCenter);
+        // A copy, because `getAbsoluteTransform()` hands back the layer's own
+        // cached transform and `invert()` rewrites it in place. Inverted where
+        // it sat, the cache stayed wrong until the next zoom or pan: the
+        // protractor was drawn off its mark and every click mapped through the
+        // inverse of the camera.
+        const localCenter = contentLayer.getAbsoluteTransform().copy().invert().point(screenCenter);
         const initialDist = 100 / camera.scaleRef.current;
         onAngleToolStateChange?.({
           center: { x: localCenter.x, y: localCenter.y },
@@ -656,7 +661,6 @@ const CanvasStage = React.memo(({
             />
             
             <PerimeterPlacementLayer
-              roomOverlay={router.activeRoomOverlay}
               traceInteractionMode={traceInteractionMode}
               perimeterVertices={perimeterVertices}
               currentMousePos={router.currentMousePos}

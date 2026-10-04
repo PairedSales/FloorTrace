@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { grayToPngBlob, crc32, adler32 } from '../DimensionsOCR';
 
-// The encoder used to take an RGBA ImageData-like and read one byte in four.
-// These assert the gray fast path, the slice-by-8 CRC and the chunked adler
+// These assert the gray PNG header, the slice-by-8 CRC and the chunked adler
 // are byte-for-byte what they replaced — Tesseract must receive identical
 // bytes or the detection rate moves.
 
@@ -38,7 +37,7 @@ const makeGray = (width, height, seed = 1) => {
   return { data, width, height };
 };
 
-describe('gray PNG scanline path', () => {
+describe('gray PNG encoder', () => {
   it('produces a PNG with a grayscale IHDR and the right dimensions', async () => {
     const gray = makeGray(64, 48, 9);
     const blob = grayToPngBlob(gray);

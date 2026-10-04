@@ -195,7 +195,7 @@
      .icon-btn                                    a button that is only an icon
      .field-input (+ -lg)                         a text field
      .seg / .seg-option                           a choice between two or three
-     .chip (+ -ok / -warn / -crit / -quiet)       a state, said in a word
+     .chip (+ -warn / -crit)                      a state, said in a word
      .note (+ -warn / -crit)                      a sentence that needs a frame
      .label-sm                                    the small label over a figure
 
@@ -313,11 +313,8 @@
   .chip-dot {
     @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
   }
-  .chip-ok    { @apply text-ok bg-ok/12 border-ok/35; }
   .chip-warn  { @apply text-warn bg-warn/12 border-warn/35; }
   .chip-crit  { @apply text-crit bg-crit/12 border-crit/35; }
-  /* Not a verdict: a step not taken yet. */
-  .chip-quiet { @apply text-fg-3 bg-sunken border-line; }
 
   /* ── a sentence that needs a frame ── */
   .note {

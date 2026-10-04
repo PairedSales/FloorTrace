@@ -13,7 +13,7 @@
 // section and on the saved image.
 
 export const QUALITY_GOOD = 0.75;
-export const QUALITY_POOR = 0.5;
+const QUALITY_POOR = 0.5;
 
 /**
  * `edited` is a fifth level, not a confidence band. A hand edit invalidates the
@@ -34,7 +34,7 @@ export const qualityLevel = (confidence, edited = false) => {
   return 'poor';
 };
 
-export const detailText = (warning) => {
+const detailText = (warning) => {
   const d = warning.detail;
   if (!d) return warning.message;
   // In words, not pixels: an image-pixel width means nothing to the person
@@ -380,18 +380,10 @@ export const scaleQualitySummary = (quality) => {
     };
 };
 
-export const qualitySummary = (quality) => {
-  const confidence = quality?.confidence ?? null;
-  const edited = Boolean(quality?.edited);
-  const level = qualityLevel(confidence, edited);
-  return {
-    level,
-    edited,
-    confidence,
-    reason: primaryWarning(quality?.warnings),
-    warnings: quality?.warnings ?? [],
-  };
-};
+export const qualitySummary = (quality) => ({
+  level: qualityLevel(quality?.confidence ?? null, Boolean(quality?.edited)),
+  reason: primaryWarning(quality?.warnings),
+});
 
 /**
  * Which warnings a hand edit can answer, and which it cannot.

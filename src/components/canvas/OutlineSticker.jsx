@@ -1,6 +1,6 @@
 import React from 'react';
 import { Group, Rect, Text } from 'react-konva';
-import { SIDE_LEN_FONT_FAMILY } from './canvasUtils';
+import { setCursor, SIDE_LEN_FONT_FAMILY } from './canvasUtils';
 import { stickerLayout } from './stickerLayout';
 import { PAPER, lineColor, solidColor, inkColor } from './overlayStyle';
 
@@ -19,11 +19,6 @@ import { PAPER, lineColor, solidColor, inkColor } from './overlayStyle';
  *
  * With `onMoved` it can be dragged elsewhere.
  */
-const setCursor = (e, cursor) => {
-  const container = e.target.getStage()?.container();
-  if (container) container.style.cursor = cursor;
-};
-
 const OutlineSticker = ({
   x, y, roomy, name, areaText, note, counted, color, scale, rotation = 0, onMoved,
 }) => {

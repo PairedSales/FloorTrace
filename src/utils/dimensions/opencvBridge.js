@@ -6,7 +6,6 @@
  */
 
 let cvPromise = null;
-let cvResolved = null;
 
 export const loadOpenCv = (timeoutMs = 2000) => {
   if (!cvPromise) {
@@ -28,18 +27,10 @@ export const loadOpenCv = (timeoutMs = 2000) => {
         };
       });
       return cv?.Mat ? cv : null;
-    })()
-      .catch(() => null)
-      .then((cv) => {
-        cvResolved = cv;
-        return cv;
-      });
+    })().catch(() => null);
   }
   return cvPromise;
 };
-
-/** Peek without blocking. Returns cv object once loaded, else null. */
-export const openCvIfReady = () => cvResolved;
 
 /**
  * CLAHE + selective median denoise via OpenCV.

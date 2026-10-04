@@ -76,7 +76,7 @@ const AngleOverlay = ({
 
     // 3. Update Arc & Label layout
     const arcRadiusScreen = 50; // Visual radius in pixels
-    const layout = getAngleLayout(center, angle1, angle2, radius1, radius2, arcRadiusScreen, scale);
+    const layout = getAngleLayout(center, angle1, angle2, arcRadiusScreen, scale);
 
     if (arcRef.current) {
       arcRef.current.position({ x: center.x, y: center.y });

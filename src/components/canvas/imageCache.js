@@ -79,6 +79,3 @@ export function forgetImage(url) {
   }
   decoded.delete(url);
 }
-
-/** How many decoded images are held. For tests and diagnosis. */
-export const decodedCount = () => decoded.size;

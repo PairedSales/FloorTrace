@@ -33,7 +33,6 @@ const entry = (query) => {
       ? window.matchMedia(query)
       : null;
     hit = {
-      mq,
       subscribe: (onChange) => {
         if (!mq) return () => {};
         // `addListener` is the Safari < 14 spelling; still shipped on iOS

@@ -20,11 +20,9 @@ import {
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel, traceTypeColor } from '../traceTypes';
 import { scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
+// A leaf module, so the panel can state the same sentence without pulling this
+// file's lazy graph into the entry chunk.
 import { scaleProvenance } from '../scaleProvenance';
-
-// Re-exported: it moved to a leaf module so the panel can state the same
-// sentence without pulling this file's lazy graph into the entry chunk.
-export { scaleProvenance };
 
 export const EXHIBIT_DEFAULTS = {
   sideLengths: true,
@@ -132,7 +130,7 @@ const scaleLines = (state) => {
  * hand-painted outline and an automatic one looked identical, and a re-searched
  * one carried no sign that the first attempt had been rejected.
  */
-export const outlineProvenance = (trace) => {
+const outlineProvenance = (trace) => {
   const q = trace?.quality;
   // No record at all means nothing measured it: the user placed these corners.
   if (!q) return 'placed by hand';
@@ -204,16 +202,11 @@ const buildFlags = (state, areas, measured = true) => {
  * The whole exhibit, as data. `state` is the app store's state; `now` is passed
  * in rather than read so the same state always produces the same page.
  */
-// `areas` is an option rather than something this file reaches for, so an
-// exhibit can be built from a state that is not the live store — and so it can
-// never be handed the numbers of whichever plan happened to read the memo last.
-// It defaults to computing them, which is why every existing caller is unchanged.
-export function buildExhibitModel(state, {
-  now = Date.now(),
-  options = {},
-  areas = computeAreaByType(state),
-} = {}) {
+export function buildExhibitModel(state, { now = Date.now(), options = {} } = {}) {
   const opts = { ...EXHIBIT_DEFAULTS, ...options };
+  // Computed from the state it was handed, never read off the live store's
+  // memo: that answers for whichever plan called last.
+  const areas = computeAreaByType(state);
   const unit = state.unit ?? 'decimal';
   const feetPerPixel = state.calibration?.feetPerPixel ?? { x: 1, y: 1 };
   const calibrated = !!state.calibration?.calibrated;

@@ -122,8 +122,7 @@ const workingStateDefaults = () => {
   // into a workfile. Document content, not a preference: a page of square
   // footage that does not say which property it belongs to is not filing.
   projectName: '',
-  // Project tracking states
-  isDirty: false,
+  // Which saved project this plan is, once it has been saved or opened as one.
   projectId: null,
   };
 };
@@ -143,7 +142,6 @@ const EXCLUDED_SNAPSHOT_FIELDS = [
   'stageY',              // camera
   'canvasRotation',      // camera
   'viewportSyncToken',   // camera sync signal
-  'isDirty',             // project tracking, not document content
   'projectId',           // project tracking
   'traceInteractionMode', // transient input mode (drawing/idle)
   'angleToolActive',     // transient tool toggle
@@ -190,7 +188,6 @@ const EXCLUDED_AUTOSAVE_FIELDS = [
   'labelPlacements',     // good for one zoom only; see its declaration
   'isProcessing',
   'processingMessage',
-  'isDirty',
   'traceInteractionMode',
   'drawModeActive',
   // A fresh `Math.random()` per `setViewportTransform` call, whose only reader
@@ -207,16 +204,11 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * What a plan carries when it is set aside so another can take the store root.
  *
  * Deliberately NOT `AUTOSAVE_FIELDS`, and the difference is the whole point.
- * A draft is written to disk and read back at startup, when three of these are
- * meaningless — nobody is mid-gesture across a page load. A park is a
- * round trip within one session, where all three are live facts about the plan
+ * A draft is written to disk and read back at startup, when the two fields a
+ * park adds are meaningless — nobody is mid-gesture across a page load. A park
+ * is a round trip within one session, where both are live facts about the plan
  * being set aside:
  *
- *  - `isDirty` says the plan has unsaved work. It is set by nearly every
- *    mutation and cleared in exactly one place, and `checkUnsavedChanges`
- *    reads it. Parking through the autosave projection would silently clear it
- *    on the way back — switching away and back would launder away the fact
- *    that a plan has unsaved changes.
  *  - `drawModeActive` is excluded from autosave as a "transient tool toggle",
  *    but `drawStrokes` is NOT — so parking one without the other returns a plan
  *    with brush strokes on it and no brush in the user's hand.
@@ -228,7 +220,7 @@ const AUTOSAVE_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
  * would be a lie; and `viewportSyncToken`, which is a fresh random per camera
  * write whose only reader compares it against a ref that is null on mount.
  */
-const PARK_ONLY_FIELDS = ['isDirty', 'drawModeActive', 'traceInteractionMode'];
+const PARK_ONLY_FIELDS = ['drawModeActive', 'traceInteractionMode'];
 const PARK_FIELDS = [...AUTOSAVE_FIELDS, ...PARK_ONLY_FIELDS];
 
 /**
@@ -253,7 +245,7 @@ const EXCLUDED_PERSISTENT_FIELDS = [
   'scaleToolActive', 'currentScaleLine',
   'canvasRotation',   // written to globalSettings
   'viewportSyncToken',
-  'isDirty', 'projectId', // written to metadata
+  'projectId', // written to metadata
 ];
 export const PERSISTENT_FLOOR_FIELDS = Object.keys(WORKING_STATE_DEFAULTS).filter(
   (k) => !EXCLUDED_PERSISTENT_FIELDS.includes(k)
@@ -351,7 +343,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       set({
         perimeterTraces: [newTrace],
         activeTraceId: newId,
-        isDirty: true,
       });
       return;
     }
@@ -419,10 +410,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       return t;
     });
 
-    const patch = {
-      perimeterTraces: updatedTraces,
-      isDirty: true,
-    };
+    const patch = { perimeterTraces: updatedTraces };
 
     if (state.perimeterVertices !== null) {
       patch.perimeterVertices = v ? (v.vertices || []) : null;
@@ -469,7 +457,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         // reads it.
         quality,
       },
-      isDirty: true,
     });
   },
   setIsProcessing: (v, msg = '') => set({ isProcessing: v, processingMessage: v ? msg : '' }),
@@ -533,7 +520,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     calibration: state.calibration?.source === 'line-calibration'
       ? workingStateDefaults().calibration
       : state.calibration,
-    isDirty: true,
   })),
   setDrawAreaActive: (v) => set({ drawAreaActive: v }),
   setCustomShapes: (v) => set({ customShapes: v }),
@@ -569,7 +555,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
       perimeterTraces: (state.perimeterTraces || []).map((t) => (
         t.id === traceId ? { ...t, holes: [...(t.holes ?? []), hole] } : t
       )),
-      isDirty: true,
     };
   }),
   removeHole: (traceId, holeId) => set((state) => ({
@@ -578,7 +563,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         ? { ...t, holes: (t.holes ?? []).filter((h, i) => holeKey(h, i) !== holeId) }
         : t
     )),
-    isDirty: true,
   })),
   setDrawModeActive: (v) => set({ drawModeActive: v }),
   setDrawBrushSize: (v) => set({ drawBrushSize: v }),
@@ -588,7 +572,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   )),
   setViewportTransform: (scale, pos, token) => set({ zoomScale: scale, stageX: pos.x, stageY: pos.y, viewportSyncToken: token }),
   setCanvasRotation: (v) => set({ canvasRotation: v }),
-  setIsDirty: (v) => set({ isDirty: v }),
   loadProject: (projectState) => set({
     ...workingStateDefaults(),
     ...projectState,
@@ -598,9 +581,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     processingMessage: '',
   }),
   setDraftState: (v) => set({ draftState: v }),
-  // Dirty like any other document edit: the subject line is what a saved
-  // project is filed under, so losing it is losing work.
-  setProjectName: (v) => set({ projectName: v, isDirty: true }),
+  setProjectName: (v) => set({ projectName: v }),
   setErrorAnchor: (v) => set({ errorAnchor: v }),
   setHasRestoredState: (v) => set({ _hasRestoredState: v }),
 
@@ -636,9 +617,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     lightweight.tracedBoundaries = state.tracedBoundaries;
     return lightweight;
   },
-
-  /** Return the current autosave-ready state (includes image). */
-  getAutosaveState: () => pickFields(get(), AUTOSAVE_FIELDS),
 
   /** Apply a snapshot produced by createSnapshot (used by undo/redo). */
   applySnapshot: (snapshot) => {
@@ -1059,5 +1037,5 @@ export const selectWorkspaceArea = (state) => {
   return lastWorkspaceArea;
 };
 
-export { AUTOSAVE_FIELDS, PARK_FIELDS, PARK_ONLY_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
+export { AUTOSAVE_FIELDS, PARK_FIELDS, SNAPSHOT_FIELDS, EXCLUDED_SNAPSHOT_FIELDS, EXCLUDED_AUTOSAVE_FIELDS, EXCLUDED_PERSISTENT_FIELDS };
 export default useAppStore;

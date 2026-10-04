@@ -87,7 +87,7 @@ async function renderPage(page, maxDimension) {
   // pages held at once is a few hundred megabytes for no reason.
   canvas.width = 0;
   canvas.height = 0;
-  return { dataUrl, width: viewport.width, height: viewport.height };
+  return dataUrl;
 }
 
 /**
@@ -132,7 +132,7 @@ export async function pdfToPageImages(file, { maxDimension, maxPages = MAX_PDF_P
       onProgress?.(n, total);
       const page = await doc.getPage(n);
       try {
-        const { dataUrl } = await renderPage(page, maxDimension);
+        const dataUrl = await renderPage(page, maxDimension);
         pages.push({
           dataUrl,
           mimeType: 'image/png',

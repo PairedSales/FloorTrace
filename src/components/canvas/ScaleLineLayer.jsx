@@ -14,10 +14,7 @@ import CanvasTab from './CanvasTab';
 // `feetPerPixel` still defaults to {x:1, y:1}, so a length in feet would read
 // as a confident and completely wrong number. Until then the line states what
 // it actually knows, which is pixels.
-const relabel = (layout, text) => {
-  const approxTextWidth = Math.max(text.length * layout.fontSize * 0.58, layout.fontSize * 2.5);
-  return { ...layout, textStr: text, approxTextWidth };
-};
+const relabel = (layout, text) => ({ ...layout, textStr: text });
 
 const endsOf = (line) => [line.start.x, line.start.y, line.end.x, line.end.y];
 

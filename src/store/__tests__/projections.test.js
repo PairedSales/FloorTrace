@@ -58,7 +58,6 @@ describe('working-state projections', () => {
       'processingMessage',   // spinner text
       'traceInteractionMode', // drawing vs idle
       'drawModeActive',      // tool toggle; note drawStrokes IS autosaved
-      'isDirty',             // project tracking
       'viewportSyncToken',   // camera sync signal, meaningless once reloaded
     ];
     const missing = WORKING_STATE_KEYS.filter((k) => !union.has(k));

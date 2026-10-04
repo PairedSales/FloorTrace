@@ -1,5 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import useWorkspaceStore from '../store/workspaceStore';
 import { useMenu } from '../hooks/useMenu';
 
@@ -192,8 +192,6 @@ export const Menu = ({
  * dispatches no pointer events in Chrome and is skipped by a screen reader's
  * arrow keys, so the one row whose reason a user most needs — "why can I not
  * measure yet" — would be the only one that could not say it.
- *
- * `external` marks a row that leaves the app.
  */
 export const MenuItem = ({
   icon: Icon,
@@ -203,7 +201,6 @@ export const MenuItem = ({
   checked,
   disabled = false,
   danger = false,
-  external = false,
   title,
   onSelect,
 }) => {
@@ -213,7 +210,6 @@ export const MenuItem = ({
       type="button"
       role="menuitem"
       aria-disabled={disabled || undefined}
-      aria-label={external ? `${label} — opens in a new tab` : undefined}
       title={title}
       onClick={() => {
         if (disabled) return;
@@ -241,7 +237,6 @@ export const MenuItem = ({
         <span className="flex items-center justify-between gap-4">
           <span className="text-[16px] font-medium leading-snug">{label}</span>
           {keys && <kbd className="shrink-0">{keys}</kbd>}
-          {!keys && external && <ArrowUpRight className="w-4 h-4 shrink-0 text-fg-dim" aria-hidden="true" />}
         </span>
         {description && (
           <span className="block mt-0.5 text-[15px] leading-snug text-fg-3">{description}</span>
@@ -252,7 +247,3 @@ export const MenuItem = ({
 };
 
 export const MenuSep = () => <div className="h-px bg-line-soft my-1.5 mx-1.5" role="separator" />;
-
-export const MenuLabel = ({ children }) => (
-  <p className="px-3 pt-2 pb-1 text-[14px] font-medium text-fg-3">{children}</p>
-);

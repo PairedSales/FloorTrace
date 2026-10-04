@@ -33,7 +33,7 @@ vi.mock('../../utils/workspaceDrafts', () => drafts);
 
 const toasts = vi.hoisted(() => ({ notify: vi.fn(), flash: vi.fn() }));
 vi.mock('../../utils/notify', () => toasts);
-vi.mock('../../utils/imageLoader', () => ({ loadImageFromFile: vi.fn() }));
+vi.mock('../../utils/imageLoader', () => ({ loadPagesFromFile: vi.fn(), pageShortfall: vi.fn() }));
 vi.mock('../../utils/detection', () => ({ prewarmDetection: vi.fn() }));
 
 const saveAll = async () => {

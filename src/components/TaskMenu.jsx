@@ -30,7 +30,6 @@ const TaskMenu = ({
   onSelect,
   menuGroup = 'bar',
   label = group.title,
-  icon = group.icon,
   omit = [],
   placement,
   triggerClassName,
@@ -46,7 +45,7 @@ const TaskMenu = ({
       id={group.id}
       group={menuGroup}
       label={label}
-      icon={icon}
+      icon={group.icon}
       title={group.hint}
       placement={placement}
       triggerClassName={triggerClassName}

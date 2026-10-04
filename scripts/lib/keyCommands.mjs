@@ -474,16 +474,13 @@ export const compareLines = (result, labelA, labelB) => {
   return lines;
 };
 
-// A key file's outlines. `compare` needs polygons and refuses anything else;
-// `check` reads whatever is there, so it can say what is wrong with it.
-const readOutlines = (file, { strict = true } = {}) => {
+// A key file's outlines. `compare` needs polygons and refuses anything else.
+const readOutlines = (file) => {
   const outlines = outlinesOfJson(readJson(file), file);
-  if (strict) {
-    outlines.forEach((o, k) => {
-      const problem = ringProblem(o.v);
-      if (problem) throw new Error(`${file}: outline ${k} (${o.type}) is not a polygon: ${problem.text}; run check on it`);
-    });
-  }
+  outlines.forEach((o, k) => {
+    const problem = ringProblem(o.v);
+    if (problem) throw new Error(`${file}: outline ${k} (${o.type}) is not a polygon: ${problem.text}; run check on it`);
+  });
   return outlines;
 };
 

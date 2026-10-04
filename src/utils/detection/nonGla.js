@@ -14,7 +14,7 @@ import { bboxAreaOf, bridgeRuns, dilateRect, labelComponents, openRect } from '.
 import { findGarageCavities } from './garage.js';
 import { matchExteriorFeature } from '../dimensions/exteriorLabels.js';
 
-const largestComponent = (mask, width, height) => {
+export const largestComponent = (mask, width, height) => {
   const { labels, components } = labelComponents(mask, width, height);
   if (!components.length) return null;
   let best = components[0];

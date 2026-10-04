@@ -1,17 +1,10 @@
+import { dataUrlToImage } from './imageLoader';
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const loadImageElement = (src) => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => resolve(img);
-  img.onerror = reject;
-  img.src = src;
-});
-
 const CORNER_BOX_HALF = 15; // 30x30 search
-const WALL_STRIP_HALF = 15; // 30 columns / rows
 const QUADRANT_OFFSET = 4;
 const MIN_CORNER_SCORE = 2.15;
-const WALL_DARK_RATIO = 0.4;
 
 /**
  * @param {Uint8Array} isDark
@@ -79,7 +72,7 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     };
   }
 
-  const image = await loadImageElement(imageSrc);
+  const image = await dataUrlToImage(imageSrc);
   const naturalW = image.naturalWidth || image.width;
   const naturalH = image.naturalHeight || image.height;
 

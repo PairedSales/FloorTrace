@@ -37,16 +37,8 @@ CLAUDE.local.md
 # Tesseract training data downloaded by Node benchmark runs
 eng.traineddata
 
-# Python bytecode caches (embed absolute source paths — keep out of git)
-__pycache__/
-*.pyc
-
 # Local scratch/debug scripts (may hardcode local paths)
 scripts/_*.mjs
-
-# Perf-probe copies of pipeline sources (instrumented forks, not sources)
-.ocrperf/
-.perfprobe/
 
 # One-off audit/analysis write-ups kept locally. They are snapshots of a
 # particular commit and go stale the moment the code moves — docs/ is for

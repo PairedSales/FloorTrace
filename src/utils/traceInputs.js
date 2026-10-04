@@ -4,6 +4,22 @@
 // of them that drifts.
 
 import { roomIsNonGla } from './dimensions/exteriorLabels.js';
+import { ringSetArea } from './detection/polygon.js';
+
+// A parsed label's identity, from what it says and where it says it. Used to
+// tell the label a room was placed from apart from the rest of them, so the
+// places that name one cannot drift.
+export const labelKeyOf = (d) => `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`;
+
+// Traced floor area in image pixels. Every floor, not the largest: the labels
+// are spread over all of them, and weighing them against one floor reports a
+// correct scale on a multi-floor sheet as implausible.
+export const tracedAreaPx = (traced) => {
+  const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
+  return floors.reduce((sum, floor) => (
+    floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
+  ), 0);
+};
 
 // OCR non-GLA labels -> tracer exclude regions (keyword kept so garages can
 // be reported distinctly from porch/patio carves).

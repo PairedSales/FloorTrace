@@ -46,7 +46,6 @@ describe('primaryWarning', () => {
     });
     expect(summary.level).toBe('poor');
     expect(summary.reason).toBe('the traced outline crosses itself');
-    expect(summary.warnings).toHaveLength(2);
   });
 });
 

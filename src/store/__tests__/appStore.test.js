@@ -369,7 +369,7 @@ describe('errorAnchor', () => {
     expect(useAppStore.getState().errorAnchor).toEqual(anchor);
 
     expect(AUTOSAVE_FIELDS).not.toContain('errorAnchor');
-    expect(useAppStore.getState().getAutosaveState()).not.toHaveProperty('errorAnchor');
+    expect(useAppStore.getState().getParkedState()).not.toHaveProperty('errorAnchor');
     expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('errorAnchor');
   });
 });

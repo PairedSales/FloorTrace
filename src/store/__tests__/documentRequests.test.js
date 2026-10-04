@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
 import {
   beginWork, settleWork, deliver, isCurrent, signalOf,
-  detachDocument, detachActiveDocument, workCount, resetRequests, ownerVerdict,
+  detachDocument, workCount, resetRequests, ownerVerdict,
   cancelActiveWork, hasStoppableWork,
 } from '../documentRequests';
 import { clearParked, parkedInboxSize } from '../documentManager';
@@ -173,7 +173,7 @@ describe('documentRequests', () => {
       const a = beginWork('trace');
       const b = beginWork('scan');
 
-      expect(detachActiveDocument()).toBe(2);
+      expect(detachDocument(app().activeDocumentId)).toBe(2);
       expect(workCount()).toBe(0);
       expect(deliver(a, () => {})).toBe('dropped');
       expect(deliver(b, () => {})).toBe('dropped');

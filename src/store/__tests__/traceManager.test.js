@@ -84,16 +84,14 @@ describe('trace types', () => {
     expect(traces()[0].color).toBe(traceTypeColor(DEFAULT_TRACE_TYPE));
   });
 
-  it('setPerimeterTraceType pushes an undo snapshot and marks the project dirty', () => {
+  it('setPerimeterTraceType pushes an undo snapshot', () => {
     useAppStore.getState().setImage('data:image/png;base64,AAAA');
-    useAppStore.getState().setIsDirty(false);
     const id = traces()[0].id;
 
     useAppStore.getState().setPerimeterTraceType(id, 'garage');
 
     expect(traces()[0].type).toBe('garage');
     expect(traces()[0].color).toBe(traceTypeColor('garage'));
-    expect(useAppStore.getState().isDirty).toBe(true);
 
     expect(undoManager.undo()).toBe(true);
     expect(traces()[0].type).toBe(DEFAULT_TRACE_TYPE);

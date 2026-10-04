@@ -22,7 +22,7 @@ export function getDerivedEndpoints(center, angle1, angle2, radius1, radius2) {
  * Computes layout information for the angle sweep arc and text label,
  * keeping the sweep within the smaller interior angle (<= 180 degrees).
  */
-export function getAngleLayout(center, angle1, angle2, radius1, radius2, arcRadiusScreen, scale) {
+export function getAngleLayout(center, angle1, angle2, arcRadiusScreen, scale) {
   let diff = angle2 - angle1;
   while (diff < -Math.PI) diff += 2 * Math.PI;
   while (diff > Math.PI) diff -= 2 * Math.PI;
@@ -54,7 +54,6 @@ export function getAngleLayout(center, angle1, angle2, radius1, radius2, arcRadi
     sweepAngle,
     angleDeg,
     arcRadiusLocal,
-    bisectRad,
     labelX,
     labelY,
     hideArc,

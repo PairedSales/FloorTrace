@@ -850,7 +850,6 @@ const fullyPopulatedPlan = () => {
     // The store's own non-persisted fields, so the save has to choose.
     canvasRotation: 90,
     projectId: 'project-full',
-    isDirty: true,
   };
 };
 
@@ -877,7 +876,6 @@ describe('every persisted field through a real file', () => {
     }
     expect(statePatch.canvasRotation).toBe(90);
     expect(statePatch.projectId).toBe('project-full');
-    expect(statePatch.isDirty).toBe(false);
   });
 
   // The undo stacks are file content too: undoing into a snapshot that lost a

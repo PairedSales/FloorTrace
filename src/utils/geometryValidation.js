@@ -22,7 +22,7 @@ const EPSILON_SQ = EPSILON * EPSILON;
  *  1 -> Clockwise (visually in Y-down screen coordinates)
  *  2 -> Counterclockwise (visually in Y-down screen coordinates)
  */
-export function getOrientation(p, q, r) {
+function getOrientation(p, q, r) {
   const val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
   if (Math.abs(val) < 1e-9) {
     return 0; // Collinear

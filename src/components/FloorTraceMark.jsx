@@ -18,7 +18,7 @@ import { MARK_BOX, MARK_FRAME, MARK_WALLS, MARK_STROKE } from './markGeometry';
  * favicons are rasterised from them (`npm run icons`) — a mark redrawn by hand
  * for the tab is a mark that quietly stops matching the one in the menu bar.
  */
-const FloorTraceMark = ({ className = '', title }) => (
+const FloorTraceMark = ({ className = '' }) => (
   <svg
     viewBox={`0 0 ${MARK_BOX} ${MARK_BOX}`}
     className={className}
@@ -27,10 +27,9 @@ const FloorTraceMark = ({ className = '', title }) => (
     strokeWidth={MARK_STROKE}
     strokeLinecap="round"
     strokeLinejoin="round"
-    role={title ? 'img' : 'presentation'}
-    aria-hidden={title ? undefined : 'true'}
+    role="presentation"
+    aria-hidden="true"
   >
-    {title && <title>{title}</title>}
     <rect
       x={MARK_FRAME.x}
       y={MARK_FRAME.y}

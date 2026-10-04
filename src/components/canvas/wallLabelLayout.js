@@ -48,7 +48,7 @@ const CUTOUT_OFFSETS = (() => {
 })();
 
 /** The size wall lengths are written at: as big as the plan's own print, within reason. */
-export const wallFontPx = (detectedDimensions) => {
+const wallFontPx = (detectedDimensions) => {
   const dims = (detectedDimensions ?? []).filter((d) => d?.bbox);
   if (!dims.length) return BASE_FONT_PX;
   const printed = dims.reduce((sum, d) => sum + d.bbox.height, 0) / dims.length;
@@ -63,7 +63,7 @@ const tabWidth = (text, font) => Math.max(MIN_TAB_WIDTH_PX, measureSideLenWidth(
  * the one that fits its wall (down to the smallest legible type); the rest are
  * what the label may fall back to when the largest has nowhere to go.
  */
-export const wallLabelTiers = (text, lengthPx, idealFont) => {
+const wallLabelTiers = (text, lengthPx, idealFont) => {
   const maxWidth = Math.max(MIN_TAB_WIDTH_PX, lengthPx * WALL_SHARE);
   let font = idealFont;
   if (tabWidth(text, font) > maxWidth) {
@@ -87,10 +87,10 @@ export const wallLabelTiers = (text, lengthPx, idealFont) => {
 // What a label is called in `labelPlacements`. A wall's also carries where the
 // wall was (`wallSig`), so a label left where the user put it is dropped when the
 // wall it measured is moved or deleted, and never hangs in space.
-export const wallKey = (outlineId, index) => `wall:${outlineId}:${index}`;
+const wallKey = (outlineId, index) => `wall:${outlineId}:${index}`;
 export const stickerKey = (outlineId) => `sticker:${outlineId}`;
 export const cutoutKey = (key) => `cutout:${key}`;
-export const wallSig = (a, b) => `${a.x.toFixed(1)},${a.y.toFixed(1)},${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+const wallSig = (a, b) => `${a.x.toFixed(1)},${a.y.toFixed(1)},${b.x.toFixed(1)},${b.y.toFixed(1)}`;
 
 const rectAround = (x, y, w, h) => ({ x0: x - w / 2, y0: y - h / 2, x1: x + w / 2, y1: y + h / 2 });
 

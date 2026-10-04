@@ -64,7 +64,7 @@ const pointInside = (mask, width, height, point) => {
  * excludes them is provably wrong, and nothing else in the pipeline was ever
  * allowed to know that.
  */
-export const scoreConstraints = (entry, analysis, constraints) => {
+const scoreConstraints = (entry, analysis, constraints) => {
   const { width, height } = analysis;
   const rooms = constraints?.rooms ?? [];
   const points = constraints?.interiorPoints ?? [];

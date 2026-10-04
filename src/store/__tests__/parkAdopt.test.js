@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { PARK_FIELDS, AUTOSAVE_FIELDS } from '../appStore';
+import useAppStore, { PARK_FIELDS } from '../appStore';
 import { parkedCount } from '../documentManager';
 import { newTraceId } from '../ids';
 import * as undoManager from '../undoManager';
@@ -109,17 +109,6 @@ describe('park and adopt', () => {
   });
 
   describe('what PARK_FIELDS carries that AUTOSAVE_FIELDS does not', () => {
-    // Parking through the autosave projection would launder away the fact that
-    // a plan has unsaved work — checkUnsavedChanges reads exactly this.
-    it('keeps a plan dirty across a park', () => {
-      useAppStore.setState({ image: IMAGE_A, isDirty: true });
-
-      app().parkActiveDocument();
-      app().adoptDocument(docA);
-
-      expect(app().isDirty).toBe(true);
-    });
-
     // drawStrokes IS autosaved and drawModeActive is not, so parking one
     // without the other returns strokes on the plan and no brush in hand.
     it('keeps draw mode and its strokes together', () => {
