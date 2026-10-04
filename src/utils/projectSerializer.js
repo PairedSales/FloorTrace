@@ -74,8 +74,6 @@ const calibrationSchema = z.looseObject({
     z.looseObject({ x: z.number(), y: z.number() })
   ]),
   source: z.string().nullable().optional(),
-  calibratedRoomId: z.string().nullable().optional(),
-  createdAt: z.number().nullable().optional(),
   quality: scaleQualitySchema,
 }).optional();
 
@@ -176,7 +174,6 @@ const perimeterTraceSchema = z.looseObject({
   }).nullable().optional(),
   closed: z.boolean(),
   visible: z.boolean(),
-  locked: z.boolean(),
   color: z.string(),
   // Which reported subtotal this trace's area lands in, and whether `color` is
   // derived from that type or was chosen and must be preserved.
@@ -238,9 +235,6 @@ const angleToolStateSchema = z.looseObject({
   angle2: z.number(),
   radius1: z.number(),
   radius2: z.number(),
-  visible: z.boolean(),
-  locked: z.boolean(),
-  snapEnabled: z.boolean().optional(),
 }).nullable().optional();
 
 const bboxSchema = z.looseObject({

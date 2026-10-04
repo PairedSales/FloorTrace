@@ -256,7 +256,6 @@ describe('selectActiveAreaByType', () => {
     holes: [],
     closed: true,
     visible,
-    locked: false,
     type,
     colorSource: 'type',
     color: '#BD93F9',
@@ -269,8 +268,6 @@ describe('selectActiveAreaByType', () => {
       calibrated: true,
       feetPerPixel: SCALE,
       source: 'room-calibration',
-      calibratedRoomId: null,
-      createdAt: 1,
       quality: null,
     },
   });
@@ -451,10 +448,10 @@ describe('applyRoomCalibration provenance', () => {
   });
 
   it('accepts both calibrating gestures and writes source from the argument', () => {
-    useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'room-calibration');
+    useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, 'room-calibration');
     expect(useAppStore.getState().calibration.source).toBe('room-calibration');
 
-    useAppStore.getState().applyRoomCalibration({ x: 0.2, y: 0.2 }, null, 'line-calibration');
+    useAppStore.getState().applyRoomCalibration({ x: 0.2, y: 0.2 }, 'line-calibration');
     expect(useAppStore.getState().calibration.source).toBe('line-calibration');
     expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.2, y: 0.2 });
   });
@@ -463,7 +460,7 @@ describe('applyRoomCalibration provenance', () => {
     expect(CALIBRATION_SOURCES.has('room-calibration')).toBe(true);
     expect(CALIBRATION_SOURCES.has('line-calibration')).toBe(true);
     expect(() =>
-      useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'somewhere-else')
+      useAppStore.getState().applyRoomCalibration({ x: 0.1, y: 0.1 }, 'somewhere-else')
     ).toThrow();
     expect(useAppStore.getState().calibration.calibrated).toBe(false);
   });
@@ -491,11 +488,11 @@ describe('scaleLines', () => {
     const s = useAppStore.getState();
     s.setImage('data:image/png;base64,AAAA'); // undoManager.save() no-ops without one
     s.addScaleLine(LINE);
-    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'line-calibration');
+    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, 'line-calibration');
 
     undoManager.save();
     useAppStore.getState().setScaleLines([]);
-    useAppStore.getState().applyRoomCalibration({ x: 0.5, y: 0.5 }, null, 'room-calibration');
+    useAppStore.getState().applyRoomCalibration({ x: 0.5, y: 0.5 }, 'room-calibration');
 
     undoManager.undo();
     expect(useAppStore.getState().scaleLines).toEqual([LINE]);
@@ -506,12 +503,12 @@ describe('scaleLines', () => {
   it('retires the scale it set when cleared, and leaves a room scale alone', () => {
     const s = useAppStore.getState();
     s.addScaleLine(LINE);
-    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, null, 'line-calibration');
+    s.applyRoomCalibration({ x: 0.1, y: 0.1 }, 'line-calibration');
     useAppStore.getState().clearLineCalibration();
     expect(useAppStore.getState().scaleLines).toEqual([]);
     expect(useAppStore.getState().calibration.calibrated).toBe(false);
 
-    useAppStore.getState().applyRoomCalibration({ x: 0.3, y: 0.3 }, null, 'room-calibration');
+    useAppStore.getState().applyRoomCalibration({ x: 0.3, y: 0.3 }, 'room-calibration');
     useAppStore.getState().clearLineCalibration();
     expect(useAppStore.getState().calibration.calibrated).toBe(true);
     expect(useAppStore.getState().calibration.feetPerPixel).toEqual({ x: 0.3, y: 0.3 });
@@ -526,15 +523,14 @@ describe('double-count detection', () => {
     { x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 },
   ];
   const trace = (id, type, vertices, visible = true) => ({
-    id, name: id, vertices, holes: [], closed: true, visible, locked: false,
+    id, name: id, vertices, holes: [], closed: true, visible,
     type, colorSource: 'type', nameSource: 'auto', color: '#BD93F9',
   });
   const seed = (list) => useAppStore.setState({
     perimeterTraces: list,
     activeTraceId: list[0]?.id ?? null,
     calibration: {
-      calibrated: true, feetPerPixel: SCALE, source: 'room-calibration',
-      calibratedRoomId: null, createdAt: 1, quality: null,
+      calibrated: true, feetPerPixel: SCALE, source: 'room-calibration', quality: null,
     },
   });
 

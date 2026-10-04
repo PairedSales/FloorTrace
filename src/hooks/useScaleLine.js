@@ -31,7 +31,7 @@ export function useScaleLine() {
     if (!resolved) return;
 
     if (resolved.changed) {
-      state.applyRoomCalibration(resolved.scale, null, 'line-calibration', resolved.quality);
+      state.applyRoomCalibration(resolved.scale, 'line-calibration', resolved.quality);
     }
   }, []);
 
@@ -49,7 +49,7 @@ export function useScaleLine() {
       calibration: state.calibration,
     });
     if (resolved?.changed) {
-      state.applyRoomCalibration(resolved.scale, null, 'line-calibration', resolved.quality);
+      state.applyRoomCalibration(resolved.scale, 'line-calibration', resolved.quality);
     } else if (!resolved && state.calibration?.source === 'line-calibration') {
       state.clearLineCalibration();
     }

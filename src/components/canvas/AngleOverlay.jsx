@@ -368,7 +368,6 @@ const AngleOverlay = ({
   const commitState = () => {
     if (onAngleToolStateChange) {
       onAngleToolStateChange({
-        ...angleToolState,
         center: { ...coordsRef.current.center },
         angle1: coordsRef.current.angle1,
         angle2: coordsRef.current.angle2,

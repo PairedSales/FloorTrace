@@ -641,7 +641,6 @@ function App() {
         edited: false,
         warnings: [],
         alternatives: rest,
-        adoptedAlternative: true,
       },
     });
     flash(rest.length
@@ -988,7 +987,7 @@ function App() {
     // actually asked — a message said it once and then left the doubt invisible.
 
     if (resolved.changed) {
-      applyRoomCalibration(resolved.scale, null, 'room-calibration', resolved.quality);
+      applyRoomCalibration(resolved.scale, 'room-calibration', resolved.quality);
     }
   }, [applyRoomCalibration]);
 

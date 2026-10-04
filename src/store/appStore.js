@@ -41,8 +41,6 @@ const workingStateDefaults = () => {
     calibrated: false,
     feetPerPixel: { x: 1.0, y: 1.0 }, // feet per pixel for X and Y directions
     source: null,
-    calibratedRoomId: null,
-    createdAt: null,
     quality: null,
   },
   mode: 'normal',
@@ -407,7 +405,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
-  applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration', quality = null) => {
+  applyRoomCalibration: (feetPerPixel, mutationSource = 'room-calibration', quality = null) => {
     if (!CALIBRATION_SOURCES.has(mutationSource)) {
       throw new Error(
         "Only explicit room calibration may modify calibration scale"
@@ -436,8 +434,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         calibrated: true,
         feetPerPixel: targetScale,
         source: mutationSource,
-        calibratedRoomId: roomId,
-        createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
         // area is rendered from it for as long as the plan is open, and "is
         // this number right" must stay answerable — the panel's scale step

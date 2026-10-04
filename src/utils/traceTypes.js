@@ -153,7 +153,6 @@ export const makeTrace = ({ type = DEFAULT_TRACE_TYPE, ...rest } = {}) => ({
   vertices: [],
   closed: false,
   visible: true,
-  locked: false,
   type: normalizeTraceType(type),
   typeSource: 'auto',
   colorSource: 'type',

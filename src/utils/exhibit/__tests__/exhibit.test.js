@@ -27,7 +27,6 @@ const trace = (overrides = {}) => ({
   holes: [],
   closed: true,
   visible: true,
-  locked: false,
   type: 'gla',
   colorSource: 'type',
   nameSource: 'auto',
@@ -55,8 +54,6 @@ const setUp = (patch = {}) => {
       calibrated: true,
       feetPerPixel: { x: 1, y: 1 },
       source: 'room-calibration',
-      calibratedRoomId: null,
-      createdAt: null,
       quality: null,
     },
     ...patch,
@@ -272,8 +269,7 @@ describe('exhibit model', () => {
   it('reports an uncalibrated plan as having no area rather than a wrong one', () => {
     const model = buildExhibitModel(setUp({
       calibration: {
-        calibrated: false, feetPerPixel: { x: 1, y: 1 },
-        source: null, calibratedRoomId: null, createdAt: null, quality: null,
+        calibrated: false, feetPerPixel: { x: 1, y: 1 }, source: null, quality: null,
       },
     }));
     expect(model.headline.value).toBe('—');
