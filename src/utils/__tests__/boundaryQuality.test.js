@@ -88,6 +88,9 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     'too few rooms': { source: 'auto', reason: 'too-few-rooms', roomCount: 1, disagreement: 0 },
     'rooms disagree': { source: 'auto', reason: 'rooms-disagree', roomCount: 4, disagreement: 0.4 },
     'area implausible': { source: 'auto', reason: 'area-implausible', roomCount: 3, disagreement: 0.1 },
+    'labels look metric': { source: 'auto', reason: 'labels-look-metric', level: 'check', roomCount: 4, disagreement: 0.05 },
+    'footprint implausible': { source: 'auto', reason: 'footprint-implausible', level: 'check', roomCount: 5, disagreement: 0.05 },
+    'a doubt with no words of its own': { source: 'auto', reason: 'some-future-reason', level: 'check', roomCount: 4, disagreement: 0.05 },
     'the usual consensus': { source: 'auto', roomCount: 5, disagreement: 0.08 },
     'a line against the rooms': { source: 'line', reason: 'line-vs-rooms', level: 'check', disagreement: 0.3 },
     'a short line': { source: 'line', reason: 'short-line', disagreement: 0.02, lengthPx: 40 },
@@ -105,6 +108,24 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
       expect(summary.remedy).toMatch(NAMES_A_CONTROL);
     });
   }
+
+  // Every doubt selectProjectScale can raise reaches the panel and the saved
+  // image as one: their consumers show a scale only when it is a `check`.
+  it('carries every automatic doubt through as a check, a reason it does not know included', () => {
+    for (const key of ['too few rooms', 'rooms disagree', 'area implausible',
+      'labels look metric', 'footprint implausible', 'a doubt with no words of its own']) {
+      expect(scaleQualitySummary(cases[key]).level).toBe('check');
+    }
+    expect(scaleQualitySummary(cases['the usual consensus']).level).toBe('note');
+  });
+
+  // Every label is in the same unit, so another room cannot fix a metric plan:
+  // the way out is a typed length.
+  it('sends a plan that looks metric to a known length, not to another room', () => {
+    const { remedy } = scaleQualitySummary(cases['labels look metric']);
+    expect(remedy).toContain('“Set scale from a known length”');
+    expect(remedy).not.toContain('“Use a different room”');
+  });
 
   // The length of the drawn line is image pixels: nothing the person who drew
   // it can do anything with.
