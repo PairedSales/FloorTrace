@@ -13,9 +13,8 @@ import { writePlan } from './syntheticPlans.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPTS = path.join(HERE, '..', '..');
-export const BENCH = path.join(SCRIPTS, 'realBenchmark.mjs');
+const BENCH = path.join(SCRIPTS, 'realBenchmark.mjs');
 export const T = { timeout: 90000 };
-export const ORCHESTRATOR = { [TEST_SPLIT_ENV]: '1' };
 
 // A stand-in for the datasets folder with a set in it: plans dev-one, dev-two,
 // test-one and stray-one (in the folder, not in the manifest) under real/.
@@ -60,11 +59,3 @@ export const makeSet = () => {
     remove: () => fs.rmSync(root, { recursive: true, force: true }),
   };
 };
-
-export const withoutMs = (value) => JSON.parse(JSON.stringify(value, (key, v) => (key === 'ms' ? undefined : v)));
-
-// What a run says that does not depend on how it was run.
-export const stable = (stdout) => stdout.split('\n')
-  .filter((line) => !/^bench:real|trace time|timings taken|^results:/.test(line))
-  .join('\n')
-  .split('\n=== Against')[0];

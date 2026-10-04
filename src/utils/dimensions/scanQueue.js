@@ -78,9 +78,6 @@ export function createScanQueue({ maxEntries = 4 } = {}) {
     /** Whether a result is memoised, without disturbing recency. */
     has: (key) => done.has(key),
 
-    /** Forget every memoised result. In-flight work is unaffected. */
-    clear: () => done.clear(),
-
     get size() {
       return done.size;
     },
