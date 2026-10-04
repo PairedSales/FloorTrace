@@ -17,6 +17,7 @@
     "bench:real": "node scripts/realBenchmark.mjs",
     "bench:ocr": "node scripts/ocrBenchmark.mjs",
     "probe:exterior": "node scripts/syntheticProbe.mjs",
+    "probe:trace": "node scripts/tracePathProbe.mjs",
     "probe:memory": "node --expose-gc scripts/memoryProbe.mjs",
     "tutorial": "node scripts/tutorialStages.mjs fixtures/ExampleFloorplan8.png tutorial-stages.json && node scripts/buildTutorial.mjs tutorial-stages.json"
   },
