@@ -1,7 +1,15 @@
 import React from 'react';
-import { Group, Line, Text } from 'react-konva';
+import { Group, Line, Circle } from 'react-konva';
 import useAppStore from '../../store/appStore';
-import { getMeasurementLineLayout, LINE_COLORS } from './canvasUtils';
+import { getMeasurementLineLayout } from './canvasUtils';
+import { ACCENT, INK, PAPER } from './overlayStyle';
+import CanvasTab from './CanvasTab';
+
+// A length the user measured is drawn in ink, every one of them. They used to
+// cycle through five colours, two of which were the colours of outline types —
+// and a measurement must never be taken for an outline. What tells it from the
+// plan's own black lines is the white casing under it and the round ends.
+const endsOf = (line) => [line.start.x, line.start.y, line.end.x, line.end.y];
 
 /**
  * MeasurementLayer renders completed measurement lines and their labels,
@@ -29,9 +37,8 @@ const MeasurementLayer = ({
         <Group>
           {measurementLines.map((line, index) => {
             const layout = getMeasurementLineLayout(line, scale, feetPerPixel, unit, { unitStyle });
-            const colors = LINE_COLORS[index % LINE_COLORS.length];
-            const strokeColor = selectedMeasurementLineIndex === index ? colors.selected : colors.normal;
-            const strokeW = (selectedMeasurementLineIndex === index ? 3 : 2) / scale;
+            const selected = selectedMeasurementLineIndex === index;
+            const color = selected ? ACCENT : INK;
             return (
             <Group
               key={`line-${index}`}
@@ -52,31 +59,44 @@ const MeasurementLayer = ({
             >
               <Line
                 name="measurement-line"
-                points={layout.line1Points}
-                stroke={strokeColor}
-                strokeWidth={strokeW}
+                points={endsOf(line)}
+                stroke={PAPER}
+                strokeWidth={7 / scale}
+                lineCap="round"
                 hitStrokeWidth={16 / scale}
                 perfectDrawEnabled={false}
               />
               <Line
                 name="measurement-line"
-                points={layout.line2Points}
-                stroke={strokeColor}
-                strokeWidth={strokeW}
+                points={endsOf(line)}
+                stroke={color}
+                strokeWidth={(selected ? 3.5 : 2.5) / scale}
                 hitStrokeWidth={16 / scale}
                 perfectDrawEnabled={false}
               />
-              <Text
+              {[line.start, line.end].map((end, i) => (
+                <Circle
+                  key={i}
+                  name="measurement-line"
+                  x={end.x}
+                  y={end.y}
+                  radius={4.5 / scale}
+                  fill={PAPER}
+                  stroke={color}
+                  strokeWidth={2 / scale}
+                  perfectDrawEnabled={false}
+                />
+              ))}
+              <CanvasTab
                 name="measurement-line"
+                listening
                 x={layout.labelX}
                 y={layout.labelY}
                 text={layout.textStr}
                 fontSize={layout.fontSize}
-                fill={strokeColor}
-                fontStyle="bold"
-                offsetX={layout.approxTextWidth / 2}
-                offsetY={layout.approxTextHeight / 2}
-                rotation={-canvasRotation}
+                scale={scale}
+                rotation={canvasRotation}
+                color={color}
               />
             </Group>
             );
@@ -86,8 +106,6 @@ const MeasurementLayer = ({
 
       {/* Measurement Line Preview */}
       {lineToolActive && currentMeasurementLine && (() => {
-        const previewColors = LINE_COLORS[measurementLines.length % LINE_COLORS.length];
-        const previewColor = previewColors.normal;
         const dx = currentMeasurementLine.end.x - currentMeasurementLine.start.x;
         const dy = currentMeasurementLine.end.y - currentMeasurementLine.start.y;
         const minPreviewLength = 1;
@@ -96,32 +114,30 @@ const MeasurementLayer = ({
           ? getMeasurementLineLayout(currentMeasurementLine, scale, feetPerPixel, unit, { forceAbove: true, unitStyle })
           : null;
         return (
-          <Group>
+          <Group listening={false}>
             <Line
-              points={[
-                currentMeasurementLine.start.x,
-                currentMeasurementLine.start.y,
-                currentMeasurementLine.end.x,
-                currentMeasurementLine.end.y
-              ]}
-              stroke={previewColor}
+              points={endsOf(currentMeasurementLine)}
+              stroke={PAPER}
+              strokeWidth={6 / scale}
+              lineCap="round"
+              perfectDrawEnabled={false}
+            />
+            <Line
+              points={endsOf(currentMeasurementLine)}
+              stroke={INK}
               strokeWidth={2 / scale}
-              dash={[6 / scale, 3 / scale]}
-              opacity={0.7}
+              dash={[6 / scale, 4 / scale]}
               perfectDrawEnabled={false}
             />
             {previewLayout && (
-              <Text
+              <CanvasTab
                 x={previewLayout.labelX}
                 y={previewLayout.labelY}
                 text={previewLayout.textStr}
                 fontSize={previewLayout.fontSize}
-                fill={previewColor}
-                fontStyle="bold"
-                offsetX={previewLayout.approxTextWidth / 2}
-                offsetY={previewLayout.approxTextHeight / 2}
-                opacity={0.9}
-                rotation={-canvasRotation}
+                scale={scale}
+                rotation={canvasRotation}
+                color={INK}
               />
             )}
           </Group>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Line } from 'react-konva';
+import { ACCENT } from './overlayStyle';
 
 /**
  * Draw mode's painted strokes. Rendered at the brush's full width so what the
@@ -37,11 +38,11 @@ const DrawModeLayer = ({ drawStrokes, currentStroke, brushSize, visible }) => {
         <Line
           key={`draw-stroke-${i}`}
           points={flatten(stroke)}
-          stroke="#8BE9FD"
+          stroke={ACCENT}
           strokeWidth={brushSize}
           lineCap="round"
           lineJoin="round"
-          opacity={0.35}
+          opacity={0.3}
           listening={false}
           perfectDrawEnabled={false}
         />

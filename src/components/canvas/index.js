@@ -8,4 +8,5 @@ export { default as PerimeterPlacementLayer } from './PerimeterPlacementLayer';
 export { default as DrawModeLayer } from './DrawModeLayer';
 export { default as AngleOverlay } from './AngleOverlay';
 export { default as RefusalHighlightLayer } from './RefusalHighlightLayer';
+export { default as SpotlightLayer } from './SpotlightLayer';
 export { getCanvasCoordinates } from './canvasUtils';

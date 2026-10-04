@@ -1,12 +1,17 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Line, Circle, Rect, Text, Group } from 'react-konva';
+import { Line, Circle, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatLength, getUnitStyleFromDimensions, formatArea } from '../../utils/unitConverter';
+import { circleHit, measureSideLenWidth, pointToLineDistance } from './canvasUtils';
+import { calculateArea, getCentroid, holeRings, holeKey, isSubtracted } from '../../utils/areaCalculator';
+import { labelAnchor } from '../../utils/labelAnchor';
+import { inkMapFor } from '../../utils/inkMap';
+import { DEFAULT_TRACE_TYPE, normalizeTraceType } from '../../utils/traceTypes';
 import {
-  circleHit, measureSideLenWidth, pointToLineDistance,
-  SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE,
-} from './canvasUtils';
-import { calculateArea, getCentroid, holeRings, holeKey } from '../../utils/areaCalculator';
+  ACCENT, CRIT, PAPER, VEIL, lineColor, solidColor, inkColor, tintColor, withAlpha,
+} from './overlayStyle';
+import CanvasTab from './CanvasTab';
+import OutlineSticker from './OutlineSticker';
 import { useIsTouch } from '../../hooks/useViewport';
 
 /* ── touch ────────────────────────────────────────────────────────────────
@@ -207,18 +212,14 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
     const midY = (vertex.y + nextVertex.y) / 2;
 
     const angle = Math.atan2(dy, dx);
-    const shortEdge = lengthInPixels < 48;
-    const offsetDistance = sideSign * (shortEdge ? 12 / scale : 9 / scale);
-    const offsetX = Math.sin(angle) * offsetDistance;
-    const offsetY = -Math.cos(angle) * offsetDistance;
 
     const ocrRefScreenPx = detectedDimensions && detectedDimensions.length > 0
       ? detectedDimensions.reduce((sum, d) => sum + d.bbox.height, 0) / detectedDimensions.length
       : 14;
-    const idealFs = Math.max(14, ocrRefScreenPx) / scale;
-    const minFs = 8 / scale;
+    const idealFs = Math.max(15, ocrRefScreenPx) / scale;
+    const minFs = 9 / scale;
 
-    const padX = 5 / scale;
+    const padX = 8 / scale;
     const minW = 30 / scale;
     const maxWByEdge = Math.max(minW, lengthInPixels * 0.9);
     const widthForFs = (fs) => measureSideLenWidth(formattedLength, fs) + padX * 2;
@@ -234,8 +235,14 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
     }
 
     const labelWidth = Math.min(Math.max(minW, widthForFs(fontSize)), maxWByEdge);
-    const labelHeight = Math.max(fontSize * 1.5, 16 / scale);
-    const cornerR = labelHeight / 2;
+    const labelHeight = Math.max(fontSize * 1.45, 18 / scale);
+
+    // Outside the wall, clear of it. `sideSign` points into the outline, and
+    // inside is where the band lies over the wall and where the plan prints its
+    // rooms; outside there is only the veil.
+    const offsetDistance = -sideSign * (labelHeight / 2 + 9 / scale);
+    const offsetX = Math.sin(angle) * offsetDistance;
+    const offsetY = -Math.cos(angle) * offsetDistance;
 
     // Calculate the effective bounding box in layer-space for collision detection.
     // Since the label is kept upright (unrotated) in viewport-space, its projection
@@ -291,32 +298,33 @@ const computeLabelLayouts = (vertices, scale, feetPerPixel, detectedDimensions, 
       fontSize,
       labelWidth,
       labelHeight,
-      cornerR,
       finalCx: cx0 + edgeShift * ex,
       finalCy: cy0 + edgeShift * ey,
     };
   });
 };
 
-const hexToRgba = (hex, opacity) => {
-  if (!hex) return `rgba(189, 147, 249, ${opacity})`;
-  const clean = hex.replace('#', '');
-  const r = parseInt(clean.substring(0, 2), 16);
-  const g = parseInt(clean.substring(2, 4), 16);
-  const b = parseInt(clean.substring(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-};
-
 /**
- * PerimeterLayer renders all visible perimeter traces, draggable vertices for
- * the active trace, and centroid name/area badges.
+ * PerimeterLayer draws every visible outline's edge, the corners and wall
+ * lengths of the one being edited, the cut-outs, and each outline's name and
+ * area. The veil and the bands that go with them are `SpotlightLayer`'s.
  */
+// How dark the plan may be under a full label before it is cut to one line.
+// A room size is about 0.013 of a label's box and a stretch of wall 0.03; the
+// faint end of a door swing is 0.003.
+const CLEAR_ENOUGH = 0.006;
+
 const PerimeterLayer = ({
+  image,
   perimeterTraces,
   activeTraceId,
   scale,
   showSideLengths,
   feetPerPixel,
+  calibrated = true,
+  // A room is being chosen: the outlines stand back to a faint line and
+  // everything that can be read or grabbed on them is put away.
+  quiet = false,
   detectedDimensions,
   unit,
   draggingVertex,
@@ -365,8 +373,13 @@ const PerimeterLayer = ({
   const handlesLocked = cropToolActive || eraserToolActive || cornerEraserActive
     || drawModeActive || voidToolActive
     || scaleToolActive || lineToolActive || drawAreaActive || placingVertices;
-  const strokeColor = isSelfIntersecting ? '#FF5555' : (activeTrace?.color || '#BD93F9');
-  const fillColor = hexToRgba(strokeColor, isSelfIntersecting ? 0.08 : 0.12);
+  // A crossing outline is drawn in the refusal colour for as long as the
+  // corner is held there: letting go would be refused.
+  const activeColor = activeTrace?.color || ACCENT;
+  const activeLine = isSelfIntersecting ? CRIT : lineColor(activeColor);
+  const activeSolid = isSelfIntersecting ? CRIT : solidColor(activeColor);
+  const activeInk = isSelfIntersecting ? CRIT : inkColor(activeColor);
+  const [hoverIndex, setHoverIndex] = useState(null);
 
   // Ref tracking drag coordinates, current drag index, and animation frame ID
   const draggingVertexIndexRef = useRef(null);
@@ -477,6 +490,13 @@ const PerimeterLayer = ({
     draggingVertexIndexRef.current = null;
     dragCoordsRef.current = null;
     onVertexDragEnd?.(index, e);
+    // Back to the outline as the store has it. A move that is accepted arrives
+    // as new vertices in the same render and replaces this; a move that is
+    // refused changes nothing in the store, so nothing else would ever take
+    // the dragged position back out of this layer — the bar said "the corner
+    // was put back" over an outline still drawn where it was dropped, with a
+    // label giving the area of a shape the plan does not have.
+    setLocalVertices(targetVertices);
   };
 
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
@@ -517,62 +537,160 @@ const PerimeterLayer = ({
         stale,
         staleReason: stale ? hole.staleReason : null,
         points: ring.flatMap((v) => [v.x, v.y]),
-        color: stale ? '#FF5555' : (trace.color || '#BD93F9'),
+        color: stale ? CRIT : lineColor(trace.color || ACCENT),
+        ink: stale ? CRIT : inkColor(trace.color || ACCENT),
         selected: selectedHole?.traceId === trace.id && selectedHole?.holeId === id,
       }];
     });
   });
 
+  // The label is a fixed size on screen, so how much of the plan it covers
+  // depends on the zoom. It is placed for the zoom rounded down to a step of an
+  // eighth: within a step it stays put as the wheel turns, and the size it is
+  // placed for is never smaller than the size it is drawn.
+  const anchorScale = 1.125 ** Math.floor(Math.log(Math.max(scale, 1e-6)) / Math.log(1.125));
+  // Upright on screen means turned in the image under a quarter turn.
+  const quarterTurn = Math.abs(Math.round((canvasRotation || 0) / 90)) % 2 === 1;
+
+  const ink = useMemo(() => inkMapFor(image), [image]);
+
+  // Where each outline's name and area sits. From the committed outline, not
+  // the one under the mouse: a label that hunted for a new spot on every frame
+  // of a drag would be the thing the eye followed.
+  const anchors = useMemo(() => {
+    const avoid = (detectedDimensions ?? []).filter((d) => d?.bbox).map((d) => ({
+      // Only a room's size was read, and its name is printed just over it.
+      x: d.bbox.x - d.bbox.height,
+      y: d.bbox.y - d.bbox.height * 2.2,
+      width: d.bbox.width + d.bbox.height * 2,
+      height: d.bbox.height * 4.2,
+    }));
+    const out = new Map();
+    for (const t of perimeterTraces || []) {
+      if (!t.visible || !t.closed || !(t.vertices?.length >= 3)) continue;
+      const holes = holeRings((t.holes ?? []).filter(isSubtracted)).filter((r) => r?.length >= 3);
+      // The full label, with a little air: three lines for an outline that is
+      // not GLA, two for one that is.
+      const counted = normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE;
+      const turned = (w, h) => (quarterTurn ? { width: h, height: w } : { width: w, height: h });
+      const nameWidth = measureSideLenWidth(t.name ?? '', 14);
+      const full = turned((Math.max(nameWidth, 92) + 40) / anchorScale, (counted ? 68 : 84) / anchorScale);
+      const at = labelAnchor(t.vertices, { holes, avoid, size: full, ink });
+      if (at && at.clearance >= 0 && (at.ink ?? 0) <= CLEAR_ENOUGH) {
+        out.set(t.id, { ...at, roomy: true });
+        continue;
+      }
+      // No room for all of it: the one-line label, wherever that covers least.
+      const line = turned((nameWidth + (counted ? 100 : 180)) / anchorScale, 28 / anchorScale);
+      out.set(t.id, {
+        ...(labelAnchor(t.vertices, { holes, avoid, size: line, ink }) ?? at ?? getCentroid(t.vertices)),
+        roomy: false,
+      });
+    }
+    return out;
+  }, [perimeterTraces, detectedDimensions, anchorScale, quarterTurn, ink]);
+
+  // The corner in hand, and the two walls it moves.
+  const dragging = draggingVertex !== null && draggingVertex !== undefined;
+  const heldIndex = dragging ? draggingVertex : selectedVertexIndex;
+  const count = renderVertices?.length ?? 0;
+  const isHeldWall = (i) => heldIndex !== null && heldIndex !== undefined && count > 0
+    && (i === heldIndex || i === (heldIndex - 1 + count) % count);
+
+  // What a drag shows besides the outline itself: where the corner was, and
+  // whether it now sits square to the walls either side of it.
+  const dragMarks = (() => {
+    if (!dragging || !localVertices || !targetVertices || count < 3 || isAnimating) return null;
+    const was = targetVertices[draggingVertex];
+    const now = localVertices[draggingVertex];
+    const prev = localVertices[(draggingVertex - 1 + count) % count];
+    const next = localVertices[(draggingVertex + 1) % count];
+    if (!was || !now || !prev || !next) return null;
+    const toPrev = { x: prev.x - now.x, y: prev.y - now.y };
+    const toNext = { x: next.x - now.x, y: next.y - now.y };
+    const lenPrev = Math.hypot(toPrev.x, toPrev.y);
+    const lenNext = Math.hypot(toNext.x, toNext.y);
+    if (!(lenPrev > 0) || !(lenNext > 0)) return null;
+    const u = { x: toPrev.x / lenPrev, y: toPrev.y / lenPrev };
+    const v = { x: toNext.x / lenNext, y: toNext.y / lenNext };
+    // Within about a degree of a right angle.
+    const square = Math.abs(u.x * v.x + u.y * v.y) < 0.02;
+    const reach = 40 / scale;
+    const tick = 12 / scale;
+    return {
+      moved: Math.hypot(now.x - was.x, now.y - was.y) > 0.5 / scale,
+      ghost: [prev.x, prev.y, was.x, was.y, next.x, next.y],
+      was,
+      square,
+      guides: [
+        [prev.x + u.x * reach, prev.y + u.y * reach, now.x - u.x * reach, now.y - u.y * reach],
+        [next.x + v.x * reach, next.y + v.y * reach, now.x - v.x * reach, now.y - v.y * reach],
+      ],
+      corner: [
+        now.x + u.x * tick, now.y + u.y * tick,
+        now.x + (u.x + v.x) * tick, now.y + (u.y + v.y) * tick,
+        now.x + v.x * tick, now.y + v.y * tick,
+      ],
+    };
+  })();
+
+  const setCursor = (e, cursor) => {
+    const container = e.target.getStage()?.container();
+    if (container) container.style.cursor = cursor;
+  };
+
   return (
     <>
-      {/* 1. Render all visible inactive traces first */}
+      {/* 1. The outlines that are not being edited: a line on the wall's edge.
+             The band over the wall and the veil round them are SpotlightLayer's,
+             under this layer. */}
       {(perimeterTraces || []).map((trace) => {
         if (!trace.visible || trace.id === activeTraceId) return null;
-        const color = trace.color || '#BD93F9';
-        const fillRgba = hexToRgba(color, 0.15);
-        const strokeRgba = hexToRgba(color, 0.75);
-
         return (
           <Line
             key={`inactive-outline-${trace.id}`}
             points={trace.vertices ? trace.vertices.flatMap(v => [v.x, v.y]) : []}
-            stroke={strokeRgba}
-            strokeWidth={2 / scale}
+            stroke={lineColor(trace.color || ACCENT)}
+            strokeWidth={1.5 / scale}
+            opacity={quiet ? 0.6 : 1}
             closed={true}
-            fill={fillRgba}
             listening={false}
             perfectDrawEnabled={false}
           />
         );
       })}
 
-      {/* 2. Render active trace outline */}
+      {/* 2. The outline being edited */}
       {activeTrace && activeTrace.visible && (
         <Line
           key={`active-outline-${activeTrace.id}`}
           points={renderVertices ? renderVertices.flatMap(v => [v.x, v.y]) : []}
-          stroke={strokeColor}
-          strokeWidth={2 / scale}
+          stroke={activeLine}
+          strokeWidth={(isSelfIntersecting ? 2.5 : 1.75) / scale}
+          opacity={quiet ? 0.6 : 1}
           closed={true}
-          fill={fillColor}
           listening={false}
           perfectDrawEnabled={false}
         />
       )}
 
-      {/* 2b. Render enclosed voids. After the outlines, not before: both fills
-              are translucent and covered their own voids, so a subtraction read
-              as slightly-darker floor. */}
+      {/* 2b. Cut-outs: a dashed edge. One that is taken off is back under the
+              veil, which is what says so; one the outline has moved out from
+              under is still drawn, because it is the user's, but in the colour
+              of a thing that is not being applied. */}
       {holeShapes.map((hole) => (
         <Line
           key={hole.key}
           name="void-hole"
           points={hole.points}
-          stroke={hole.selected ? '#FF79C6' : hole.color}
-          strokeWidth={(hole.selected ? 3 : 1.5) / scale}
-          dash={[6 / scale, 4 / scale]}
+          stroke={hole.color}
+          strokeWidth={(hole.selected ? 3.5 : 2) / scale}
+          dash={[7 / scale, 5 / scale]}
+          opacity={quiet ? 0.6 : 1}
           closed={true}
-          fill="rgba(40, 42, 54, 0.55)"
+          // Nothing to see, but a shape with no fill is only its stroke to a
+          // click, and a cut-out is picked by clicking inside it.
+          fill={voidToolActive ? 'rgba(0, 0, 0, 0.001)' : undefined}
           listening={voidToolActive}
           onClick={voidToolActive ? (e) => {
             e.cancelBubble = true;
@@ -586,66 +704,45 @@ const PerimeterLayer = ({
         />
       ))}
 
-      {/* 2c. What each void takes off the total. The badge shows net square
-              footage, which on its own never accounts for the difference. */}
-      {feetPerPixel && holeShapes.map((hole) => {
+      {/* 2c. What each cut-out takes off the total. The outline's label shows
+              the net area, which on its own never accounts for the difference. */}
+      {!quiet && feetPerPixel && calibrated && holeShapes.map((hole) => {
         const centroid = getCentroid(hole.ring);
         const holeArea = calculateArea(hole.ring, feetPerPixel);
         if (!(holeArea > 0)) return null;
         const { value: areaText, suffix: areaSuffix } = formatArea(holeArea, unit);
-        // A stale void is not subtracted, so it must not claim a minus sign.
+        // A stale cut-out is not subtracted, so it must not claim a minus sign.
         const labelText = hole.stale
-          ? `Void outside outline · ${areaText} ${areaSuffix}`
-          : `Void −${areaText} ${areaSuffix}`;
-        const fontSize = 10 / scale;
-        const labelWidth = measureSideLenWidth(labelText, fontSize) + 10 / scale;
-        const labelHeight = fontSize * 1.5 + 3 / scale;
-
+          ? `Cut-out outside the outline · ${areaText} ${areaSuffix}`
+          : `Cut-out −${areaText} ${areaSuffix}`;
         return (
-          <Group key={`void-label-${hole.key}`} x={centroid.x} y={centroid.y} listening={false}>
-            <Rect
-              width={labelWidth}
-              height={labelHeight}
-              offsetX={labelWidth / 2}
-              offsetY={labelHeight / 2}
-              rotation={-canvasRotation}
-              fill="rgba(40, 42, 54, 0.92)"
-              stroke={hole.color}
-              strokeWidth={1 / scale}
-              cornerRadius={labelHeight / 2}
-              perfectDrawEnabled={false}
-            />
-            <Text
-              width={labelWidth}
-              height={labelHeight}
-              offsetX={labelWidth / 2}
-              offsetY={labelHeight / 2}
-              rotation={-canvasRotation}
-              text={labelText}
-              fontSize={fontSize}
-              fill="#ffffff"
-              fontFamily={SIDE_LEN_FONT_FAMILY}
-              fontStyle="600"
-              align="center"
-              verticalAlign="middle"
-            />
-          </Group>
+          <CanvasTab
+            key={`void-label-${hole.key}`}
+            x={centroid.x}
+            y={centroid.y}
+            text={labelText}
+            fontSize={12.5 / scale}
+            scale={scale}
+            rotation={canvasRotation}
+            color={hole.ink}
+            edge={hole.stale ? CRIT : tintColor(hole.color)}
+          />
         );
       })}
 
-      {/* 2d. The void being drawn, in the invalid colour when the candidate
+      {/* 2d. The cut-out being drawn, in the refusal colour when the candidate
               already fails validation — so the rejection is visible before the
               mouse comes up. */}
       {voidCandidate?.ring?.length >= 2 && (
         <>
           <Line
             points={voidCandidate.ring.flatMap((v) => [v.x, v.y])}
-            stroke={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+            stroke={voidCandidate.valid ? activeLine : CRIT}
             strokeWidth={2 / scale}
-            dash={[6 / scale, 4 / scale]}
+            dash={[7 / scale, 5 / scale]}
             closed={voidCandidate.ring.length >= 3}
             fill={voidCandidate.ring.length >= 3
-              ? (voidCandidate.valid ? 'rgba(40, 42, 54, 0.45)' : 'rgba(255, 85, 85, 0.18)')
+              ? withAlpha(voidCandidate.valid ? VEIL.color : CRIT, voidCandidate.valid ? VEIL.opacity : 0.12)
               : undefined}
             listening={false}
             perfectDrawEnabled={false}
@@ -655,8 +752,10 @@ const PerimeterLayer = ({
               key={`void-corner-${i}`}
               x={v.x}
               y={v.y}
-              radius={3.5 / scale}
-              fill={voidCandidate.valid ? '#8BE9FD' : '#FF5555'}
+              radius={4 / scale}
+              fill={PAPER}
+              stroke={voidCandidate.valid ? activeLine : CRIT}
+              strokeWidth={2 / scale}
               listening={false}
               perfectDrawEnabled={false}
             />
@@ -664,140 +763,194 @@ const PerimeterLayer = ({
         </>
       )}
 
-      {/* 3. Render active trace draggable vertex handles */}
-      {activeTrace && activeTrace.visible && !isAnimating && localVertices && localVertices.map((vertex, i) => (
-        <Circle
-          key={`active-vertex-${activeTrace.id}-${i}`}
-          x={vertex.x}
-          y={vertex.y}
-          radius={((selectedVertexIndex === i ? 7 : 5) + (isTouch ? 2.5 : 0)) / scale}
-          fill={activeTrace.color || '#BD93F9'}
-          stroke={selectedVertexIndex === i ? '#8BE9FD' : '#fff'}
-          strokeWidth={(selectedVertexIndex === i ? 2.5 : 1.5) / scale}
-          draggable={!handlesLocked}
-          // Both, not just `draggable`: a non-draggable handle still swallows
-          // the press, so the crop or erase stroke would start nowhere at all.
-          listening={!handlesLocked}
-          // The grabbable region, separate from the drawn one. `/scale` keeps
-          // it a constant *screen* size, so a corner is no harder to hit when
-          // the plan is zoomed out — which is exactly when it is smallest.
-          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-          onClick={(e) => {
-            // Konva fires click for every button, and right-click already means
-            // delete on this handle.
-            if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
-            e.cancelBubble = true;
-            onVertexSelect?.(i);
-          }}
-          onTap={(e) => {
-            e.cancelBubble = true;
-            onVertexSelect?.(i);
-          }}
-          onDragStart={() => handleDragStart(i)}
-          onDragMove={(e) => handleDragMove(i, e)}
-          onDragEnd={(e) => handleDragEnd(i, e)}
-          // Deliberately allowed to bubble, matching what `mousedown` does on
-          // the same handle: the stage still needs the event to start a pinch
-          // whose first finger happened to land on a corner.
-          onTouchStart={(e) => startLongPress(i, e)}
-          onTouchMove={moveLongPress}
-          onTouchEnd={cancelLongPress}
-          onContextMenu={(e) => {
-            e.evt.preventDefault();
-            e.cancelBubble = true;
-            if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
-          }}
-        />
-      ))}
+      {/* 3. A corner being moved: where it was, and a square mark with the two
+             walls run on past it once they meet at a right angle. */}
+      {dragMarks && activeTrace?.visible && !isSelfIntersecting && (
+        <Group listening={false}>
+          {dragMarks.square && dragMarks.guides.map((points, i) => (
+            <Line
+              key={`guide-${i}`}
+              points={points}
+              stroke={activeLine}
+              strokeWidth={1 / scale}
+              dash={[2 / scale, 4 / scale]}
+              perfectDrawEnabled={false}
+            />
+          ))}
+          {dragMarks.moved && (
+            <>
+              <Line
+                points={dragMarks.ghost}
+                stroke={activeLine}
+                strokeWidth={1.5 / scale}
+                dash={[5 / scale, 4 / scale]}
+                opacity={0.6}
+                perfectDrawEnabled={false}
+              />
+              <Circle
+                x={dragMarks.was.x}
+                y={dragMarks.was.y}
+                radius={4 / scale}
+                fill={PAPER}
+                stroke={activeLine}
+                strokeWidth={1.5 / scale}
+                opacity={0.6}
+                perfectDrawEnabled={false}
+              />
+            </>
+          )}
+          {dragMarks.square && (
+            <Line
+              points={dragMarks.corner}
+              stroke={activeLine}
+              strokeWidth={1.5 / scale}
+              perfectDrawEnabled={false}
+            />
+          )}
+        </Group>
+      )}
 
-      {/* 4. Render active trace side length labels */}
-      {activeTrace && activeTrace.visible && labelLayouts.map((layout, i) => (
-        <React.Fragment key={`active-label-${activeTrace.id}-${i}`}>
-          <Rect
-            x={layout.finalCx}
-            y={layout.finalCy}
-            width={layout.labelWidth}
-            height={layout.labelHeight}
-            offsetX={layout.labelWidth / 2}
-            offsetY={layout.labelHeight / 2}
-            rotation={-canvasRotation}
-            fill="rgba(40, 42, 54, 0.92)"
-            strokeWidth={0}
-            cornerRadius={layout.cornerR}
+      {/* 4. The halo under the corner the pointer is on, has picked, or is moving */}
+      {activeTrace && activeTrace.visible && !quiet && !isAnimating && localVertices && (() => {
+        const index = dragging ? draggingVertex : (selectedVertexIndex ?? hoverIndex);
+        const vertex = index !== null && index !== undefined ? localVertices[index] : null;
+        if (!vertex || handlesLocked) return null;
+        const held = dragging || selectedVertexIndex === index;
+        return (
+          <Circle
+            x={vertex.x}
+            y={vertex.y}
+            radius={(dragging ? 22 : held ? 17 : 15) / scale}
+            fill={withAlpha(activeSolid, held ? 0.16 : 0.12)}
             listening={false}
             perfectDrawEnabled={false}
           />
-          <Text
-            x={layout.finalCx}
-            y={layout.finalCy}
-            width={layout.labelWidth}
-            height={layout.labelHeight}
-            offsetX={layout.labelWidth / 2}
-            offsetY={layout.labelHeight / 2}
-            rotation={-canvasRotation}
-            text={layout.formattedLength}
-            fontSize={layout.fontSize}
-            fill="#ffffff"
-            fontFamily={SIDE_LEN_FONT_FAMILY}
-            fontStyle={SIDE_LEN_FONT_STYLE}
-            align="center"
-            verticalAlign="middle"
-            listening={false}
+        );
+      })()}
+
+      {/* 5. The corners: rings, so the wall corner under each one shows through */}
+      {activeTrace && activeTrace.visible && !quiet && !isAnimating && localVertices && localVertices.map((vertex, i) => {
+        const moving = dragging && draggingVertex === i;
+        // One corner is in hand at a time: a corner picked earlier is not the
+        // one being moved now.
+        const picked = !dragging && selectedVertexIndex === i;
+        const over = hoverIndex === i && !handlesLocked;
+        const held = moving || picked;
+        // While one corner moves the rest stand down, bar the two it shares a
+        // wall with: they are what the moving walls are anchored to.
+        const neighbour = dragging && (i === (draggingVertex - 1 + count) % count || i === (draggingVertex + 1) % count);
+        const radius = (moving ? 10 : picked ? 9 : over ? 8 : 6) + (isTouch ? 2.5 : 0);
+        return (
+          <Circle
+            key={`active-vertex-${activeTrace.id}-${i}`}
+            x={vertex.x}
+            y={vertex.y}
+            radius={radius / scale}
+            fill={held ? activeSolid : (over ? PAPER : 'rgba(255, 255, 255, 0.85)')}
+            stroke={held ? PAPER : activeLine}
+            strokeWidth={(held || over ? 2.5 : 2) / scale}
+            visible={!dragging || moving || neighbour}
+            draggable={!handlesLocked}
+            // Both, not just `draggable`: a non-draggable handle still swallows
+            // the press, so the crop or erase stroke would start nowhere at all.
+            listening={!handlesLocked}
+            // The grabbable region, separate from the drawn one. `/scale` keeps
+            // it a constant *screen* size, so a corner is no harder to hit when
+            // the plan is zoomed out — which is exactly when it is smallest.
+            hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
+            onMouseEnter={(e) => { setHoverIndex(i); setCursor(e, 'grab'); }}
+            onMouseLeave={(e) => { setHoverIndex((h) => (h === i ? null : h)); setCursor(e, 'default'); }}
+            onClick={(e) => {
+              // Konva fires click for every button, and right-click already means
+              // delete on this handle.
+              if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+              e.cancelBubble = true;
+              onVertexSelect?.(i);
+            }}
+            onTap={(e) => {
+              e.cancelBubble = true;
+              onVertexSelect?.(i);
+            }}
+            onDragStart={() => handleDragStart(i)}
+            onDragMove={(e) => handleDragMove(i, e)}
+            onDragEnd={(e) => handleDragEnd(i, e)}
+            // Deliberately allowed to bubble, matching what `mousedown` does on
+            // the same handle: the stage still needs the event to start a pinch
+            // whose first finger happened to land on a corner.
+            onTouchStart={(e) => startLongPress(i, e)}
+            onTouchMove={moveLongPress}
+            onTouchEnd={cancelLongPress}
+            onContextMenu={(e) => {
+              e.evt.preventDefault();
+              e.cancelBubble = true;
+              if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
+            }}
           />
-        </React.Fragment>
+        );
+      })}
+
+      {/* 6. Wall lengths, outside the walls. The two the held corner moves are
+             filled; while it moves, the rest stand back. */}
+      {activeTrace && activeTrace.visible && !quiet && labelLayouts.map((layout, i) => (
+        <CanvasTab
+          key={`active-label-${activeTrace.id}-${i}`}
+          x={layout.finalCx}
+          y={layout.finalCy}
+          width={layout.labelWidth}
+          height={layout.labelHeight}
+          text={layout.formattedLength}
+          fontSize={layout.fontSize}
+          scale={scale}
+          rotation={canvasRotation}
+          color={isHeldWall(i) ? activeSolid : activeInk}
+          edge={tintColor(activeSolid)}
+          solid={isHeldWall(i)}
+          opacity={dragging && !isHeldWall(i) ? 0.45 : 1}
+        />
       ))}
 
-      {/* 5. Render Centroid Area Badges for all visible closed traces (only if multiple are active/visible) */}
-      {feetPerPixel && (perimeterTraces || []).filter(t => t.visible && t.closed && t.vertices && t.vertices.length >= 3).length > 1 && (perimeterTraces || []).map((trace) => {
+      {/* 7. Each outline's name and area. Always, not only when there are
+             several: a lone outline's label is where the eye checks the figure
+             the panel leads with against the shape it came from. */}
+      {!quiet && feetPerPixel && (perimeterTraces || []).map((trace) => {
         if (!trace.visible || !trace.closed || !trace.vertices || trace.vertices.length < 3) return null;
+        const anchor = anchors.get(trace.id);
+        if (!anchor) return null;
 
-        // Use renderVertices for active trace to move badge in real time during drag/animation
-        const vertices = trace.id === activeTraceId ? renderVertices : trace.vertices;
+        // The outline under the mouse, so the figure follows a drag.
+        const isActive = trace.id === activeTraceId;
+        const vertices = isActive ? renderVertices : trace.vertices;
         if (!vertices || vertices.length < 3) return null;
 
-        const centroid = getCentroid(vertices);
-        const traceArea = calculateArea(vertices, feetPerPixel, trace.holes);
-        const { value: areaText, suffix: areaSuffix } = formatArea(traceArea, unit);
-
-        const labelText = `${trace.name}: ${areaText} ${areaSuffix}`;
-        const fontSize = 11 / scale;
-        const labelWidth = measureSideLenWidth(labelText, fontSize) + 12 / scale;
-        const labelHeight = fontSize * 1.5 + 4 / scale;
+        const areaOf = (ring) => {
+          const { value, suffix } = formatArea(calculateArea(ring, feetPerPixel, trace.holes), unit);
+          return `${value} ${suffix}`;
+        };
+        // No scale, no figure: the store's 1 px = 1 ft fallback is never
+        // printed as square feet. Nor is an outline that crosses itself given
+        // one — its lobes cancel, and the shoelace of that is not an area.
+        const crossed = isActive && isSelfIntersecting;
+        const areaText = calibrated && !crossed ? areaOf(vertices) : '—';
+        const counted = normalizeTraceType(trace.type) === DEFAULT_TRACE_TYPE;
+        const before = isActive && dragging && calibrated ? areaOf(trace.vertices) : null;
+        const note = counted
+          ? (before && before !== areaText ? `was ${before}` : null)
+          : 'Not in GLA';
 
         return (
-          <Group
-            key={`centroid-badge-${trace.id}`}
-            x={centroid.x}
-            y={centroid.y}
-            listening={false}
-          >
-            <Rect
-              width={labelWidth}
-              height={labelHeight}
-              offsetX={labelWidth / 2}
-              offsetY={labelHeight / 2}
-              rotation={-canvasRotation}
-              fill="rgba(40, 42, 54, 0.92)"
-              stroke={trace.color || '#BD93F9'}
-              strokeWidth={1 / scale}
-              cornerRadius={labelHeight / 2}
-              perfectDrawEnabled={false}
-            />
-            <Text
-              width={labelWidth}
-              height={labelHeight}
-              offsetX={labelWidth / 2}
-              offsetY={labelHeight / 2}
-              rotation={-canvasRotation}
-              text={labelText}
-              fontSize={fontSize}
-              fill="#ffffff"
-              fontFamily={SIDE_LEN_FONT_FAMILY}
-              fontStyle="600"
-              align="center"
-              verticalAlign="middle"
-            />
-          </Group>
+          <OutlineSticker
+            key={`sticker-${trace.id}`}
+            x={anchor.x}
+            y={anchor.y}
+            roomy={anchor.roomy}
+            name={trace.name}
+            areaText={areaText}
+            note={note}
+            counted={counted}
+            color={crossed ? CRIT : (trace.color || ACCENT)}
+            scale={scale}
+            rotation={canvasRotation}
+          />
         );
       })}
     </>

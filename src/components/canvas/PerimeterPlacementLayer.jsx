@@ -1,5 +1,6 @@
 import React from 'react';
 import { Line, Circle } from 'react-konva';
+import { ACCENT, CRIT, PAPER } from './overlayStyle';
 
 /**
  * PerimeterPlacementLayer renders temporary vertices, preview lines,
@@ -32,10 +33,11 @@ const PerimeterPlacementLayer = ({
           <Circle
             x={vertex.x}
             y={vertex.y}
-            radius={5 / scale}
-            fill="#F1FA8C"
-            stroke="#fff"
-            strokeWidth={1.5 / scale}
+            radius={(i === 0 ? 7 : 5.5) / scale}
+            // The first corner is the one to click again to finish.
+            fill={i === 0 ? ACCENT : PAPER}
+            stroke={i === 0 ? PAPER : ACCENT}
+            strokeWidth={2 / scale}
           />
           
           {/* Preview line from previous vertex */}
@@ -47,9 +49,8 @@ const PerimeterPlacementLayer = ({
                 vertex.x,
                 vertex.y
               ]}
-              stroke="#F1FA8C"
+              stroke={ACCENT}
               strokeWidth={2 / scale}
-              dash={[10 / scale, 5 / scale]}
             />
           )}
         </React.Fragment>
@@ -64,10 +65,10 @@ const PerimeterPlacementLayer = ({
             currentMousePos.x,
             currentMousePos.y
           ]}
-          stroke={isPreviewInvalid ? '#FF5555' : '#F1FA8C'}
+          stroke={isPreviewInvalid ? CRIT : ACCENT}
           strokeWidth={2 / scale}
-          dash={[10 / scale, 5 / scale]}
-          opacity={isPreviewInvalid ? 0.8 : 0.5}
+          dash={[7 / scale, 5 / scale]}
+          opacity={isPreviewInvalid ? 1 : 0.7}
         />
       )}
     </>

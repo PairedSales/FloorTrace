@@ -178,8 +178,8 @@ export function composeExhibit(ctx, model, {
       ops.push({
         op: 'poly',
         points: hole.ring.map(project),
-        fill: hole.stale ? alpha('#FF5555', 0.16) : 'rgba(40, 42, 54, 0.45)',
-        stroke: hole.stale ? '#B42318' : trace.color,
+        fill: hole.stale ? alpha(PAPER.crit, 0.12) : 'rgba(40, 42, 54, 0.45)',
+        stroke: hole.stale ? PAPER.crit : trace.color,
         width: strokeW * 0.75,
         dash: [strokeW * 4, strokeW * 3],
         close: true,
@@ -219,7 +219,9 @@ export function composeExhibit(ctx, model, {
   for (const line of model.plan.lines) {
     const a = project(line.start);
     const b = project(line.end);
-    ops.push({ op: 'poly', points: [a, b], stroke: '#FF79C6', width: strokeW, close: false });
+    // Ink, as on the plan: a length the user measured is not an outline, and
+    // every outline type has a hue of its own.
+    ops.push({ op: 'poly', points: [a, b], stroke: PAPER.ink, width: strokeW, close: false });
     if (line.text) {
       ops.push(...pill(line.text, (a.x + b.x) / 2, (a.y + b.y) / 2,
         annotationSize, 500, measure, ui));
@@ -229,8 +231,8 @@ export function composeExhibit(ctx, model, {
   for (const shape of model.plan.shapes) {
     const points = shape.vertices.map(project);
     ops.push({
-      op: 'poly', points, fill: 'rgba(255, 121, 198, 0.15)',
-      stroke: '#FF79C6', width: strokeW, close: true,
+      op: 'poly', points, fill: alpha(PAPER.ink, 0.07),
+      stroke: PAPER.ink, width: strokeW, close: true,
     });
     if (shape.text) {
       const cx = points.reduce((s, p) => s + p.x, 0) / points.length;

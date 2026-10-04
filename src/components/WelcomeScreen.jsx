@@ -91,10 +91,10 @@ const DEMO_CSS = `
 .ft-demo .ft-scan    { fill: rgb(var(--accent) / .14); stroke: rgb(var(--accent) / .65); }
 .ft-demo .ft-chip    { fill: rgb(var(--panel-2)); stroke: rgb(var(--line-strong)); }
 .ft-demo .ft-area    { fill: rgb(var(--fg)); }
-.ft-demo .ft-trace   { stroke: #BD93F9; }
-.ft-demo .ft-fill    { fill: rgb(189 147 249 / .18); }
-.ft-demo .ft-corners { fill: rgb(var(--panel-2)); stroke: #BD93F9; }
-.ft-demo .ft-room    { fill: rgb(80 250 123 / .14); stroke: #50FA7B; }
+.ft-demo .ft-trace   { stroke: rgb(var(--accent)); }
+.ft-demo .ft-fill    { fill: rgb(var(--accent) / .16); }
+.ft-demo .ft-corners { fill: rgb(var(--panel-2)); stroke: rgb(var(--accent)); }
+.ft-demo .ft-room    { fill: rgb(var(--ok) / .14); stroke: rgb(var(--ok)); }
 .ft-demo .ft-arealabel { fill: rgb(var(--fg-3)); }
 
 .ft-demo .ft-cycle { animation-name: ft-cycle; }
