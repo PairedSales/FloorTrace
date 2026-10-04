@@ -383,7 +383,7 @@ describe('the scale', () => {
   it('says where the scale came from, and never in pixels', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
     expect(view.container.querySelector('#panel-scale').textContent).not.toMatch(/px/);
   });
 

@@ -11,9 +11,12 @@
 // eager shell would fire once against a null stage and never again.
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
-import useAppStore, { roomScaleSamples, selectPickingRoom } from '../store/appStore';
+import useAppStore, { selectPickingRoom } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, SpotlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { ACCENT, CRIT, INK, lineColor, withAlpha } from './canvas/overlayStyle';
+import { holeRings, isSubtracted } from '../utils/areaCalculator';
+import { DEFAULT_TRACE_TYPE, normalizeTraceType } from '../utils/traceTypes';
 import { anchorBounds } from '../utils/planAnchors';
 import { useCornerEraser } from '../hooks/useEraserTool';
 import { useImageEraser } from '../hooks/useImageEraser';
@@ -96,7 +99,6 @@ const CanvasStage = React.memo(({
   const stageY = useAppStore((s) => s.stageY);
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
-  const rooms = useAppStore((s) => s.rooms);
   // Read here rather than threaded through App -> Canvas: the scale tool has
   // no callbacks App owns, so a prop chain would be three files of pass-through.
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
@@ -446,9 +448,7 @@ const CanvasStage = React.memo(({
         // The whole committed rule, not just the pairing half: these are the
         // numbers the drag applies on release, so a wall must not read one
         // length under the mouse and another the moment it is let go.
-        const { x, y } = resolveRoomScale(
-          dimWidth, dimHeight, overlayWidth, overlayHeight, roomScaleSamples(rooms),
-        );
+        const { x, y } = resolveRoomScale(dimWidth, dimHeight, overlayWidth, overlayHeight);
         return { x, y };
       }
     }
@@ -456,7 +456,7 @@ const CanvasStage = React.memo(({
       return { x: feetPerPixel, y: feetPerPixel };
     }
     return feetPerPixel;
-  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
+  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel]);
 
   // `errorAnchor` is where the edit the user just tried was refused — the two
   // edges that would have crossed. Highlight always; move the camera only when
@@ -508,6 +508,45 @@ const CanvasStage = React.memo(({
       y: vh / 2 - target * (minY + maxY) / 2,
     }, null);
   }, [errorAnchor, setViewportTransform]);
+
+  // What is lit and what is banded, for `SpotlightLayer`. The outline in hand
+  // is taken with the dragged corner where the mouse has it, so the lit area
+  // grows and shrinks under the drag instead of catching up on release.
+  //
+  // Off while the plan itself is being worked on — a room being chosen, the
+  // outline being painted or its corners placed, a crop, marks being erased.
+  // Those are all about the drawing, and a veil over part of it would be
+  // dimming the thing the user is reading.
+  const spotlightOn = !pickingRoom && !drawModeActive && !cropToolActive
+    && !eraserToolActive && traceInteractionMode !== 'drawing';
+  const dragIndex = perimeter.draggingVertex;
+  const dragCoords = perimeter.draggedVertexCoords;
+  const pickedIndex = perimeter.selectedVertexIndex;
+  const crossing = perimeter.isSelfIntersecting;
+  const spotOutlines = useMemo(() => {
+    if (!spotlightOn) return [];
+    return (perimeterTraces ?? []).flatMap((t) => {
+      if (!t.visible || !(t.vertices?.length >= 3)) return [];
+      const active = t.id === activeTraceId;
+      let vertices = t.vertices;
+      if (active && dragIndex !== null && dragCoords && vertices[dragIndex]) {
+        vertices = [...vertices];
+        vertices[dragIndex] = dragCoords;
+      }
+      const held = active ? (dragIndex ?? pickedIndex) : null;
+      const n = vertices.length;
+      return [{
+        vertices,
+        // Only the cut-outs that are taken off go back under the veil.
+        holes: holeRings((t.holes ?? []).filter(isSubtracted)).filter((ring) => ring?.length >= 3),
+        color: active && crossing ? CRIT : lineColor(t.color || ACCENT),
+        lit: !!t.closed && normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE,
+        emphasis: held !== null && held !== undefined && vertices[held]
+          ? [[vertices[(held - 1 + n) % n], vertices[held]], [vertices[held], vertices[(held + 1) % n]]]
+          : null,
+      }];
+    });
+  }, [spotlightOn, perimeterTraces, activeTraceId, dragIndex, dragCoords, pickedIndex, crossing]);
 
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
@@ -562,6 +601,12 @@ const CanvasStage = React.memo(({
                 x={0}
                 y={0}
               />
+              <SpotlightLayer
+                image={camera.imageObj}
+                outlines={spotOutlines}
+                veil={spotlightOn}
+                scale={overlayScale}
+              />
             </Layer>
           )}
 
@@ -574,11 +619,14 @@ const CanvasStage = React.memo(({
             />
 
             <PerimeterLayer
+              image={camera.imageObj}
               perimeterTraces={perimeterTraces}
               activeTraceId={activeTraceId}
               scale={overlayScale}
               showSideLengths={showSideLengths}
               feetPerPixel={activeFeetPerPixel}
+              calibrated={!!calibrated}
+              quiet={pickingRoom}
               detectedDimensions={detectedDimensions}
               unit={unit}
               draggingVertex={perimeter.draggingVertex}
@@ -600,6 +648,7 @@ const CanvasStage = React.memo(({
             <DimensionOverlay
               visible={pickingRoom}
               detectedDimensions={detectedDimensions}
+              roomOverlay={router.activeRoomOverlay}
               scale={overlayScale}
               unit={unit}
               stageRef={stageRef}
@@ -688,9 +737,9 @@ const CanvasStage = React.memo(({
                   x={router.currentMousePos.x}
                   y={router.currentMousePos.y}
                   radius={eraserBrushSize / 2}
-                  stroke="#FF5555"
+                  stroke={CRIT}
                   strokeWidth={2 / camera.scale}
-                  fill="rgba(255, 85, 85, 0.15)"
+                  fill={withAlpha(CRIT, 0.12)}
                   dash={[4 / camera.scale, 4 / camera.scale]}
                   listening={false}
                 />
@@ -701,9 +750,9 @@ const CanvasStage = React.memo(({
                   x={router.currentMousePos.x}
                   y={router.currentMousePos.y}
                   radius={drawBrushSize / 2}
-                  stroke="#8BE9FD"
+                  stroke={ACCENT}
                   strokeWidth={2 / camera.scale}
-                  fill="rgba(139, 233, 253, 0.18)"
+                  fill={withAlpha(ACCENT, 0.16)}
                   listening={false}
                 />
               )}
@@ -720,7 +769,7 @@ const CanvasStage = React.memo(({
                     y={sy}
                     width={sw}
                     height={sh}
-                    stroke="#8BE9FD"
+                    stroke={INK}
                     strokeWidth={2 / camera.scale}
                     dash={[6 / camera.scale, 4 / camera.scale]}
                     listening={false}

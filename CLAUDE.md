@@ -47,7 +47,7 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 - `src/utils/exhibit/` — the exhibit PNG, the primary export. `.floorplan` (`projectSerializer.js`) is the editable project file.
 - `scripts/` — benchmarks, probes and generators. `fixtures/` — sample plans with `.truth.json` sidecars.
 
-The flow: load an image → OCR reads the labels → every labelled room is measured and the rooms vote on one project scale → the exterior is traced with those rooms and labels as constraints → area, with the detector's confidence and warnings.
+The flow: load an image → OCR reads the labels → every labelled room is measured, and the one that agrees best with the others gets the green box and sets the project scale → the exterior is traced with those rooms and labels as constraints → area, with the detector's confidence and warnings.
 
 Rules for each subsystem load automatically when you open its files: `.claude/rules/detection.md`, `ocr.md`, `state-and-plans.md`, `ui-shell.md`, `export-and-area.md`, `build.md`.
 
@@ -59,6 +59,7 @@ Rules for each subsystem load automatically when you open its files: `.claude/ru
 ## Rules that apply everywhere
 
 - **This codebase's characteristic failure is a wrong answer that looks right.** The cases that fit that description are the ones no picture shows — a doubtful scale, an area counted twice, a cut-out no longer subtracted, a plan with no scale — and those are always said, in the panel step they are about and on the saved image (`traceIssues.js`). The outline is the opposite case: it is drawn on the plan and the user checks it by eye, so the UI says nothing about how well it follows the walls (the owner's decision, October 2026 — a list of the detector's doubts beside the picture was redundant). Detection results still carry `confidence` and `warnings[]`; they drive remediation, the runner-up outlines and the benchmarks, and are saved with the plan. Don't strip them, and don't put them back on screen without being asked.
+- **The scale is one room's: the room the green box is on.** Its printed size against its own rectangle, and no other room's number — never a median, an average or a fallback pooled from several (the owner's decision, October 2026). The other measured rooms choose that room and are compared with it; the user changes the scale by changing the room.
 - **Area goes as scale squared.** The scale is the most consequential number the app produces: never apply one from evidence the user has moved on from, and never let anything quietly degrade its inputs (CPU contention during an OCR scan silently costs detections).
 - **Never key identity on `hashDataUrl`.** It folds an 8 KB prefix and the length into 32 bits, and two images can collide. Use the data URL itself or `internKey` (`utils/hash.js`).
 - **Derive, don't copy.** State projections derive from `WORKING_STATE_DEFAULTS`; each user-facing verdict or figure has one source (`boundaryQuality.js`, `traceIssues.js`, `scaleProvenance.js`, `displayedBreakdownTotal`). A second copy is where drift starts.

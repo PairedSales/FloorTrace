@@ -9,7 +9,7 @@ export const OCR_PILL_FONT_FAMILY = CANVAS_FONT_FAMILY;
 export const OCR_PILL_FONT_STYLE = 'bold';
 /** Font family and style used for side-length pill badge text (must match the Konva Text element). */
 export const SIDE_LEN_FONT_FAMILY = CANVAS_FONT_FAMILY;
-export const SIDE_LEN_FONT_STYLE = '500';
+export const SIDE_LEN_FONT_STYLE = '600';
 /** Cached canvas 2D context used for text measurement – avoids repeated DOM element creation. */
 const _measureCtx = document.createElement('canvas').getContext('2d');
 
@@ -47,25 +47,16 @@ export function measureSideLenWidth(text, fontSize) {
   safeSetCache(_sideLenCache, key, width);
   return width;
 }
-/** Base dot radius (canvas units) for the OCR anchor dot before scale division. */
-export const OCR_DOT_BASE_RADIUS = 3;
-/** Minimum rendered dot radius in pixels for the OCR anchor dot. */
-export const OCR_DOT_MIN_RADIUS = 2;
+/** The box a label's text needs, in image px (`CanvasTab`). */
+export const tabSize = (text, fontSize, scale) => ({
+  width: measureSideLenWidth(text, fontSize) + 16 / scale,
+  height: Math.max(fontSize * 1.45, 18 / scale),
+});
 
 /** Conversion factor from square meters to square centimeters. */
 export const SQ_M_TO_SQ_CM = 10000;
 /** Threshold (m²) below which custom shape areas are shown in cm² instead of m². */
 export const MIN_SQ_M_DISPLAY = 0.1;
-
-/** Cycling colors for measurement lines (Dracula color scheme).
- *  `label` is a complementary Dracula color used for area shape text labels. */
-export const LINE_COLORS = [
-  { normal: '#FFB86C', selected: '#FFCA99', label: '#BD93F9' }, // Orange shape → Purple label
-  { normal: '#8BE9FD', selected: '#A8F0FF', label: '#FFB86C' }, // Cyan shape → Orange label
-  { normal: '#50FA7B', selected: '#7AFFA0', label: '#FF79C6' }, // Green shape → Pink label
-  { normal: '#BD93F9', selected: '#D2B8FC', label: '#F1FA8C' }, // Purple shape → Yellow label
-  { normal: '#FF79C6', selected: '#FFA8D9', label: '#50FA7B' }, // Pink shape → Green label
-];
 
 /** Layout for measurement line: split stroke so it never crosses the label; offset label when the segment is too short.
  *  @param {object} options
@@ -80,7 +71,7 @@ export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forc
   const dyFeet = dy * feetPerPixel.y;
   const lengthFeet = Math.sqrt(dxFeet * dxFeet + dyFeet * dyFeet);
   const textStr = `${formatLength(lengthFeet, unit, unitStyle)}`;
-  const fontSize = 12 / scale;
+  const fontSize = 13.5 / scale;
   const ux = lenPx > 1e-6 ? dx / lenPx : 1;
   const uy = lenPx > 1e-6 ? dy / lenPx : 0;
   const mx = (line.start.x + line.end.x) / 2;
@@ -90,7 +81,8 @@ export const getMeasurementLineLayout = (line, scale, feetPerPixel, unit, { forc
   let ny = ux;
   if (ny > 0 || (ny === 0 && nx > 0)) { nx = -nx; ny = -ny; }
 
-  const approxPad = 6 / scale;
+  // The label is a tab now, wider than its text by the tab's padding.
+  const approxPad = 12 / scale;
   const approxCharW = fontSize * 0.58;
   const approxTextWidth = Math.max(textStr.length * approxCharW, fontSize * 2.5);
   const approxTextHeight = fontSize * 1.25;

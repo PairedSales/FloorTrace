@@ -79,11 +79,15 @@ describe('resolveRoomScale', () => {
     expect(x).toBeCloseTo(Math.sqrt((20 / 240) * (10 / 100)), 12);
   });
 
-  it('prefers the median of the rooms already measured', () => {
+  // It used to fall back on the median of the rooms measured so far, which
+  // put a number in force that the room under the box does not state.
+  it('takes nothing from any other room', () => {
     const samples = [0.05, 0.05, 0.051, 0.049, 0.05];
+    const alone = resolveRoomScale(20, 10, 240, 100);
     const { x, y } = resolveRoomScale(20, 10, 240, 100, samples);
-    expect(x).toBe(y);
-    expect(x).toBeCloseTo(0.05, 3);
+    expect(x).toBe(alone.x);
+    expect(y).toBe(alone.y);
+    expect(x).not.toBeCloseTo(0.05, 3);
   });
 
   it('leaves a room that agrees with itself alone', () => {
@@ -136,38 +140,37 @@ describe('decideProjectScale', () => {
     expect(scaleQualitySummary(d).short).toMatch(/off by ~3\d%/);
   });
 
-  it('refuses to rescale the project from one contradicting room', () => {
-    // Same 400x300 rectangle, but a label read from the room next door.
-    const d = decideProjectScale({
-      dimWidth: 24, dimHeight: 18, boxWidth: 400, boxHeight: 300, otherSamples: settled,
-    });
-    expect(d.adopted).toBe(false);
-    expect(d.level).toBe('check');
-    expect(d.reason).toBe('room-vs-project');
-    expect(d.scale.x).toBeCloseTo(0.04, 3); // the settled rooms still rule
-    expect(d.roomCount).toBe(3);
-    expect(scaleQualitySummary(d).short).toMatch(/Kept the scale/);
+  // Same 400x300 rectangle, but a label read from the room next door. Three
+  // settled rooms used to outvote it and keep their own scale in force; the
+  // scale is the room's whatever they say, and what they are for is the
+  // warning.
+  it('sets the scale from the room, however many others contradict it, and says so', () => {
+    for (const others of [settled, [0.04, 0.04]]) {
+      const d = decideProjectScale({
+        dimWidth: 24, dimHeight: 18, boxWidth: 400, boxHeight: 300, otherSamples: others,
+      });
+      expect(d.adopted).toBe(true);
+      expect(d.scale.x).toBeCloseTo(0.06, 12);
+      expect(d.scale.y).toBeCloseTo(0.06, 12);
+      expect(d.level).toBe('check');
+      expect(d.reason).toBe('room-vs-auto');
+      expect(d.roomCount).toBe(others.length / 2);
+      // 50% on the scale is 125% on the area (124% against the settled rooms,
+      // whose middle is a shade over 0.04).
+      expect(scaleQualitySummary({ ...d, source: 'manual' }).short).toMatch(/areas ~12[45]% different/);
+    }
   });
 
-  it('takes the new room when only one earlier room disagrees', () => {
-    const d = decideProjectScale({
-      dimWidth: 24, dimHeight: 18, boxWidth: 400, boxHeight: 300, otherSamples: [0.04, 0.04],
-    });
-    expect(d.adopted).toBe(true);
-    expect(d.level).toBe('check');
-    expect(d.reason).toBe('room-vs-project');
-    expect(d.scale.x).toBeCloseTo(0.06, 6);
-    expect(scaleQualitySummary(d).short).toMatch(/disagrees with the last one/);
-  });
-
-  it('accepts a room inside the plan’s natural room-to-room spread', () => {
+  it('only notes a room inside the plan’s natural room-to-room spread', () => {
     // 13.97-16.36 px/ft across one real plan: 15% apart is the drawing being
-    // normal, not a room being wrong.
+    // normal, not a room being wrong — but it is 32% on the area, so it is
+    // still on the record.
     const d = decideProjectScale({
       dimWidth: 16, dimHeight: 12, boxWidth: 348, boxHeight: 261, otherSamples: settled,
     });
     expect(d.adopted).toBe(true);
-    expect(d.level).toBe('ok');
+    expect(d.level).toBe('note');
+    expect(d.reason).toBe('room-vs-auto');
   });
 
   it('has nothing to compare against for the first room', () => {

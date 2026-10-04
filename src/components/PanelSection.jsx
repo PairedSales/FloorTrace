@@ -9,7 +9,7 @@ import { Check, Loader2, Minus } from 'lucide-react';
  * added up. They are the same four lines the panel shows while it is measuring,
  * ticked off, so the finished panel reads as the record of what just happened
  * rather than as a different screen. Each step says its own conclusion in the
- * `summary` ("Measured from 3 rooms on this plan") and carries the one way to
+ * `summary` ("Measured from one room on this plan") and carries the one way to
  * change it. A step opens by itself when it holds the next thing to do; opened
  * or closed by hand, it stays that way.
  *

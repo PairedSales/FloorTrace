@@ -4,6 +4,7 @@
 // opens in the app.
 import { describe, expect, it } from 'vitest';
 import { applyKey, applyPlan, keyOf, repairOutcome, untouched } from '../realKeys.mjs';
+import { traceTypeColor } from '../../../src/utils/traceTypes.js';
 
 const ring = (x0, y0, x1, y1) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
 const draft = () => ({
@@ -38,7 +39,7 @@ describe('answer keys as data', () => {
       closed: true,
       quality: { source: 'manual', edited: true },
     });
-    expect(garage).toMatchObject({ type: 'garage', name: 'Garage', color: '#FFB86C' });
+    expect(garage).toMatchObject({ type: 'garage', name: 'Garage', color: traceTypeColor('garage') });
     expect(state.activeTraceId).toBe(house.id);
     expect(keyOf(state)).toEqual(key);
   });

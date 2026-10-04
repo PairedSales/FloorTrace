@@ -114,4 +114,13 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
       expect(`${short} ${detail} ${remedy ?? ''}`).not.toMatch(/\bpx\b/);
     }
   });
+
+  // Nothing said about the scale may describe it as made from several rooms.
+  it('never says the scale is the middle or the average of the rooms', () => {
+    for (const quality of Object.values(cases)) {
+      const { short, detail } = scaleQualitySummary(quality);
+      expect(`${short} ${detail}`).not.toMatch(/middle of them is in use|is the middle of what|rather than one|measured average/i);
+      expect(short).not.toMatch(/Scale from \d+ rooms/);
+    }
+  });
 });

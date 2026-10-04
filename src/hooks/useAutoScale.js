@@ -10,15 +10,16 @@ import * as undoManager from '../store/undoManager';
 /**
  * useAutoScale
  *
- * Sets the project scale from every labelled room on the page, with no user
- * input. Previously the user clicked one dimension pill and the whole project
- * was calibrated from that room; measured across the fixtures, the worst room
- * they could have clicked implies a scale 58-90% wrong, and area goes as scale
- * squared. Nothing in the app steered them away from it.
+ * Sets the project scale from one room, chosen with no user input: every
+ * labelled room on the page is measured, the one that agrees best with the
+ * others is chosen, and the scale is that room's alone. The caller draws the
+ * green box on it (`decision.room`).
  *
- * The batch is affordable because the worker shares one analysis and one clamp
- * trace across the labels: the first room costs 0.5-1.5s, every one after it
- * costs 1-3ms.
+ * Measuring them all is what makes the choice safe: across the fixtures the
+ * worst room on a page implies a scale 58-90% wrong, and area goes as scale
+ * squared. The batch is affordable because the worker shares one analysis and
+ * one clamp trace across the labels: the first room costs 0.5-1.5s, every one
+ * after it costs 1-3ms.
  *
  * @returns {{
  *   measureAndCalibrate: (labels: Array) => Promise<object|null>,
@@ -27,26 +28,20 @@ import * as undoManager from '../store/undoManager';
  */
 export function useAutoScale() {
   // Kept so the verdict can be revisited once the perimeter exists without
-  // measuring anything again — selectProjectScale is pure.
+  // measuring anything again — selectProjectScale is pure, and the footprint
+  // has no say in which room it chooses, so the scale cannot move.
   //
-  // Keyed by plan, not a single slot. This is a cross-plan wrong-scale path
-  // that lives entirely outside the store, so no grep for a store field finds
-  // it: `reviewAgainstFootprint` re-runs the scale decision from whatever rooms
-  // are in this ref, and its only other guard is that the scale in force is
-  // still the automatic one — which any auto-scaled plan satisfies. One slot
-  // shared between plans would recalibrate plan B from plan A's measured rooms
-  // and report it as a clean automatic consensus.
+  // Keyed by plan, not a single slot: one slot shared between plans would
+  // judge plan B by plan A's measured rooms.
   const lastRunByDocRef = useRef(new Map());
 
-  // Returns whether the decision was actually written. The guard lives here
-  // rather than at the two call sites so measureAndCalibrate and
-  // reviewAgainstFootprint cannot diverge: this wrote unconditionally, so a
-  // re-scan silently discarded a scale the user had asserted by hand.
+  // Returns whether the decision was written. A scale the user set by hand
+  // stands: a re-read must not discard it.
   const applyDecision = useCallback((decision) => {
     if (!(decision?.pixelsPerFoot > 0)) return false;
     if (isUserAsserted(useAppStore.getState().calibration)) return false;
     useAppStore.getState().applyRoomCalibration(
-      { x: decision.feetPerPixel, y: decision.feetPerPixel },
+      decision.feetPerPixel,
       null,
       'room-calibration',
       {
@@ -56,12 +51,10 @@ export function useAutoScale() {
         // scaleQualitySummary can render either verdict the same way.
         disagreement: decision.spread,
         adopted: true,
+        // The rooms that agree, the chosen one among them: what it was
+        // checked against, never what the scale was made from.
         roomCount: decision.roomCount,
         source: 'auto',
-        // The traced building against what its own labels add up to — the one
-        // quantity the app holds that can see an area error, as opposed to a
-        // tracing error. Carried so the panel can state it rather than only
-        // gate on it.
         areaRatio: decision.areaRatio ?? null,
         rejected: decision.rejected.map((r) => ({
           name: r.name, reason: r.reason, pixelsPerFoot: r.pixelsPerFoot ?? null,
@@ -72,17 +65,14 @@ export function useAutoScale() {
   }, []);
 
   /**
-   * Measure every label and calibrate from the rooms that agree.
-   * Returns the decision, or null when nothing usable came back — in which case
-   * no scale is set and the user has the flow they already had.
+   * Measure every label and calibrate from the room that agrees best with the
+   * others. Returns the decision, or null when nothing usable came back — in
+   * which case no scale is set and the user has the flow they already had.
    *
    * When a scale the user set by hand stood instead, the decision carries
-   * `keptByHand: {agrees}` — whether the rooms just measured bear it out. It is
-   * the caller's to say, as the last line of the run: said from here it was
-   * replaced a second later by the trace's own. Whether, and not by how much:
-   * the scale step states the size of a disagreement, from the verdict
-   * stored with the scale, and a second figure worked out here from a
-   * different set of rooms would not match it.
+   * `keptByHand: {agrees}` — whether the room just chosen bears it out — and
+   * the box must be left where the user put it. It is the caller's to say, as
+   * the last line of the run.
    */
   const measureAndCalibrate = useCallback(async (labels) => {
     const state = useAppStore.getState();
@@ -126,9 +116,10 @@ export function useAutoScale() {
     if (!(decision.pixelsPerFoot > 0)) return null;
 
     undoManager.save();
-    // Only the rooms that set the scale are recorded. The rest are the tracer's
-    // known-inside evidence too, and a rectangle that leaked through a doorway
-    // is evidence for the wrong building.
+    // Every room that agrees is recorded, not only the one the scale came
+    // from: they are the tracer's known-inside evidence. The rest are left
+    // out — a rectangle that leaked through a doorway is evidence for the
+    // wrong building.
     useAppStore.getState().addRooms(decision.contributors.map((c) => ({
       labelId: c.name,
       name: null,
@@ -142,42 +133,28 @@ export function useAutoScale() {
     })));
     if (!applyDecision(decision)) {
       // A hand-set scale stands, but the measurement it disagreed with is
-      // still worth saying out loud: silently keeping either number is the
-      // failure this guard exists to prevent.
+      // still worth saying out loud.
       const held = useAppStore.getState().calibration.feetPerPixel;
       const heldScale = Math.sqrt(Math.abs((held?.x ?? 0) * (held?.y ?? 0)));
-      const gap = heldScale > 0 ? Math.abs(Math.log(decision.feetPerPixel / heldScale)) : 0;
-      // A real disagreement is the app overruling a measurement in favour of
-      // the user's number — they have to know. Agreement is just reassurance.
+      const gap = heldScale > 0 ? Math.abs(Math.log(decision.pixelsPerFoot * heldScale)) : 0;
       return { ...decision, keptByHand: { agrees: gap <= 0.03 } };
     }
 
     // A 'check' verdict is not announced here: the panel's scale step says
-    // it, and keeps saying it for as long as the scale is in force. A message
-    // said it once and then left the doubt invisible.
+    // it, and keeps saying it for as long as the scale is in force.
     return decision;
   }, [applyDecision]);
 
   /**
-   * Re-run the verdict once the perimeter is traced. The scale itself cannot
-   * change — the same rooms decide it — but the traced footprint is the one
-   * piece of evidence that survives a majority of bad rooms: a 2x scale error
-   * moves the building's square footage 4x, and the rooms' own labels then no
-   * longer fit inside it.
+   * Judge the scale again once the perimeter is traced. The scale itself
+   * cannot change — the same rooms choose the same room — but the traced
+   * footprint is the one piece of evidence that survives a majority of bad
+   * rooms: a 2x scale error moves the building's square footage 4x, and the
+   * rooms' own labels then no longer fit inside it.
    */
   const reviewAgainstFootprint = useCallback((footprintAreaPx) => {
     const state = useAppStore.getState();
-    // This plan's own measurements, never another's. Rebuilt from the store
-    // when the ref is empty, which is every reopened project and every plan the
-    // user did not scan in this session — the check was silently dead there.
-    const run = lastRunByDocRef.current.get(state.activeDocumentId) ?? (
-      state.rooms?.length
-        ? {
-          rooms: state.rooms,
-          nonGlaRegions: (state.exteriorLabels ?? []).map((l) => l.bbox),
-        }
-        : null
-    );
+    const run = lastRunByDocRef.current.get(state.activeDocumentId);
     if (!run?.rooms?.length || !(footprintAreaPx > 0)) return;
     if (state.calibration.quality?.source !== 'auto') return;
     applyDecision(selectProjectScale(run.rooms, {

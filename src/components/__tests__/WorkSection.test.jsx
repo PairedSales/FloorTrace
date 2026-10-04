@@ -60,7 +60,7 @@ describe('WorkSection shows the math', () => {
   it('prints the scale it converted with', () => {
     const view = render(<WorkSection unit="decimal" />);
     expect(view.getByText('1 ft = 10.00 px')).toBeTruthy();
-    expect(view.getByText('Measured from 2 rooms on this plan.')).toBeTruthy();
+    expect(view.getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
   });
 
   // The whole point of the card: the outline arrives as a multiply whose two
