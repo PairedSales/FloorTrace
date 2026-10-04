@@ -35,6 +35,7 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 - **Before pushing, run what CI runs** (`.github/workflows/deploy.yml`): lint → test → `bench:detection` → `bench:scale` → build → `check:bundle`. `bench:scale` is the one that gets forgotten.
 - **Detection, OCR and scale changes need benchmark runs before and after**, compared in full. The protocol is in `.claude/rules/detection.md` and `.claude/rules/ocr.md`.
 - **`master` only takes pull requests.** A repository ruleset requires the `build` check (the branch-protection API answers 404, which does not mean unprotected). Push the branch, `gh pr create`, and merge with **`gh pr merge <N> --merge`** — merge commits, never squash or rebase; that was decided explicitly. While checks are still running, add `--auto` so GitHub merges when `build` passes (auto-merge is enabled on the repo). Don't merge into a local `master`. When `master` moves, merge `origin/master` into the branch and push; `gh run rerun` re-tests the old SHAs.
+- **Nothing heavy runs on the page's own thread.** Image decodes, the scan and the tracer are in workers; a new one belongs there too. The Node benchmarks cannot see a frozen page — `scripts/pageProbe.js` can (the `run-floortrace` skill says how).
 - **There is no browser end-to-end harness.** Say in the PR what you checked by hand. To launch and drive the app in the Browser pane, use the `run-floortrace` skill: the pane runs with `document.hidden` set, so rAF, `ResizeObserver`, media-query events and CSS transitions stall, and layout readings there can be wrong.
 
 ## Architecture
@@ -43,7 +44,7 @@ A single-page React 19 + Vite app for real-estate appraisers. The user uploads a
 - `src/store/` — one Zustand store for the plan's working state (`appStore.js`) plus `workspaceStore.js` for workspace-wide UI state and preferences; undo (`undoManager.js`), outlines (`traceManager.js`), open plans (`documentManager.js`) and ownership of async results (`documentRequests.js`).
 - `src/components/` — two shells over one workflow: desktop (`AppHeader` with its `PlanTabs`, `ResultsPanel` and its four steps, `ActionBar`, `ViewControls`) and `mobile/`; the shared `Menu`, `TaskMenu`, `Dialog` and `PanelSection`; the lazily loaded Konva canvas in `canvas/`.
 - `src/utils/detection/` — wall and boundary detection. Pure-JS cores run in `src/workers/detectionWorker.js` and, unchanged, in the Node benchmarks.
-- `src/utils/dimensions/` — dimension OCR (Tesseract, optional PaddleOCR), fronted by `DimensionsOCR.js` and the lazy `ocrLazy.js`.
+- `src/utils/dimensions/` — dimension OCR (Tesseract, optional PaddleOCR), fronted by `DimensionsOCR.js` and the lazy `ocrLazy.js`. The scan itself runs in `src/workers/ocrWorker.js`.
 - `src/utils/exhibit/` — the exhibit PNG, the primary export. `.floorplan` (`projectSerializer.js`) is the editable project file.
 - `scripts/` — benchmarks, probes and generators. `fixtures/` — sample plans with `.truth.json` sidecars.
 
@@ -77,5 +78,5 @@ Rules for each subsystem load automatically when you open its files: `.claude/ru
 - `docs/architecture.md` — pipeline overview and quality model.
 - `docs/accuracy-roadmap.md` — the accuracy scoreboard and its targets, what stands in the way, and a log of every change that moved it.
 - `docs/remediation-plan.md` — open findings. `docs/tools-and-options-backlog.md` — ideas not yet built.
-- `docs/ocr-performance.md`, `docs/load-to-area-performance.md` — dated measurement records. `docs/CODE_REVIEW.md` — historical review from July 2026.
+- `docs/ocr-performance.md`, `docs/load-to-area-performance.md`, `docs/page-responsiveness.md` — dated measurement records. The last is about whether the page freezes while a plan loads or is reopened, measured in the browser with `scripts/pageProbe.js`. `docs/CODE_REVIEW.md` — historical review from July 2026.
 - `Reference Data for Wall Detection System/` — papers behind the detector. `datasets/README.md` — getting CubiCasa5K.
