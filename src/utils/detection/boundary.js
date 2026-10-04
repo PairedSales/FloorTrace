@@ -460,11 +460,31 @@ const memo = (cache, key, compute) => {
 };
 
 // Everything a network's footprint components need to become floors.
-const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
+const detectFloorNet = (net, analysis, options, constraints, cache, netKey, bank = null) => {
   const { width, height, wallThickness } = analysis;
   const epsilon = Math.max(2, wallThickness * 0.35);
   const fitOptions = { mergeTol: Math.max(2, Math.round(wallThickness * 0.5)) };
-  const generated = memo(cache, `gen|${netKey}`, () => generateCandidates(net, analysis, options));
+  // What earlier searches of this network, in this trace, already measured —
+  // see `priorRungs` in generateCandidates. Keyed by the network object, which
+  // is what makes it exact: the same object is the same mask.
+  const earlier = bank?.get(net) ?? [];
+  const priorRungs = earlier.length ? {
+    get: (token) => {
+      let found = null;
+      for (const rungs of earlier) {
+        const rung = rungs.get(token);
+        if (rung?.fp || rung?.none) return rung;
+        found = found ?? rung ?? null;
+      }
+      return found;
+    },
+  } : null;
+  const generated = memo(cache, `gen|${netKey}`,
+    () => generateCandidates(net, analysis, priorRungs ? { ...options, priorRungs } : options));
+  // The live map, so a rescue this attempt asks for further down is on offer
+  // to the next one too. A search answered from the memo brings the rungs it
+  // was built with.
+  if (bank && generated.rungs) bank.set(net, [...earlier, generated.rungs]);
   if (!generated.candidates.length) return null;
 
   // Constraints are page-wide but a network is one drawing: on a multi-floor
@@ -713,9 +733,25 @@ const floorPlausibility = (floor, net, analysis, evidence, constraints, structur
  * every memo the attempt touches: a pass that forces the rescue hypotheses
  * mutates the candidate set it is handed, so sharing one memo entry across
  * passes would let a warm cache answer a base trace with an escalated search.
+ *
+ * `shared` is what one trace's attempts have in common: the partition the trace
+ * began with, and the rungs each network has had measured so far.
  */
-const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) => {
+const assembleFloors = (analysis, options, nets, cache, searchScope, passKey, shared = null) => {
   const { wallThickness } = analysis;
+  // The memo's keys name a network by its place in the partition, so they only
+  // mean anything for the partition the image's memo was built on. A `join`
+  // pass makes its own — which networks it joins depends on which labels the
+  // attempt before it missed — and `escalate` after an accepted join climbs
+  // that one. Keyed the same way, those were answered with the candidates of
+  // whatever network had held the same index: the first partition's, left by
+  // the room clamp's own `escalate`, or an earlier trace's different join. The
+  // attempt was then judged on another network's footprints, in the browser
+  // only — a cold trace has no memo to be wrong. So they are searched fresh,
+  // and charge the memo nothing, since it will not hold them.
+  const memoised = !shared || nets === shared.partition;
+  const netCache = memoised ? cache : null;
+  const netOptions = memoised ? options : { ...options, searchCache: null };
   const constraints = options.constraints ?? null;
   const brush = options.brush ?? null;
   const warnings = [];
@@ -756,7 +792,8 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
     // The net key carries the search scope and the pass, so `gen|` and `ev|`
     // inherit both.
     const detected = detectFloorNet(
-      net, analysis, options, constraints, cache, `${searchScope}|${passKey}|${netIndex}`,
+      net, analysis, netOptions, constraints, netCache, `${searchScope}|${passKey}|${netIndex}`,
+      shared?.bank ?? null,
     )
       ?? (brush ? freehandFloorNet(net, analysis) : null);
     if (!detected) {
@@ -1012,7 +1049,10 @@ export const traceBoundary = (analysis, options = {}) => {
     }
   }
 
-  const base = assembleFloors(analysis, options, nets, cache, searchScope, 'base');
+  // No bank in draw mode: the stroke is part of what a rung measures there, and
+  // remediation never runs on a painted outline anyway.
+  const shared = { partition: nets, bank: brush ? null : new Map() };
+  const base = assembleFloors(analysis, options, nets, cache, searchScope, 'base', shared);
   if (!shouldRemediate(base, analysis, options)) return base;
 
   // The first attempt is doubtful, or provably excludes something the rest of
@@ -1024,6 +1064,6 @@ export const traceBoundary = (analysis, options = {}) => {
     nets,
     base,
     attempt: (passNets, passOptions, passKey) =>
-      assembleFloors(analysis, passOptions, passNets, cache, searchScope, passKey),
+      assembleFloors(analysis, passOptions, passNets, cache, searchScope, passKey, shared),
   });
 };

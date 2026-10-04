@@ -335,6 +335,48 @@ export const generateCandidates = (net, analysis, options = {}) => {
   // both opt out of the memo (see traceBoundary), so neither spends its budget.
   const memoBudget = (options.mask || options.brush) ? null : options.searchCache;
 
+  // Every rung this search measures, by `policy:variant:radius`, and the rungs
+  // an earlier search of this same network measured (`options.priorRungs`).
+  //
+  // A remediation pass regenerates a network's candidates from nothing, with a
+  // taller ladder and every rescue forced. But a rung is `measureFootprint` of
+  // a mask and a radius, and the mask a policy and a variant climb is a
+  // function of the network and the analysis alone — never of the options that
+  // differ between passes. So the first eight or nine rungs of the welded
+  // ladder, and of the structural one, are the very rungs the first search
+  // closed, flooded and labelled moments earlier: 17-19 of the ~45 an
+  // `escalate` pass climbs. Handing them over is exact, not approximate.
+  //
+  // A rung that became a candidate keeps its footprint (the candidate holds it
+  // anyway). One that repeated the rung below it keeps only the numbers the
+  // climb reads, so the bank costs the memo nothing it was not already holding.
+  // The stroke corridor is left out: it is the one mask that is not a function
+  // of the network.
+  const priorRungs = options.priorRungs ?? null;
+  const rungs = new Map();
+  const rungOf = (fp) => {
+    if (!fp) return { none: true, totalEnclosed: 0, fp: null };
+    let enclosed = 0;
+    let parts = 0;
+    // Enclosure of the whole rung, not just its largest piece: two floor
+    // outlines that seal into two components have enclosed both of them.
+    for (const c of fp.components) {
+      if (c.size >= 0.02 * fp.largest.size) {
+        enclosed += c.size;
+        parts += 1;
+      }
+    }
+    return {
+      none: false,
+      totalEnclosed: fp.totalEnclosed,
+      area: fp.largest.size,
+      bboxArea: bboxAreaOf(fp.largest.bbox),
+      enclosed,
+      parts,
+      fp,
+    };
+  };
+
   // Reference enclosure for a ladder: the most a rung enclosed before the
   // point where extra radius stopped sealing and started annexing. A sealed
   // footprint gains only rounding slack from more radius, so rungs still
@@ -343,26 +385,26 @@ export const generateCandidates = (net, analysis, options = {}) => {
   // one. Everything below the reference is an incomplete enclosure — which is
   // how a footprint that stopped at an interior wall for five rungs before the
   // real outline closed becomes visible as wrong.
-  const ladderReference = (rungs) => {
-    let end = rungs.length;
+  const ladderReference = (steps) => {
+    let end = steps.length;
     // Cut at the first rung that fused separate enclosures into one.
     for (let i = 1; i < end; i += 1) {
-      if (rungs[i].parts < rungs[i - 1].parts && rungs[i].area > 1.03 * rungs[i - 1].area) {
+      if (steps[i].parts < steps[i - 1].parts && steps[i].area > 1.03 * steps[i - 1].area) {
         end = i;
         break;
       }
     }
     // Then drop a trailing tail that is still growing fast.
-    while (end > 1 && rungs[end - 1].area > 1.03 * rungs[end - 2].area) end -= 1;
+    while (end > 1 && steps[end - 1].area > 1.03 * steps[end - 2].area) end -= 1;
     let best = 0;
-    for (let i = 0; i < end; i += 1) best = Math.max(best, rungs[i].area);
-    return best || rungs.reduce((m, r) => Math.max(m, r.area), 1);
+    for (let i = 0; i < end; i += 1) best = Math.max(best, steps[i].area);
+    return best || steps.reduce((m, r) => Math.max(m, r.area), 1);
   };
 
   const climb = (variant, policy, mask, bridged, ladder) => {
     const tried = [];
     const group = [];
-    const rungs = [];
+    const steps = [];
     let previousArea = null;
     let sealedRadius = null;
     // The mask is fixed for the whole ladder, so its ink box is too.
@@ -371,25 +413,29 @@ export const generateCandidates = (net, analysis, options = {}) => {
       const token = `${policy}:${variant}:${r}`;
       if (evaluated.has(token)) continue;
       evaluated.add(token);
-      const fp = measureFootprint(mask, width, height, r, bounds);
-      tried.push({ radius: r, area: fp?.totalEnclosed ?? 0 });
-      if (!fp) continue;
+      const known = policy === 'corridor' ? null : priorRungs?.get(token) ?? null;
+      const rung = known ?? rungOf(measureFootprint(mask, width, height, r, bounds));
+      tried.push({ radius: r, area: rung.totalEnclosed });
+      if (rung.none) {
+        rungs.set(token, rung);
+        continue;
+      }
       // The two scalars sealMetrics reads, taken straight off the component.
       // Building the entry here would allocate a page-sized component mask for
       // every rung, and five in eight rungs are discarded on the next line.
-      const area = fp.largest.size;
-      const seal = sealMetrics({ area, bboxArea: bboxAreaOf(fp.largest.bbox) }, wallBboxArea);
-      // Enclosure of the whole rung, not just its largest piece: two floor
-      // outlines that seal into two components have enclosed both of them.
-      const enclosed = fp.components.reduce(
-        (sum, c) => sum + (c.size >= 0.02 * fp.largest.size ? c.size : 0), 0,
-      );
-      const parts = fp.components.filter((c) => c.size >= 0.02 * fp.largest.size).length;
-      rungs.push({ area: enclosed, parts });
+      const { area, enclosed } = rung;
+      const seal = sealMetrics({ area, bboxArea: rung.bboxArea }, wallBboxArea);
+      steps.push({ area: enclosed, parts: rung.parts });
       const sameAsPrevious = previousArea !== null
         && Math.abs(area - previousArea) <= 0.005 * previousArea;
       previousArea = area;
-      if (!sameAsPrevious) {
+      if (sameAsPrevious) {
+        rungs.set(token, rung.fp ? { ...rung, fp: null } : rung);
+      } else {
+        // A rung handed over without its footprint was a repeat in the ladder
+        // it came from and is not one here, so it is measured after all.
+        const fp = rung.fp ?? measureFootprint(mask, width, height, r, bounds);
+        rungs.set(token, rung.fp ? rung : { ...rung, fp });
         const entry = footprintEntry(fp, fp.largest, width, height);
         const candidate = {
           variant, policy, radius: r, bridgedSpan: bridged, measured: fp, entry, seal,
@@ -399,13 +445,14 @@ export const generateCandidates = (net, analysis, options = {}) => {
         group.push(candidate);
         // Labels only: `entry.mask` is derived on read, so charging for it here
         // would both allocate the array this change exists to avoid and bill
-        // the memo for bytes it does not hold.
-        memoBudget?.retain?.(fp.labels.byteLength);
+        // the memo for bytes it does not hold. A footprint handed over by an
+        // earlier search was charged when that search made it.
+        if (!known?.fp) memoBudget?.retain?.(fp.labels.byteLength);
       }
       if (seal.seal >= SEALED && sealedRadius === null) sealedRadius = r;
     }
     if (group.length) {
-      const reference = ladderReference(rungs);
+      const reference = ladderReference(steps);
       for (const candidate of group) {
         candidate.completeness = Math.min(1, candidate.enclosed / reference);
       }
@@ -519,6 +566,8 @@ export const generateCandidates = (net, analysis, options = {}) => {
     maxRadius,
     coverage,
     rescue,
+    // Live: a rescue asked for later adds its rungs here too.
+    rungs,
     sealedThreshold: SEALED,
     // `null` when no opening was run (thickRadius < 2), which is the case
     // floorPlausibility scores as fully structural.
