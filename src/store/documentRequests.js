@@ -169,16 +169,6 @@ export function deliver(token, apply) {
 }
 
 /**
- * The signal for work that can stop early rather than finish and be discarded.
- *
- * Nothing consumes it yet: the two long awaits are a detection request, which is
- * stopped by terminating its worker (`cancelActiveWork` below), and an OCR scan,
- * which cannot be stopped at all. It is the seam for the day a caller can poll
- * one — until then, a token that is aborted is read through `resolveOwner`.
- */
-export const signalOf = (token) => token?.controller?.signal;
-
-/**
  * Abandon every unit of work a plan has in flight. Their results will be
  * dropped rather than applied, and anything watching the signal can stop now.
  * Called when a plan is closed or restarted — the work was about a drawing that

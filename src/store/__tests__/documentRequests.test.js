@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import useAppStore from '../appStore';
 import {
-  beginWork, settleWork, deliver, isCurrent, signalOf,
+  beginWork, settleWork, deliver, isCurrent,
   detachDocument, workCount, resetRequests, ownerVerdict,
   cancelActiveWork, hasStoppableWork,
 } from '../documentRequests';
@@ -177,7 +177,7 @@ describe('documentRequests', () => {
       expect(workCount()).toBe(0);
       expect(deliver(a, () => {})).toBe('dropped');
       expect(deliver(b, () => {})).toBe('dropped');
-      expect(signalOf(a).aborted).toBe(true);
+      expect(a.controller.signal.aborted).toBe(true);
     });
 
     it('leaves another plan’s ownership alone', () => {
@@ -195,11 +195,12 @@ describe('documentRequests', () => {
 });
 
 /**
- * A trace can hold the app for thirty seconds and `signalOf` had no consumer,
- * so there was nothing a Cancel could do. Aborting the tokens is only half of
- * it — the detection cores are straight-line pure JS with nothing to poll a
- * signal — but it is the half this layer owns: whatever arrives afterwards is
- * dropped rather than written onto a plan the user has moved on from.
+ * A trace can hold the app for thirty seconds and a token's signal had no
+ * consumer, so there was nothing a Cancel could do. Aborting the tokens is only
+ * half of it — the detection cores are straight-line pure JS with nothing to
+ * poll a signal — but it is the half this layer owns: whatever arrives
+ * afterwards is dropped rather than written onto a plan the user has moved on
+ * from.
  */
 describe('cancelActiveWork', () => {
   beforeEach(() => {
@@ -221,7 +222,7 @@ describe('cancelActiveWork', () => {
     expect(deliver(trace, () => { ran = true; })).toBe('dropped');
     expect(ran).toBe(false);
     expect(ownerVerdict(scan)).toBe('dropped');
-    expect(signalOf(trace).aborted).toBe(true);
+    expect(trace.controller.signal.aborted).toBe(true);
     expect(workCount()).toBe(0);
   });
 
@@ -246,7 +247,7 @@ describe('cancelActiveWork', () => {
   // is the worker: terminating it ends every open plan's detection request, and
   // that plan's trace then comes back through the App layer's "interrupted
   // before it finished" branch rather than as a result. Per-request
-  // cancellation (`signalOf`) is what would close that, and nothing consumes it.
+  // cancellation is what would close that, and nothing reads a token's signal.
   it('leaves another plan\u2019s work alone', () => {
     const mine = beginWork('trace');
     const otherDoc = 'doc-elsewhere';
@@ -255,7 +256,7 @@ describe('cancelActiveWork', () => {
     useAppStore.setState({ activeDocumentId: mine.docId });
 
     expect(cancelActiveWork().count).toBe(1);
-    expect(signalOf(theirs).aborted).toBe(false);
+    expect(theirs.controller.signal.aborted).toBe(false);
     expect(workCount(otherDoc)).toBe(1);
   });
 });

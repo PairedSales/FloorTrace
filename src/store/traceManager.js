@@ -376,18 +376,5 @@ export function createTraceSlice(set, get) {
         perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
       });
     },
-
-    /**
-     * Reset floor manager/trace slice to initial state.
-     */
-    resetPerimeterTraces: () => {
-      const defaultTraceId = newTraceId();
-      set({
-        perimeterTraces: [makeTrace({ id: defaultTraceId })],
-        activeTraceId: defaultTraceId,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
-      });
-    },
   };
 }

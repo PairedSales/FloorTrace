@@ -24,8 +24,7 @@ const TWO_WARNINGS = [
 ];
 
 beforeEach(() => {
-  store().resetPerimeterTraces();
-  store().setImage(null);
+  store().restart();
   undoManager.clear();
 });
 
