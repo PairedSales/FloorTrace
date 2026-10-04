@@ -189,7 +189,7 @@ self.onmessage = async (event) => {
     } else if (type === 'warmDetection') {
       // Fire-and-forget: runs during the OCR scan so the analysis and the
       // room-clamp ladder are already in the memo when step 4 asks for them.
-      data = prewarmDetectionCore(imageData, options);
+      prewarmDetectionCore(imageData, options);
     } else if (type === 'wallSnapSegments') {
       // Run here so it reuses this decode instead of doing its own
       // full-resolution getImageData on the main thread mid-gesture, and

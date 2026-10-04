@@ -463,10 +463,7 @@ const memo = (cache, key, compute) => {
 const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   const { width, height, wallThickness } = analysis;
   const epsilon = Math.max(2, wallThickness * 0.35);
-  const fitOptions = {
-    ...options.fit,
-    mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
-  };
+  const fitOptions = { mergeTol: Math.max(2, Math.round(wallThickness * 0.5)) };
   const generated = memo(cache, `gen|${netKey}`, () => generateCandidates(net, analysis, options));
   if (!generated.candidates.length) return null;
 
@@ -622,7 +619,6 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     confidence,
     warnings,
     epsilon,
-    fitOptions,
     evidence,
     structuralInk: generated.structuralKept,
     alternatives: ranked.slice(1, 4).map((c) => ({
@@ -648,7 +644,7 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
 // hypothesis built from ink produced a usable candidate — a plan whose walls
 // are unreadable, or a stroke over blank paper. The user gets the outline they
 // drew, said plainly to be that and nothing more.
-const freehandFloorNet = (net, analysis, options) => {
+const freehandFloorNet = (net, analysis) => {
   const { width, height, wallThickness } = analysis;
   // Closed at three-quarters of the brush radius: enough to seal where the
   // user lifted the mouse mid-outline, not enough to round the corners of a
@@ -670,10 +666,6 @@ const freehandFloorNet = (net, analysis, options) => {
     confidence: 0.45,
     warnings: [warning('drawn-freehand', null, 'warn')],
     epsilon,
-    fitOptions: {
-      ...options.fit,
-      mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
-    },
     evidence: createEvidence(analysis, net.mask, net.ribbon),
     // No candidate generation ran, so floorPlausibility measures it itself.
     structuralInk: null,
@@ -766,7 +758,7 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
     const detected = detectFloorNet(
       net, analysis, options, constraints, cache, `${searchScope}|${passKey}|${netIndex}`,
     )
-      ?? (brush ? freehandFloorNet(net, analysis, options) : null);
+      ?? (brush ? freehandFloorNet(net, analysis) : null);
     if (!detected) {
       dropNet(dropped, DROP.noCandidate, net.bbox);
       continue;

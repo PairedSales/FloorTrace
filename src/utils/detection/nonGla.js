@@ -479,8 +479,7 @@ const distinctRooms = (points) => {
  * has no words for.
  */
 export const collectNonGlaRegions = (footprint, analysis, options) => {
-  const { width, height, wallThickness } = analysis;
-  const wallMask = options.wallMask ?? analysis.wallMask;
+  const { width, height, wallThickness, wallMask } = analysis;
   const exteriorThickness = options.exteriorThickness;
   const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
   const regions = [];

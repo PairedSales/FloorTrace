@@ -356,8 +356,7 @@ const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis
 );
 
 /**
- * Run the analysis and the room-clamp trace for their side effect on the memo,
- * and return nothing but a receipt.
+ * Run the analysis and the room-clamp trace for their side effect on the memo.
  *
  * The detection worker is idle for the whole OCR scan (2-4 s) and then does
  * this work serially afterwards, where it lands squarely on the clock: the
@@ -376,7 +375,6 @@ export const prewarmDetectionCore = (imageData, options = {}) => {
     () => analyzeFloorplan(imageData, { maxDimension }),
   );
   roomClampBoundary(analysis, maxDimension, options);
-  return { warmed: true };
 };
 
 // One SAT per clamped floor, not per click: every room placed on a floorplan

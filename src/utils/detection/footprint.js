@@ -60,12 +60,16 @@ const bboxCovers = (outer, inner) => {
 // `carrier` is anything holding `{labels, frame, componentId}` — the footprint
 // entry's labels live in their own crop (labelFrame.js), everything else here
 // labels a page-sized mask and carries no frame.
-const polygonize = (carrier, width, height, epsilon, fitOptions) => {
+//
+// Fitted with `fitRing`'s own tolerances. The scorer fits the candidates it
+// ranks with a merge tolerance scaled to the wall (`fitOptions`, boundary.js);
+// the polygon a floor is given never has been.
+const polygonize = (carrier, width, height, epsilon) => {
   const ring = traceFramedBoundary(carrier, width, height);
   if (ring.length < 3) return null;
   const simplified = simplifyRing(ring, epsilon);
   if (simplified.length < 3) return null;
-  const fitted = fitRing(simplified, fitOptions);
+  const fitted = fitRing(simplified);
   if (!fitted.polygon || fitted.polygon.length < 3) return null;
   // `skewDeg` is what was measured; `deskewed` says whether the fit acted on
   // it. A ring past the de-skew ceiling is squashed onto the page's own axes,
@@ -227,7 +231,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
   // array on every read (see footprintEntry), and everything below reads it
   // repeatedly. This is the one place that wants it materialised.
   let footprint = { ...initialFootprint };
-  let outerResult = polygonize(footprint, width, height, epsilon, options.fit);
+  let outerResult = polygonize(footprint, width, height, epsilon);
   if (!outerResult) return null;
 
   let exteriorThickness = sampleExteriorThickness(
@@ -259,7 +263,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
         bbox: kept.component.bbox,
         bboxArea: bboxAreaOf(kept.component.bbox),
       };
-      const reOuter = polygonize(candidate, width, height, epsilon, options.fit);
+      const reOuter = polygonize(candidate, width, height, epsilon);
       if (reOuter) {
         footprint = candidate;
         outerResult = reOuter;
@@ -297,7 +301,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
       });
       rejectedRegions = applied.rejected;
       const carvedOuter = applied.accepted.length
-        ? polygonize(applied.footprint, width, height, epsilon, options.fit)
+        ? polygonize(applied.footprint, width, height, epsilon)
         : null;
       if (carvedOuter) {
         footprint = applied.footprint;
@@ -391,7 +395,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
 
   const holes = [];
   for (const hole of holeSources) {
-    const shape = polygonize(hole, width, height, epsilon, options.fit);
+    const shape = polygonize(hole, width, height, epsilon);
     if (shape && polygonArea(shape.polygon) > 0) holes.push(shape.polygon);
   }
 
@@ -415,7 +419,7 @@ export const buildFloor = (initialFootprint, analysis, epsilon, options) => {
     if (innerComp && innerComp.component.size > 0.2 * footprint.area) {
       const innerResult = polygonize(
         { labels: innerComp.labels, frame: null, componentId: innerComp.component.id },
-        width, height, epsilon, options.fit,
+        width, height, epsilon,
       );
       if (innerResult && polygonArea(innerResult.polygon) > 0) {
         innerPolygon = innerResult.polygon;
