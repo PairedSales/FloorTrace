@@ -170,23 +170,6 @@ const perimeterTraceSchema = z.looseObject({
   holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
-  // What this outline was before a re-trace, a draw-mode result or its first
-  // hand edit replaced it — oldest first, capped at MAX_TRACE_ATTEMPTS.
-  // Declared for the reason `scope` and `anchor` on a warning are: a later
-  // tightening that dropped it would turn every recovery back into a re-scan
-  // with nothing saying so.
-  // `wallFaces` is deliberately not part of an attempt — see `makeAttempt`.
-  attempts: z.array(z.looseObject({
-    at: z.number().optional(),
-    source: z.string().optional(),
-    confidence: z.number().nullable().optional(),
-    // px², so a scale corrected after the fact cannot falsify a stored row.
-    area: z.number().optional(),
-    vertices: z.array(vertexSchema),
-    holes: z.array(holeSchema).optional(),
-    quality: traceQualitySchema,
-    remediation: z.looseObject({}).nullable().optional(),
-  })).optional(),
   wallFaces: z.looseObject({
     outer: wallFaceSchema,
     inner: wallFaceSchema,

@@ -743,16 +743,6 @@ const fullyPopulatedPlan = () => {
         outer: { vertices: ring(8, 8, 304), holes: [{ id: 'hole-auto-0', ring: ring(50, 50, 20), source: 'auto' }] },
         inner: { vertices: ring(14, 14, 292), holes: [] },
       },
-      attempts: [{
-        at: 1700000000000,
-        source: 'auto',
-        confidence: 0.4,
-        area: 81000,
-        vertices: ring(12, 12, 290),
-        holes: [],
-        quality: { source: 'auto', confidence: 0.4, warnings: [] },
-        remediation: { ran: false },
-      }],
     }),
     makeTrace({
       id: 'trace-garage',

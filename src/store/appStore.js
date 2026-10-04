@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createTraceSlice, recordAttempt } from './traceManager';
+import { createTraceSlice } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
@@ -350,21 +350,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     const updatedTraces = currentTraces.map((t) => {
       if (t.id === activeId) {
         const vertices = v?.vertices || [];
-        // What this write is about to throw away, kept once.
-        //
-        // A result landing (`v` carries its own `quality` — a re-trace, a draw
-        // mode outline) always supersedes whatever was here. A hand edit does
-        // too, but only the *first* one: `edited` is set by the branch below
-        // and never cleared, so it is exactly the marker for "the pre-edit
-        // geometry of this attempt has already been kept". Without that test a
-        // single vertex drag would fill the cap on its own, and the geometry
-        // worth returning to — the detector's own result — would be the first
-        // thing pushed off the end of it.
-        const replacing = !!v && 'quality' in v;
-        const firstEdit = !replacing && !!t.quality && !t.quality.edited;
-        const base = replacing || firstEdit ? recordAttempt(t) : t;
         return {
-          ...base,
+          ...t,
           vertices,
           // Deliberately the opposite of `quality` below: holes are independent
           // rings a vertex edit did not touch, so an update that omits them

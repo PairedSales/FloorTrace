@@ -619,8 +619,8 @@ function App() {
    * The commonest correctable failure is a tie-break: two candidates within
    * `SCORE_EPSILON` (0.015) of each other and the wrong one won. The right
    * geometry has already been computed and scored — this hands it over instead
-   * of asking the user to paint the whole outline again. The rejected one goes
-   * onto the trace's attempt history, so it is one undo away either direction.
+   * of asking the user to paint the whole outline again. The rejected one is
+   * one undo away.
    */
   const handleUseAlternative = useCallback(() => {
     const state = useAppStore.getState();
