@@ -29,7 +29,7 @@ const ConfirmDialog = () => {
 
   if (!request) return null;
 
-  const { message, detail, confirmLabel = 'Confirm', cancelLabel = 'Cancel' } = request;
+  const { message, detail, confirmLabel = 'Confirm' } = request;
 
   return (
     <Dialog
@@ -58,7 +58,7 @@ const ConfirmDialog = () => {
             onClick={cancel}
             className={`btn btn-secondary ${isTouch ? 'flex-1 h-11' : 'ml-auto'}`}
           >
-            {cancelLabel}
+            Cancel
           </button>
           <button
             type="button"

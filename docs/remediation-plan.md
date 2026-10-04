@@ -12,8 +12,9 @@ reproduced here, because a landed brief is a description of code that already
 exists and the code is the better copy.
 
 What is left is this file: **one deferred task (§1) and nine findings the waves
-surfaced and deliberately did not fix (§2)**. `docs/CODE_REVIEW.md` is an
-earlier review and marks itself historical.
+surfaced and deliberately did not fix (§2)**, with two more (#10, #11) added by
+the dead-code audit of October 2026. `docs/CODE_REVIEW.md` is an earlier review
+and marks itself historical.
 
 ---
 
@@ -84,6 +85,8 @@ are annotated below. #2, #4, #7 and #9 are carried over unre-verified.
 | 7 | **The structural-with-garage footprint is geometrically degenerate** — two wall-width fingers tracing around the garage, cleaned up only when they fall under `buildFloor`'s 3% filament-shave budget. Latent now, reachable whenever `structural` wins by more than the epsilon on a plan with a thin-line-bounded bay. | `boundary.js` / `footprint.js` | Downstream of #6. |
 | 8 | **`requestTimeout` is unverified by execution.** `index.js` is main-thread worker-wrapper code with no test file. The 120 s cap and 2 s-per-label slope are judgement calls, read and linted only. | `src/utils/detection/index.js` | Still no harness for it. The repo now has happy-dom for hook tests (see CLAUDE.md), so a worker stub is cheaper than it was when this was written. |
 | 9 | `flushAutosaveNow` is still registered on `beforeunload`, where its async IndexedDB work will not reliably complete. Harmless and occasionally works; the comment is honest about what actually protects the user (the 2 s debounce). | `src/hooks/useAutosave.js` | D2's brief did not ask for the listener to be removed. |
+| 10 | **The outline a floor is given is not fitted the way it was scored.** `detectFloorNet` scales the fit's merge tolerance to the wall (`mergeTol = max(2, round(wallThickness × 0.5))`) and gives it to the scorer, so `scoring.js` ranks candidates on polygons fitted with it. `buildFloor` fits the polygon that is actually returned with `rectilinearFit`'s default of 3 px, and always has: before the scored search it read `options.fit`, which nothing set. The two agree only when the wall is between 5 and 7 px thick at working scale. Until October 2026 the scaled value was also built onto the record a network returns and never read, which hid this. | `boundary.js` / `footprint.js` / `scoring.js` | Found while removing dead option plumbing, which may not change output. Handing `buildFloor` the scorer's tolerance moves returned polygons, so it is a measured change under the accuracy protocol (`.claude/rules/detection.md`), in either direction. |
+| 11 | **`dropCacheKey` leaves an image's room-clamp trace behind.** `roomClampBoundary` memoises through `getCachedAnalysis` under `<image key>::roomclamp::<boundary options>`, so the entry's key does not start with `<image key>\|`, which is the prefix `dropCacheKey` matches. Closing a plan or evicting a decode therefore drops the image's analysis and search ladder and keeps its clamp trace (a whole `traceBoundary` result) until the four-entry LRU pushes it out. | `cache.js` / `pipeline.js` | Bounded, so a retention defect rather than a leak, and found by a change that was not altering behaviour. Needs a test that observes the memo, and `npm run probe:memory` before and after. |
 
 Two things checked and found **not** to be problems, recorded so they are not
 re-investigated: `handleInteriorWallToggle` need not re-review the footprint

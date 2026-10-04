@@ -11,7 +11,7 @@ import {
 import { classifyTraces } from '../utils/traceClassification';
 // From areaCalculator, not appStore: appStore already imports createTraceSlice
 // from here, so sourcing it there made a cycle that only worked by hoisting.
-import { calculateArea, mergeHoles } from '../utils/areaCalculator';
+import { mergeHoles } from '../utils/areaCalculator';
 import { markStaleHoles } from '../utils/geometryValidation';
 import { pointInPolygon } from '../utils/detection/polygon';
 
@@ -75,52 +75,6 @@ const cloneHoles = (holes) => (holes ?? []).map((h) => (Array.isArray(h)
 
 // Naming lives in traceTypes.js, which owns the taxonomy the names come from.
 const generateTraceName = (traces) => autoTraceName(DEFAULT_TRACE_TYPE, traces);
-
-/**
- * How many earlier versions of an outline are kept. The list rides inside
- * every undo snapshot, every draft and every `.floorplan`, so the cap has to
- * bound it by the plan rather than by the length of the session.
- */
-export const MAX_TRACE_ATTEMPTS = 5;
-
-/**
- * What an outline was, at the moment something replaced it.
- *
- * `area` is px², not square feet, and deliberately: a scale corrected later
- * must not falsify a row that was right when it was written — the caller
- * multiplies by the live calibration, the same way every other stored geometry
- * is read.
- *
- * `wallFaces` is absent. It is by far the heaviest thing on a trace (two full
- * face polygons with their own holes), and the pair belongs to the result that
- * produced it, not to the outline as it stood before.
- *
- * `quality` is shared rather than cloned: a trace's quality object is replaced
- * wholesale by every setter that touches it and never mutated in place, so the
- * outgoing one has no other owner. Its `warnings` can carry ring anchors, which
- * is the one part of an attempt that is not trivially small — the cap is what
- * bounds it.
- */
-const makeAttempt = (trace) => ({
-  at: Date.now(),
-  source: trace?.quality?.source ?? 'manual',
-  confidence: trace?.quality?.confidence ?? null,
-  area: calculateArea(trace?.vertices, 1, trace?.holes),
-  vertices: clonePoints(trace?.vertices),
-  holes: cloneHoles(trace?.holes),
-  quality: trace?.quality ?? null,
-  // Lifted out of `quality` so a row can read "this was the escalate pass"
-  // without reaching through; the same object, not a second copy.
-  remediation: trace?.quality?.remediation ?? null,
-});
-
-// Only geometry worth returning to is recorded — an outline with no ring is
-// not a state anyone wants back, and recording it would spend the cap.
-export const recordAttempt = (trace) => {
-  if ((trace?.vertices?.length ?? 0) < 3) return trace;
-  const attempts = [...(trace.attempts ?? []), makeAttempt(trace)];
-  return { ...trace, attempts: attempts.slice(-MAX_TRACE_ATTEMPTS) };
-};
 
 export function createTraceSlice(set, get) {
   return {
@@ -345,9 +299,7 @@ export function createTraceSlice(set, get) {
           });
         }
         return {
-          // The outline this re-trace is about to overwrite, kept so a worse
-          // second reading is recoverable without re-scanning the image.
-          ...recordAttempt(prior),
+          ...prior,
           ...floor,
           // Spreading `floor` would replace the holes wholesale, and a void the
           // user punched is not the detector's to discard. Re-checked against
@@ -379,10 +331,6 @@ export function createTraceSlice(set, get) {
      *
      * Returns how many outlines carry the requested face, so a caller can tell
      * "nothing to switch" from "switched". Callers own the undo snapshot.
-     *
-     * Deliberately records no attempt: both faces are already on the trace, so
-     * flipping back is the recovery, and recording one would spend the whole
-     * cap on a toggle.
      */
     setWallFaceMode: (interior) => {
       const key = interior ? 'inner' : 'outer';
@@ -426,19 +374,6 @@ export function createTraceSlice(set, get) {
       if (!traces.some((t) => t.wallFaces)) return;
       set({
         perimeterTraces: traces.map((t) => (t.wallFaces ? { ...t, wallFaces: null } : t)),
-      });
-    },
-
-    /**
-     * Reset floor manager/trace slice to initial state.
-     */
-    resetPerimeterTraces: () => {
-      const defaultTraceId = newTraceId();
-      set({
-        perimeterTraces: [makeTrace({ id: defaultTraceId })],
-        activeTraceId: defaultTraceId,
-        traceInteractionMode: 'idle',
-        perimeterVertices: null,
       });
     },
   };

@@ -394,9 +394,6 @@ const CanvasStage = React.memo(({
           angle2: -Math.PI / 2,
           radius1: initialDist,
           radius2: initialDist,
-          visible: true,
-          locked: false,
-          snapEnabled: true
         });
       } catch (e) {
         console.error(e);

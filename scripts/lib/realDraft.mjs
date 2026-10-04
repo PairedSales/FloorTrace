@@ -136,12 +136,10 @@ const measureRooms = (image, dimensions) => {
 };
 
 // useAutoScale.applyDecision, as the store records it.
-const calibrationOf = (decision, at) => ({
+const calibrationOf = (decision) => ({
   calibrated: true,
   feetPerPixel: decision.feetPerPixel,
   source: 'room-calibration',
-  calibratedRoomId: null,
-  createdAt: at,
   quality: {
     level: decision.level,
     reason: decision.reason,
@@ -226,7 +224,7 @@ export const planState = (image, scan, { at = Date.now() } = {}) => {
       sides: c.sides,
       feetPerPixel: { x: 1 / c.pixelsPerFoot.x, y: 1 / c.pixelsPerFoot.y },
     }));
-    state.calibration = calibrationOf(decision, at);
+    state.calibration = calibrationOf(decision);
   }
 
   const traced = traceFloorplanBoundaryCore(image, {
@@ -241,7 +239,7 @@ export const planState = (image, scan, { at = Date.now() } = {}) => {
   const footprintAreaPx = tracedAreaPx(traced);
   if (decision?.pixelsPerFoot > 0 && footprintAreaPx > 0) {
     const reviewed = selectProjectScale(measured, { nonGlaRegions, footprintAreaPx });
-    if (reviewed?.pixelsPerFoot > 0) state.calibration = calibrationOf(reviewed, at);
+    if (reviewed?.pixelsPerFoot > 0) state.calibration = calibrationOf(reviewed);
   }
 
   const summary = qualitySummary(traced?.quality);

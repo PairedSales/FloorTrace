@@ -116,17 +116,20 @@ export function assignTypeColors(traces) {
 // re-reading the plan must never take that back.
 export function normalizeTraces(traces) {
   if (!Array.isArray(traces)) return traces;
-  return assignTypeColors(traces.map((t) => (t && typeof t === 'object' ? {
-    ...t,
-    // A trace saved before attempt history existed has none, not an unknown
-    // one: every reader indexes into this array, so it has to exist.
-    attempts: Array.isArray(t.attempts) ? t.attempts : [],
-    type: normalizeTraceType(t.type),
-    typeSource: t.typeSource
-      ?? (normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE ? 'auto' : 'user'),
-    colorSource: t.colorSource ?? (t.type ? 'type' : 'user'),
-    nameSource: t.nameSource ?? (isAutoTraceName(t.name) ? 'auto' : 'user'),
-  } : t)));
+  return assignTypeColors(traces.map((trace) => {
+    if (!trace || typeof trace !== 'object') return trace;
+    // An outline used to keep up to five earlier versions of itself, and
+    // nothing ever read them back. One saved while it did sheds them here.
+    const { attempts: _attempts, ...t } = trace;
+    return {
+      ...t,
+      type: normalizeTraceType(t.type),
+      typeSource: t.typeSource
+        ?? (normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE ? 'auto' : 'user'),
+      colorSource: t.colorSource ?? (t.type ? 'type' : 'user'),
+      nameSource: t.nameSource ?? (isAutoTraceName(t.name) ? 'auto' : 'user'),
+    };
+  }));
 }
 
 /**
@@ -144,19 +147,12 @@ export function normalizeTraces(traces) {
  * whatever type ends up applying rather than passed alongside it. Anything else
  * — `id`, `name`, `vertices`, `closed`, `quality`, `wallFaces`, `holes` — is a
  * plain override.
- *
- * `attempts` is what this outline was before something replaced it, oldest
- * first. Born empty and written by `recordAttempt` (traceManager), because an
- * outline that is one mutable cell makes every recovery destructive — and the
- * only move that lowers the issue count is then destroying the evidence.
  */
 export const makeTrace = ({ type = DEFAULT_TRACE_TYPE, ...rest } = {}) => ({
   name: '1st Floor',
   vertices: [],
-  attempts: [],
   closed: false,
   visible: true,
-  locked: false,
   type: normalizeTraceType(type),
   typeSource: 'auto',
   colorSource: 'type',

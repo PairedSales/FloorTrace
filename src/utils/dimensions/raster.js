@@ -17,15 +17,18 @@ export const toGray = (imageData) => {
   return { data: gray, width, height };
 };
 
+const CLAHE_TILES = 8;
+const CLAHE_CLIP_LIMIT = 3.0;
+
 /**
  * Contrast Limited Adaptive Histogram Equalization (pure-JS fallback for
  * cv.CLAHE). Normalises uneven scan lighting so faint labels survive
  * binarization. Tile-based with bilinear interpolation between tile LUTs.
  */
-export const clahe = (gray, { tiles = 8, clipLimit = 3.0 } = {}) => {
+export const clahe = (gray) => {
   const { data, width, height } = gray;
-  const tileW = Math.max(1, Math.ceil(width / tiles));
-  const tileH = Math.max(1, Math.ceil(height / tiles));
+  const tileW = Math.max(1, Math.ceil(width / CLAHE_TILES));
+  const tileH = Math.max(1, Math.ceil(height / CLAHE_TILES));
   const tilesX = Math.ceil(width / tileW);
   const tilesY = Math.ceil(height / tileH);
 
@@ -48,7 +51,7 @@ export const clahe = (gray, { tiles = 8, clipLimit = 3.0 } = {}) => {
       }
 
       // Clip histogram and redistribute excess
-      const limit = Math.max(1, Math.round((clipLimit * count) / 256));
+      const limit = Math.max(1, Math.round((CLAHE_CLIP_LIMIT * count) / 256));
       let excess = 0;
       for (let i = 0; i < 256; i++) {
         if (hist[i] > limit) {
@@ -221,6 +224,10 @@ export const binarizeInk = (gray, threshold) => {
   return { data: mask, width, height };
 };
 
+// How many dashes in a row prove a ruling line. A count, so unlike the
+// lengths below it does not scale with the glyph size.
+const DASH_MIN_CHAIN = 5;
+
 /**
  * Mask of dash/dot ruling lines (dashed tray-ceiling boxes, leader lines).
  * Colour-styled plans draw dashed ceiling outlines straight through room
@@ -231,7 +238,7 @@ export const binarizeInk = (gray, threshold) => {
  * cross-axis ink extent exceeds the line thickness, so they are not "thin".
  */
 export const dashLineMask = (ink, {
-  maxThick = 4, minChain = 5, minSpan = 64, maxSeg = 48, maxGap = 24,
+  maxThick = 4, minSpan = 64, maxSeg = 48, maxGap = 24,
   maxBridge = 320, minSolid = 90, minInk = 60
 } = {}) => {
   const minDashLen = maxThick + 2;
@@ -428,7 +435,7 @@ export const dashLineMask = (ink, {
         // punctuation can't get there — quote ticks are below the length
         // floor and a row has only two hyphens.
         if (chain && chain.to - chain.from >= minSpan &&
-            (chain.count >= minChain || chain.ink >= minInk)) {
+            (chain.count >= DASH_MIN_CHAIN || chain.ink >= minInk)) {
           erase(horizontal, o, chain.from, chain.to);
         }
         chain = null;

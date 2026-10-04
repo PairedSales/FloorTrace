@@ -48,12 +48,12 @@ const MIN_SHOWN = 2;
 const NICE_STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
 
 // The smallest tidy step whose lines sit at least ~40 screen px apart.
-export const autoGrid = (scale) => NICE_STEPS.find((s) => s * scale >= 40) ?? 1000;
+const autoGrid = (scale) => NICE_STEPS.find((s) => s * scale >= 40) ?? 1000;
 
 const round = (x) => Math.round(x * 100) / 100;
 const fmt = (n) => (Number.isInteger(n) ? String(n) : String(round(n)));
 
-export const describeView = ({ crop, scale, grid }) => `crop ${crop.map(fmt).slice(0, 2).join(',')}→${crop.map(fmt).slice(2).join(',')}  scale ${scale.toFixed(2)} px/px  grid ${grid || 'none'}`;
+const describeView = ({ crop, scale, grid }) => `crop ${crop.map(fmt).slice(0, 2).join(',')}→${crop.map(fmt).slice(2).join(',')}  scale ${scale.toFixed(2)} px/px  grid ${grid || 'none'}`;
 
 const halo = (g, text, x, y) => {
   g.lineWidth = 3;

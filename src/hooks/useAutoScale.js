@@ -42,7 +42,6 @@ export function useAutoScale() {
     if (isUserAsserted(useAppStore.getState().calibration)) return false;
     useAppStore.getState().applyRoomCalibration(
       decision.feetPerPixel,
-      null,
       'room-calibration',
       {
         level: decision.level,

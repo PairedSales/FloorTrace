@@ -379,20 +379,22 @@ const rotatePoints = (points, angle, cx, cy) => {
   }));
 };
 
+// The de-skew applies only to a measured skew between these, in degrees.
+const MIN_SKEW_DEG = 0.75;
+const MAX_SKEW_DEG = 20;
+
 // Rectilinear fit with de-skew: estimate the ring's dominant orientation, fit
 // in that frame, and rotate back. A skewed plan then keeps its true corners
 // instead of being squashed onto the image axes.
 //
 // `skewDeg` is what was *measured* and is reported whether or not it was
-// corrected — past `maxSkewDeg` the de-skew is refused and the ring is squashed
+// corrected — past `MAX_SKEW_DEG` the de-skew is refused and the ring is squashed
 // onto the image axes, which is the case worth telling the user about and the
 // one the applied `skew` (0 there) cannot describe.
 export const fitRing = (ring, options = {}) => {
-  const maxSkewDeg = options.maxSkewDeg ?? 20;
-  const minSkewDeg = options.minSkewDeg ?? 0.75;
-  const skew = options.skewAngle ?? ringSkewAngle(ring);
+  const skew = ringSkewAngle(ring);
   const skewDeg = Math.abs(skew * 180 / Math.PI);
-  if (skewDeg < minSkewDeg || skewDeg > maxSkewDeg) {
+  if (skewDeg < MIN_SKEW_DEG || skewDeg > MAX_SKEW_DEG) {
     return { polygon: rectilinearFit(ring, options), skew: 0, skewDeg, deskewed: false };
   }
   let cx = 0;

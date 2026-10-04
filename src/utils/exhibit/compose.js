@@ -419,5 +419,5 @@ export function composeExhibit(ctx, model, {
     y += Math.round(16 * ui);
   }
 
-  return { width: pageW, height: Math.round(y + pad), ops, ui, scale: frame.scale };
+  return { width: pageW, height: Math.round(y + pad), ops };
 }

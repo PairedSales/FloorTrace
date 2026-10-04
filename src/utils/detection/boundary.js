@@ -28,6 +28,10 @@ const overlaps = (a, b, margin) =>
   a.minX <= b.maxX + margin && b.minX <= a.maxX + margin
   && a.minY <= b.maxY + margin && b.minY <= a.maxY + margin;
 
+// The most outlines one trace returns. What is left on the page past it is
+// dropped, and says so (`DROP.limit`).
+const MAX_FLOORS = 5;
+
 // Why a piece of the drawing never reached the answer. Seven branches between
 // the wall mask and the floors discarded one with a bare `continue`, and a
 // skipped network is a missing wing until somebody has looked at it — so each
@@ -458,11 +462,8 @@ const memo = (cache, key, compute) => {
 // Everything a network's footprint components need to become floors.
 const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
   const { width, height, wallThickness } = analysis;
-  const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
-  const fitOptions = {
-    ...options.fit,
-    mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
-  };
+  const epsilon = Math.max(2, wallThickness * 0.35);
+  const fitOptions = { mergeTol: Math.max(2, Math.round(wallThickness * 0.5)) };
   const generated = memo(cache, `gen|${netKey}`, () => generateCandidates(net, analysis, options));
   if (!generated.candidates.length) return null;
 
@@ -618,7 +619,6 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
     confidence,
     warnings,
     epsilon,
-    fitOptions,
     evidence,
     structuralInk: generated.structuralKept,
     alternatives: ranked.slice(1, 4).map((c) => ({
@@ -644,7 +644,7 @@ const detectFloorNet = (net, analysis, options, constraints, cache, netKey) => {
 // hypothesis built from ink produced a usable candidate — a plan whose walls
 // are unreadable, or a stroke over blank paper. The user gets the outline they
 // drew, said plainly to be that and nothing more.
-const freehandFloorNet = (net, analysis, options) => {
+const freehandFloorNet = (net, analysis) => {
   const { width, height, wallThickness } = analysis;
   // Closed at three-quarters of the brush radius: enough to seal where the
   // user lifted the mouse mid-outline, not enough to round the corners of a
@@ -654,7 +654,7 @@ const freehandFloorNet = (net, analysis, options) => {
   );
   if (!measured?.largest) return null;
   const entry = footprintEntry(measured, measured.largest, width, height);
-  const epsilon = options.simplifyEpsilon ?? Math.max(2, wallThickness * 0.35);
+  const epsilon = Math.max(2, wallThickness * 0.35);
   return {
     floorComps: [entry],
     best: {
@@ -666,10 +666,6 @@ const freehandFloorNet = (net, analysis, options) => {
     confidence: 0.45,
     warnings: [warning('drawn-freehand', null, 'warn')],
     epsilon,
-    fitOptions: {
-      ...options.fit,
-      mergeTol: options.fit?.mergeTol ?? Math.max(2, Math.round(wallThickness * 0.5)),
-    },
     evidence: createEvidence(analysis, net.mask, net.ribbon),
     // No candidate generation ran, so floorPlausibility measures it itself.
     structuralInk: null,
@@ -720,7 +716,6 @@ const floorPlausibility = (floor, net, analysis, evidence, constraints, structur
  */
 const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) => {
   const { wallThickness } = analysis;
-  const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
   const constraints = options.constraints ?? null;
   const brush = options.brush ?? null;
   const warnings = [];
@@ -743,7 +738,7 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
 
   for (let netIndex = 0; netIndex < nets.length; netIndex += 1) {
     const net = nets[netIndex];
-    if (floors.length >= maxFloors) {
+    if (floors.length >= MAX_FLOORS) {
       // The break skips every remaining network, not only this one — and the
       // cap is not why a nested one would have gone, so each still names
       // itself.
@@ -763,7 +758,7 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
     const detected = detectFloorNet(
       net, analysis, options, constraints, cache, `${searchScope}|${passKey}|${netIndex}`,
     )
-      ?? (brush ? freehandFloorNet(net, analysis, options) : null);
+      ?? (brush ? freehandFloorNet(net, analysis) : null);
     if (!detected) {
       dropNet(dropped, DROP.noCandidate, net.bbox);
       continue;
@@ -774,7 +769,7 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
     const comps = detected.floorComps;
     for (let compIndex = 0; compIndex < comps.length; compIndex += 1) {
       const footprint = comps[compIndex];
-      if (floors.length >= maxFloors) {
+      if (floors.length >= MAX_FLOORS) {
         for (let k = compIndex; k < comps.length; k += 1) {
           dropNet(dropped, DROP.limit, comps[k].bbox ?? net.bbox);
         }
@@ -974,7 +969,6 @@ const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) =>
 
 export const traceBoundary = (analysis, options = {}) => {
   const { width, height, wallThickness } = analysis;
-  const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
   const brush = options.brush ?? null;
 
   // A caller-supplied mask is not part of the cache key, so it opts out of the
@@ -997,12 +991,12 @@ export const traceBoundary = (analysis, options = {}) => {
   // this was latent rather than live, but `options.boundary` is spread in
   // wholesale from the caller and `pipeline.js` already treats those options
   // as key material for the room-clamp analysis cache.
-  const searchScope = `${maxFloors}|${options.maxCloseRadius ?? ''}`;
+  const searchScope = `${options.maxCloseRadius ?? ''}`;
   const nets = brush
     ? brushNetworks(brush, options.mask ?? analysis.boundaryMask, width, height)
     : memo(cache, `nets|${searchScope}`, () =>
       partitionWallNetworks(
-        options.mask ?? analysis.boundaryMask, width, height, wallThickness, maxFloors + 2,
+        options.mask ?? analysis.boundaryMask, width, height, wallThickness, MAX_FLOORS + 2,
       ));
   if (!nets.length) return null;
 

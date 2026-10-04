@@ -75,7 +75,7 @@ const probe = (file) => {
   // What the search *charged* itself, and whether that tripped the budget. A
   // memo that evicted reports a healthy retention figure and a warm replay
   // that costs full price, so the two numbers only mean something together.
-  const searchCache = getSearchCache(file, 1400, undefined);
+  const searchCache = getSearchCache(file, 1400);
   const charged = searchCache.bytes ?? 0;
   const evicted = Boolean(searchCache.overBudget);
   clearDetectionCache();

@@ -17,7 +17,6 @@ const openProjectWith = (names) => useAppStore.setState({
     holes: [],
     closed: true,
     visible: true,
-    locked: false,
     color: '#BD93F9',
   })),
   activeTraceId: 'saved-0',
@@ -25,7 +24,7 @@ const openProjectWith = (names) => useAppStore.setState({
 
 describe('applyDetectedTraces', () => {
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
   });
 
   it('keeps a trace the user hid when re-tracing the same floor count', () => {
@@ -56,7 +55,7 @@ describe('applyDetectedTraces', () => {
 
 describe('trace types', () => {
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
     undoManager.clear();
   });
 
@@ -150,7 +149,6 @@ describe('trace types', () => {
         vertices: square(10),
         closed: true,
         visible: true,
-        locked: false,
         color: '#FF5555',
         type: DEFAULT_TRACE_TYPE,
         colorSource: 'user',
@@ -182,7 +180,7 @@ describe('applyDetectedTraces and hand-punched voids', () => {
   });
 
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
   });
 
   it('keeps a user void when the floor count is unchanged', () => {
@@ -246,7 +244,6 @@ describe('setWallFaceMode', () => {
           ...detected(50, 44),
           closed: true,
           visible: true,
-          locked: false,
           type: 'garage',
           colorSource: 'type',
           nameSource: 'auto',
@@ -259,7 +256,7 @@ describe('setWallFaceMode', () => {
   };
 
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
   });
 
   it('switches every outline, not just the active one', () => {
@@ -344,7 +341,7 @@ describe('setWallFaceMode', () => {
 // one of the twins deleted both.
 describe('trace ids', () => {
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
   });
 
   it('deletes exactly one trace when several were created in the same tick', () => {
@@ -383,7 +380,7 @@ describe('trace ids', () => {
 
 describe('trace naming', () => {
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
   });
 
   it('numbers from the traces on hand, not a session counter', () => {
@@ -469,7 +466,7 @@ describe('classifyTraceTypes', () => {
   });
 
   beforeEach(() => {
-    useAppStore.getState().resetPerimeterTraces();
+    useAppStore.getState().restart();
     useAppStore.setState({ areaLabels: [] });
   });
 

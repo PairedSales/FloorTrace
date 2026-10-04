@@ -47,7 +47,7 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
   const calibrated = useAppStore((s) => s.calibration?.calibrated);
 
   const [options, setOptions] = useState(readExportOptions);
-  const [result, setResult] = useState(null);   // { canvas, model, layout }
+  const [result, setResult] = useState(null);   // { canvas, model }
   const [rendering, setRendering] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);       // 'copy' | 'save' | 'share' | null

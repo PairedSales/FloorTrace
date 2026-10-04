@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { createTraceSlice, recordAttempt } from './traceManager';
+import { createTraceSlice } from './traceManager';
 import { newTraceId } from './ids';
 import { createDocumentSlice, documentLabel } from './documentManager';
 import { calculateArea, holeKey, mergeHoles } from '../utils/areaCalculator';
@@ -41,8 +41,6 @@ const workingStateDefaults = () => {
     calibrated: false,
     feetPerPixel: { x: 1.0, y: 1.0 }, // feet per pixel for X and Y directions
     source: null,
-    calibratedRoomId: null,
-    createdAt: null,
     quality: null,
   },
   mode: 'normal',
@@ -350,21 +348,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     const updatedTraces = currentTraces.map((t) => {
       if (t.id === activeId) {
         const vertices = v?.vertices || [];
-        // What this write is about to throw away, kept once.
-        //
-        // A result landing (`v` carries its own `quality` — a re-trace, a draw
-        // mode outline) always supersedes whatever was here. A hand edit does
-        // too, but only the *first* one: `edited` is set by the branch below
-        // and never cleared, so it is exactly the marker for "the pre-edit
-        // geometry of this attempt has already been kept". Without that test a
-        // single vertex drag would fill the cap on its own, and the geometry
-        // worth returning to — the detector's own result — would be the first
-        // thing pushed off the end of it.
-        const replacing = !!v && 'quality' in v;
-        const firstEdit = !replacing && !!t.quality && !t.quality.edited;
-        const base = replacing || firstEdit ? recordAttempt(t) : t;
         return {
-          ...base,
+          ...t,
           vertices,
           // Deliberately the opposite of `quality` below: holes are independent
           // rings a vertex edit did not touch, so an update that omits them
@@ -420,7 +405,7 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   },
   setRoomDimensions: (v) => set({ roomDimensions: v }),
   setMode: (v) => set({ mode: v }),
-  applyRoomCalibration: (feetPerPixel, roomId = null, mutationSource = 'room-calibration', quality = null) => {
+  applyRoomCalibration: (feetPerPixel, mutationSource = 'room-calibration', quality = null) => {
     if (!CALIBRATION_SOURCES.has(mutationSource)) {
       throw new Error(
         "Only explicit room calibration may modify calibration scale"
@@ -449,8 +434,6 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
         calibrated: true,
         feetPerPixel: targetScale,
         source: mutationSource,
-        calibratedRoomId: roomId,
-        createdAt: Date.now(),
         // How much this scale can be trusted, kept with the scale itself: the
         // area is rendered from it for as long as the plan is open, and "is
         // this number right" must stay answerable — the panel's scale step
@@ -690,8 +673,9 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
     // Deliberately NOT `normalizeTraces` here, unlike `applySnapshot` and
     // `restoreFromSaved`. That is a migration for traces coming off disk — a
     // draft or a `.floorplan` written before types existed. A parked record was
-    // live state in this session moments ago, so there is nothing to migrate,
-    // and normalising rebuilds every trace object: the array identity is what
+    // live state in this session moments ago, or was migrated as it was read
+    // back (`usePlanManager`), so there is nothing to migrate here, and
+    // normalising rebuilds every trace object: the array identity is what
     // the area memo and every subscribed component compare on, so a switch
     // would re-render and recompute the whole plan for no reason.
     const traces = patch.perimeterTraces || [];
@@ -860,12 +844,7 @@ const findDoubleCounted = (traces) => {
       if (outer === inner) continue;
       if (normalizeTraceType(outer.type) !== DEFAULT_TRACE_TYPE) continue;
       if (containmentRatio(inner.vertices, outer.vertices) >= NESTED_ENOUGH) {
-        found.push({
-          innerId: inner.id,
-          innerName: inner.name,
-          outerName: outer.name,
-          detail: `${inner.name} sits inside ${outer.name}, so its area is counted twice`,
-        });
+        found.push({ innerName: inner.name, outerName: outer.name });
         break;
       }
     }

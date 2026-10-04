@@ -5,6 +5,7 @@ import { MAX_OPEN_DOCUMENTS, releaseImageResources } from '../store/documentMana
 import { detachDocument } from '../store/documentRequests';
 import { readDocDraft, readHistoryRecord, removePlan } from '../utils/workspaceDrafts';
 import { forgetFileHandle } from '../utils/fileHandles';
+import { normalizeTraces } from '../utils/traceTypes';
 import { askConfirm } from '../utils/askConfirm';
 import { notify } from '../utils/notify';
 
@@ -34,9 +35,16 @@ export function usePlanManager() {
       return false;
     }
 
+    // Off disk, so its outlines are migrated here, as `restoreFromSaved`
+    // migrates the active plan's. Adopting a parked record deliberately does
+    // not, and this record is about to be one.
+    const state = 'perimeterTraces' in draft.state
+      ? { ...draft.state, perimeterTraces: normalizeTraces(draft.state.perimeterTraces) }
+      : draft.state;
+
     const history = await readHistoryRecord(docId);
     useAppStore.getState().parkRestoredDocument(docId, {
-      state: draft.state,
+      state,
       history: history
         ? { ...history, imagePool: new Map(history.imagePool) }
         : null,

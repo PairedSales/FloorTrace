@@ -178,7 +178,6 @@ describe('decideProjectScale', () => {
       dimWidth: 16, dimHeight: 12, boxWidth: 400, boxHeight: 300,
     });
     expect(d.level).toBe('ok');
-    expect(d.projectScale).toBeNull();
     expect(d.roomCount).toBe(0);
   });
 });

@@ -138,7 +138,7 @@ export async function renderExhibit(state, { now = Date.now(), options, maxPlanW
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   paintExhibit(ctx, layout.ops, image);
 
-  return { canvas, model, layout };
+  return { canvas, model };
 }
 
 const exhibitBlob = (canvas) => new Promise((resolve, reject) => {

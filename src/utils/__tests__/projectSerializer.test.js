@@ -29,7 +29,6 @@ const createMockStoreState = () => ({
       vertices: [{ x: 5, y: 5 }, { x: 50, y: 5 }, { x: 50, y: 50 }],
       closed: true,
       visible: true,
-      locked: false,
       color: '#BD93F9',
     }
   ],
@@ -40,8 +39,6 @@ const createMockStoreState = () => ({
     calibrated: true,
     feetPerPixel: { x: 2.0, y: 2.0 },
     source: 'room-calibration',
-    calibratedRoomId: null,
-    createdAt: 1234567890
   },
   mode: 'normal',
   zoomScale: 1.0,
@@ -154,8 +151,6 @@ describe('projectSerializer', () => {
         calibrated: true,
         feetPerPixel: { x: 2.0, y: 2.0 },
         source: 'room-calibration',
-        calibratedRoomId: null,
-        createdAt: 1234567890
       });
       expect(statePatch.projectId).toBe('test-uuid-1234');
       expect(statePatch.canvasRotation).toBe(90);
@@ -495,8 +490,6 @@ describe('projectSerializer', () => {
         calibrated: true,
         feetPerPixel: { x: 0.1, y: 0.104 },
         source: 'line-calibration',
-        calibratedRoomId: null,
-        createdAt: 1234567890,
         quality: {
           level: 'note',
           reason: 'scale-anisotropic',
@@ -537,7 +530,6 @@ describe('warning anchors round-trip', () => {
       holes: [],
       closed: true,
       visible: true,
-      locked: false,
       color: '#BD93F9',
       quality: {
         source: 'auto',
@@ -690,6 +682,33 @@ describe('a persisted field removed from the app', () => {
   });
 });
 
+// Fields inside a persisted record that the app wrote, never read, and stopped
+// writing in October 2026: an outline's `locked`, the protractor's `visible`,
+// `locked` and `snapEnabled`, the scale's `calibratedRoomId` and `createdAt`.
+// Every file saved before then carries them, and still has to open. A file
+// saved now has none, which the schema used to refuse for three of the six;
+// every `reopen` in this suite is that case.
+describe('fields a saved record no longer has', () => {
+  const savedBefore = () => {
+    const file = JSON.parse(JSON.stringify(sanitizeData(serializeSketch(createMockStoreState()))));
+    const state = file.floors[0].state;
+    state.perimeterTraces[0].locked = false;
+    Object.assign(state.calibration, { calibratedRoomId: null, createdAt: 1234567890 });
+    state.angleToolState = {
+      center: { x: 100, y: 100 }, angle1: 0, angle2: 90, radius1: 40, radius2: 60,
+      visible: true, locked: false, snapEnabled: true,
+    };
+    return JSON.stringify(file);
+  };
+
+  it('opens a file that carries them', () => {
+    const { statePatch } = importProject(savedBefore());
+    expect(statePatch.perimeterTraces[0].vertices).toHaveLength(3);
+    expect(statePatch.calibration.feetPerPixel).toEqual({ x: 2, y: 2 });
+    expect(statePatch.angleToolState.center).toEqual({ x: 100, y: 100 });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The whole projection through a real file
 // ---------------------------------------------------------------------------
@@ -743,16 +762,6 @@ const fullyPopulatedPlan = () => {
         outer: { vertices: ring(8, 8, 304), holes: [{ id: 'hole-auto-0', ring: ring(50, 50, 20), source: 'auto' }] },
         inner: { vertices: ring(14, 14, 292), holes: [] },
       },
-      attempts: [{
-        at: 1700000000000,
-        source: 'auto',
-        confidence: 0.4,
-        area: 81000,
-        vertices: ring(12, 12, 290),
-        holes: [],
-        quality: { source: 'auto', confidence: 0.4, warnings: [] },
-        remediation: { ran: false },
-      }],
     }),
     makeTrace({
       id: 'trace-garage',
@@ -760,7 +769,6 @@ const fullyPopulatedPlan = () => {
       nameSource: 'user',
       vertices: ring(320, 10, 120),
       closed: true,
-      locked: true,
       visible: false,
       type: 'garage',
       typeSource: 'user',
@@ -784,8 +792,6 @@ const fullyPopulatedPlan = () => {
       calibrated: true,
       feetPerPixel: { x: 0.104, y: 0.1 },
       source: 'room-calibration',
-      calibratedRoomId: 'label-3',
-      createdAt: 1700000000000,
       quality: {
         level: 'check',
         reason: 'room-vs-project',
@@ -833,9 +839,6 @@ const fullyPopulatedPlan = () => {
       angle2: 90,
       radius1: 40,
       radius2: 60,
-      visible: true,
-      locked: true,
-      snapEnabled: false,
     },
     measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }],
     scaleLines: [{ id: 'scale-1', start: { x: 10, y: 10 }, end: { x: 210, y: 10 }, feet: 20 }],

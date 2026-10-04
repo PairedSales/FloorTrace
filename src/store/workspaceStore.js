@@ -93,7 +93,7 @@ const useWorkspaceStore = create((set, get) => ({
   statusFlash: null,
 
   // The one notice: something outside the plan went wrong — a file, a save,
-  // storage — as {text, tone, action, at}, or null. One slot and no queue:
+  // storage — as {text, tone, at}, or null. One slot and no queue:
   // a second notice replaces the first (`utils/notify.js`).
   notice: null,
 
@@ -165,9 +165,9 @@ const useWorkspaceStore = create((set, get) => ({
   menuOpen: null,
 
   // Pending destructive confirmation, as {message, detail, confirmLabel,
-  // cancelLabel, resolve}. Parked here so askConfirm() can stay a plain
-  // promise-returning function callable from non-React code while a real
-  // dialog does the rendering.
+  // resolve}. Parked here so askConfirm() can stay a plain promise-returning
+  // function callable from non-React code while a real dialog does the
+  // rendering.
   confirmRequest: null,
 
   setShowHelpModal: (v) => set({ showHelpModal: v }),
@@ -175,8 +175,8 @@ const useWorkspaceStore = create((set, get) => ({
   flashStatus: (text, tone = 'ok') => set({
     statusFlash: { text, tone: tone === 'warn' ? 'warn' : 'ok', at: Date.now() },
   }),
-  setNotice: ({ text, tone = 'crit', action = null }) => set({
-    notice: { text, tone: tone === 'warn' ? 'warn' : 'crit', action, at: Date.now() },
+  setNotice: ({ text, tone = 'crit' }) => set({
+    notice: { text, tone: tone === 'warn' ? 'warn' : 'crit', at: Date.now() },
   }),
   dismissNotice: () => set({ notice: null }),
   setRetraceOfferFor: (docId) => set({ retraceOfferFor: docId ?? null }),

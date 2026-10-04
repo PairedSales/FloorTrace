@@ -464,14 +464,14 @@ export const generateCandidates = (net, analysis, options = {}) => {
       rescue.usedSpan = true;
       const segs = segmentsFor(net.mask);
       const spanned = orMasks(segmentSpanMask(segs, width, height), weldedAll.slice());
-      climb('all', 'span', spanned, bridgedSpan(segs).longest, radii);
+      climb('all', 'span', spanned, bridgedSpan(segs), radii);
       if (structuralMask) {
         const segsStructural = segmentsFor(structuralMask);
         const spannedStructural = orMasks(
           segmentSpanMask(segsStructural, width, height),
           bridgeRunsGuarded(structuralMask, width, height, maxGap, minFlank, probeDepth),
         );
-        climb('structural', 'span', spannedStructural, bridgedSpan(segsStructural).longest, radii);
+        climb('structural', 'span', spannedStructural, bridgedSpan(segsStructural), radii);
       }
     },
   };

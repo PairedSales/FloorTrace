@@ -479,8 +479,7 @@ const distinctRooms = (points) => {
  * has no words for.
  */
 export const collectNonGlaRegions = (footprint, analysis, options) => {
-  const { width, height, wallThickness } = analysis;
-  const wallMask = options.wallMask ?? analysis.wallMask;
+  const { width, height, wallThickness, wallMask } = analysis;
   const exteriorThickness = options.exteriorThickness;
   const minCavity = Math.max(16, exteriorThickness * exteriorThickness * 4);
   const regions = [];
@@ -806,6 +805,9 @@ export const refusedRegion = (region, reason) => ({
   reason,
 });
 
+// The share of a footprint the carves may remove between them.
+const MAX_CUMULATIVE_REMOVAL = 0.5;
+
 /**
  * Remove accepted regions from the footprint in ONE pass, so the result cannot
  * depend on detector order, and stop at a cumulative bound so three
@@ -826,7 +828,6 @@ export const refusedRegion = (region, reason) => ({
 export const applyRegions = (footprint, regions, analysis, options) => {
   const { width, height, wallThickness } = analysis;
   const exteriorThickness = options.exteriorThickness;
-  const maxCumulative = options.maxCumulativeRemoval ?? 0.5;
   const originalArea = footprint.area;
   const openR = Math.max(2, exteriorThickness + 2);
   const rooms = distinctRooms(livingPoints(options));
@@ -861,7 +862,7 @@ export const applyRegions = (footprint, regions, analysis, options) => {
   let removedArea = 0;
   let carved = null;
   for (const region of regions) {
-    if (removedArea + region.size > maxCumulative * originalArea) {
+    if (removedArea + region.size > MAX_CUMULATIVE_REMOVAL * originalArea) {
       rejected.push(refusedRegion(region, 'cumulative-bound'));
       continue;
     }

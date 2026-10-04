@@ -146,7 +146,7 @@ export const analyzeFloorplan = (imageData, options = {}) => {
 
   // Drop small components: text glyphs, window tick marks, arrows, dots.
   // Walls (and anything attached to them) form far larger components.
-  const speckMax = options.speckMaxDim ?? Math.max(14, Math.round(longest * 0.03));
+  const speckMax = Math.max(14, Math.round(longest * 0.03));
   const { labels, components } = labelComponents(ink, width, height);
   const cleaned = ink.slice();
   for (const comp of components) {
@@ -166,7 +166,7 @@ export const analyzeFloorplan = (imageData, options = {}) => {
   // enough to survive a small square opening (thick walls of any shape).
   // This removes door swing arcs and stray curves that survived the speck
   // filter because they touch nothing.
-  const minRun = options.minRunLength ?? Math.max(12, Math.round(longest * 0.018));
+  const minRun = Math.max(12, Math.round(longest * 0.018));
   const tolerant = dilateRect(cleaned, width, height, 1);
   // All four directions accumulate into one mask — `keepLongRuns` only sets
   // bits, so this is the same union the three OR passes produced, without the
@@ -313,15 +313,12 @@ export const analyzeFloorplan = (imageData, options = {}) => {
 
   // `wallThickness` is the answer to "is this image too small to trace": it is
   // the dominant stroke width *at working scale*, and below ~3px the speck
-  // filter and the run filter take the walls with the noise. `downscaled` says
-  // which remedy applies — a thin stroke on a raster we shrank can be recovered
-  // by raising `maxDimension`, one at scale 1:1 cannot be recovered at all.
+  // filter and the run filter take the walls with the noise.
   return {
     width,
     height,
     scaleX: scaled.scaleX,
     scaleY: scaled.scaleY,
-    downscaled: scaled.scaleX < 1 || scaled.scaleY < 1,
     ink,
     gray: scaled.gray,
     cleaned,

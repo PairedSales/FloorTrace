@@ -12,7 +12,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { usePlanManager } from '../usePlanManager';
 import { getFileHandle, rememberFileHandle, forgetFileHandle } from '../../utils/fileHandles';
-import { app, oneDocument, addParkedDocument, IMAGE_A, IMAGE_B } from './harness';
+import { DEFAULT_TRACE_TYPE } from '../../utils/traceTypes';
+import {
+  app, oneDocument, addParkedDocument, addUnhydratedDocument, IMAGE_A, IMAGE_B,
+} from './harness';
 
 const drafts = vi.hoisted(() => ({
   readDocDraft: vi.fn(async () => ({ status: 'ok', state: { image: 'data:image/png;base64,X' } })),
@@ -82,6 +85,39 @@ describe('usePlanManager', () => {
     const { result } = renderHook(() => usePlanManager());
     await act(async () => { await result.current.closePlan(docB, { confirmFirst: false }); });
     expect(drafts.removePlan).toHaveBeenCalledWith(docB);
+  });
+
+  // After a reload every background plan is still on disk, and the first
+  // switch parks its record straight from there. Adopting a parked record
+  // does not migrate, so the read has to, or a draft an older build wrote
+  // reaches the store exactly as it was saved.
+  it('migrates a plan read back from disk', async () => {
+    const docC = addUnhydratedDocument();
+    drafts.readDocDraft.mockResolvedValueOnce({
+      status: 'ok',
+      state: {
+        image: IMAGE_B,
+        perimeterTraces: [{
+          id: 'saved',
+          name: 'Guest Wing',
+          vertices: [],
+          closed: true,
+          visible: true,
+          color: '#BD93F9',
+          attempts: [{ vertices: [] }],
+        }],
+        activeTraceId: 'saved',
+      },
+    });
+    const { result } = renderHook(() => usePlanManager());
+
+    await act(async () => { await result.current.switchPlan(docC); });
+
+    expect(app().activeDocumentId).toBe(docC);
+    const [trace] = app().perimeterTraces;
+    expect(trace.type).toBe(DEFAULT_TRACE_TYPE);
+    expect(trace.nameSource).toBe('user');
+    expect(Object.hasOwn(trace, 'attempts')).toBe(false);
   });
   // Closing the *last* plan is structurally different — the plan does not go
   // away, it is emptied in place and keeps its id — and that branch lived in

@@ -11,7 +11,7 @@
 
 const EPS = 1e-6;
 
-export const signedArea = (v) => {
+const signedArea = (v) => {
   let a = 0;
   for (let i = 0; i < v.length; i += 1) {
     const [x0, y0] = v[i];

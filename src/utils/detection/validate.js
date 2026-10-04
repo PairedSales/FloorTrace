@@ -302,10 +302,9 @@ export const orientDimsToBox = (dimWidth, dimHeight, boxWidth, boxHeight) => {
 // This is the cheapest correctness check available to the app and needs no new
 // state — sx and sy are both already in hand wherever a scale is set.
 export const scaleIsotropy = (scaleX, scaleY, tolerance = ISOTROPY_TOLERANCE) => {
-  if (!(scaleX > 0) || !(scaleY > 0)) return { ok: false, ratio: NaN, logDistance: Infinity };
-  const ratio = scaleX / scaleY;
-  const logDistance = Math.abs(Math.log(ratio));
-  return { ok: logDistance <= tolerance, ratio, logDistance };
+  if (!(scaleX > 0) || !(scaleY > 0)) return { ok: false, logDistance: Infinity };
+  const logDistance = Math.abs(Math.log(scaleX / scaleY));
+  return { ok: logDistance <= tolerance, logDistance };
 };
 
 // How far from the median an estimate may sit and still be one of the rooms
@@ -380,8 +379,6 @@ export const decideProjectScale = ({
   const base = {
     scale: { x: room.x, y: room.y },
     adopted: true,
-    roomScale,
-    projectScale: others ? others.value : null,
     roomCount: Math.floor(otherSamples.length / 2),
   };
 

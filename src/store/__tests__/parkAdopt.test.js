@@ -31,7 +31,7 @@ describe('park and adopt', () => {
         projectName: '42 Oak Ave',
         perimeterTraces: [only],
         activeTraceId: only.id,
-        calibration: { calibrated: true, feetPerPixel: { x: 0.05, y: 0.05 }, source: 'room-calibration', calibratedRoomId: null, createdAt: 1, quality: null },
+        calibration: { calibrated: true, feetPerPixel: { x: 0.05, y: 0.05 }, source: 'room-calibration', quality: null },
         rooms: [{ rect: { left: 1, right: 2, top: 3, bottom: 4 } }],
         detectedDimensions: [{ width: 10, height: 12, text: "10' x 12'", bbox: { x: 1, y: 2, width: 3, height: 4 }, format: 'decimal' }],
         measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 5, y: 5 } }],

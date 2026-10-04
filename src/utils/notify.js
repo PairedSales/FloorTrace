@@ -48,17 +48,15 @@ export function flash(text, tone = 'ok') {
  * Something outside the plan went wrong. `type` is 'error' when it failed and
  * 'warning' when it half-worked or the user's work is at risk.
  *
- * `action` is `{label, onClick}` — the one thing to do about it, when there is
- * one. Latest wins; there is no stack to manage and no id to pick.
+ * Latest wins; there is no stack to manage and no id to pick.
  */
-export function notify(message, { type = 'error', action = null } = {}) {
+export function notify(message, { type = 'error' } = {}) {
   if (type !== 'error' && type !== 'warning') {
     throw new Error(`notify() is for failures: type must be 'error' or 'warning' (got ${JSON.stringify(type)}) for: ${message}`);
   }
   useWorkspaceStore.getState().setNotice({
     text: message,
     tone: type === 'error' ? 'crit' : 'warn',
-    action,
   });
 }
 

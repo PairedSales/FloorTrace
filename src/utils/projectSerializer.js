@@ -74,8 +74,6 @@ const calibrationSchema = z.looseObject({
     z.looseObject({ x: z.number(), y: z.number() })
   ]),
   source: z.string().nullable().optional(),
-  calibratedRoomId: z.string().nullable().optional(),
-  createdAt: z.number().nullable().optional(),
   quality: scaleQualitySchema,
 }).optional();
 
@@ -170,30 +168,12 @@ const perimeterTraceSchema = z.looseObject({
   holes: z.array(holeSchema).optional(),
   // How much the detector trusted this outline, and why not more.
   quality: traceQualitySchema,
-  // What this outline was before a re-trace, a draw-mode result or its first
-  // hand edit replaced it — oldest first, capped at MAX_TRACE_ATTEMPTS.
-  // Declared for the reason `scope` and `anchor` on a warning are: a later
-  // tightening that dropped it would turn every recovery back into a re-scan
-  // with nothing saying so.
-  // `wallFaces` is deliberately not part of an attempt — see `makeAttempt`.
-  attempts: z.array(z.looseObject({
-    at: z.number().optional(),
-    source: z.string().optional(),
-    confidence: z.number().nullable().optional(),
-    // px², so a scale corrected after the fact cannot falsify a stored row.
-    area: z.number().optional(),
-    vertices: z.array(vertexSchema),
-    holes: z.array(holeSchema).optional(),
-    quality: traceQualitySchema,
-    remediation: z.looseObject({}).nullable().optional(),
-  })).optional(),
   wallFaces: z.looseObject({
     outer: wallFaceSchema,
     inner: wallFaceSchema,
   }).nullable().optional(),
   closed: z.boolean(),
   visible: z.boolean(),
-  locked: z.boolean(),
   color: z.string(),
   // Which reported subtotal this trace's area lands in, and whether `color` is
   // derived from that type or was chosen and must be preserved.
@@ -255,9 +235,6 @@ const angleToolStateSchema = z.looseObject({
   angle2: z.number(),
   radius1: z.number(),
   radius2: z.number(),
-  visible: z.boolean(),
-  locked: z.boolean(),
-  snapEnabled: z.boolean().optional(),
 }).nullable().optional();
 
 const bboxSchema = z.looseObject({

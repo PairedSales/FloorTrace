@@ -189,12 +189,11 @@ const crowdTrouble = (box, placed, margin) => {
  *   only through that order, so sort before passing)
  * @param {Obstacles} obstacles
  * @param {object} [options]
- * @param {number} [options.margin] the gap to keep (default `LABEL_GAP`)
  * @param {boolean} [options.crowdsOk] labels may overlap each other
  * @returns {Map<string|number, Candidate & {clear:boolean,rank:number}>} the candidate taken, with
  *   `rank` its index in the label's list: 0 is the label's first choice.
  */
-export function placeLabels(labels, obstacles, { margin = LABEL_GAP, crowdsOk = false } = {}) {
+export function placeLabels(labels, obstacles, { crowdsOk = false } = {}) {
   const fixed = { segments: obstacles.segments ?? [], discs: obstacles.discs ?? [], rects: obstacles.rects ?? [] };
 
   // The places each label can go as far as the walls and corners are concerned.
@@ -202,7 +201,7 @@ export function placeLabels(labels, obstacles, { margin = LABEL_GAP, crowdsOk = 
   // also how the order is chosen: the label with the fewest is placed first.
   const entries = labels.map((label) => {
     const boxes = label.candidates.map(boxOf);
-    const trouble = boxes.map((box) => fixedTrouble(box, fixed, margin));
+    const trouble = boxes.map((box) => fixedTrouble(box, fixed, LABEL_GAP));
     let free = 0;
     for (const t of trouble) if (t === 0) free += 1;
     return { label, boxes, trouble, free };
@@ -219,7 +218,7 @@ export function placeLabels(labels, obstacles, { margin = LABEL_GAP, crowdsOk = 
     let pick = -1;
     for (let i = 0; i < n; i += 1) {
       if (trouble[i] > 0) continue;
-      if (!crowdsOk && crowdTrouble(boxes[i], placed, margin) > 0) continue;
+      if (!crowdsOk && crowdTrouble(boxes[i], placed, LABEL_GAP) > 0) continue;
       pick = i;
       break;
     }
@@ -230,7 +229,7 @@ export function placeLabels(labels, obstacles, { margin = LABEL_GAP, crowdsOk = 
       // deciding between equals.
       let least = Infinity;
       for (let i = 0; i < n; i += 1) {
-        const t = trouble[i] + (crowdsOk ? 0 : crowdTrouble(boxes[i], placed, margin));
+        const t = trouble[i] + (crowdsOk ? 0 : crowdTrouble(boxes[i], placed, LABEL_GAP));
         if (t < least - 1e-9) {
           least = t;
           pick = i;

@@ -571,8 +571,8 @@ export function useAutosave() {
           // the first edit makes that message a lie. Fall through and write
           // what is left instead.
           //
-          // Geometry, not trace count: `resetPerimeterTraces` always leaves one
-          // empty "1st Floor" behind, so an empty plan has a trace too.
+          // Geometry, not trace count: a plan always holds one empty "1st Floor"
+          // (`workingStateDefaults`), so an empty plan has a trace too.
           const drawn = (state.perimeterTraces ?? []).some((t) => t.vertices?.length >= 3);
           if (drawn) return;
 

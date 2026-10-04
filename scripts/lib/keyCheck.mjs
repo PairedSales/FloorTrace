@@ -36,8 +36,8 @@ import {
   areaOf, areasOf, bboxOf, pointInRing, ringProblem, sharedBoundaryLength,
 } from './keyGeometry.mjs';
 
-export const FACE_TOLERANCE = 2;
-export const STATED_TOLERANCE = 0.05;
+const FACE_TOLERANCE = 2;
+const STATED_TOLERANCE = 0.05;
 const OVERLAP_PX = 2;
 const OVERLAP_SHARE = 0.002;
 const FIXED_SHARE = 0.5;

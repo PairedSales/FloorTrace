@@ -25,7 +25,7 @@ describe('summariseIssues', () => {
   });
 
   it('counts one per double-counted outline, and names the pair', () => {
-    const doubles = [{ innerName: 'Garage', outerName: '1st Floor' }, { innerId: 'b' }];
+    const doubles = [{ innerName: 'Garage', outerName: '1st Floor' }, {}];
     const summary = summariseIssues([], null, doubles);
     expect(kinds(summary)).toEqual(['double-counted', 'double-counted']);
     expect(summary.issues[0].label).toBe('Garage sits inside 1st Floor');

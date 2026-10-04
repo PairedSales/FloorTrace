@@ -34,7 +34,7 @@ import { writeFileAtomic } from './keyFiles.mjs';
 // `FLOORTRACE_ARCHIVE_CACHE` points the tool at another folder (the tests, a
 // scratch run); by default the main checkout's datasets/, whatever worktree
 // runs the tool.
-export const cacheDir = (env = process.env) => (env.FLOORTRACE_ARCHIVE_CACHE
+const cacheDir = (env = process.env) => (env.FLOORTRACE_ARCHIVE_CACHE
   ? path.resolve(env.FLOORTRACE_ARCHIVE_CACHE)
   : path.join(DATASETS_DIR, 'archive-cache'));
 
@@ -53,7 +53,7 @@ export class HttpError extends Error {
 // without the root label's trailing dot (`web.archive.org.` is the same host, so
 // it must get the same gap; a second dot is not one host's spelling and stays,
 // so `archive.org..` is refused).
-export const normalizeHost = (host) => String(host).toLowerCase().replace(/\.$/, '');
+const normalizeHost = (host) => String(host).toLowerCase().replace(/\.$/, '');
 
 export const isAllowedHost = (host) => {
   const h = normalizeHost(host);
@@ -88,7 +88,7 @@ export const checkUrl = (text, what = 'URL') => {
 };
 
 // The two spacing classes: the Wayback Machine is the expensive one.
-export const hostClass = (host) => (normalizeHost(host) === 'web.archive.org' ? 'wayback' : 'other');
+const hostClass = (host) => (normalizeHost(host) === 'web.archive.org' ? 'wayback' : 'other');
 
 // ---- images ----------------------------------------------------------------
 
@@ -107,7 +107,7 @@ export const sniffImage = (bytes) => {
   return null;
 };
 
-export const EXT_OF_MIME = {
+const EXT_OF_MIME = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp',
 };
 const EXTS = Object.values(EXT_OF_MIME);
@@ -203,7 +203,7 @@ export const realClock = {
   sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
 };
 
-export class LockError extends Error {}
+class LockError extends Error {}
 
 const LOCK_BUSY = ['EEXIST', 'EPERM', 'EBUSY', 'EACCES'];
 
@@ -337,7 +337,7 @@ export const acquireLock = async (file, {
 };
 
 /** `fn()` while holding the lock `file`. */
-export const withLock = async (file, options, fn) => {
+const withLock = async (file, options, fn) => {
   const release = await acquireLock(file, options);
   try {
     return await fn();
@@ -354,7 +354,7 @@ const num = (value, fallback) => {
 };
 
 /** The request settings, from the environment (each is overridable for tests). */
-export const netConfig = (env = process.env) => {
+const netConfig = (env = process.env) => {
   const staleMs = num(env.FLOORTRACE_SOURCE_STALE_MS, 300000);
   return {
     gapMs: {
@@ -382,7 +382,7 @@ const MAX_HOPS = 6;
 const DAY_MS = 24 * 3600 * 1000;
 
 /** `Retry-After` as milliseconds: seconds, or an HTTP date. null when absent or unreadable. */
-export const parseRetryAfter = (value, now) => {
+const parseRetryAfter = (value, now) => {
   if (value === null || value === undefined || value === '') return null;
   if (/^\d+(\.\d+)?$/.test(String(value).trim())) return Math.round(Number(value) * 1000);
   const at = Date.parse(value);

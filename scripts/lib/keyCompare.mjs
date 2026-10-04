@@ -29,7 +29,7 @@ import {
   areaOf, areasOf, bboxOf, distanceToSegments, sampleRing, segmentsOf,
 } from './keyGeometry.mjs';
 
-export const AGREEMENT = {
+const AGREEMENT = {
   buildingIou: 0.99,
   nonGlaIou: 0.97,
   maxDistance: 3,
