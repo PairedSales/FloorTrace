@@ -19,12 +19,12 @@ describe('analysis memo scoping', () => {
     let runs = 0;
     const compute = () => { runs += 1; return { ran: runs }; };
 
-    getCachedAnalysis(KEY_A, DIM, null, compute);
-    getCachedAnalysis(KEY_B, DIM, null, compute);
+    getCachedAnalysis(KEY_A, DIM, compute);
+    getCachedAnalysis(KEY_B, DIM, compute);
     expect(runs).toBe(2);
 
-    getCachedAnalysis(KEY_A, DIM, null, compute);
-    getCachedAnalysis(KEY_B, DIM, null, compute);
+    getCachedAnalysis(KEY_A, DIM, compute);
+    getCachedAnalysis(KEY_B, DIM, compute);
     expect(runs).toBe(2);
   });
 
@@ -34,27 +34,27 @@ describe('analysis memo scoping', () => {
     let runs = 0;
     const compute = () => { runs += 1; return { ran: runs }; };
 
-    getCachedAnalysis(KEY_A, DIM, null, compute);
-    getCachedAnalysis(KEY_B, DIM, null, compute);
+    getCachedAnalysis(KEY_A, DIM, compute);
+    getCachedAnalysis(KEY_B, DIM, compute);
 
     dropCacheKey(KEY_A);
 
-    getCachedAnalysis(KEY_B, DIM, null, compute);
+    getCachedAnalysis(KEY_B, DIM, compute);
     expect(runs).toBe(2); // B survived
 
-    getCachedAnalysis(KEY_A, DIM, null, compute);
+    getCachedAnalysis(KEY_A, DIM, compute);
     expect(runs).toBe(3); // A had to be recomputed
   });
 });
 
 describe('search memo budget', () => {
   it('holds a ladder per image rather than one at a time', () => {
-    const a = getSearchCache(KEY_A, DIM, null);
-    const b = getSearchCache(KEY_B, DIM, null);
+    const a = getSearchCache(KEY_A, DIM);
+    const b = getSearchCache(KEY_B, DIM);
     expect(a).not.toBe(b);
     // Asking again returns the same instance, which is what makes a second
     // trace of a plan you returned to warm rather than cold.
-    expect(getSearchCache(KEY_A, DIM, null)).toBe(a);
+    expect(getSearchCache(KEY_A, DIM)).toBe(a);
   });
 
   // The budget was declared once and charged against each instance's own
@@ -63,11 +63,11 @@ describe('search memo budget', () => {
   it('charges every cache against one budget', () => {
     setSearchBudgetBytes(1000);
 
-    const a = getSearchCache(KEY_A, DIM, null);
+    const a = getSearchCache(KEY_A, DIM);
     a.retain(600);
     expect(a.overBudget).toBe(false);
 
-    const b = getSearchCache(KEY_B, DIM, null);
+    const b = getSearchCache(KEY_B, DIM);
     b.retain(600);
 
     // 1200 across two caches is over the shared budget even though neither
@@ -79,30 +79,30 @@ describe('search memo budget', () => {
   it('evicts another plan’s ladder before giving up on the one being built', () => {
     setSearchBudgetBytes(1000);
 
-    const a = getSearchCache(KEY_A, DIM, null);
+    const a = getSearchCache(KEY_A, DIM);
     a.retain(900);
 
-    const b = getSearchCache(KEY_B, DIM, null);
+    const b = getSearchCache(KEY_B, DIM);
     b.retain(600);
 
     // The ladder still being climbed survives; the idle one is what goes.
     expect(b.overBudget).toBe(false);
-    expect(getSearchCache(KEY_B, DIM, null)).toBe(b);
-    expect(getSearchCache(KEY_A, DIM, null)).not.toBe(a);
+    expect(getSearchCache(KEY_B, DIM)).toBe(b);
+    expect(getSearchCache(KEY_A, DIM)).not.toBe(a);
   });
 
   it('bounds how many ladders it holds at once', () => {
-    getSearchCache(KEY_A, DIM, null);
-    getSearchCache(KEY_B, DIM, null);
-    getSearchCache(KEY_C, DIM, null);
+    getSearchCache(KEY_A, DIM);
+    getSearchCache(KEY_B, DIM);
+    getSearchCache(KEY_C, DIM);
 
     expect(searchCacheStats().caches).toBeLessThanOrEqual(2);
   });
 
   it('drops a ladder with its image', () => {
-    const a = getSearchCache(KEY_A, DIM, null);
+    const a = getSearchCache(KEY_A, DIM);
     a.retain(10);
     dropCacheKey(KEY_A);
-    expect(getSearchCache(KEY_A, DIM, null)).not.toBe(a);
+    expect(getSearchCache(KEY_A, DIM)).not.toBe(a);
   });
 });

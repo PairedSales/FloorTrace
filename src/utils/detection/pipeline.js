@@ -148,8 +148,8 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
   const t0 = Date.now();
   const maxDimension = options.preprocess?.maxDimension ?? 1400;
   const analysis = getCachedAnalysis(
-    options.cacheKey, maxDimension, options.analyze,
-    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+    options.cacheKey, maxDimension,
+    () => analyzeFloorplan(imageData, { maxDimension }),
   );
   // Non-GLA label bboxes (original image px) -> working scale.
   const excludeRegions = (options.excludeRegions ?? []).map((r) => ({
@@ -170,7 +170,7 @@ export const traceFloorplanBoundaryCore = (imageData, options = {}) => {
     excludeRegions,
     constraints,
     brush,
-    searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
+    searchCache: getSearchCache(options.cacheKey, maxDimension),
   });
   if (!boundary) {
     return {
@@ -340,7 +340,7 @@ const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis
   options.cacheKey
     ? `${options.cacheKey}::roomclamp::${JSON.stringify(options.boundary ?? null)}`
     : null,
-  maxDimension, options.analyze,
+  maxDimension,
   () => traceBoundary(analysis, {
     ...options.boundary,
     autoGarage: false,
@@ -351,7 +351,7 @@ const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis
     // already turns this pair off together, for the same reason.
     autoShaded: false,
     inclusive: true,
-    searchCache: getSearchCache(options.cacheKey, maxDimension, options.analyze),
+    searchCache: getSearchCache(options.cacheKey, maxDimension),
   }),
 );
 
@@ -372,8 +372,8 @@ const roomClampBoundary = (analysis, maxDimension, options) => getCachedAnalysis
 export const prewarmDetectionCore = (imageData, options = {}) => {
   const maxDimension = options.preprocess?.maxDimension ?? 1400;
   const analysis = getCachedAnalysis(
-    options.cacheKey, maxDimension, options.analyze,
-    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+    options.cacheKey, maxDimension,
+    () => analyzeFloorplan(imageData, { maxDimension }),
   );
   roomClampBoundary(analysis, maxDimension, options);
   return { warmed: true };
@@ -399,8 +399,8 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
   // perimeter the user sees.
   const maxDimension = options.preprocess?.maxDimension ?? 1400;
   const analysis = getCachedAnalysis(
-    options.cacheKey, maxDimension, options.analyze,
-    () => analyzeFloorplan(imageData, { maxDimension, ...options.analyze }),
+    options.cacheKey, maxDimension,
+    () => analyzeFloorplan(imageData, { maxDimension }),
   );
 
   const workPoint = {
@@ -554,8 +554,8 @@ export const detectRoomFromClickCore = (imageData, clickPoint, options = {}) => 
 // the room/boundary calls default to or the sharing silently stops.
 export const wallSnapSegmentsCore = (imageData, options = {}) => {
   const analysis = getCachedAnalysis(
-    options.cacheKey, 1400, options.analyze,
-    () => analyzeFloorplan(imageData, { maxDimension: 1400, ...options.analyze }),
+    options.cacheKey, 1400,
+    () => analyzeFloorplan(imageData, { maxDimension: 1400 }),
   );
   const { vertical, horizontal } = extractWallSegments(
     analysis.ink, analysis.width, analysis.height,

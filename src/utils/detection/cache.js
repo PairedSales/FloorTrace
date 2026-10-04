@@ -10,12 +10,11 @@
 const MAX_ENTRIES = 4;
 const entries = new Map();
 
-const keyFor = (cacheKey, maxDimension, analyzeOptions) =>
-  `${cacheKey}|${maxDimension}|${analyzeOptions ? JSON.stringify(analyzeOptions) : ''}`;
+const keyFor = (cacheKey, maxDimension) => `${cacheKey}|${maxDimension}`;
 
-export const getCachedAnalysis = (cacheKey, maxDimension, analyzeOptions, compute) => {
+export const getCachedAnalysis = (cacheKey, maxDimension, compute) => {
   if (!cacheKey) return compute();
-  const key = keyFor(cacheKey, maxDimension, analyzeOptions);
+  const key = keyFor(cacheKey, maxDimension);
   if (entries.has(key)) {
     const value = entries.get(key);
     // Refresh recency.
@@ -146,9 +145,9 @@ class SearchCache extends Map {
   }
 }
 
-export const getSearchCache = (cacheKey, maxDimension, analyzeOptions) => {
+export const getSearchCache = (cacheKey, maxDimension) => {
   if (!cacheKey) return new Map();
-  const key = keyFor(cacheKey, maxDimension, analyzeOptions);
+  const key = keyFor(cacheKey, maxDimension);
   const existing = searchCaches.get(key);
   if (existing) {
     // Refresh recency.

@@ -344,8 +344,7 @@ export const shouldRemediate = (result, analysis, options = {}) => {
   const constraints = options.constraints ?? null;
   const hold = measureHold(result.floors ?? [], constraints, analysis);
   if (hold.missed.length) return true;
-  const threshold = options.remediationConfidence ?? REMEDIATION_CONFIDENCE;
-  return result.confidence < threshold;
+  return result.confidence < REMEDIATION_CONFIDENCE;
 };
 
 // The confidence this attempt would actually be shown at: the detector's own
