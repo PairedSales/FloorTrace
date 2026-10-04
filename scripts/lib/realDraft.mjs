@@ -16,9 +16,10 @@ import { fileURLToPath } from 'url';
 import { detectDimensionsCore } from '../../src/utils/dimensions/pipeline.js';
 import { configureTesseract, terminateOcrWorker } from '../../src/utils/dimensions/ocrTesseract.js';
 import { detectRoomFromClickCore, traceFloorplanBoundaryCore } from '../../src/utils/detection/pipeline.js';
-import { ringSetArea } from '../../src/utils/detection/polygon.js';
 import { selectProjectScale } from '../../src/utils/detection/scale.js';
-import { boundaryConstraints, nonGlaExcludeRegions } from '../../src/utils/traceInputs.js';
+import {
+  boundaryConstraints, labelKeyOf, nonGlaExcludeRegions, tracedAreaPx,
+} from '../../src/utils/traceInputs.js';
 import { classifyTraces } from '../../src/utils/traceClassification.js';
 import { qualitySummary } from '../../src/utils/boundaryQuality.js';
 import { assignTypeColors, autoTraceName, makeTrace, normalizeTraceType } from '../../src/utils/traceTypes.js';
@@ -112,9 +113,6 @@ export const scanImage = async (image) => {
   };
 };
 
-// A parsed label's identity, as App.jsx keys it.
-const labelKeyOf = (d) => `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`;
-
 // App.runAutoScale's labels, measured as the detection worker's batch measures
 // them: no scale prior, and every other label passed as a place this room is not.
 const measureRooms = (image, dimensions) => {
@@ -197,14 +195,6 @@ const tracesOf = (traced, areaLabels) => {
     };
   });
   return assignTypeColors(typed);
-};
-
-// App.tracedAreaPx: every floor, not the largest.
-const tracedAreaPx = (traced) => {
-  const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
-  return floors.reduce((sum, floor) => (
-    floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
-  ), 0);
 };
 
 /**

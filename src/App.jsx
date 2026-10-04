@@ -26,8 +26,9 @@ import {
 import {
   robustScale, orientDimsToBox, resolveScaleUpdate,
 } from './utils/detection/validate';
-import { ringSetArea } from './utils/detection/polygon';
-import { boundaryConstraints, nonGlaExcludeRegions } from './utils/traceInputs';
+import {
+  boundaryConstraints, labelKeyOf, nonGlaExcludeRegions, tracedAreaPx,
+} from './utils/traceInputs';
 import { useAutoScale } from './hooks/useAutoScale';
 import { qualitySummary } from './utils/boundaryQuality';
 import { loadExamplePlan } from './utils/examplePlan';
@@ -94,21 +95,6 @@ const roomScaleHint = () => {
     return { x: 1 / feetPerPixel.x, y: 1 / feetPerPixel.y };
   }
   return null;
-};
-
-// A parsed label's identity, from what it says and where it says it. Used to
-// tell the label a room was placed from apart from the rest of them, so the
-// three places that name one cannot drift.
-const labelKeyOf = (d) => `${d.text ?? ''}@${Math.round(d.bbox.x)},${Math.round(d.bbox.y)}`;
-
-// Traced floor area in image pixels. Every floor, not the largest: the labels
-// are spread over all of them, and weighing them against one floor reports a
-// correct scale on a multi-floor sheet as implausible.
-const tracedAreaPx = (traced) => {
-  const floors = traced?.floors?.length ? traced.floors : (traced ? [traced] : []);
-  return floors.reduce((sum, floor) => (
-    floor?.outer?.polygon ? sum + ringSetArea(floor.outer.polygon, floor.holes ?? []) : sum
-  ), 0);
 };
 
 // What the trace left out of the outline on purpose, as the second half of

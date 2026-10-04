@@ -256,7 +256,7 @@ export const bridgeRunsGuarded = (mask, width, height, maxGap, minFlank, probeDe
   return out;
 };
 
-const inkCount = (mask) => {
+export const inkCount = (mask) => {
   let n = 0;
   for (let i = 0; i < mask.length; i += 1) n += mask[i];
   return n;

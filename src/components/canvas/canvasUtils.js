@@ -122,6 +122,12 @@ export const getCanvasCoordinates = (stage, scaleRef, contentNodeRef = null) => 
   };
 };
 
+/** Set the pointer's cursor over the stage, from a Konva event. */
+export const setCursor = (e, cursor) => {
+  const container = e.target.getStage()?.container();
+  if (container) container.style.cursor = cursor;
+};
+
 /** Calculate distance from point to line segment */
 export const pointToLineDistance = (point, lineStart, lineEnd) => {
   const dx = lineEnd.x - lineStart.x;

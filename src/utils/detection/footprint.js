@@ -2,7 +2,7 @@
 // interior voids as holes, and an interior envelope inset per edge by the wall
 // that edge is actually drawn with.
 
-import { bboxAreaOf, erodeRect, labelComponents, openRect } from './raster.js';
+import { bboxAreaOf, erodeRect, openRect } from './raster.js';
 import {
   simplifyRing,
   fitRing,
@@ -16,20 +16,11 @@ import {
   applyRegions,
   componentMask,
   enclosedVoids,
+  largestComponent,
   sealedCavities,
   refusedRegion,
 } from './nonGla.js';
 import { warning, bboxRing } from './scoring.js';
-
-const largestComponent = (mask, width, height) => {
-  const { labels, components } = labelComponents(mask, width, height);
-  if (!components.length) return null;
-  let best = components[0];
-  for (const comp of components) {
-    if (comp.size > best.size) best = comp;
-  }
-  return { labels, component: best };
-};
 
 // How much of a footprint a space nothing opens onto has to be before saying
 // so is worth the reader's attention. The shape gate in `sealedCavities` rules

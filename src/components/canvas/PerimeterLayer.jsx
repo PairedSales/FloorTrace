@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Line, Circle, Group } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { formatArea } from '../../utils/unitConverter';
-import { circleHit, measureSideLenWidth, tabSize } from './canvasUtils';
+import { circleHit, measureSideLenWidth, setCursor, tabSize } from './canvasUtils';
 import { calculateArea, getCentroid, holeRings, holeKey, isSubtracted } from '../../utils/areaCalculator';
 import { labelAnchor } from '../../utils/labelAnchor';
 import { inkMapFor } from '../../utils/inkMap';
@@ -596,11 +596,6 @@ const PerimeterLayer = ({
       ],
     };
   })();
-
-  const setCursor = (e, cursor) => {
-    const container = e.target.getStage()?.container();
-    if (container) container.style.cursor = cursor;
-  };
 
   return (
     <>

@@ -1,11 +1,6 @@
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+import { dataUrlToImage } from './imageLoader';
 
-const loadImageElement = (src) => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => resolve(img);
-  img.onerror = reject;
-  img.src = src;
-});
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const CORNER_BOX_HALF = 15; // 30x30 search
 const QUADRANT_OFFSET = 4;
@@ -77,7 +72,7 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     };
   }
 
-  const image = await loadImageElement(imageSrc);
+  const image = await dataUrlToImage(imageSrc);
   const naturalW = image.naturalWidth || image.width;
   const naturalH = image.naturalHeight || image.height;
 

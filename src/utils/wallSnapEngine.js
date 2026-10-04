@@ -6,19 +6,13 @@ import { binarizeToWorkingScale } from './detection/raster';
 // One wall-segment extractor for the whole app. The snap engine and the
 // boundary stage were running two copies of the same vectorisation.
 import { extractWallSegments } from './detection/wallEvidence';
+import { dataUrlToImage } from './imageLoader';
 
 export { extractWallSegments };
 
 const WORKING_MAX_DIMENSION = 1400;
 const EDGE_OVERLAP_FRAC = 0.35;
 const SEGMENT_OVERLAP_FRAC = 0.8;
-
-const loadImageElement = (src) => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => resolve(img);
-  img.onerror = reject;
-  img.src = src;
-});
 
 // Best segment within tolerance of pos whose extent sufficiently overlaps the
 // edge span [spanA, spanB]. Snaps to the requested wall face — 'lo' is the
@@ -110,7 +104,7 @@ export const createWallSnapEngine = async (imageSrc) => {
     return { snapVerticalEdge: noop, snapHorizontalEdge: noop };
   }
 
-  const image = await loadImageElement(imageSrc);
+  const image = await dataUrlToImage(imageSrc);
   const naturalW = image.naturalWidth || image.width;
   const naturalH = image.naturalHeight || image.height;
 

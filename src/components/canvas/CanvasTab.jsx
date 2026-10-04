@@ -1,12 +1,7 @@
 import React from 'react';
 import { Group, Rect, Text } from 'react-konva';
-import { tabSize, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE } from './canvasUtils';
+import { setCursor, tabSize, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE } from './canvasUtils';
 import { PAPER } from './overlayStyle';
-
-const setCursor = (e, cursor) => {
-  const container = e.target.getStage()?.container();
-  if (container) container.style.cursor = cursor;
-};
 
 /**
  * A figure on the plan: a small white label, upright whatever way the plan is

@@ -13,18 +13,12 @@ import { bboxAreaOf, dilateRect, labelComponents, openRect } from './raster.js';
 import { pointInPolygon } from './polygon.js';
 import { createEvidence, contourSupport } from './wallEvidence.js';
 import {
-  generateCandidates, footprintEntry, measureFootprint, netSelfSeals, netEnclosure, INDEPENDENT_SEAL,
+  generateCandidates, footprintEntry, inkCount, measureFootprint, netSelfSeals, netEnclosure, INDEPENDENT_SEAL,
 } from './candidates.js';
 import { scoreCandidate, pickCandidate, candidateConfidence, warning, bboxRing } from './scoring.js';
 import { buildFloor } from './footprint.js';
 import { brushNetworks, strokeRegion } from './brush.js';
 import { remediateTrace, shouldRemediate } from './remediate.js';
-
-const inkCount = (mask) => {
-  let n = 0;
-  for (let i = 0; i < mask.length; i += 1) n += mask[i];
-  return n;
-};
 
 const contains = (outer, inner, margin) =>
   outer.minX - margin <= inner.minX && outer.maxX + margin >= inner.maxX
