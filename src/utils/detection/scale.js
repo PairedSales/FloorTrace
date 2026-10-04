@@ -169,7 +169,6 @@ export const selectProjectScale = (candidates = [], context = {}) => {
       roomCount: 0,
       spread: 0,
       areaRatio: null,
-      acceptedCount: 0,
       contributors: [],
       rejected,
     };
@@ -282,11 +281,6 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     // The area cross-check, reported rather than only tested: it is the one
     // number in the app that can see a footprint too big.
     areaRatio,
-    acceptedCount: accepted.length,
-    labelSqFt: labelSqFt > 0 ? labelSqFt : null,
-    footprintSqFt: footprintSqFt > 0 ? footprintSqFt : null,
-    medianSideFt,
-    widestSideFt,
     contributors,
     rejected,
   };

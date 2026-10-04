@@ -57,7 +57,6 @@ const segmentsForDirection = (ink, width, height, direction, opts) => {
       thick,
       weight: comp.size,
       drawn: len,
-      direction,
     });
   }
   return mergeCollinear(raw, opts.bridgeGap);
@@ -105,20 +104,19 @@ export const segmentSpanMask = (segments, width, height) => {
   return mask;
 };
 
-// Total length of segment extent that was bridged rather than drawn. A large
-// value means the outline leans on inferred wall rather than observed ink.
+// How much of a segment was bridged rather than drawn: the widest average
+// bridge among the segments built from more than one piece. A large value
+// means the outline leans on inferred wall rather than observed ink.
 export const bridgedSpan = (segments) => {
-  let total = 0;
   let longest = 0;
   for (const list of [segments.vertical, segments.horizontal]) {
     for (const seg of list) {
       const extent = seg.hi - seg.lo + 1;
       const gap = Math.max(0, extent - seg.drawn);
-      total += gap;
       if (seg.pieces > 1) longest = Math.max(longest, gap / Math.max(1, seg.pieces - 1));
     }
   }
-  return { total, longest };
+  return longest;
 };
 
 // Graded per-point wall evidence. Structural ink (survives the thickness
