@@ -1,6 +1,7 @@
 import React from 'react';
 import { Group, Rect, Text } from 'react-konva';
-import { measureSideLenWidth, SIDE_LEN_FONT_FAMILY } from './canvasUtils';
+import { SIDE_LEN_FONT_FAMILY } from './canvasUtils';
+import { stickerLayout } from './stickerLayout';
 import { PAPER, lineColor, solidColor, inkColor } from './overlayStyle';
 
 /**
@@ -15,36 +16,33 @@ import { PAPER, lineColor, solidColor, inkColor } from './overlayStyle';
  * the walls and of the room sizes the plan prints. When it has not, the label
  * becomes one line: a porch four feet deep cannot carry three lines of type,
  * and on a plan with a size printed in every room a big label would cover one.
+ *
+ * With `onMoved` it can be dragged elsewhere.
  */
+const setCursor = (e, cursor) => {
+  const container = e.target.getStage()?.container();
+  if (container) container.style.cursor = cursor;
+};
+
 const OutlineSticker = ({
-  x, y, roomy, name, areaText, note, counted, color, scale, rotation = 0,
+  x, y, roomy, name, areaText, note, counted, color, scale, rotation = 0, onMoved,
 }) => {
   const hue = color;
-  const full = [
-    { text: name, size: 14 / scale, style: 'normal' },
-    { text: areaText, size: (counted ? 24 : 19) / scale, style: '600' },
-    ...(note ? [{ text: note, size: 13 / scale, style: 'normal' }] : []),
-  ];
-  const padX = 16 / scale;
-  const padY = 7 / scale;
-  const fullWidth = Math.max(...full.map((l) => measureSideLenWidth(l.text, l.size))) + padX * 2;
-  const fullHeight = full.reduce((sum, l) => sum + l.size * 1.2, 0) + padY * 2;
   const fits = roomy;
-
-  // One line still says whether the outline counts: that is the half of the
-  // label a reader cannot work out from the figure.
-  const lines = fits ? full : [{
-    text: [name, areaText === '—' ? null : areaText, counted ? null : 'not in GLA']
-      .filter(Boolean).join(' · '),
-    size: 13 / scale,
-    style: '600',
-  }];
-  const width = fits ? fullWidth : measureSideLenWidth(lines[0].text, lines[0].size) + 16 / scale;
-  const height = fits ? fullHeight : lines[0].size * 1.2 + 8 / scale;
+  const { lines, width, height, padY } = stickerLayout({ roomy, name, areaText, note, counted }, scale);
 
   let cursor = -height / 2 + (fits ? padY : 4 / scale);
   return (
-    <Group x={x} y={y} rotation={-rotation} listening={false}>
+    <Group
+      x={x}
+      y={y}
+      rotation={-rotation}
+      listening={!!onMoved}
+      draggable={!!onMoved}
+      onDragEnd={onMoved ? (e) => onMoved({ x: e.target.x(), y: e.target.y() }) : undefined}
+      onMouseEnter={onMoved ? (e) => setCursor(e, 'move') : undefined}
+      onMouseLeave={onMoved ? (e) => setCursor(e, 'default') : undefined}
+    >
       <Rect
         x={-width / 2}
         y={-height / 2}
