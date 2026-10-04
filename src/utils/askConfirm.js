@@ -13,12 +13,11 @@ import useWorkspaceStore from '../store/workspaceStore';
  */
 export function askConfirm(message, {
   confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
   detail = null,
 } = {}) {
   return new Promise((resolve) => {
     useWorkspaceStore.getState().requestConfirm({
-      message, detail, confirmLabel, cancelLabel, resolve,
+      message, detail, confirmLabel, resolve,
     });
   });
 }

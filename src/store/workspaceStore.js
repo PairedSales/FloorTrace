@@ -165,9 +165,9 @@ const useWorkspaceStore = create((set, get) => ({
   menuOpen: null,
 
   // Pending destructive confirmation, as {message, detail, confirmLabel,
-  // cancelLabel, resolve}. Parked here so askConfirm() can stay a plain
-  // promise-returning function callable from non-React code while a real
-  // dialog does the rendering.
+  // resolve}. Parked here so askConfirm() can stay a plain promise-returning
+  // function callable from non-React code while a real dialog does the
+  // rendering.
   confirmRequest: null,
 
   setShowHelpModal: (v) => set({ showHelpModal: v }),

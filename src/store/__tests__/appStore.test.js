@@ -546,9 +546,7 @@ describe('double-count detection', () => {
 
     const { doubleCounted } = selectActiveAreaByType(useAppStore.getState());
     expect(doubleCounted).toHaveLength(1);
-    expect(doubleCounted[0]).toMatchObject({ innerId: 'garage', outerName: 'house' });
-    // Why, in words the panel can print.
-    expect(doubleCounted[0].detail).toBe('garage sits inside house, so its area is counted twice');
+    expect(doubleCounted[0]).toEqual({ innerName: 'garage', outerName: 'house' });
   });
 
   it('says nothing about a garage drawn beside the house', () => {

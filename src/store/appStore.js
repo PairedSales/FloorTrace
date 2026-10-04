@@ -844,12 +844,7 @@ const findDoubleCounted = (traces) => {
       if (outer === inner) continue;
       if (normalizeTraceType(outer.type) !== DEFAULT_TRACE_TYPE) continue;
       if (containmentRatio(inner.vertices, outer.vertices) >= NESTED_ENOUGH) {
-        found.push({
-          innerId: inner.id,
-          innerName: inner.name,
-          outerName: outer.name,
-          detail: `${inner.name} sits inside ${outer.name}, so its area is counted twice`,
-        });
+        found.push({ innerName: inner.name, outerName: outer.name });
         break;
       }
     }
