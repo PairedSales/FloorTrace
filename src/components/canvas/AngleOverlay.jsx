@@ -3,6 +3,7 @@ import { Group, Line, Circle, Arc, Rect, Text } from 'react-konva';
 import { getDerivedEndpoints, getAngleLayout, findAngleSnapPointScreen, findVertexNeighbors } from '../../utils/angleMath';
 import { circleHit, measureSideLenWidth, CANVAS_FONT_FAMILY } from './canvasUtils';
 import { useIsTouch } from '../../hooks/useViewport';
+import { ACCENT, INK, PAPER, withAlpha } from './overlayStyle';
 
 // The protractor's three handles are 5-6 px of drawn radius, and two of them
 // sit on the arms where they overlap the very walls the user is aiming at.
@@ -89,7 +90,7 @@ const AngleOverlay = ({
     // 4. Update Text label
     if (labelTextRef.current && labelBgRef.current) {
       const angleText = `${layout.angleDeg.toFixed(1)}°`;
-      const fontSize = 11 / scale;
+      const fontSize = 13.5 / scale;
 
       // Update text details
       labelTextRef.current.text(angleText);
@@ -113,7 +114,7 @@ const AngleOverlay = ({
       labelBgRef.current.height(rectH);
       labelBgRef.current.offsetX(rectW / 2);
       labelBgRef.current.offsetY(rectH / 2);
-      labelBgRef.current.cornerRadius(rectH / 2);
+      labelBgRef.current.cornerRadius(Math.min(6 / scale, rectH / 2));
     }
   }, [scale]);
 
@@ -387,8 +388,8 @@ const AngleOverlay = ({
       {/* Visual protractor sweep arc */}
       <Arc
         ref={arcRef}
-        fill="rgba(139, 233, 253, 0.18)"
-        stroke="#8BE9FD"
+        fill={withAlpha(INK, 0.08)}
+        stroke={INK}
         strokeWidth={1.2 / scale}
         listening={false}
       />
@@ -396,7 +397,7 @@ const AngleOverlay = ({
       {/* Vector arm 1 */}
       <Line
         ref={line1Ref}
-        stroke="#BD93F9"
+        stroke={INK}
         strokeWidth={handleStrokeWidth}
         dash={[6 / scale, 4 / scale]}
         listening={false}
@@ -405,7 +406,7 @@ const AngleOverlay = ({
       {/* Vector arm 2 */}
       <Line
         ref={line2Ref}
-        stroke="#BD93F9"
+        stroke={INK}
         strokeWidth={handleStrokeWidth}
         dash={[6 / scale, 4 / scale]}
         listening={false}
@@ -414,15 +415,15 @@ const AngleOverlay = ({
       {/* Upright Angle Value Pill Label */}
       <Rect
         ref={labelBgRef}
-        fill="rgba(40, 42, 54, 0.95)"
-        stroke="#BD93F9"
+        fill={PAPER}
+        stroke={INK}
         strokeWidth={borderStrokeWidth}
         rotation={-canvasRotation}
         listening={false}
       />
       <Text
         ref={labelTextRef}
-        fill="#50FA7B"
+        fill={INK}
         fontStyle="bold"
         fontFamily={CANVAS_FONT_FAMILY}
         align="center"
@@ -436,9 +437,9 @@ const AngleOverlay = ({
         ref={arm1HandleRef}
         radius={5 / scale}
         hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-        fill="#8BE9FD"
-        stroke="#ffffff"
-        strokeWidth={1.5 / scale}
+        fill={PAPER}
+        stroke={INK}
+        strokeWidth={2 / scale}
         draggable
         onDragStart={handleArm1DragStart}
         onDragMove={handleArm1DragMove}
@@ -450,9 +451,9 @@ const AngleOverlay = ({
         ref={arm2HandleRef}
         radius={5 / scale}
         hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-        fill="#8BE9FD"
-        stroke="#ffffff"
-        strokeWidth={1.5 / scale}
+        fill={PAPER}
+        stroke={INK}
+        strokeWidth={2 / scale}
         draggable
         onDragStart={handleArm2DragStart}
         onDragMove={handleArm2DragMove}
@@ -464,9 +465,9 @@ const AngleOverlay = ({
         ref={centerHandleRef}
         radius={6 / scale}
         hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-        fill="#FF79C6"
-        stroke="#ffffff"
-        strokeWidth={1.5 / scale}
+        fill={ACCENT}
+        stroke={PAPER}
+        strokeWidth={2 / scale}
         draggable
         onDragStart={handleCenterDragStart}
         onDragMove={handleCenterDragMove}

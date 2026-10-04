@@ -101,13 +101,20 @@ There are no toasts. Measured before they were removed, eight of the nine sample
 
 ## Canvas and touch
 
+- **What is lit is what is counted.** Inside a GLA outline the plan is as bright as the paper; everything else — outside every outline, inside one that is not GLA, inside a cut-out that is taken off — is under one light veil. An outline is a thin line on the wall's edge with a translucent band over the wall inside it, so the wall it follows shows through. The veil and the bands are `SpotlightLayer`, drawn in the *image's* Konva layer (a band multiplies with the ink under it, and a blend mode only reaches its own layer's canvas); everything else is in the overlay layer above. The spotlight is off while the plan itself is being worked on: a room being chosen, the outline painted or its corners placed, a crop, marks being erased.
+- Labels on the plan are white with the text in the colour of the thing they measure (`CanvasTab`), never a dark slab: the plan's print is black, and a dark label reads as part of the drawing. Wall lengths sit outside the walls. The two walls a held corner moves are filled, and while it moves the rest stand back.
+- An outline's name and area (`OutlineSticker`) are on the plan for every outline, not only when there are several. It is placed where the plan has the least print under it (`labelAnchor.js` over `inkMap.js`) and drops to one line where the full label would cover any. It prints "—" with no scale and while an outline crosses itself. An outline that is not GLA says "Not in GLA".
+- A length or an area the user measured is ink with a white casing, every one of them: an outline type's hue must never be on something that is not an outline. The scale's own marks — the scale room, a length the user gave — are the one green; a refusal is the one red.
+- The room sizes, while a room is being chosen, are buttons directly *under* the size the plan prints, each saying what was read — so a misread is seen before it is clicked. The room in use is the filled one.
+- The toolbar above the plan and the zoom control are not part of this and were left as they were on purpose (the owner's decision, October 2026).
+
 - Nothing the eager shell imports may pull konva into the entry's static graph: `PlanTabs` imports no canvas component, and `canvas/imageCache.js` and `canvas/wallSnapEngineCache.js` must stay import-free. `npm run build && npm run check:bundle` catches a regression.
 - Touch: `useToolRouter` routes one-finger touches into the same `dispatchPointerDown` as the mouse; two fingers drive the camera (`usePinchZoom`). Test buttons with `button != null && button !== 0` (a `TouchEvent` has no `button`). A gesture that grows a second finger commits rather than cancels. Handles keep their drawn size and get a `hitFunc` sized in `/scale` (~44 screen px). Deleting a vertex on touch is a 500 ms press-and-hold.
 
 ## Styling
 
 - Colours are `rgb(var(--token) / <alpha-value>)`. An opacity modifier on `current` (`border-current/40`) or one outside the configured opacity scale compiles to no CSS at all, and the element silently falls back to a theme-blind default. Name the token (`border-warn/40`).
-- The chrome tokens in `index.css` and the canvas/exhibit colours (exact Dracula values, persisted in `.floorplan` files) are two deliberate palettes. Don't unify them.
+- What is drawn on the plan has its own colours, stated once in `canvas/overlayStyle.js`; they are not theme tokens, because the paper is white in both themes. An outline's colour comes from its type (`traceTypes.js`) and is saved with the plan, so the canvas never draws a saved colour raw: `lineColor` / `solidColor` / `inkColor` take it to the nearest shade that reads on white (plans saved with the earlier pastels still open).
 - `.canvas-grid-bg` is the paper: white in both themes, and it re-applies the light tokens to its subtree under the dark theme. Anything inside it (the zoom controls, the action bar's row) wears the light palette; anything that should follow the theme (the start screen) must sit outside it.
 - Check contrast of a self-tint (`bg-accent/12` with `text-accent`) composited over its real parent; a token-pair check misses the loss.
 - Never bind `Ctrl+Shift+C` — it is the browser's element inspector.

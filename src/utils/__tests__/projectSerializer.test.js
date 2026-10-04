@@ -10,6 +10,7 @@ import {
   PERSISTENT_FLOOR_FIELDS,
 } from '../projectSerializer';
 import { hashDataUrl } from '../hash';
+import { traceTypeColor } from '../traceTypes';
 
 // Mock storeState
 const createMockStoreState = () => ({
@@ -208,7 +209,10 @@ describe('projectSerializer', () => {
       expect(deserializeSketch(project).statePatch.calibration.quality).toBeUndefined();
     });
 
-    it('carries a trace type and its colour source through a round trip', () => {
+    // The colour written here is the garage pastel every plan saved before the
+    // paper palette carries. A colour that came from the type is the type's to
+    // restate, so an old plan opens in the colours of the day.
+    it('carries a trace type through a round trip and re-derives its colour from it', () => {
       const storeState = createMockStoreState();
       storeState.perimeterTraces[0].type = 'garage';
       storeState.perimeterTraces[0].colorSource = 'type';
@@ -219,7 +223,7 @@ describe('projectSerializer', () => {
       const trace = deserializeSketch(project).statePatch.perimeterTraces[0];
       expect(trace.type).toBe('garage');
       expect(trace.colorSource).toBe('type');
-      expect(trace.color).toBe('#FFB86C');
+      expect(trace.color).toBe(traceTypeColor('garage'));
     });
 
     // Losing either half would let the next trace of a reopened project

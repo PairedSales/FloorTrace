@@ -5,6 +5,7 @@ import { buildAreaDerivation } from '../utils/areaDerivation';
 import { formatAreaValue, formatAreaTenths, formatLength } from '../utils/unitConverter';
 import { derivationText } from '../utils/derivationText';
 import { STEP_TITLES } from '../utils/progressSteps';
+import { DEFAULT_TRACE_TYPE, traceTypeColor } from '../utils/traceTypes';
 import PanelSection from './PanelSection';
 
 /* ── the arithmetic, written out ──────────────────────────────────────────
@@ -76,7 +77,7 @@ const Level = ({ level, unit, single }) => (
       <span className="flex items-center gap-2 min-w-0">
         {!single && (
           <span className="w-2.5 h-2.5 rounded-sm shrink-0"
-                style={{ backgroundColor: level.color || '#BD93F9' }} />
+                style={{ backgroundColor: level.color || traceTypeColor(DEFAULT_TRACE_TYPE) }} />
         )}
         <span className="min-w-0 truncate text-[15.5px] font-medium text-fg-2">
           {single ? 'Outline' : level.name}

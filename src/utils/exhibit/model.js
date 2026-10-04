@@ -17,7 +17,7 @@ import {
   formatArea, formatLength, getUnitStyleFromDimensions,
   areaDisplayValue, formatAreaValue,
 } from '../unitConverter';
-import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel } from '../traceTypes';
+import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel, traceTypeColor } from '../traceTypes';
 import { scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
 import { scaleProvenance } from '../scaleProvenance';
@@ -47,11 +47,10 @@ export const exhibitDateStamp = (now) => {
 };
 
 // Per edge: its length, and the unit normal the label is offset along. Taken
-// from the polygon's winding rather than index parity, which is the same rule
-// PerimeterLayer uses — so a length sits on the same side of the same wall in
-// the export as it did on screen, which for these windings is the inside. The
-// export deliberately copies the screen here rather than improving on it: the
-// exhibit has to look like the thing the user approved.
+// from the polygon's winding rather than index parity, the rule PerimeterLayer
+// uses too, so a length always lands on the same side of its wall: here, the
+// inside. On screen the lengths are outside the walls, on the veil; the page
+// has no veil and its margin is not the plan's to write in, so they stay in.
 const edgeLabels = (vertices, feetPerPixel, unit, unitStyle) => {
   let sum = 0;
   for (let i = 0; i < vertices.length; i += 1) {
@@ -234,7 +233,7 @@ export function buildExhibitModel(state, {
     return {
       id: trace.id,
       name: trace.name,
-      color: trace.color || '#BD93F9',
+      color: trace.color || traceTypeColor(DEFAULT_TRACE_TYPE),
       // Dropped when the user has named the outline after its own type — a row
       // reading "Garage / Garage" spends a line saying nothing.
       typeLabel: typeLabel === trace.name ? null : typeLabel,
@@ -292,7 +291,7 @@ export function buildExhibitModel(state, {
   const plan = {
     rotation: state.canvasRotation ?? 0,
     traces: drawn.map((trace, i) => ({
-      color: trace.color || '#BD93F9',
+      color: trace.color || traceTypeColor(DEFAULT_TRACE_TYPE),
       vertices: trace.vertices,
       holes: holeRings(trace.holes ?? []).flatMap((ring, j) => (
         ring?.length >= 3

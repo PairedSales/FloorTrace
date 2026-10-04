@@ -2,12 +2,20 @@
 // traceManager, the area selector, the panel and the serializer's normalizer.
 // Array order is load-bearing twice — it is the order breakdown rows appear in,
 // and the reading order a report expects (GLA first, non-living last).
+//
+// The colours are for white paper: each is at least 4.5:1 on it, because an
+// outline is a line on a scanned plan and its label is white text on that
+// colour. GLA is the chrome's violet (`--accent`). None of them is the green of
+// the scale room, the amber of a warning or the red of a refusal — those three
+// already mean something on the plan. A plan saved with the earlier pastels
+// keeps them where the colour was the user's (`colorSource: 'user'`); the canvas
+// draws those as the nearest readable shade (`canvas/overlayStyle.js`).
 export const TRACE_TYPES = [
-  { id: 'gla', label: 'GLA', color: '#BD93F9' },
-  { id: 'below-grade', label: 'Below grade', color: '#8BE9FD' },
-  { id: 'garage', label: 'Garage', color: '#FFB86C' },
-  { id: 'porch', label: 'Porch/patio', color: '#50FA7B' },
-  { id: 'unfinished', label: 'Unfinished', color: '#F1FA8C' },
+  { id: 'gla', label: 'GLA', color: '#5B3FD6' },
+  { id: 'below-grade', label: 'Below grade', color: '#1565A8' },
+  { id: 'garage', label: 'Garage', color: '#B45309' },
+  { id: 'porch', label: 'Porch/patio', color: '#0E7490' },
+  { id: 'unfinished', label: 'Unfinished', color: '#55556A' },
 ];
 
 export const DEFAULT_TRACE_TYPE = 'gla';
