@@ -2,6 +2,7 @@ import React, { forwardRef, useImperativeHandle, useRef, useEffect, lazy, Suspen
 import { Loader2 } from 'lucide-react';
 import { useIsTouch } from '../hooks/useViewport';
 import WelcomeScreen from './WelcomeScreen';
+import { loadImage } from './canvas/imageCache';
 
 // The Konva stage and everything under it load on demand. `manualChunks`
 // already put konva in its own file, but splitting is not lazying: App.jsx
@@ -41,6 +42,15 @@ const Canvas = React.memo(forwardRef((props, ref) => {
     const handle = idle(() => { import('./CanvasStage').catch(() => {}); }, { timeout: 4000 });
     return () => cancel(handle);
   }, []);
+
+  // Start decoding the plan's image now, not when the stage mounts. The stage
+  // is a chunk that may still be on its way — a workspace restored at startup
+  // has its image a third of a second before it has konva — and a large image
+  // takes as long again to decode, so the two waits are better spent together.
+  // The stage asks the same cache and finds the decode running, or done.
+  useEffect(() => {
+    if (image) loadImage(image).catch(() => {});
+  }, [image]);
 
   // The paper is white in every theme; the start screen is not paper. Only a
   // plan (or one on its way) gets the paper and, under the dark theme, the

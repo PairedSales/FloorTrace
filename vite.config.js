@@ -22,9 +22,21 @@ export default defineConfig({
   base: '/FloorTrace/',
   // Honor an externally assigned port (e.g. parallel dev sessions); Vite
   // ignores the PORT env var by default.
-  server: globalThis.process?.env?.PORT
-    ? { port: Number(globalThis.process.env.PORT) }
-    : undefined,
+  //
+  // The header lets a page on the dev or preview server use the JS
+  // Self-Profiling API, which is how `scripts/pageProbe.js` attributes what the
+  // page's own thread does while a plan loads. It grants nothing else, and
+  // GitHub Pages does not send it.
+  server: {
+    ...(globalThis.process?.env?.PORT ? { port: Number(globalThis.process.env.PORT) } : {}),
+    headers: { 'Document-Policy': 'js-profiling' },
+  },
+  preview: { headers: { 'Document-Policy': 'js-profiling' } },
+  // Workers are ES modules, so one can load code on demand. The scan's worker
+  // has to: OpenCV is 3.9 MB gzipped and is fetched only when a plan is
+  // actually read, and the default (`iife`) cannot split a chunk off at all —
+  // the build fails on the first dynamic import inside a worker.
+  worker: { format: 'es' },
   test: {
     // Nested git worktrees carry their own copies of the suite; collecting them
     // makes a stale worktree fail master's tests. eslint ignores .claude too.

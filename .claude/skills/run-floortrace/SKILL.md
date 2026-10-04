@@ -15,16 +15,23 @@ description: Launch FloorTrace's dev server and drive the app in the Browser pan
 
 - Simplest: click **Try the sample plan** on the start screen (`public/example-plan.png`, the same image as `fixtures/ExampleFloorplan.png`: two outlines, a garage left out, about 1,900 ft²).
 - Any fixture: Vite serves `fixtures/` at `/FloorTrace/fixtures/<name>.png`. Fetch it, wrap it in a `File` inside a `DataTransfer`, and dispatch `new DragEvent('drop', { dataTransfer, bubbles: true })` on `#app-container` — that element owns `onDrop`; dispatching on `#root` does nothing.
-- A drop onto an open plan opens a second plan beside it (six at most), and a reload restores every plan that was open. To start clean, clear `localStorage`, delete the IndexedDB database `floortrace-db` (drafts; `keyval-store` is Tesseract's cache and is worth keeping) and reload. Close other tabs on the same origin first, or `deleteDatabase` blocks and autosave never initialises.
-- A new port is a new origin, with empty storage and a cold Tesseract cache.
+- A drop onto an open plan opens a second plan beside it (six at most; a seventh drop does nothing), and a reload restores every plan that was open. To start clean, empty the drafts rather than deleting the database: open `floortrace-db`, `transaction('drafts', 'readwrite').objectStore('drafts').clear()`, close it, `sessionStorage.clear()`, reload (`keyval-store` is Tesseract's cache and is worth keeping). **Do not call `indexedDB.deleteDatabase('floortrace-db')`**: while any page holds the database open — this one, or another session's pane on the same origin — the delete stays pending, and every later `open` on that origin queues behind it and never settles. The app then waits out its 10 s open timeout on every read and write, restores late or not at all, and falls back to `localStorage`. Closing the tab does not clear it.
+- A new port is a new origin, with empty storage and a cold Tesseract cache. So is any `<name>.localhost:<port>` — the way out when an origin's storage is stuck.
 
 ## Read state
 
 - Prefer the React tree. `await import('/FloorTrace/src/store/appStore.js')` can hand back a second module instance with empty state; before trusting it, compare a value the UI also receives (e.g. `getState().image` against the app's `hasImage` prop). To read props, start from a DOM node, take `el[Object.keys(el).find(k => k.startsWith('__reactFiber'))]`, follow `.return` to the component, and read `memoizedProps`. Never `JSON.stringify` a fiber or hook chain; they are circular.
 - After editing a module, re-import it with `?v=<random>` or the dev cache serves the old copy.
-- Web workers don't hot-reload: after editing `src/utils/detection/`, reload the page or the worker keeps running the old code.
+- Web workers don't hot-reload: after editing `src/utils/detection/` or `src/utils/dimensions/`, reload the page or the worker keeps running the old code.
 - `javascript_tool` calls cap at 30 s. Poll OCR and tracing progress in short calls instead of awaiting a whole scan.
 - `src/utils/perfMarks.js` records DEV-only `ft:*` performance marks for the drop-to-area path.
+
+## Measure a load
+
+- `scripts/pageProbe.js` drops a plan and samples the page's own thread for the run: `const probe = await import('/FloorTrace/scripts/pageProbe.js')`, then `const run = await probe.dropAndProfile(await probe.fixture('ExampleFloorplan.png'), 'plan.png')`, `probe.freezes(run)` (every stretch the page could not repaint or take a click, and what it was doing) and `probe.hotspots(run)`. `probe.photo(name)` makes a 12 MP phone photo of a fixture and `probe.pdf(name)` a one-page Letter PDF — the two inputs the fixtures do not cover, and the two that are slowest. Empty the workspace between runs.
+- `longtask` entries are not delivered to a hidden document, so a `PerformanceObserver` reports nothing here. The probe uses the JS Self-Profiling API instead, which the dev and preview servers allow by header (`vite.config.js`).
+- The dev build's React is several times slower than the shipped one. For figures a user would see, build and serve the production bundle: `npx vite build --minify false` (readable function names), copy `scripts/pageProbe.js` and `fixtures/` into `dist/`, `preview_start` with `name: "floortrace-preview"`, and import the probe from `/FloorTrace/pageProbe.js`. There are no `ft:*` marks in that build; the probe times the run from the panel instead.
+- Workers are not in the sample: the scan (`workers/ocrWorker.js`) and the tracer (`workers/detectionWorker.js`) run off the page. Their time is in the DEV report (`run.report`).
 
 ## The pane runs hidden
 

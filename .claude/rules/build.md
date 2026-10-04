@@ -27,7 +27,8 @@ paths:
 - Splitting is not lazying. `manualChunks` in `vite.config.js` only decides which file deferred code lands in; the deferral itself comes from dynamic imports: `Canvas.jsx` lazy-loads `CanvasStage.jsx` (all of konva), `ocrLazy.js` fronts the OCR graph, and `loadOpenCv` imports OpenCV.
 - `dist/index.html` must modulepreload exactly `interop` and `react`. `npm run build && npm run check:bundle` enforces this, and CI runs it. When it fails, find the static import that pulled a chunk into the entry graph — don't widen the check.
 - `react` and rollup's `commonjsHelpers` (`interop`) are pinned to their own chunks: left unassigned, rollup folds them into konva and the entry then imports konva statically. The tesseract rule skips `?url` ids — a URL belongs in whichever chunk asks for it.
-- `base` is `/FloorTrace/` (GitHub Pages). The dev server honours `PORT`.
+- Workers are built as ES modules (`worker.format: 'es'`). The scan worker imports Tesseract and OpenCV on demand, and the default `iife` format cannot split a chunk: the build fails on the first dynamic import inside a worker. A worker's chunks are its own copies (OpenCV is in `dist` twice, once for the worker and once for the on-page fallback); only one is ever fetched.
+- `base` is `/FloorTrace/` (GitHub Pages). The dev server honours `PORT`. The dev and preview servers send `Document-Policy: js-profiling`, which `scripts/pageProbe.js` needs; GitHub Pages does not.
 
 ## Generated files: edit the source, never the output
 
