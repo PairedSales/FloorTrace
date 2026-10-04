@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import useAppStore from '../../../store/appStore';
 import { flashAt } from '../../../utils/notify';
 import { hasSelfIntersection, findSelfIntersection, validateVertexMove } from '../../../utils/geometryValidation';
-import { pointToLineDistance } from '../canvasUtils';
+import { nearestOutlineEdge } from '../outlineHit';
 
 export function usePerimeterEditor({
   perimeterOverlay,
@@ -109,29 +110,20 @@ export function usePerimeterEditor({
     }
   }, [perimeterVertices, onClosePerimeter]);
 
+  // A corner goes into the wall nearest the click, whichever outline that wall
+  // belongs to — read off the store, because the outline it lands on need not
+  // be the one in hand, and is taken in hand by this.
   const handleInsertPerimeterVertex = useCallback((clickPoint) => {
-    if (!perimeterOverlay) return;
-
-    const vertices = perimeterOverlay.vertices;
-    let closestEdgeIndex = 0;
-    let minDistance = Infinity;
-
-    for (let i = 0; i < vertices.length; i++) {
-      const v1 = vertices[i];
-      const v2 = vertices[(i + 1) % vertices.length];
-      const distance = pointToLineDistance(clickPoint, v1, v2);
-
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestEdgeIndex = i;
-      }
-    }
+    const { perimeterTraces, activeTraceId, switchPerimeterTrace } = useAppStore.getState();
+    const nearest = nearestOutlineEdge(perimeterTraces, activeTraceId, clickPoint);
+    if (!nearest) return;
+    const { vertices } = perimeterTraces.find((t) => t.id === nearest.traceId);
 
     const snappedPoint = autoSnapEnabled ? findVertexSnapPoint(clickPoint) : null;
     const finalPoint = snappedPoint || clickPoint;
 
     const newVertices = [...vertices];
-    newVertices.splice(closestEdgeIndex + 1, 0, finalPoint);
+    newVertices.splice(nearest.edgeIndex + 1, 0, finalPoint);
 
     const crossing = findSelfIntersection(newVertices, true);
     if (crossing) {
@@ -139,8 +131,11 @@ export function usePerimeterEditor({
       return;
     }
 
+    // Before the update, which writes to the outline in hand and saves the
+    // undo point with it.
+    switchPerimeterTrace(nearest.traceId);
     onPerimeterUpdate(newVertices, true);
-  }, [perimeterOverlay, autoSnapEnabled, findVertexSnapPoint, onPerimeterUpdate]);
+  }, [autoSnapEnabled, findVertexSnapPoint, onPerimeterUpdate]);
 
   return {
     draggingVertex,

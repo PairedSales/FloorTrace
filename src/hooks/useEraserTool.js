@@ -1,16 +1,19 @@
 import { useRef, useCallback } from 'react';
-// The same clamped point-to-segment projection this file used to declare
-// privately. `canvasUtils` imports only `unitConverter`, so reaching it from a
-// hook pulls no konva into the graph.
-import { pointToLineDistance } from '../components/canvas/canvasUtils';
+import useAppStore from '../store/appStore';
+// `outlineHit` imports only `canvasUtils`, which imports only `unitConverter`,
+// so reaching it from a hook pulls no konva into the graph.
+import { eraseCornersUnderStroke } from '../components/canvas/outlineHit';
 
 // Deletes the *outline's* corners, never a pixel of the plan. It carried the
 // name "Erase clutter" for a long time, which is what the image eraser
 // (`useImageEraser`) does; this one is gated on its own flag so the two cannot
 // both be on, and so this one can be disabled with a reason before a trace
 // exists rather than silently returning false.
+//
+// The brush works on whichever outline it is run over, not the one in hand:
+// the outlines are read off the store when the stroke ends, and the one it
+// erased from is taken in hand (`eraseCornersUnderStroke` says which).
 export function useCornerEraser({
-  perimeterOverlay,
   cornerEraserActive,
   eraserBrushSize,
   onPerimeterUpdate,
@@ -21,11 +24,8 @@ export function useCornerEraser({
   const eraserAxisRef = useRef(null);
   const eraserPathRef = useRef([]);
 
-  const initialVerticesRef = useRef(null);
-  const activeVerticesRef = useRef(null);
-
   const handleEraserMouseDown = useCallback((stage) => {
-    if (!cornerEraserActive || !perimeterOverlay?.vertices?.length) return false;
+    if (!cornerEraserActive) return false;
 
     const pos = getCanvasCoords(stage);
     if (!pos) return false;
@@ -35,14 +35,11 @@ export function useCornerEraser({
     eraserAxisRef.current = null;
     eraserPathRef.current = [pos];
 
-    initialVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
-    activeVerticesRef.current = perimeterOverlay.vertices.map((v) => ({ ...v }));
-
     return true;
-  }, [cornerEraserActive, perimeterOverlay, getCanvasCoords]);
+  }, [cornerEraserActive, getCanvasCoords]);
 
   const handleEraserMouseMove = useCallback((stage, shiftKey) => {
-    if (!isErasingRef.current || !activeVerticesRef.current) return false;
+    if (!isErasingRef.current) return false;
 
     const pos = getCanvasCoords(stage);
     if (!pos) return false;
@@ -78,50 +75,17 @@ export function useCornerEraser({
     eraserStartPosRef.current = null;
     eraserAxisRef.current = null;
 
-    const vertices = initialVerticesRef.current;
     const path = eraserPathRef.current;
-
-    if (vertices && vertices.length > 3 && path && path.length > 0) {
-      const radius = eraserBrushSize / 2;
-      const candidates = [];
-
-      for (let i = 0; i < vertices.length; i++) {
-        let minDistance = Infinity;
-        if (path.length === 1) {
-          minDistance = Math.hypot(vertices[i].x - path[0].x, vertices[i].y - path[0].y);
-        } else {
-          for (let j = 0; j < path.length - 1; j++) {
-            const dist = pointToLineDistance(vertices[i], path[j], path[j + 1]);
-            if (dist < minDistance) {
-              minDistance = dist;
-            }
-          }
-        }
-
-        if (minDistance <= radius) {
-          candidates.push({ index: i, distance: minDistance });
-        }
-      }
-
-      if (candidates.length > 0) {
-        const maxRemovals = vertices.length - 3;
-        if (maxRemovals > 0) {
-          candidates.sort((a, b) => a.distance - b.distance);
-          const removeSet = new Set(candidates.slice(0, maxRemovals).map((c) => c.index));
-
-          if (removeSet.size > 0) {
-            const nextVertices = vertices.filter((_, index) => !removeSet.has(index));
-            if (nextVertices.length < vertices.length) {
-              onPerimeterUpdate?.(nextVertices, true);
-            }
-          }
-        }
-      }
-    }
-
-    initialVerticesRef.current = null;
-    activeVerticesRef.current = null;
     eraserPathRef.current = [];
+
+    const { perimeterTraces, activeTraceId, switchPerimeterTrace } = useAppStore.getState();
+    const erased = eraseCornersUnderStroke(perimeterTraces, activeTraceId, path, eraserBrushSize / 2);
+    if (erased) {
+      // Before the update, which writes to the outline in hand and saves the
+      // undo point with it.
+      switchPerimeterTrace(erased.traceId);
+      onPerimeterUpdate?.(erased.vertices, true);
+    }
 
     return true;
   }, [eraserBrushSize, onPerimeterUpdate]);
@@ -136,9 +100,6 @@ export function useCornerEraser({
     eraserStartPosRef.current = null;
     eraserAxisRef.current = null;
     eraserPathRef.current = [];
-
-    initialVerticesRef.current = null;
-    activeVerticesRef.current = null;
     return true;
   }, []);
 

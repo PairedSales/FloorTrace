@@ -104,11 +104,18 @@ const detectSignificantChange = (prev, next) => {
  * detected (e.g. toggling between interior / exterior boundary mode).
  * Single-vertex drags are applied immediately without animation.
  *
+ * `outlineId` is whose vertices these are. A change of outline is not a change
+ * of shape: taking another outline in hand used to morph the last one into it,
+ * and the handles are put away for the length of a morph — which, now that an
+ * outline is taken in hand by pressing one of its corners, would take the
+ * corner out from under the press.
+ *
  * Returns { displayVertices, isAnimating }.
  */
-const useAnimatedVertices = (targetVertices) => {
+const useAnimatedVertices = (targetVertices, outlineId) => {
   const [animState, setAnimState] = useState({ displayVertices: null, isAnimating: false });
   const prevVerticesRef = useRef(null);
+  const prevOutlineRef = useRef(outlineId);
   const currentDisplayRef = useRef(null);
   const animFrameRef = useRef(null);
 
@@ -116,7 +123,9 @@ const useAnimatedVertices = (targetVertices) => {
     // Capture the vertices we are transitioning FROM.  If a previous
     // animation was in-flight, start from its most recent visual position
     // so that rapid toggles don't cause jumps.
-    const prev = currentDisplayRef.current || prevVerticesRef.current;
+    const sameOutline = prevOutlineRef.current === outlineId;
+    prevOutlineRef.current = outlineId;
+    const prev = sameOutline ? (currentDisplayRef.current || prevVerticesRef.current) : null;
     prevVerticesRef.current = targetVertices;
     currentDisplayRef.current = null;
 
@@ -175,15 +184,21 @@ const useAnimatedVertices = (targetVertices) => {
         animFrameRef.current = null;
       }
     };
-  }, [targetVertices]);
+  }, [targetVertices, outlineId]);
 
   return animState;
 };
 
 /**
- * PerimeterLayer draws every visible outline's edge, the corners and wall
- * lengths of the one being edited, the cut-outs, and each outline's name and
- * area. The veil and the bands that go with them are `SpotlightLayer`'s.
+ * PerimeterLayer draws every visible outline's edge and corners, the wall
+ * lengths of the one in hand, the cut-outs, and each outline's name and area.
+ * The veil and the bands that go with them are `SpotlightLayer`'s.
+ *
+ * Every outline can be edited where it stands: all their corners are handles,
+ * and pressing one takes its outline in hand (`activeTraceId`) before the drag
+ * or the click that follows. The rest of the editing — the drag itself, the
+ * wall lengths, the selected corner — is still about one outline, the one in
+ * hand; what changed is that getting it there is no longer a trip to the panel.
  */
 // How dark the plan may be under a full label before it is cut to one line.
 // A room size is about 0.013 of a label's box and a stretch of wall 0.03; the
@@ -225,6 +240,7 @@ const PerimeterLayer = ({
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const labelPlacements = useAppStore((s) => s.labelPlacements);
   const moveLabel = useAppStore((s) => s.moveLabel);
+  const switchPerimeterTrace = useAppStore((s) => s.switchPerimeterTrace);
 
   /* A vertex handle is the topmost thing on the canvas and it is draggable, so
      while another drag tool is running it steals that tool's gesture: a crop
@@ -259,7 +275,8 @@ const PerimeterLayer = ({
   const activeLine = isSelfIntersecting ? CRIT : lineColor(activeColor);
   const activeSolid = isSelfIntersecting ? CRIT : solidColor(activeColor);
   const activeInk = isSelfIntersecting ? CRIT : inkColor(activeColor);
-  const [hoverIndex, setHoverIndex] = useState(null);
+  // The corner under the pointer: `{ traceId, index }`, on any outline.
+  const [hover, setHover] = useState(null);
 
   // Ref tracking drag coordinates, current drag index, and animation frame ID
   const draggingVertexIndexRef = useRef(null);
@@ -300,7 +317,7 @@ const PerimeterLayer = ({
     pressRef.current = null;
   };
 
-  const startLongPress = (index, e) => {
+  const startLongPress = (traceId, index, e) => {
     const touch = e.evt?.touches?.[0];
     if (!touch) return;
     cancelLongPress();
@@ -312,7 +329,7 @@ const PerimeterLayer = ({
         // Confirmation is the deletion being undoable and the outline visibly
         // changing; a dialog on a hold gesture teaches the user to fear it.
         navigator.vibrate?.(18);
-        onDeletePerimeterVertex?.(index);
+        onDeletePerimeterVertex?.(index, traceId);
       }, LONG_PRESS_MS),
     };
   };
@@ -380,7 +397,7 @@ const PerimeterLayer = ({
   };
 
   // Animate between bulk polygon changes (interior ↔ exterior toggle).
-  const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices);
+  const { displayVertices, isAnimating } = useAnimatedVertices(targetVertices, activeTrace?.id ?? null);
 
   // During animation, render the interpolated path; otherwise the local/drag state.
   const renderVertices = displayVertices || localVertices;
@@ -597,9 +614,23 @@ const PerimeterLayer = ({
     };
   })();
 
+  // Whose corners are handles: every visible outline's. The outline in hand
+  // goes last, so it is drawn on top — outlines often share a corner (a garage
+  // against the house), and there the one in hand is the one that is grabbed;
+  // the other is reached by any corner the two do not share, or from the
+  // panel. Its corners are put away for the length of a morph.
+  const cornerSets = quiet ? [] : [
+    ...(perimeterTraces || [])
+      .filter((t) => t.visible && t.id !== activeTraceId)
+      .map((trace) => ({ trace, vertices: trace.vertices, inHand: false })),
+    ...(activeTrace?.visible && !isAnimating
+      ? [{ trace: activeTrace, vertices: localVertices, inHand: true }]
+      : []),
+  ].filter((set) => set.vertices?.length);
+
   return (
     <>
-      {/* 1. The outlines that are not being edited: a line on the wall's edge.
+      {/* 1. The outlines that are not in hand: a line on the wall's edge.
              The band over the wall and the veil round them are SpotlightLayer's,
              under this layer. */}
       {(perimeterTraces || []).map((trace) => {
@@ -618,7 +649,7 @@ const PerimeterLayer = ({
         );
       })}
 
-      {/* 2. The outline being edited */}
+      {/* 2. The outline in hand */}
       {activeTrace && activeTrace.visible && (
         <Line
           key={`active-outline-${activeTrace.id}`}
@@ -765,82 +796,102 @@ const PerimeterLayer = ({
       )}
 
       {/* 4. The halo under the corner the pointer is on, has picked, or is moving */}
-      {activeTrace && activeTrace.visible && !quiet && !isAnimating && localVertices && (() => {
-        const index = dragging ? draggingVertex : (selectedVertexIndex ?? hoverIndex);
-        const vertex = index !== null && index !== undefined ? localVertices[index] : null;
-        if (!vertex || handlesLocked) return null;
-        const held = dragging || selectedVertexIndex === index;
+      {!handlesLocked && (() => {
+        const inHand = cornerSets.find((set) => set.inHand);
+        const heldIndex = dragging ? draggingVertex : selectedVertexIndex;
+        const held = !!inHand && heldIndex !== null && heldIndex !== undefined;
+        const set = held ? inHand : cornerSets.find((c) => c.trace.id === hover?.traceId);
+        const vertex = set?.vertices[held ? heldIndex : hover.index];
+        if (!vertex) return null;
         return (
           <Circle
             x={vertex.x}
             y={vertex.y}
             radius={(dragging ? 22 : held ? 17 : 15) / scale}
-            fill={withAlpha(activeSolid, held ? 0.16 : 0.12)}
+            fill={withAlpha(set.inHand ? activeSolid : solidColor(set.trace.color || ACCENT), held ? 0.16 : 0.12)}
             listening={false}
             perfectDrawEnabled={false}
           />
         );
       })()}
 
-      {/* 5. The corners: rings, so the wall corner under each one shows through */}
-      {activeTrace && activeTrace.visible && !quiet && !isAnimating && localVertices && localVertices.map((vertex, i) => {
-        const moving = dragging && draggingVertex === i;
-        // One corner is in hand at a time: a corner picked earlier is not the
-        // one being moved now.
-        const picked = !dragging && selectedVertexIndex === i;
-        const over = hoverIndex === i && !handlesLocked;
-        const held = moving || picked;
-        // While one corner moves the rest stand down, bar the two it shares a
-        // wall with: they are what the moving walls are anchored to.
-        const neighbour = dragging && (i === (draggingVertex - 1 + count) % count || i === (draggingVertex + 1) % count);
-        const radius = (moving ? 10 : picked ? 9 : over ? 8 : 6) + (isTouch ? 2.5 : 0);
-        return (
-          <Circle
-            key={`active-vertex-${activeTrace.id}-${i}`}
-            x={vertex.x}
-            y={vertex.y}
-            radius={radius / scale}
-            fill={held ? activeSolid : (over ? PAPER : 'rgba(255, 255, 255, 0.85)')}
-            stroke={held ? PAPER : activeLine}
-            strokeWidth={(held || over ? 2.5 : 2) / scale}
-            visible={!dragging || moving || neighbour}
-            draggable={!handlesLocked}
-            // Both, not just `draggable`: a non-draggable handle still swallows
-            // the press, so the crop or erase stroke would start nowhere at all.
-            listening={!handlesLocked}
-            // The grabbable region, separate from the drawn one. `/scale` keeps
-            // it a constant *screen* size, so a corner is no harder to hit when
-            // the plan is zoomed out — which is exactly when it is smallest.
-            hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-            onMouseEnter={(e) => { setHoverIndex(i); setCursor(e, 'grab'); }}
-            onMouseLeave={(e) => { setHoverIndex((h) => (h === i ? null : h)); setCursor(e, 'default'); }}
-            onClick={(e) => {
-              // Konva fires click for every button, and right-click already means
-              // delete on this handle.
-              if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
-              e.cancelBubble = true;
-              onVertexSelect?.(i);
-            }}
-            onTap={(e) => {
-              e.cancelBubble = true;
-              onVertexSelect?.(i);
-            }}
-            onDragStart={() => handleDragStart(i)}
-            onDragMove={(e) => handleDragMove(i, e)}
-            onDragEnd={(e) => handleDragEnd(i, e)}
-            // Deliberately allowed to bubble, matching what `mousedown` does on
-            // the same handle: the stage still needs the event to start a pinch
-            // whose first finger happened to land on a corner.
-            onTouchStart={(e) => startLongPress(i, e)}
-            onTouchMove={moveLongPress}
-            onTouchEnd={cancelLongPress}
-            onContextMenu={(e) => {
-              e.evt.preventDefault();
-              e.cancelBubble = true;
-              if (onDeletePerimeterVertex) onDeletePerimeterVertex(i);
-            }}
-          />
-        );
+      {/* 5. The corners: rings, so the wall corner under each one shows through.
+             One flat list under keys that do not say which outline is in hand,
+             so the corner being pressed is the same node before and after its
+             outline is taken in hand — remounted, it would lose the drag. */}
+      {cornerSets.flatMap(({ trace, vertices, inHand }) => {
+        const line = inHand ? activeLine : lineColor(trace.color || ACCENT);
+        const solid = inHand ? activeSolid : solidColor(trace.color || ACCENT);
+        return vertices.map((vertex, i) => {
+          const moving = inHand && dragging && draggingVertex === i;
+          // One corner is in hand at a time: a corner picked earlier is not the
+          // one being moved now.
+          const picked = inHand && !dragging && selectedVertexIndex === i;
+          const over = hover?.traceId === trace.id && hover.index === i && !handlesLocked;
+          const held = moving || picked;
+          // While one corner moves the rest stand down, bar the two it shares a
+          // wall with: they are what the moving walls are anchored to.
+          const neighbour = inHand && dragging
+            && (i === (draggingVertex - 1 + count) % count || i === (draggingVertex + 1) % count);
+          const radius = (moving ? 10 : picked ? 9 : over ? 8 : 6) + (isTouch ? 2.5 : 0);
+          return (
+            <Circle
+              key={`vertex-${trace.id}-${i}`}
+              x={vertex.x}
+              y={vertex.y}
+              radius={radius / scale}
+              fill={held ? solid : (over ? PAPER : 'rgba(255, 255, 255, 0.85)')}
+              stroke={held ? PAPER : line}
+              strokeWidth={(held || over ? 2.5 : 2) / scale}
+              visible={!dragging || moving || neighbour}
+              draggable={!handlesLocked}
+              // Both, not just `draggable`: a non-draggable handle still swallows
+              // the press, so the crop or erase stroke would start nowhere at all.
+              listening={!handlesLocked}
+              // The grabbable region, separate from the drawn one. `/scale` keeps
+              // it a constant *screen* size, so a corner is no harder to hit when
+              // the plan is zoomed out — which is exactly when it is smallest.
+              hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
+              onMouseEnter={(e) => { setHover({ traceId: trace.id, index: i }); setCursor(e, 'grab'); }}
+              onMouseLeave={(e) => {
+                setHover((h) => (h?.traceId === trace.id && h.index === i ? null : h));
+                setCursor(e, 'default');
+              }}
+              // The press takes this corner's outline in hand, ahead of the drag
+              // or the click it turns into: both are written to the outline in
+              // hand, and by then it has to be this one. Left button only — a
+              // right press may be a pan.
+              onMouseDown={(e) => { if (e.evt?.button === 0) switchPerimeterTrace(trace.id); }}
+              onClick={(e) => {
+                // Konva fires click for every button, and right-click already means
+                // delete on this handle.
+                if (e.evt && e.evt.button != null && e.evt.button !== 0) return;
+                e.cancelBubble = true;
+                switchPerimeterTrace(trace.id);
+                onVertexSelect?.(i);
+              }}
+              onTap={(e) => {
+                e.cancelBubble = true;
+                switchPerimeterTrace(trace.id);
+                onVertexSelect?.(i);
+              }}
+              onDragStart={() => handleDragStart(i)}
+              onDragMove={(e) => handleDragMove(i, e)}
+              onDragEnd={(e) => handleDragEnd(i, e)}
+              // Deliberately allowed to bubble, matching what `mousedown` does on
+              // the same handle: the stage still needs the event to start a pinch
+              // whose first finger happened to land on a corner.
+              onTouchStart={(e) => { switchPerimeterTrace(trace.id); startLongPress(trace.id, i, e); }}
+              onTouchMove={moveLongPress}
+              onTouchEnd={cancelLongPress}
+              onContextMenu={(e) => {
+                e.evt.preventDefault();
+                e.cancelBubble = true;
+                if (onDeletePerimeterVertex) onDeletePerimeterVertex(i, trace.id);
+              }}
+            />
+          );
+        });
       })}
 
       {/* 6. Wall lengths, outside the walls. The two the held corner moves are

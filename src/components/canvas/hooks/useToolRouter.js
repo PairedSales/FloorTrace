@@ -843,8 +843,14 @@ export function useToolRouter({
       return;
     }
 
+    // Not while another tool has the pointer, the same list that locks the
+    // corner handles: a double-click there belongs to that tool. Placing
+    // corners is on it for a second reason — the new corner goes into whichever
+    // outline is nearest, and taking that one in hand ends the placement.
     if (!perimeterOverlay || drawAreaActive || lineToolActive
-      || drawModeActive || scaleToolActive) return;
+      || drawModeActive || scaleToolActive
+      || cropToolActive || eraserToolActive || cornerEraserActive || voidToolActive
+      || traceInteractionMode === 'drawing') return;
     
     const targetType = e.target.getType();
     if (targetType === 'Circle') return;
@@ -860,6 +866,11 @@ export function useToolRouter({
     lineToolActive,
     drawAreaActive,
     drawModeActive,
+    cropToolActive,
+    eraserToolActive,
+    cornerEraserActive,
+    voidToolActive,
+    traceInteractionMode,
     perimeterOverlay,
     handleInsertPerimeterVertex,
     onAddMeasurementLine,

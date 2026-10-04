@@ -100,7 +100,7 @@ const rectAround = (x, y, w, h) => ({ x0: x - w / 2, y0: y - h / 2, x1: x + w / 
  * @param {object} input
  * @param {{id:string, vertices:{x:number,y:number}[], holes?:{x:number,y:number}[][]}[]} input.outlines
  *   every outline that is drawn
- * @param {string|null} input.activeId the outline whose corners are handles and whose wall lengths are drawn
+ * @param {string|null} input.activeId the outline in hand, whose wall lengths are drawn
  * @param {{x:number,y:number}[]|null} [input.activeVertices] that outline as it is now (mid-drag),
  *   when it differs from the one in `outlines`
  * @param {number} input.scale screen px per image px
@@ -109,7 +109,7 @@ const rectAround = (x, y, w, h) => ({ x0: x - w / 2, y0: y - h / 2, x1: x + w / 
  * @param {object[]} [input.detectedDimensions]
  * @param {string} input.unit
  * @param {boolean} [input.wallLengths] whether the wall lengths are drawn
- * @param {boolean} [input.handles] whether the active outline's corners are drawn as handles
+ * @param {boolean} [input.handles] whether the outlines' corners are drawn as handles
  * @param {boolean} [input.touch]
  * @param {{x:number,y:number,width:number,height:number}[]} [input.stickers] each outline's name
  *   and area: the middle in the image, and the size in pixels
@@ -127,8 +127,8 @@ export function layoutLabels({
   if (!(scale > 0)) return result;
   const space = toLayoutSpace(rotation, scale);
 
-  // What to keep off: every outline's walls, its cut-outs', and the active
-  // outline's corners, which are handles.
+  // What to keep off: every outline's walls, its cut-outs', and its corners,
+  // which are handles on every outline.
   const obstacles = { segments: [], discs: [], rects: [] };
   let activeRing = null;
   for (const outline of outlines) {
@@ -137,7 +137,7 @@ export function layoutLabels({
     if (!vertices || vertices.length < 3) continue;
     const ring = vertices.map(space.forward);
     if (isActive) activeRing = ring;
-    const corner = isActive && handles ? (touch ? TOUCH_HANDLE_RADIUS_PX : HANDLE_RADIUS_PX) : JOINT_RADIUS_PX;
+    const corner = handles ? (touch ? TOUCH_HANDLE_RADIUS_PX : HANDLE_RADIUS_PX) : JOINT_RADIUS_PX;
     const mine = ringObstacles(ring, { reach: WALL_REACH_PX, corner });
     obstacles.segments.push(...mine.segments);
     obstacles.discs.push(...mine.discs);
