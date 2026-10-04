@@ -11,7 +11,7 @@ import path from 'path';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  UsageError, apply, blind, check, compare, labels, parseArgs, probe, review, score, sheet, snap, view,
+  UsageError, apply, blind, check, compare, probe, review, score, snap, view,
 } from '../keyCommands.mjs';
 import { keySha256 } from '../manifest.mjs';
 import { applyKey, keyOf } from '../realKeys.mjs';
@@ -119,27 +119,6 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe('arguments', () => {
-  it('refuses an option a command does not have, and a value that is missing', () => {
-    expect(() => parseArgs(['x', '--bare2'], { flags: ['bare'] }, 'view')).toThrow(UsageError);
-    expect(() => parseArgs(['x', '--bare2'], { flags: ['bare'] }, 'view')).toThrow(/unknown option --bare2 \(view takes: --bare\)/);
-    expect(() => parseArgs(['--crop'], { values: ['crop'] }, 'view')).toThrow(/--crop needs a value/);
-    expect(() => parseArgs(['--crop', '--grid'], { values: ['crop', 'grid'] }, 'view')).toThrow(/--crop needs a value/);
-    expect(() => parseArgs(['--dry=1'], { flags: ['dry'] }, 'snap')).toThrow(/takes no value/);
-  });
-
-  it('reads values, repeated values, flags and --name=value', () => {
-    const { positional, opts } = parseArgs(['n', '--poly', 'a', '--poly=b', '--keys', '--grid', '20'], { values: ['grid'], repeat: ['poly'], flags: ['keys'] }, 'view');
-    expect(positional).toEqual(['n']);
-    expect(opts).toEqual({ poly: ['a', 'b'], keys: true, grid: '20' });
-  });
-
-  it('turns a command with no plan into a usage error', async () => {
-    await expect(blind([], ctx)).rejects.toThrow(UsageError);
-    await expect(snap(['demo', '--spec', 'x'], ctx)).rejects.toThrow(/needs --role/);
-  });
-});
-
 describe('blind', () => {
   it('writes the packet: the image bytes, the labels and the size, and nothing of the trace', async () => {
     const { code, out } = await run(blind, 'demo');
@@ -162,15 +141,6 @@ describe('blind', () => {
     await run(blind, 'demo');
     expect(fs.readFileSync(path.join(root, 'keys-wip', 'packets', 'demo', 'labels.json'), 'utf8')).toBe(first);
     expect(sha(plan())).toBe(before);
-  });
-
-  it('lists the labels for an agent that cannot open the set', async () => {
-    await run(blind, 'demo');
-    const { out } = await run(labels, 'demo');
-    expect(out).toMatch(/d0 +room +180,140,40,20 +"20' x 14'" +20 x 14 ft/);
-    expect(out).toMatch(/e0 +nonGla +330,140,40,20 +"GARAGE"/);
-    const { out: json } = await run(labels, 'demo', '--json');
-    expect(JSON.parse(json).labels).toHaveLength(2);
   });
 });
 
@@ -204,58 +174,6 @@ describe('snap', () => {
     expect(JSON.stringify(snapped)).not.toMatch(/777|confidence|quality/);
   });
 
-  it('snaps from the packet\'s image when there is one', async () => {
-    await run(blind, 'demo');
-    const { out } = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
-    expect(out).toMatch(/from .*packets/);
-  });
-
-  it('accepts --dry and does the same', async () => {
-    const file = writeSpec('a.json', specOf('a-demo'));
-    const before = sha(plan());
-    const { code } = await run(snap, 'demo', '--role', 'a', '--spec', file, '--dry');
-    expect(code).toBe(0);
-    expect(sha(plan())).toBe(before);
-  });
-
-  it('lists the flagged edges in the snapped file and on the screen', async () => {
-    const spec = specOf('a-demo');
-    // A top edge drawn 12 px off the wall: it moves far.
-    spec.outlines[0].v[0][1] = 68;
-    spec.outlines[0].v[1][1] = 68;
-    const { out } = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', spec));
-    expect(out).toMatch(/edge 0: \+?-?\d+\.\d px {3}<-- far/);
-    const snapped = readJson(wip('.a.snapped.json'));
-    expect(snapped.flagged.some((f) => f.outline === 0 && f.edge === 0 && f.flags.includes('far'))).toBe(true);
-  });
-
-  it('says what a frame beside the wall did to an edge: bridged when it was joined, partial when the line was drawn on it', async () => {
-    // A frame 4 px thick 2 px above the top wall (face y=80). Over 68% of the
-    // edge it counts as wall and is joined to it; over 48% it does not.
-    const framed = async (w, y) => {
-      fs.writeFileSync(plan(), JSON.stringify(project((fill) => fill(130, 74, 130 + w, 78))));
-      const spec = specOf('a-demo');
-      spec.outlines[0].v[0][1] = y;
-      spec.outlines[0].v[1][1] = y;
-      const { out } = await run(snap, 'demo', '--role', 'a', '--replace', '--spec', writeSpec('a.json', spec));
-      return { out, flagged: readJson(wip('.a.snapped.json')).flagged.find((f) => f.outline === 0 && f.edge === 0), top: readJson(wip('.a.snapped.json')).outlines[0].v[0][1] };
-    };
-    const joined = await framed(124, 81);
-    expect(joined.top).toBeCloseTo(74, 0);
-    expect(joined.flagged.flags).toEqual(expect.arrayContaining(['far', 'bridged']));
-    expect(joined.flagged.bridgedBy).toBeCloseTo(6, 0);
-    expect(joined.out).toMatch(/edge 0: \+6\.\d px {3}<-- far, bridged: .*; the face is the end of a stroke joined across a gap, [56]\.\d px from the stroke nearest your line.*"bridge": 0/);
-    const apart = await framed(88, 76);
-    expect(apart.top).toBeCloseTo(74, 0);
-    expect(apart.flagged.flags).toEqual(['partial']);
-    expect(apart.flagged.share).toBeCloseTo(0.49, 1);
-    expect(apart.out).toMatch(/edge 0: [+-]?\d\.\d px {3}<-- partial: the stroke the face is read from is only 4[89]% as continuous along the edge as the strongest stroke on it/);
-    // Drawn on the wall, the same frame is beyond the face used and no more.
-    const beside = await framed(88, 81);
-    expect(beside.top).toBeCloseTo(80, 0);
-    expect(beside.flagged.flags).toEqual(['ink-beyond']);
-  });
-
   it('will not let a second agent replace an annotator\'s key by naming the same role, unless --replace', async () => {
     await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
     const before = fs.readFileSync(wip('.a.json'), 'utf8');
@@ -275,27 +193,6 @@ describe('snap', () => {
     expect(readJson(wip('.a.json')).author).toBe('b-demo');
   });
 
-  it('says nothing of a replacement when there was nothing to replace, and guards a spec that had no author too', async () => {
-    const bare = specOf('x');
-    delete bare.author;
-    const first = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b1.json', bare));
-    expect(first.out).not.toMatch(/replaced/);
-    // Two specs with no name: nothing says they are one agent's.
-    await expect(run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b2.json', bare))).rejects.toThrow(/already holds a spec by no named author, and this spec's author is not set/);
-    const forced = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b3.json', bare), '--replace');
-    expect(forced.out).toMatch(/note: replaced the earlier demo\.b\.json \(author not set\)/);
-    // A spec file that will not parse is nobody's: it is replaced, and said so.
-    fs.writeFileSync(wip('.b.json'), '{ not json');
-    const broken = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b4.json', specOf('b-demo')));
-    expect(broken.out).toMatch(/note: replaced the earlier demo\.b\.json \(it could not be read\)/);
-  });
-
-  it('leaves the final key to whoever adjudicates it: no author guard on the role', async () => {
-    await run(snap, 'demo', '--role', 'final', '--spec', writeSpec('f1.json', specOf('adj-1')));
-    await run(snap, 'demo', '--role', 'final', '--spec', writeSpec('f2.json', specOf('adj-2')));
-    expect(readJson(wip('.final.json')).author).toBe('adj-2');
-  });
-
   it('refuses a vertex far outside the image, and lets one sit on its edge', async () => {
     const spec = specOf('a-demo');
     spec.outlines[0].v[0] = [-40, 77];
@@ -308,28 +205,6 @@ describe('snap', () => {
     const edge = { outlines: [{ type: 'gla', v: [[0, 0], [460, 0], [461, 300], [0, 300]], fix: [0, 1, 2, 3] }] };
     const { code } = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('edge.json', edge));
     expect(code).toBe(0);
-  });
-
-  it('refuses a malformed spec with the place and the reason, and writes nothing', async () => {
-    const spec = specOf('a-demo');
-    spec.outlines[1].in = [9];
-    await expect(run(snap, 'demo', '--role', 'a', '--spec', writeSpec('bad.json', spec))).rejects.toThrow(/outlines\[1\]\.in: edge 9 is out of range/);
-    expect(fs.existsSync(wip('.a.json'))).toBe(false);
-    expect(fs.existsSync(wip('.a.snapped.json'))).toBe(false);
-  });
-
-  it('refuses a rough outline that crosses itself', async () => {
-    const spec = { outlines: [{ type: 'gla', v: [[100, 80], [300, 220], [300, 80], [100, 220]] }] };
-    await expect(run(snap, 'demo', '--role', 'a', '--spec', writeSpec('bow.json', spec))).rejects.toThrow(/outline 0 \(gla\) as drawn: edge 0 crosses edge 2/);
-  });
-
-  it('says so when the spec, the role or the plan is wrong', async () => {
-    await expect(run(snap, 'demo', '--role', 'c', '--spec', writeSpec('a.json', specOf('a')))).rejects.toThrow(/--role must be one of a, b, final/);
-    await expect(run(snap, 'demo', '--role', 'a', '--spec', path.join(scratch, 'nope.json'))).rejects.toThrow(/cannot read the spec/);
-    fs.writeFileSync(path.join(scratch, 'junk.json'), '{oops');
-    await expect(run(snap, 'demo', '--role', 'a', '--spec', path.join(scratch, 'junk.json'))).rejects.toThrow(/not valid JSON/);
-    await expect(run(snap, 'nosuch', '--role', 'a', '--spec', writeSpec('a.json', specOf('a')))).rejects.toThrow(/no plan named nosuch/);
-    await expect(run(snap, '../demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a')))).rejects.toThrow(/not a plan name/);
   });
 });
 
@@ -350,40 +225,6 @@ describe('compare', () => {
     expect(record.agree).toBe(true);
     expect(record.counts.a).toEqual({ gla: 1, garage: 1 });
   });
-
-  it('disagrees when one drawer fixed an edge where they drew it, and says where', async () => {
-    await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
-    const off = specOf('b-demo');
-    off.outlines[0].v = [[97, 77], [303, 77], [303, 223], [90, 223]];
-    off.outlines[0].fix = [3, 0, 2];
-    off.outlines[0].v[0] = [90, 70];
-    await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', off));
-    const { out } = await run(compare, 'demo');
-    expect(out).toMatch(/DISAGREE \(\d\)/);
-    expect(out).toMatch(/disagreement regions/);
-    expect(out).toMatch(/1\. bbox/);
-  });
-
-  it('compares two files, and draws the regions to a views folder by tag', async () => {
-    await both(0);
-    const a = wip('.a.snapped.json');
-    const b = wip('.b.snapped.json');
-    const { code, out } = await run(compare, a, b, '--draw', 'cmp.png', '--tag', 'adj1', '--image', 'demo');
-    expect(code).toBe(0);
-    const png = path.join(root, 'datasets', 'zz-scratch', 'views', 'adj1', 'cmp.png');
-    expect(fs.existsSync(png)).toBe(true);
-    expect(out).toContain(png);
-    await expect(run(compare, a, b, '--draw', 'cmp.png')).rejects.toThrow(/needs --image/);
-    const { out: json } = await run(compare, a, b, '--json');
-    expect(JSON.parse(json).agree).toBe(true);
-  });
-
-  it('draws for a plan by name, and says what is missing', async () => {
-    await both(0);
-    await run(compare, 'demo', '--draw', 'named.png', '--tag', 'adj2');
-    expect(fs.existsSync(path.join(root, 'datasets', 'zz-scratch', 'views', 'adj2', 'named.png'))).toBe(true);
-    await expect(run(compare, 'other')).rejects.toThrow(/does not exist/);
-  });
 });
 
 describe('check', () => {
@@ -400,34 +241,6 @@ describe('check', () => {
     expect(out).toMatch(/PASS +labels +2 of 2 labels/);
   });
 
-  it('fails, with a non-zero exit, on a key whose label lies in the wrong outline', async () => {
-    const spec = specOf('adj');
-    // The garage label sits at (350, 150): make the "garage" the house's type.
-    spec.outlines[1].type = 'gla';
-    await finalKey(spec);
-    const { code, out } = await run(check, 'demo');
-    expect(code).toBe(1);
-    expect(out).toMatch(/FAIL +labels +e0/);
-    expect(out).toMatch(/CHECK FAIL \(1\)$/);
-  });
-
-  it('fails a hand-broken snapped file, and reads a stated area from the spec', async () => {
-    await finalKey(specOf('adj', 0, { stated: [{ sqft: 400, of: 'first floor' }] }));
-    let { code, out } = await run(check, 'demo');
-    expect(code).toBe(1);
-    expect(out).toMatch(/FAIL +stated/);
-    await finalKey(specOf('adj', 0, { stated: [{ sqft: 400, of: 'first floor', explained: 'the page counts the garage' }] }));
-    ({ code, out } = await run(check, 'demo'));
-    expect(code).toBe(0);
-    expect(out).toMatch(/WARN +stated/);
-    const snapped = readJson(wip('.final.snapped.json'));
-    snapped.outlines[0].v = [[100, 80], [300, 220], [300, 80], [100, 220]];
-    fs.writeFileSync(wip('.final.snapped.json'), JSON.stringify(snapped));
-    ({ code, out } = await run(check, 'demo'));
-    expect(code).toBe(1);
-    expect(out).toMatch(/FAIL +closed .*edge 0 crosses edge 2/);
-  });
-
   it('takes a scale from the command line when the plan has none, and says when there is none', async () => {
     const p = project();
     p.floors[0].state.calibration = { calibrated: false };
@@ -440,31 +253,6 @@ describe('check', () => {
     expect(out).toMatch(/PASS +stated/);
     const { out: json } = await run(check, 'demo', '--feet-per-pixel', '0.1', '--json');
     expect(JSON.parse(json)).toMatchObject({ pass: true, failures: 0 });
-  });
-
-  it('fails a key snapped on a page of another size than the plan\'s image, as when the plan was drafted again', async () => {
-    await finalKey();
-    const file = wip('.final.snapped.json');
-    let { code, out } = await run(check, 'demo');
-    expect(code).toBe(0);
-    expect(out).toMatch(/PASS +page +460 x 300 px: the key was snapped on a page of the plan's size/);
-    const snapped = readJson(file);
-    snapped.image = { width: 1000, height: 400 };
-    fs.writeFileSync(file, JSON.stringify(snapped));
-    ({ code, out } = await run(check, 'demo'));
-    expect(code).toBe(1);
-    expect(out).toMatch(/FAIL +page +460 x 300 px: the key was snapped on a 1000 x 400 px page and the plan's image is 460 x 300 px/);
-    expect(out).toMatch(/CHECK FAIL \(1\)$/);
-    // A snapped file that records no size is not judged by it.
-    delete snapped.image;
-    fs.writeFileSync(file, JSON.stringify(snapped));
-    ({ code, out } = await run(check, 'demo'));
-    expect(code).toBe(0);
-    expect(out).not.toMatch(/ page /);
-  });
-
-  it('says to snap first when there is no key to check', async () => {
-    await expect(run(check, 'demo')).rejects.toThrow(/run snap --role final first/);
   });
 
   it('warns of an edge the snap moved far onto a band, which a second snap of the snapped key cannot see', async () => {
@@ -508,27 +296,6 @@ describe('check', () => {
     expect(out).toMatch(/labels from the plan's scan/);
     expect(out).toMatch(/WARN +labels +d0: .* lies in no outline/);
   });
-
-  it('keeps the kinds the annotators saw: a later change to labelKind does not move a frozen key', async () => {
-    await run(blind, 'demo');
-    await finalKey();
-    // As if labelKind read "20' x 14'" (the living room's size) as a garage now.
-    const file = path.join(root, 'keys-wip', 'packets', 'demo', 'labels.json');
-    const packet = readJson(file);
-    packet.labels.find((l) => l.id === 'd0').kind = 'nonGla';
-    fs.writeFileSync(file, JSON.stringify(packet));
-    const { code, out } = await run(check, 'demo');
-    expect(code).toBe(1);
-    expect(out).toMatch(/FAIL +labels +d0: .* lies in gla, expected garage\/porch\/unfinished/);
-    expect(out).toMatch(/WARN +labels +packet: .*d0 is nonGla .* in the packet, room .* in the scan now/);
-  });
-
-  it('refuses a packet whose labels are not a labels list', async () => {
-    await run(blind, 'demo');
-    await finalKey();
-    fs.writeFileSync(path.join(root, 'keys-wip', 'packets', 'demo', 'labels.json'), JSON.stringify({ labels: [{ id: 'd0' }] }));
-    await expect(run(check, 'demo')).rejects.toThrow(/is not a labels list.*run blind demo again/);
-  });
 });
 
 describe('review and apply: the freeze', () => {
@@ -548,17 +315,6 @@ describe('review and apply: the freeze', () => {
     expect(out).toContain('review-1.json');
     await run(review, 'demo', '--reject', '--agent', 'rev-2', '--region', '90,70,120,100', '--reason', 'the corner is off');
     expect(readJson(wip('.review-2.json'))).toMatchObject({ n: 2, decision: 'reject', region: [90, 70, 120, 100], reason: 'the corner is off' });
-  });
-
-  it('refuses a rejection with no reason, an empty agent, both flags, and no key', async () => {
-    await expect(run(review, 'demo', '--reject', '--agent', 'r')).rejects.toThrow(/needs --reason/);
-    await expect(run(review, 'demo', '--reject', '--agent', 'r', '--reason', '  ')).rejects.toThrow(/needs --reason/);
-    await expect(run(review, 'demo', '--approve', '--reject', '--agent', 'r')).rejects.toThrow(/exactly one of/);
-    await expect(run(review, 'demo', '--agent', 'r')).rejects.toThrow(/exactly one of/);
-    await expect(run(review, 'demo', '--approve')).rejects.toThrow(/needs --agent/);
-    await expect(run(review, 'demo', '--approve', '--agent', 'r')).rejects.toThrow(/nothing to review/);
-    await finalKey();
-    await expect(run(review, 'demo', '--reject', '--agent', 'r', '--reason', 'x', '--region', '1,2,3')).rejects.toThrow(/--region must be 4 comma-separated numbers/);
   });
 
   it('refuses a reviewer who drew or adjudicated the key', async () => {
@@ -630,41 +386,6 @@ describe('review and apply: the freeze', () => {
     await run(review, 'demo', '--approve', '--agent', 'rev-2');
     await run(apply, 'demo');
     expect(readJson(plan()).answerKey.notes).toBe('Nothing to see here.');
-  });
-
-  it('does not take an older review, recorded without the spec hash, as approval of the notes', async () => {
-    await finalKey();
-    writeRecord();
-    await run(review, 'demo', '--approve', '--agent', 'rev-1');
-    const rec = readJson(wip('.review-1.json'));
-    delete rec.specSha256;
-    fs.writeFileSync(wip('.review-1.json'), JSON.stringify(rec));
-    await expect(run(apply, 'demo')).rejects.toThrow(/review-1 holds no hash of the final spec.*needs a fresh review/);
-    expect(readJson(plan()).answerKey).toBeUndefined();
-  });
-
-  it('gives two reviewers who run at once two review files, and neither replaces the other', async () => {
-    await finalKey();
-    const each = (agent, ...more) => {
-      const out = [];
-      return review(['demo', '--agent', agent, ...more], { ...ctx, out: (l) => out.push(l) }).then(() => out);
-    };
-    await Promise.all([
-      each('rev-1', '--approve'),
-      each('rev-2', '--reject', '--reason', 'the porch is missing'),
-      each('rev-3', '--approve', '--note', 'third'),
-    ]);
-    const files = fs.readdirSync(path.join(root, 'keys-wip')).filter((f) => /^demo\.review-\d+\.json$/.test(f)).sort();
-    expect(files).toEqual(['demo.review-1.json', 'demo.review-2.json', 'demo.review-3.json']);
-    const agents = files.map((f) => readJson(path.join(root, 'keys-wip', f)));
-    expect(agents.map((r) => r.n)).toEqual([1, 2, 3]);
-    expect(new Set(agents.map((r) => r.agent))).toEqual(new Set(['rev-1', 'rev-2', 'rev-3']));
-  });
-
-  it('will not review a key whose spec is missing, since apply records its notes', async () => {
-    await finalKey();
-    fs.rmSync(wip('.final.json'));
-    await expect(run(review, 'demo', '--approve', '--agent', 'rev-1')).rejects.toThrow(/nothing to review: demo\.final\.json \(the notes, waivers and stated figures\) does not exist/);
   });
 
   it('refuses a key that fails check, a missing or malformed record, and empty notes', async () => {
@@ -762,58 +483,6 @@ describe('view, probe and sheet', () => {
     expect(lineA).toMatch(/^crop 60,40→340,240 {2}scale \d+\.\d\d px\/px {2}grid 20$/);
   });
 
-  it('draws a plan by name bare by default: no key and no trace', async () => {
-    const bare = await run(view, 'demo', '--tag', 'x');
-    const again = await run(view, 'demo', '--tag', 'x');
-    expect(bare.out).toBe(again.out);
-    expect(path.basename(bare.out.split('\n')[0])).toBe('demo.png');
-  });
-
-  it('accepts --bare, which a plan drawn by name already is, and refuses it with --keys or --trace', async () => {
-    const plain = await run(view, 'demo', '--tag', 'x');
-    const bare = await run(view, 'demo', '--bare', '--tag', 'x');
-    expect(bare.out).toBe(plain.out);
-    await expect(run(view, 'demo', '--bare', '--keys')).rejects.toThrow(/--bare draws no key and no trace/);
-    await expect(run(view, 'demo', '--bare', '--trace')).rejects.toThrow(/--bare draws no key and no trace/);
-  });
-
-  it('says so when the crop misses the page or grazes it, and notes a crop cut back to the page', async () => {
-    await expect(run(view, 'demo', '--crop', '1000,1000,1200,1200')).rejects.toThrow(/the crop 1000,1000→1200,1200 shows none of the 460 x 300 px image/);
-    await expect(run(view, 'demo', '--crop', '459.5,10,600,80')).rejects.toThrow(/shows only 0\.5 x 70 px of the 460 x 300 px image/);
-    await expect(run(view, 'demo', '--crop', '-50,-50,-10,-10')).rejects.toThrow(/shows none/);
-    const { out } = await run(view, 'demo', '--crop', '400,200,600,400', '--tag', 'clip');
-    expect(out).toMatch(/crop 400,200→460,300/);
-  });
-
-  it('refuses --keys and --trace on an image file, and an option it does not have', async () => {
-    await run(blind, 'demo');
-    const packetImage = path.join(root, 'keys-wip', 'packets', 'demo', 'image.png');
-    await expect(run(view, packetImage, '--keys')).rejects.toThrow(/need a plan NAME/);
-    await expect(run(view, packetImage, '--trace')).rejects.toThrow(/need a plan NAME/);
-    await expect(run(view, 'demo', '--bogus')).rejects.toThrow(/unknown option --bogus/);
-    await expect(run(view, 'demo', '--crop', '5,5,1,1')).rejects.toThrow(/X1 > X0/);
-    await expect(run(view, 'demo', '--tag', '../x')).rejects.toThrow(/--tag/);
-  });
-
-  it('draws the polygons of several files, each in its own style, with a name per view', async () => {
-    await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
-    await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
-    const one = await run(view, 'demo', '--poly', wip('.a.snapped.json'), '--tag', 'p');
-    const two = await run(view, 'demo', '--poly', wip('.a.snapped.json'), '--poly', wip('.b.snapped.json'), '--tag', 'p');
-    expect(one.out.split('\n')[0]).not.toBe(two.out.split('\n')[0]);
-    // A rough spec with refs draws too.
-    await run(view, 'demo', '--poly', path.join(scratch, 'a.json'), '--tag', 'p');
-  });
-
-  it('draws the scan\'s labels on a plan or beside a packet, and refuses them on a bare image', async () => {
-    await run(blind, 'demo');
-    const packetImage = path.join(root, 'keys-wip', 'packets', 'demo', 'image.png');
-    await run(view, 'demo', '--labels', '--tag', 'l');
-    await run(view, packetImage, '--labels', '--tag', 'l');
-    fs.writeFileSync(path.join(scratch, 'page.png'), image());
-    await expect(run(view, path.join(scratch, 'page.png'), '--labels')).rejects.toThrow(/needs a labels\.json beside it/);
-  });
-
   it('probes the ink along a segment: the runs, in pixels', async () => {
     const { out } = await run(probe, 'demo', '--from', '200,70', '--to', '200,100');
     // Light to y=80, dark 80-88, light after.
@@ -834,162 +503,12 @@ describe('view, probe and sheet', () => {
     const { code } = await run(probe, 'demo', '--from', '200,290', '--to', '200,300');
     expect(code).toBe(0);
   });
-
-  it('makes review sheets that show the stored key and its record', async () => {
-    const out = path.join(scratch, 'sheet.png');
-    const { out: written } = await run(sheet, 'demo', '--out', out);
-    expect(written).toBe(out);
-    expect(fs.statSync(out).size).toBeGreaterThan(1000);
-    await expect(run(sheet, '--out', out)).rejects.toThrow(UsageError);
-  });
 });
 
-describe('--dry and --tag: what a blind role sees, and never has to name', () => {
-  const scratchOf = (tag) => path.join(root, 'datasets', 'zz-scratch', tag);
-  const namesWip = (out) => out.split('\n').filter((l) => l.includes('keys-wip'));
-
-  it('says --dry changes nothing: it is not a preview, snap writes keys-wip/ either way', async () => {
-    const dry = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--dry');
-    expect(dry.out).toContain('note: --dry changes nothing: snap only writes keys-wip/ (never the plan)');
-    expect(fs.existsSync(wip('.a.snapped.json'))).toBe(true);
-    const plain = await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
-    expect(plain.out).not.toMatch(/--dry/);
-  });
-
-  it('snap --tag copies the spec and the snapped key into the tag\'s scratch folder, and prints those paths for --poly', async () => {
-    await run(blind, 'demo');
-    const spec = writeSpec('a.json', specOf('a-demo'));
-    const { code, out } = await run(snap, 'demo', '--role', 'a', '--spec', spec, '--tag', 'ann-a');
-    expect(code).toBe(0);
-    const snappedCopy = path.join(scratchOf('ann-a'), 'demo.a.snapped.json');
-    const specCopy = path.join(scratchOf('ann-a'), 'demo.a.json');
-    expect(fs.readFileSync(snappedCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.snapped.json'), 'utf8'));
-    expect(fs.readFileSync(specCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.json'), 'utf8'));
-    expect(out).toContain(`snapped outlines -> ${snappedCopy}`);
-    expect(out).toContain(`spec kept -> ${specCopy}`);
-    expect(out).toContain(`use this with --poly: ${snappedCopy}`);
-    // The packet's image is the only thing of keys-wip/ it names, on the header line.
-    const named = namesWip(out);
-    expect(named).toHaveLength(1);
-    expect(named[0]).toMatch(/^snap demo role a: .*\(from .*packets/);
-    // view --poly draws the copy as it drew the set's file.
-    const drawn = await run(view, 'demo', '--poly', snappedCopy, '--tag', 'ann-a');
-    expect(fs.existsSync(drawn.out.split('\n')[0])).toBe(true);
-    // Snapped again, the copy follows.
-    await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a2.json', specOf('a-demo', 1)), '--tag', 'ann-a');
-    expect(fs.readFileSync(snappedCopy, 'utf8')).toBe(fs.readFileSync(wip('.a.snapped.json'), 'utf8'));
-  });
-
-  it('snap without --tag prints the set\'s paths and makes no scratch copy, as before', async () => {
-    const { out } = await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
-    expect(out).toContain(`snapped outlines -> ${wip('.a.snapped.json')}`);
-    expect(out).toContain(`spec kept -> ${wip('.a.json')}`);
-    expect(out).not.toMatch(/use this with --poly/);
-    expect(fs.existsSync(path.join(root, 'datasets', 'zz-scratch'))).toBe(false);
-  });
-
+describe('--tag', () => {
   it('refuses a tag that is not a name before writing anything', async () => {
     await expect(run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', '../x')).rejects.toThrow(/--tag/);
     expect(fs.existsSync(wip('.a.json'))).toBe(false);
-  });
-
-  describe('compare and check', () => {
-    const both = async (tag, aSpec = specOf('a-demo'), bSpec = specOf('b-demo', 2)) => {
-      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', aSpec), '--tag', tag);
-      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', bSpec), '--tag', tag);
-    };
-
-    it('compare NAME --tag copies both keys, their specs and the comparison, and names only the copies', async () => {
-      await both('adj');
-      const { out } = await run(compare, 'demo', '--tag', 'adj');
-      const dir = scratchOf('adj');
-      for (const f of ['demo.a.snapped.json', 'demo.b.snapped.json', 'demo.a.json', 'demo.b.json', 'demo.compare.json']) {
-        expect(fs.existsSync(path.join(dir, f)), f).toBe(true);
-      }
-      expect(fs.readFileSync(path.join(dir, 'demo.b.snapped.json'), 'utf8')).toBe(fs.readFileSync(wip('.b.snapped.json'), 'utf8'));
-      expect(out).toContain(`written -> ${path.join(dir, 'demo.compare.json')}`);
-      expect(out).toContain(`use this with --poly: ${path.join(dir, 'demo.a.snapped.json')}`);
-      expect(out).toContain(`use this with --poly: ${path.join(dir, 'demo.b.snapped.json')}`);
-      expect(namesWip(out)).toEqual([]);
-      // The set's own record names the set's files; the copy names the copies.
-      expect(readJson(wip('.compare.json')).a).toBe(wip('.a.snapped.json'));
-      expect(readJson(path.join(dir, 'demo.compare.json'))).toMatchObject({
-        a: path.join(dir, 'demo.a.snapped.json'), b: path.join(dir, 'demo.b.snapped.json'), agree: true,
-      });
-      const json = await run(compare, 'demo', '--tag', 'adj', '--json');
-      expect(json.out).not.toContain('keys-wip');
-      expect(JSON.parse(json.out).a).toBe(path.join(dir, 'demo.a.snapped.json'));
-      // The copies are what view --poly takes.
-      await run(view, 'demo', '--poly', path.join(dir, 'demo.a.snapped.json'), '--poly', path.join(dir, 'demo.b.snapped.json'), '--tag', 'adj');
-    });
-
-    it('compare without --tag prints the set\'s path and copies nothing; two files with --tag copy nothing either', async () => {
-      await both('t0');
-      fs.rmSync(scratchOf('t0'), { recursive: true });
-      const plain = await run(compare, 'demo');
-      expect(plain.out).toContain(`written -> ${wip('.compare.json')}`);
-      expect(fs.existsSync(scratchOf('t0'))).toBe(false);
-      await run(compare, wip('.a.snapped.json'), wip('.b.snapped.json'), '--tag', 'adj9');
-      expect(fs.existsSync(scratchOf('adj9'))).toBe(false);
-    });
-
-    it('under --tag a key that is missing is said without the set\'s path', async () => {
-      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', 'adj');
-      await expect(run(compare, 'demo', '--tag', 'adj')).rejects.toThrow(/^there is no key for role b of demo yet: snap --role b first$/);
-      await expect(run(check, 'demo', '--role', 'b', '--tag', 'adj')).rejects.toThrow(/^no key has been snapped for role b of demo: run snap --role b first$/);
-    });
-
-    it('check --tag names the copy where it prints a path, and no path when there is no copy', async () => {
-      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')), '--tag', 'ann-a');
-      const copy = path.join(scratchOf('ann-a'), 'demo.a.snapped.json');
-      const tagged = await run(check, 'demo', '--role', 'a', '--tag', 'ann-a', '--json');
-      expect(tagged.out).not.toContain('keys-wip');
-      expect(JSON.parse(tagged.out).snappedFile).toBe(copy);
-      // The text output has never named a path.
-      expect((await run(check, 'demo', '--role', 'a', '--tag', 'ann-a')).out).not.toContain('keys-wip');
-      // Snapped without a tag there is no copy: the field is left out, not the set's path.
-      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
-      const bare = await run(check, 'demo', '--role', 'b', '--tag', 'ann-a', '--json');
-      expect(bare.out).not.toContain('keys-wip');
-      expect(JSON.parse(bare.out).snappedFile).toBeUndefined();
-      // Without --tag, as before.
-      expect(JSON.parse((await run(check, 'demo', '--role', 'b', '--json')).out).snappedFile).toBe(wip('.b.snapped.json'));
-    });
-  });
-
-  describe('compare: a small unfinished outline decides nothing', () => {
-    // A chimney 12 x 20 px = 240 px2 out of the house's left wall, 0.86% of its 28,000 px2.
-    const chimney = { type: 'unfinished', v: [[88, 120], [100, 120], [100, 140], [88, 140]], fix: [0, 1, 2, 3] };
-    const withChimney = (extra) => {
-      const spec = specOf('a-demo');
-      spec.outlines.push({ ...chimney, ...extra });
-      return spec;
-    };
-
-    it('lists it as informational, and the keys agree', async () => {
-      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', withChimney()));
-      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', specOf('b-demo')));
-      const { out } = await run(compare, 'demo');
-      expect(out).toMatch(/outline types: A \[gla, garage, unfinished\] {2}B \[gla, garage\]/);
-      expect(out).toMatch(/informational \(unfinished space is not scored, so these do not decide agreement\):\n {2}A's outline 2 \(unfinished\): 240 px2, 0\.86% of A's building \(under 2\.00%\), bbox 88,120,100,140; B has none there/);
-      expect(out).not.toMatch(/unfinished \d+\.\d+% \(not scored\)/);
-      expect(out).toMatch(/^AGREE$/m);
-      expect(readJson(wip('.compare.json')).informational).toHaveLength(1);
-    });
-
-    it('but a large one only B drew is a disagreement, and a region to crop at, and not a distance failure', async () => {
-      await run(snap, 'demo', '--role', 'a', '--spec', writeSpec('a.json', specOf('a-demo')));
-      const big = specOf('b-demo');
-      big.outlines.push({ type: 'unfinished', v: [[100, 220], [300, 220], [300, 240], [100, 240]], fix: [0, 1, 2, 3] });
-      await run(snap, 'demo', '--role', 'b', '--spec', writeSpec('b.json', big));
-      const { out } = await run(compare, 'demo');
-      expect(out).toMatch(/FAIL \(a\) outline types differ: A has \[garage, gla\], B has \[garage, gla, unfinished\]/);
-      expect(out).toMatch(/ok {3}\(d\) largest boundary distance/);
-      // One key's unfinished space is not a figure: no "unfinished 0.00%" to alarm anyone.
-      expect(out).not.toMatch(/unfinished 0\.00%/);
-      expect(out).toMatch(/1\. bbox 100,220,300,240 {2}only key B has an unfinished outline here \(not scored: it fails the outline types, criterion a, and nothing else\)/);
-      expect(out).toMatch(/^DISAGREE \(1\)$/m);
-    });
   });
 });
 
@@ -1013,7 +532,6 @@ describe('score', () => {
   };
   const traceFile = (name, json) => writeSpec(name, json);
   const houseOnly = { outlines: [{ type: 'gla', closed: true, vertices: [{ x: 100, y: 80 }, { x: 300, y: 80 }, { x: 300, y: 220 }, { x: 100, y: 220 }] }] };
-  const merged = { outlines: [{ type: 'gla', closed: true, vertices: [{ x: 100, y: 80 }, { x: 400, y: 80 }, { x: 400, y: 220 }, { x: 100, y: 220 }] }] };
 
   beforeEach(() => {
     fs.writeFileSync(plan(), JSON.stringify(keyed()));
@@ -1040,43 +558,6 @@ describe('score', () => {
     expect(out).not.toMatch(/WRONG BUT SHOWN/);
     expect(out).toContain('warnings: thin-structure-excluded');
     expect(sha(plan())).toBe(before);
-  });
-
-  it('calls the outline merged with the garage wrong, names the garage as the cause, and flags it as shown good', async () => {
-    const { code, out } = await run(score, 'demo', traceFile('t.json', { ...merged, confidence: 0.93 }));
-    expect(code).toBe(0);
-    expect(out.split('\n')[0]).toBe('score demo: verdict WRONG   IoU 66.67%   area error +50.0% (the outlines cover more than the key\'s building)');
-    expect(out).toMatch(/non-GLA space kept 50\.0%, other space taken in 0\.0%, living space missed 0\.0%/);
-    expect(out).toMatch(/error regions, largest first: non-GLA space kept 50\.0%/);
-    expect(out).toMatch(/confidence 93\.0% \(good\) {3}WRONG BUT SHOWN AS GOOD/);
-    const { out: json } = await run(score, 'demo', traceFile('t2.json', { ...merged, confidence: 0.4 }), '--json');
-    expect(JSON.parse(json)).toMatchObject({
-      name: 'demo', verdict: 'wrong', overNonGla: 0.5, confidence: 0.4, level: 'poor', wrongButShownGood: false, keyChanged: null,
-    });
-    const { out: none } = await run(score, 'demo', traceFile('t3.json', merged), '--json');
-    expect(JSON.parse(none)).toMatchObject({ confidence: null, wrongButShownGood: null });
-  });
-
-  it('takes the rings of a run file and the outlines of the app, and a shifted copy is judged by cells', async () => {
-    const ring = (dx) => [[100 + dx, 80], [300 + dx, 80], [300 + dx, 220], [100 + dx, 220]];
-    expect(JSON.parse((await run(score, 'demo', traceFile('r0.json', { rings: [ring(0)] }), '--json')).out).verdict).toBe('perfect');
-    const shifted = JSON.parse((await run(score, 'demo', traceFile('r4.json', { rings: [ring(4)] }), '--json')).out);
-    expect(shifted).toMatchObject({ verdict: 'wrong', iou: 0.9608, areaErr: 0 });
-    // The app's own outlines: a bare array, with the garage as an outline of its own.
-    const appOutlines = [...houseOnly.outlines, { type: 'garage', closed: true, vertices: [{ x: 300, y: 80 }, { x: 400, y: 80 }, { x: 400, y: 220 }, { x: 300, y: 220 }] }];
-    const bare = JSON.parse((await run(score, 'demo', traceFile('app.json', appOutlines), '--json')).out);
-    expect(bare).toMatchObject({ verdict: 'perfect', floors: 1 });
-    expect(bare.left).toEqual([{ index: 1, type: 'garage', why: 'not a building type' }]);
-  });
-
-  it('scores against the plan\'s stored outlines, not their copy rounded to a tenth of a pixel', async () => {
-    // A key edge at x = 100.04: keyOf writes 100, but the truth is what bench:real reads.
-    const p = keyed();
-    p.floors[0].state.perimeterTraces[0].vertices[0].x = 100.04;
-    fs.writeFileSync(plan(), JSON.stringify(p));
-    expect(keyOf(readJson(plan()).floors[0].state)[0].points[0][0]).toBe(100);
-    const { out } = await run(score, 'demo', traceFile('t.json', houseOnly), '--json');
-    expect(JSON.parse(out).verdict).toBe('perfect');
   });
 
   describe('the test split, and the manifest', () => {

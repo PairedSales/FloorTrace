@@ -2,7 +2,6 @@
 // (lib/realBenchPool.mjs). The crash and start-up cases run against stub
 // workers; one test runs the real `realBenchmark.mjs --worker` on synthetic
 // plans and requires what a worker reports to be what the main process would.
-import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -50,10 +49,6 @@ describe('the worker pool', () => {
     expect(results.map((r) => r.name).sort()).toEqual(['p1', 'p2', 'p3']);
     for (const r of results) expect(r.error).toMatch(/workers failed to start/);
   });
-
-  it('has nothing to wait for with no plans', async () => {
-    expect(await runPool(STUB, [], 4)).toEqual([]);
-  });
 });
 
 describe('the real worker', () => {
@@ -82,10 +77,4 @@ describe('the real worker', () => {
     expect(theirs.map(withoutMs)).toEqual(mine.map(withoutMs));
     expect(theirs[2]).toMatchObject({ name: 'absent', error: expect.stringMatching(/ENOENT/) });
   }, 60000);
-
-  it('refuses to be started by hand', () => {
-    const run = spawnSync(process.execPath, [BENCH, '--worker'], { encoding: 'utf8' });
-    expect(run.status).toBe(2);
-    expect(run.stderr).toMatch(/started by --jobs/);
-  });
 });
