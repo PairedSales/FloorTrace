@@ -51,7 +51,6 @@ const TRACE_WORDS = /\b(trace[sd]?|tracer|tracing|verdict|iou|bench\w*|scor(?:e|
 const TRACE_MESSAGE = 'a reason that talks about the tracer, the scan or the labels is not an inclusion rule: a page qualifies before it is drafted, never by how the app handles it (integrity rule 6). Draft the page; if it truly breaks a rule, give that rule';
 
 
-const SLUG = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const isInt = (n) => Number.isInteger(n);
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
 const keyOf = (text) => str(text).toLowerCase().replace(/\s+/g, ' ');

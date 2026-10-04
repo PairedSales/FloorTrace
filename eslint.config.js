@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['**/dist/**', '.claude/**', '.ocrperf/**', '.perfprobe/**']),
+  globalIgnores(['**/dist/**', '.claude/**']),
   {
     // `.mjs` is in the glob because it was not, and that left every file under
     // `scripts/` — the two benchmarks CI gates each PR on included — with

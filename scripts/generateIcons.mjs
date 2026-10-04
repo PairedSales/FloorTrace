@@ -143,7 +143,5 @@ const write = (name, data) => {
 write('favicon-16x16.png', renderIcon(16));
 write('favicon-32x32.png', renderIcon(32));
 write('apple-touch-icon.png', renderIcon(180));
-write('android-chrome-192x192.png', renderIcon(192));
-write('android-chrome-512x512.png', renderIcon(512));
 write('favicon.ico', buildIco([16, 32, 48].map((size) => ({ size, data: renderIcon(size) }))));
 write('icon.svg', Buffer.from(svgMarkup(), 'utf8'));
