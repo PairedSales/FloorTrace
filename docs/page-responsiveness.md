@@ -198,6 +198,57 @@ touched.
 in 2.8 s, the scan and the decode run in their workers, the on-page fallback is never fetched,
 and the page's longest stall across the whole run was 57 ms.
 
+### The second-chance trace, a third pass
+
+§3.3 below was the largest wait left in the usual workflow, so it was taken on. Two changes, both
+in the tracer, and both checked the way a detection change has to be.
+
+**An attempt is handed the rungs an earlier attempt measured.** A remediation pass regenerates a
+network's candidates from nothing — a taller ladder, every rescue forced. But a rung is
+`measureFootprint` of a mask and a radius, and the mask a policy climbs is a function of the
+network alone. So the welded and structural ladders' first eight or nine rungs are the ones the
+first search had just closed, flooded and labelled, and `generateCandidates` now takes them
+(`priorRungs`) instead of measuring them again. A rung that became a candidate keeps its
+footprint; one that repeated the rung below keeps only the numbers the climb reads.
+
+**The memo answers only for the partition it was built on.** Its keys name a network by its
+place in the partition, and a `join` pass makes a partition of its own. A later attempt — an
+`escalate` after an accepted join, or a join in a later trace of the same image with other
+labels outside — was answered with the candidates of whichever network had held that index
+before. Only where there is a memo: in the browser, never in a Node benchmark. Found because the
+harness for the first change compares a memoised trace with a cold one, and on one of the
+owner's own snips they disagreed. Reproduced on the synthetic houses, where the memoised trace
+returned an earlier trace's outline (IoU 0.99 against a cold 0.50, on a plan whose one label
+implicates half the building). Attempts on any other partition are now searched fresh.
+
+The outline step on the app's own path, in Node with the browser's memo and prewarm:
+
+| Plan | before | after | the second pass |
+|---|---|---|---|
+| `ExampleFloorplan3` | 2687 ms | 2171 ms | kept |
+| `ExampleFloorplan4` | 1368 ms | 1094 ms | thrown away |
+| `ExampleFloorplan5` | 2100 ms | 1646 ms | thrown away |
+| `ExampleFloorplan7` | 2380 ms | 1858 ms | kept |
+| one of the owner's 1440×1080 plans | 2125 ms | 1604 ms | thrown away |
+| another | 2210 ms | 1790 ms | kept |
+
+About a fifth off, 0.3–0.5 s a plan. Less than the estimate in §3.3, because what is left of the
+pass is the two span ladders, which no earlier attempt has climbed. Plans that never run the pass
+are unchanged, and so is every outline:
+
+- 24 plans through the app's path — the ten fixtures and fourteen of the owner's own — with the
+  whole result compared: 23 identical, and the 24th is the snip the memo was wrong about, which
+  now says what a cold trace says.
+- `bench:real`, 75 plan-book pages, bare and as the app traced them: 168 of 168 records identical.
+- `bench:cubicasa`, 300 plans of the dev split: 300 of 300 records identical, no verdict moved.
+- `probe:exterior`, both modes, and `bench:detection` and `bench:scale`: identical with timings
+  stripped.
+- `remediationMemo.test.js`: an escalated search given the first search's rungs produces the same
+  candidates, label array for label array, as one that measured everything; and a memoised
+  second-chance trace equals a cold one. Seven of its nine cases fail on the code before.
+
+On the owner's fourteen plans the pass runs on six. It is still most of the trace on those.
+
 ---
 
 ## 3. Found and left
@@ -233,45 +284,33 @@ and the trace 2.4 s. The render and its PNG encode are also the one freeze left 
 ROI crops are taken from the full-resolution page, so the size is not free to cut: this needs
 `bench:ocr` on PDF inputs, which the fixtures do not include.
 
-### 3.3 The second-chance trace costs 1.2–2.1 s, on four fixtures in ten
+### 3.3 The second-chance trace still costs about a second, on four fixtures in ten
 
-This is the largest wait left in the usual workflow, and it is worker time: the page stays live.
+Worker time, so the page stays live — but the largest wait left in the usual workflow, and on six
+of the owner's fourteen plans.
 
 The first search is cheap, because the prewarm has already climbed its ladder: 0.2–0.33 s. When
 a label the scan located falls outside the outline it finds, remediation runs an `escalate` pass
-— the ladder to twice the radius, with every rescue forced — and that pass is a cold search of
-about 45 rungs. Reproduced in Node on the app's own path (the scan's labels, the rooms measured
-from them, then the trace, with the browser's `cacheKey` and prewarm):
+— the ladder to twice the radius, with every rescue forced. Before the change in §2 that pass
+was a cold search of about 45 rungs, 1.2–2.1 s; with the first search's rungs handed over it is
+0.9–1.6 s, and what remains is the two span ladders (about 22 rungs no attempt has climbed
+before), the three new rungs at the top of each ladder, and scoring some twenty candidates. On
+two of the four fixtures its result is thrown away.
 
-| Fixture | first search | with the second pass | second pass | its result |
-|---|---|---|---|---|
-| `ExampleFloorplan3` | 324 ms | 2424 ms | 2.1 s | kept |
-| `ExampleFloorplan4` | 242 ms | 1400 ms | 1.2 s | thrown away |
-| `ExampleFloorplan5` | 198 ms | 2121 ms | 1.9 s | thrown away |
-| `ExampleFloorplan7` | 330 ms | 2339 ms | 2.0 s | kept |
+What would take more off:
 
-The other six trace in 33–456 ms and never run it.
-
-Three things about it:
-
-- **`bench:detection` cannot see it.** Its constrained pass prints "no retry needed" on every
-  fixture: the truth file's rooms never leave a label outside. The scan's labels do, on four of
-  the ten. So the gate that guards the tracer's time has never timed this pass, and the 60 s
-  ceiling the detection suites are held under says nothing about it either.
-- **It re-measures what the first search measured.** The pass regenerates every candidate from
-  nothing. Its welded ladder's first eight or nine rungs, and the structural ladder's, are the
-  same masks at the same radii the first search closed, flooded and labelled moments before —
-  17–19 of its ~45 rungs. `measureFootprint` is a pure function of the mask and the radius, so
-  handing the first search's rungs to the pass is exact, and worth an estimated 0.5–0.8 s.
+- **Nothing can run it ahead of time.** The detection worker is idle for a second or two while
+  the scan finishes, but it is one thread, and a speculative pass that outlasted the scan would
+  hold up measuring the rooms on the six plans in ten that never need it.
 - **The memo cannot hold it.** `ExampleFloorplan3`, `4` and `5` all trip the 32 MB search budget
   (34–36 MB charged); holding everything `ExampleFloorplan5` computes would take 101 MB. Each
-  kept rung is charged for a page-sized `Int32` label array where one bit per pixel would say
-  the same thing. Until that is smaller, neither a bigger budget nor running the pass ahead of
-  time during the scan is affordable — a budget of 128 MB was tried and changed nothing, because
-  the pass is not what the memo was holding.
-
-Any change here is a detection change: output-identical or not at all, and the proof has to come
-from a harness that runs the app's path, since the benchmark does not reach this code.
+  kept rung is charged for a page-sized label array where one bit per pixel would say the same
+  thing. A budget of 128 MB was tried and changed nothing.
+- **`bench:detection` cannot see it.** Its constrained pass prints "no retry needed" on every
+  fixture: the truth file's rooms never leave a label outside. So the gate that guards the
+  tracer's time has never timed this pass. `npm run probe:trace` now does: the fixtures through
+  the app's path, the outline step timed and the pass named, and a failure when a memoised trace
+  and a cold one disagree. It is not a CI gate — it scans every fixture, about a minute.
 
 ### 3.4 Every eraser stroke and every crop re-encodes the whole plan on the page
 
