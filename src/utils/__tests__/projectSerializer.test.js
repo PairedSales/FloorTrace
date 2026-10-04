@@ -10,7 +10,8 @@ import {
   PERSISTENT_FLOOR_FIELDS,
 } from '../projectSerializer';
 import { hashDataUrl } from '../hash';
-import { traceTypeColor } from '../traceTypes';
+import { makeTrace, normalizeTraces, traceTypeColor } from '../traceTypes';
+import useAppStore from '../../store/appStore';
 
 // Mock storeState
 const createMockStoreState = () => ({
@@ -76,6 +77,14 @@ const createMockHistoryState = () => ({
     [f1Hash, f1Image],
   ],
 });
+
+// Save and open the way the app does: through the sanitiser and `JSON`, then
+// back through `importProject`. Calling `deserializeSketch` on the object
+// `serializeSketch` returned skips the parse, so a field the schema dropped
+// would still compare equal by reference.
+const reopen = (storeState, historyState = null) => importProject(
+  JSON.stringify(sanitizeData(serializeSketch(storeState, historyState))),
+);
 
 describe('projectSerializer', () => {
   
@@ -185,10 +194,7 @@ describe('projectSerializer', () => {
         adopted: false,
         roomCount: 3,
       };
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const { statePatch } = deserializeSketch(project);
+      const { statePatch } = reopen(storeState);
       expect(statePatch.calibration.quality).toEqual(storeState.calibration.quality);
     });
 
@@ -200,10 +206,7 @@ describe('projectSerializer', () => {
       storeState.perimeterTraces[0].type = 'garage';
       storeState.perimeterTraces[0].colorSource = 'type';
       storeState.perimeterTraces[0].color = '#FFB86C';
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const trace = deserializeSketch(project).statePatch.perimeterTraces[0];
+      const trace = reopen(storeState).statePatch.perimeterTraces[0];
       expect(trace.type).toBe('garage');
       expect(trace.colorSource).toBe('type');
       expect(trace.color).toBe(traceTypeColor('garage'));
@@ -222,10 +225,7 @@ describe('projectSerializer', () => {
         type: 'below-grade', keyword: 'basement', text: 'BASEMENT',
         bbox: { x: 115, y: 651, width: 74, height: 10 },
       }];
-      const project = serializeSketch(storeState);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const patch = deserializeSketch(project).statePatch;
+      const patch = reopen(storeState).statePatch;
       expect(patch.perimeterTraces[0].typeSource).toBe('detected');
       expect(patch.perimeterTraces[0].typeEvidence.text).toBe('BASEMENT');
       expect(patch.areaLabels).toEqual(storeState.areaLabels);
@@ -329,24 +329,22 @@ describe('projectSerializer', () => {
     const withHoles = (holes) => {
       const storeState = createMockStoreState();
       storeState.perimeterTraces[0].holes = holes;
-      return serializeSketch(storeState);
+      return storeState;
     };
 
     it('round-trips a mixed set of tagged and bare holes', () => {
       const holes = [
         { id: 'hole-auto-0', ring: ring(4), source: 'auto' },
         { id: 'hole-user-0', ring: ring(6), source: 'user' },
+        { id: 'hole-auto-1', ring: ring(5), source: 'auto', stale: true, staleReason: 'outside' },
         ring(8),
       ];
-      const project = withHoles(holes);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const { statePatch } = deserializeSketch(project);
+      const { statePatch } = reopen(withHoles(holes));
       expect(statePatch.perimeterTraces[0].holes).toEqual(holes);
     });
 
     it('still rejects a hole that is neither shape', () => {
-      const project = withHoles([{ id: 'h1', source: 'user' }]); // no ring
+      const project = serializeSketch(withHoles([{ id: 'h1', source: 'user' }])); // no ring
       expect(() => validateProjectSchema(project)).toThrow(/Project validation failed/);
     });
   });
@@ -364,20 +362,17 @@ describe('projectSerializer', () => {
     const withFaces = (faces) => {
       const storeState = createMockStoreState();
       storeState.perimeterTraces[0].wallFaces = faces;
-      return serializeSketch(storeState);
+      return storeState;
     };
 
     it('round-trips both faces and their voids', () => {
-      const project = withFaces(wallFaces);
-      expect(() => validateProjectSchema(project)).not.toThrow();
-
-      const { statePatch } = deserializeSketch(project);
+      const { statePatch } = reopen(withFaces(wallFaces));
       expect(statePatch.perimeterTraces[0].wallFaces).toEqual(wallFaces);
     });
 
     it('accepts a pair with only one face', () => {
-      const project = withFaces({ outer: { vertices: ring(100), holes: [] }, inner: null });
-      expect(() => validateProjectSchema(project)).not.toThrow();
+      const faces = { outer: { vertices: ring(100), holes: [] }, inner: null };
+      expect(reopen(withFaces(faces)).statePatch.perimeterTraces[0].wallFaces).toEqual(faces);
     });
   });
 
@@ -517,10 +512,7 @@ describe('projectSerializer', () => {
     });
 
     it('round-trips the lines, the source and the reason to doubt it', () => {
-      const project = serializeSketch(withScaleLines());
-      validateProjectSchema(project);
-
-      const { statePatch } = deserializeSketch(project);
+      const { statePatch } = reopen(withScaleLines());
       expect(statePatch.scaleLines).toHaveLength(2);
       expect(statePatch.scaleLines[0].feet).toBe(20);
       expect(statePatch.calibration.source).toBe('line-calibration');
@@ -532,10 +524,9 @@ describe('projectSerializer', () => {
   });
 });
 
-// `z.object` strips unknown keys, so an undeclared field survives autosave and
-// dies on a `.floorplan` — the asymmetry that already cost this repo
-// `exteriorLabels`. An anchor that does not survive is a warning that becomes
-// unclickable the moment a project is reopened.
+// A field a draft keeps and a `.floorplan` drops is the asymmetry that already
+// cost this repo `exteriorLabels`. An anchor that does not survive is a warning
+// that becomes unclickable the moment a project is reopened.
 describe('warning anchors round-trip', () => {
   const withAnchoredWarnings = () => ({
     ...createMockStoreState(),
@@ -575,10 +566,7 @@ describe('warning anchors round-trip', () => {
   });
 
   it('keeps both the anchor and the scope through export and import', () => {
-    const project = serializeSketch(withAnchoredWarnings());
-    validateProjectSchema(project);
-
-    const { statePatch } = deserializeSketch(project);
+    const { statePatch } = reopen(withAnchoredWarnings());
     const warnings = statePatch.perimeterTraces[0].quality.warnings;
 
     expect(warnings[0].anchor).toEqual({
@@ -596,10 +584,7 @@ describe('warning anchors round-trip', () => {
       delete w.anchor;
       delete w.scope;
     }
-    const project = serializeSketch(state);
-    validateProjectSchema(project);
-
-    const { statePatch } = deserializeSketch(project);
+    const { statePatch } = reopen(state);
     expect(statePatch.perimeterTraces[0].quality.warnings[0].anchor).toBeUndefined();
     expect(statePatch.perimeterTraces[0].quality.warnings[0].code).toBe('bridged-opening');
   });
@@ -656,7 +641,7 @@ describe('planStateForSave', () => {
 // `manualEntryMode` is the concrete case — it was in PERSISTENT_FLOOR_FIELDS,
 // so every .floorplan written before its removal still carries it — but the
 // property under test is general: dropping a persisted field must degrade an
-// existing file quietly, not reject it.
+// existing file quietly, neither rejecting it nor bringing the field back.
 describe('a persisted field removed from the app', () => {
   const fileCarryingRemovedField = () => ({
     fileType: 'floorplan',
@@ -676,12 +661,277 @@ describe('a persisted field removed from the app', () => {
         calibration: { calibrated: true, feetPerPixel: { x: 1, y: 1 } },
         perimeterTraces: [],
         manualEntryMode: true,
+        // And a key no version of the app ever wrote.
+        notAStoreField: { x: 1 },
       },
     }],
     activeFloorId: 'floor-1',
   });
 
-  it('still validates — the schema strips unknown keys rather than rejecting', () => {
+  it('still validates — unknown keys are not a reason to refuse a file', () => {
     expect(() => validateProjectSchema(fileCarryingRemovedField())).not.toThrow();
+  });
+
+  // Through the store, because `loadProject` spreading the patch is where an
+  // extra key becomes live state. Asked of the patch's own keys, not of the
+  // `{ statePatch, historyPatch }` wrapper, which never has them either way.
+  it('does not put the removed field, or any unknown key, on the store', () => {
+    const { statePatch } = importProject(JSON.stringify(fileCarryingRemovedField()));
+    expect(Object.hasOwn(statePatch, 'manualEntryMode')).toBe(false);
+    expect(Object.hasOwn(statePatch, 'notAStoreField')).toBe(false);
+
+    useAppStore.getState().loadProject(statePatch);
+    const state = useAppStore.getState();
+    expect(Object.hasOwn(state, 'manualEntryMode')).toBe(false);
+    expect(Object.hasOwn(state, 'notAStoreField')).toBe(false);
+    // ...while the fields it does know still arrive.
+    expect(state.roomDimensions).toEqual({ width: '10', height: '12' });
+    expect(state.calibration.calibrated).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The whole projection through a real file
+// ---------------------------------------------------------------------------
+
+// Every field `PERSISTENT_FLOOR_FIELDS` writes, each holding something other
+// than its default, in the shapes the app's own producers give it — including
+// the keys the schema does not declare (`ocrText`, a warning's `remedy`, a
+// room's `sides`), because what `parse` returns is what a project opens with.
+const ring = (x, y, n) => [{ x, y }, { x: x + n, y }, { x: x + n, y: y + n }, { x, y: y + n }];
+
+const fullyPopulatedPlan = () => {
+  const warnings = [{
+    code: 'bridged-opening',
+    severity: 'warn',
+    message: 'a wide opening was bridged to close the outline',
+    detail: { px: 34 },
+    remedy: 'check the opening',
+    scope: 'floor',
+    anchor: { kind: 'segment', points: [{ x: 40, y: 12 }, { x: 74, y: 12 }] },
+    acknowledged: { at: 1700000000000, note: 'checked' },
+  }];
+  const quality = {
+    source: 'auto',
+    confidence: 0.62,
+    warnings,
+    edited: true,
+    remediation: {
+      ran: true,
+      accepted: 'rooms-seeded',
+      passes: [{ name: 'rooms-seeded', roomsInside: 3 }],
+      before: { roomsInside: 2 },
+      after: { roomsInside: 3 },
+    },
+  };
+  const traces = normalizeTraces([
+    makeTrace({
+      id: 'trace-main',
+      name: 'Basement',
+      vertices: ring(10, 10, 300),
+      closed: true,
+      type: 'below-grade',
+      typeSource: 'detected',
+      typeEvidence: { keyword: 'basement', text: 'BASEMENT', from: 'inside' },
+      holes: [
+        { id: 'hole-auto-0', ring: ring(50, 50, 20), source: 'auto' },
+        { id: 'hole-user-0', ring: ring(120, 120, 15), source: 'user', stale: true, staleReason: 'outside' },
+        ring(200, 200, 10),
+      ],
+      quality,
+      wallFaces: {
+        outer: { vertices: ring(8, 8, 304), holes: [{ id: 'hole-auto-0', ring: ring(50, 50, 20), source: 'auto' }] },
+        inner: { vertices: ring(14, 14, 292), holes: [] },
+      },
+      attempts: [{
+        at: 1700000000000,
+        source: 'auto',
+        confidence: 0.4,
+        area: 81000,
+        vertices: ring(12, 12, 290),
+        holes: [],
+        quality: { source: 'auto', confidence: 0.4, warnings: [] },
+        remediation: { ran: false },
+      }],
+    }),
+    makeTrace({
+      id: 'trace-garage',
+      name: 'Workshop',
+      nameSource: 'user',
+      vertices: ring(320, 10, 120),
+      closed: true,
+      locked: true,
+      visible: false,
+      type: 'garage',
+      typeSource: 'user',
+      colorSource: 'user',
+      color: '#123456',
+    }),
+  ]);
+
+  return {
+    image: 'data:image/png;base64,FullyPopulatedPlan',
+    imageMimeType: 'image/jpeg',
+    roomOverlay: {
+      x1: 20, y1: 30, x2: 140, y2: 130,
+      polygon: ring(20, 30, 100),
+      confidence: 0.81,
+    },
+    perimeterTraces: traces,
+    activeTraceId: 'trace-garage',
+    roomDimensions: { width: '12\'6"', height: '10\'' },
+    calibration: {
+      calibrated: true,
+      feetPerPixel: { x: 0.104, y: 0.1 },
+      source: 'room-calibration',
+      calibratedRoomId: 'label-3',
+      createdAt: 1700000000000,
+      quality: {
+        level: 'check',
+        reason: 'room-vs-project',
+        disagreement: 0.06,
+        adopted: true,
+        roomCount: 3,
+        source: 'auto',
+        rejected: [{ name: 'KITCHEN', reason: 'outlier', pixelsPerFoot: 7.1 }],
+      },
+    },
+    mode: 'manual',
+    detectedDimensions: [{
+      width: 12.5,
+      height: 10,
+      text: '12\'6" x 10\'',
+      ocrText: '12\'6"x10\'',
+      bbox: { x: 40, y: 60, width: 80, height: 14 },
+      confidence: 88,
+      format: 'inches',
+    }],
+    exteriorLabels: [{
+      type: 'garage', keyword: 'garage', text: 'GARAGE',
+      bbox: { x: 350, y: 50, width: 60, height: 12 },
+    }],
+    areaLabels: [{
+      type: 'below-grade', keyword: 'basement', text: 'BASEMENT',
+      bbox: { x: 115, y: 151, width: 74, height: 10 },
+    }],
+    rooms: [{
+      labelId: 'label-3',
+      name: null,
+      rect: { left: 20, right: 140, top: 30, bottom: 130 },
+      confidence: 0.81,
+      sides: { left: 20, right: 140, top: 30, bottom: 130 },
+      feetPerPixel: { x: 0.104, y: 0.1 },
+    }],
+    showSideLengths: false,
+    useInteriorWalls: true,
+    autoSnapEnabled: false,
+    ocrFailed: true,
+    unit: 'inches',
+    angleToolState: {
+      center: { x: 100, y: 100 },
+      angle1: 0,
+      angle2: 90,
+      radius1: 40,
+      radius2: 60,
+      visible: true,
+      locked: true,
+      snapEnabled: false,
+    },
+    measurementLines: [{ start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }],
+    scaleLines: [{ id: 'scale-1', start: { x: 10, y: 10 }, end: { x: 210, y: 10 }, feet: 20 }],
+    customShapes: [{ id: 'shape-1', name: 'Deck', vertices: ring(500, 500, 40), closed: true, color: '#FF0000' }],
+    tracedBoundaries: { floors: [{ vertices: ring(10, 10, 300), confidence: 0.62 }], imageWidth: 800 },
+    lastTraceOutcome: { at: 1700000000000, level: 'check', reason: 'bridged-opening', floors: 1, source: 'auto' },
+    drawStrokes: [{ points: [{ x: 5, y: 5 }, { x: 90, y: 5 }, { x: 90, y: 70 }] }],
+    zoomScale: 1.5,
+    stageX: 12,
+    stageY: -4,
+    projectName: '12 Elm St',
+    // The store's own non-persisted fields, so the save has to choose.
+    canvasRotation: 90,
+    projectId: 'project-full',
+    isDirty: true,
+  };
+};
+
+describe('every persisted field through a real file', () => {
+  // Without these two the comparison below could pass by comparing nothing:
+  // a field missing from the fixture compares `undefined` with `undefined`,
+  // and one left at its default cannot tell a dropped value from a kept one.
+  it('the fixture populates every persisted field, each away from its default', () => {
+    useAppStore.getState().loadProject({});
+    const defaults = useAppStore.getState();
+    const plan = fullyPopulatedPlan();
+    expect(PERSISTENT_FLOOR_FIELDS.filter((k) => !Object.hasOwn(plan, k))).toEqual([]);
+    const atDefault = PERSISTENT_FLOOR_FIELDS.filter(
+      (k) => JSON.stringify(plan[k]) === JSON.stringify(defaults[k]),
+    );
+    expect(atDefault).toEqual([]);
+  });
+
+  it('opens with every persisted field as it was saved', () => {
+    const plan = fullyPopulatedPlan();
+    const { statePatch } = reopen(plan);
+    for (const key of PERSISTENT_FLOOR_FIELDS) {
+      expect({ [key]: statePatch[key] }).toEqual({ [key]: plan[key] });
+    }
+    expect(statePatch.canvasRotation).toBe(90);
+    expect(statePatch.projectId).toBe('project-full');
+    expect(statePatch.isDirty).toBe(false);
+  });
+
+  // The undo stacks are file content too: undoing into a snapshot that lost a
+  // field would hand that field back as its default.
+  it('carries an undo snapshot with every field it held', () => {
+    const plan = fullyPopulatedPlan();
+    const snapshot = { ...plan, __imageRef: 'img-0' };
+    delete snapshot.image;
+    const { historyPatch } = reopen(plan, {
+      undoStack: [snapshot],
+      redoStack: [],
+      imagePool: [['img-0', plan.image]],
+    });
+    expect(historyPatch.undoStack).toEqual([snapshot]);
+  });
+
+  it('is what the store holds after opening it', () => {
+    const plan = fullyPopulatedPlan();
+    useAppStore.getState().loadProject(reopen(plan).statePatch);
+    const state = useAppStore.getState();
+    for (const key of PERSISTENT_FLOOR_FIELDS) {
+      expect({ [key]: state[key] }).toEqual({ [key]: plan[key] });
+    }
+  });
+});
+
+// The parse is what a project opens with, so it must not strip anything the
+// app wrote. A `z.object` anywhere in the schema strips keys it was not told
+// about; this marks every object in a fully populated file with a key the
+// schema cannot know and checks that every mark survives.
+describe('the schema keeps what it does not declare', () => {
+  const mark = (value) => {
+    if (Array.isArray(value)) return value.map(mark);
+    if (value && typeof value === 'object') {
+      const out = { __unknown: 1 };
+      for (const [k, v] of Object.entries(value)) out[k] = mark(v);
+      return out;
+    }
+    return value;
+  };
+
+  it('returns every object of the file with its unknown keys intact', () => {
+    const plan = fullyPopulatedPlan();
+    const snapshot = { ...plan, __imageRef: 'img-0' };
+    delete snapshot.image;
+    const file = JSON.parse(JSON.stringify(sanitizeData(serializeSketch(plan, {
+      undoStack: [snapshot],
+      redoStack: [snapshot],
+      imagePool: [['img-0', plan.image]],
+    }))));
+    // `images` is a record from key to data URL: a marker there would be an
+    // image that is not a string, which the schema rightly refuses.
+    const { images, ...rest } = file;
+    const marked = { ...mark(rest), images };
+    expect(validateProjectSchema(marked)).toEqual(marked);
   });
 });
