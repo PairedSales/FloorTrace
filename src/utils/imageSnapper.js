@@ -1,4 +1,4 @@
-import { dataUrlToImage } from './imageLoader';
+import { loadImageElement } from '../components/canvas/imageCache';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -72,7 +72,12 @@ export const createImageSnapAnalyzer = async (imageSrc) => {
     };
   }
 
-  const image = await dataUrlToImage(imageSrc);
+  // An <img>, as it always was — a bitmap is resampled differently at this
+  // size, and these pixels decide where a corner snaps — but loaded from the
+  // image's bytes rather than its data URL. This runs on the first corner the
+  // user drags, and re-parsing a large plan's data URL there froze the page
+  // for half a second at exactly that moment.
+  const image = await loadImageElement(imageSrc);
   const naturalW = image.naturalWidth || image.width;
   const naturalH = image.naturalHeight || image.height;
 

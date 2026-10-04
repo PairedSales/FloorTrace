@@ -19,8 +19,12 @@ self.onmessage = async (event) => {
   const { id, image } = event.data ?? {};
   try {
     const response = await fetch(image);
-    const bitmap = await createImageBitmap(await response.blob());
-    self.postMessage({ id, bitmap }, [bitmap]);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    // The bytes go back as well. What still has to draw from an <img> — the
+    // saved image, the corner snapper — loads it from them, and so does not pay
+    // the 475 ms above for a string the worker has already taken apart.
+    self.postMessage({ id, bitmap, blob }, [bitmap]);
   } catch (error) {
     self.postMessage({ id, error: error instanceof Error ? error.message : String(error) });
   }

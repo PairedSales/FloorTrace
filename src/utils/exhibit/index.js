@@ -6,14 +6,16 @@
 
 import { composeExhibit, PAPER } from './compose';
 import { buildExhibitModel, exhibitFilename, exhibitDate, EXHIBIT_DEFAULTS } from './model';
+import { loadImageElement } from '../../components/canvas/imageCache';
 
 export { buildExhibitModel, exhibitFilename, exhibitDate, EXHIBIT_DEFAULTS };
 
-const loadImage = (src) => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => resolve(img);
-  img.onerror = () => reject(new Error('The plan image could not be read.'));
-  img.src = src;
+// An <img>, deliberately, and not the bitmap the stage draws from: the plan is
+// drawn here well under full size, where the two are resampled differently, and
+// this is the page the user keeps. The cache loads it from the image's bytes,
+// so opening the dialog on a large plan does not parse its data URL again.
+const loadImage = (src) => loadImageElement(src).catch(() => {
+  throw new Error('The plan image could not be read.');
 });
 
 const roundRectPath = (ctx, x, y, w, h, r) => {
@@ -199,11 +201,20 @@ export async function exhibitFile(canvas, filename) {
   return new File([blob], filename, { type: 'image/png' });
 }
 
-/** Whether this browser can put `file` into a share sheet. */
-export const canShareExhibit = (file) => (
+/**
+ * Whether this browser has a share sheet to ask at all. Cheap, and asked
+ * before the page is encoded for it: `canShareExhibit` needs the file in hand,
+ * and making one is a full PNG encode of the page.
+ */
+export const hasShareSheet = () => (
   typeof navigator !== 'undefined'
   && typeof navigator.share === 'function'
   && typeof navigator.canShare === 'function'
+);
+
+/** Whether this browser can put `file` into a share sheet. */
+export const canShareExhibit = (file) => (
+  hasShareSheet()
   && !!file
   && navigator.canShare({ files: [file] })
 );

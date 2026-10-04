@@ -116,6 +116,72 @@ describe('imageCache', () => {
     expect(worker.posted).toHaveLength(2);
   });
 
+  describe('loadImageElement', () => {
+    const made = [];
+    const revoked = [];
+
+    beforeEach(() => {
+      made.length = 0;
+      revoked.length = 0;
+      // Still a constructor: the cache builds its worker's address with it.
+      const RealURL = URL;
+      vi.stubGlobal('URL', class extends RealURL {
+        static createObjectURL(blob) { made.push(blob); return `blob:${made.length}`; }
+        static revokeObjectURL(url) { revoked.push(url); }
+      });
+    });
+
+    const decodeWithBytes = async (url, blob) => {
+      const loading = cache.loadImage(url);
+      const [worker] = FakeWorker.instances;
+      worker.answer({ id: worker.posted.at(-1).id, bitmap: { url }, blob });
+      await loading;
+    };
+
+    // The point of it: an <img> given the data URL parses the whole string on
+    // the page, and the worker has already taken that string apart.
+    it('loads the <img> from the bytes the decode left behind', async () => {
+      await decodeWithBytes('data:a', { bytes: 1 });
+      const img = await cache.loadImageElement('data:a');
+
+      expect(img).toBeInstanceOf(FakeImage);
+      expect(img.url).toBe('blob:1');
+    });
+
+    it('gives every <img> of one image the same source', async () => {
+      await decodeWithBytes('data:a', { bytes: 1 });
+      const first = await cache.loadImageElement('data:a');
+      const second = await cache.loadImageElement('data:a');
+
+      expect(second.url).toBe(first.url);
+      expect(made).toHaveLength(1);
+    });
+
+    it('loads it from the data URL where the worker left no bytes', async () => {
+      FakeWorker.refuse = true;
+      const img = await cache.loadImageElement('data:a');
+      expect(img.url).toBe('data:a');
+    });
+
+    it('lets the source go with the image', async () => {
+      await decodeWithBytes('data:a', { bytes: 1 });
+      cache.forgetImage('data:a');
+      expect(revoked).toEqual(['blob:1']);
+
+      // Evicted the same way as forgotten.
+      for (const name of ['b', 'c', 'd', 'e']) await decodeWithBytes(`data:${name}`, { name });
+      expect(revoked).toContain('blob:2');
+    });
+
+    it('rejects an image an <img> cannot read', async () => {
+      const loading = cache.loadImageElement('data:broken');
+      await tick();
+      const [worker] = FakeWorker.instances;
+      worker.answer({ id: worker.posted[0].id, error: 'could not be decoded' });
+      await expect(loading).rejects.toBeDefined();
+    });
+  });
+
   it('keeps three images and lets the least recently used go', async () => {
     for (const name of ['a', 'b', 'c', 'd']) {
       const loading = cache.loadImage(`data:${name}`);
