@@ -161,14 +161,7 @@ const CanvasStage = React.memo(({
   });
 
   // ── 3. Eraser Tool ─────────────────────────────────────────────────────────
-  const activePerimeterOverlay = useMemo(() => {
-    return perimeterRef.current?.localPerimeterVertices 
-      ? { ...perimeterOverlay, vertices: perimeterRef.current.localPerimeterVertices }
-      : perimeterOverlay;
-  }, [perimeterOverlay]);
-
   const cornerEraser = useCornerEraser({
-    perimeterOverlay: activePerimeterOverlay,
     cornerEraserActive,
     eraserBrushSize,
     onPerimeterUpdate: useCallback((nextVertices, isFinal) => {
@@ -409,8 +402,13 @@ const CanvasStage = React.memo(({
   // draw, crop or vertex-placement gesture. `routerRef` is already synced after
   // every render (see above), so reading the pan flag through it needs no ref
   // mirror and no surgery inside useToolRouter.
-  const handleDeletePerimeterVertex = useCallback((index) => {
+  //
+  // `traceId` is the outline the corner belongs to. A right-click never takes
+  // an outline in hand on the way down (that press may be a pan), so it is
+  // done here, before the delete — which is written to the outline in hand.
+  const handleDeletePerimeterVertex = useCallback((index, traceId) => {
     if (routerRef.current?.rightClickPannedRef?.current) return;
+    if (traceId) useAppStore.getState().switchPerimeterTrace(traceId);
     onDeletePerimeterVertex?.(index);
   }, [onDeletePerimeterVertex]);
 
