@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { grayToPngBlob, crc32, adler32 } from '../DimensionsOCR';
+import { grayToPngBlob, crc32, adler32 } from '../dimensions/pngEncode';
 
 // These assert the gray PNG header, the slice-by-8 CRC and the chunked adler
 // are byte-for-byte what they replaced — Tesseract must receive identical

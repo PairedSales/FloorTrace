@@ -13,7 +13,7 @@ paths:
 
 # Dimension OCR (`src/utils/dimensions/`)
 
-The phases are documented at the top of `dimensions/pipeline.js`. `detectDimensionsCore` is environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`), so the same code runs in the browser (`browserEnv()` in `DimensionsOCR.js`) and in `scripts/ocrBenchmark.mjs` (Tesseract only). Keep it that way.
+The phases are documented at the top of `dimensions/pipeline.js`. `detectDimensionsCore` is environment-agnostic: it takes an `env` adapter (`toOcrInput`, optional `refineRois`, `budgetMs`), so the same code runs in the browser's scan worker (`src/workers/ocrWorker.js`), on the page where that worker cannot run (`dimensions/scanOnPage.js`), and in `scripts/ocrBenchmark.mjs` (Tesseract only). Keep it that way, and keep it free of the DOM.
 
 ## Verify
 
@@ -25,6 +25,7 @@ The phases are documented at the top of `dimensions/pipeline.js`. `detectDimensi
 ## Invariants
 
 - **The time budget is wall clock** (`budgetMs`, default 2600). Anything competing for CPU during a scan makes it return fewer dimensions with nothing saying so — a worse scale, and area goes as scale squared. That is why `scanQueue.js` serialises scans (it also de-duplicates concurrent requests and keeps a four-entry LRU keyed by data-URL identity). Never memoise a failure.
+- **The scan runs in a worker, not on the page** (`workers/ocrWorker.js`; `dimensions/ocrHost.js` is the page's half). Its image work is 1.3–1.8 s a plan, and on the page's thread that was stretches of up to 800 ms in which nothing repainted and Stop could not be pressed (`docs/page-responsiveness.md`). The worker decodes the image, starts the Tesseract pool as its own workers and loads OpenCV; the page keeps the scan queue, the asset URLs and PaddleOCR (WebGL and an `<img>`), which the worker reaches by message. A worker that cannot start or dies hands the scan back (`hostUnavailable`) and it is run on the page; a scan that fails on its own merits is not retried there. Both paths read the same pixels and return the same sizes on every fixture — check that again (`scanOnPage` against `detectAllDimensions`, in the dev page) if either decode changes.
 - **The Tesseract pool size is a memory decision**: `max(1, min(cap, cores/2))`, with a cap of 8 only when there are ≥16 cores and ≥8 GB `deviceMemory` (unknown counts as not enough), else 4. Reads are identical at any pool size.
 - **Benchmarked shut — don't retry without new numbers**: CLAHE before the pre-OCR upscale, lower `UPSCALE_MAX` or `TARGET_GLYPH_PX`, reading pass 1 as parallel strips. Numbers in `docs/ocr-performance.md`.
 - **OpenCV stays** (settled 2026-08-22): across the fixtures it is worth +1 detection and −2 false positives, and a false positive is a sample the scale pools. Reproduce with `FLOORTRACE_NO_OPENCV=1 node scripts/ocrBenchmark.mjs fixtures/ExampleFloorplan*.png`. It is reached only through `await import()` in `loadOpenCv`, so it costs the first scan, not first paint.
