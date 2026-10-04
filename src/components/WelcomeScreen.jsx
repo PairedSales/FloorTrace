@@ -251,7 +251,7 @@ const PipelineDemo = () => (
       <g className="ft-a ft-ruler">
         <rect className="ft-chip" x="168" y="6" width="122" height="20" rx="5" strokeWidth="1" />
         <text className="ft-label" x="229" y="19.5" fontSize="9.5" fontWeight="700"
-          textAnchor="middle">Scale set from 3 rooms</text>
+          textAnchor="middle">Scale from one room</text>
       </g>
 
       <path
