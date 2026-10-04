@@ -49,15 +49,6 @@ describe('the one notice', () => {
     expect(v.container.firstChild).toBeNull();
     expect(useWorkspaceStore.getState().notice).toBeNull();
   });
-
-  it('offers the one thing to do about it, and goes once that is done', () => {
-    const onClick = vi.fn();
-    const v = view();
-    act(() => notify('Autosave stopped.', { type: 'warning', action: { label: 'Save project file', onClick } }));
-    fireEvent.click(v.getByRole('button', { name: 'Save project file' }));
-    expect(onClick).toHaveBeenCalledTimes(1);
-    expect(v.container.firstChild).toBeNull();
-  });
 });
 
 describe('how long it waits to be read', () => {

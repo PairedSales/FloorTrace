@@ -21,7 +21,7 @@ beforeEach(() => {
 describe('notify — something outside the plan went wrong', () => {
   it('is a failure unless it is said to be a caution', () => {
     notify('Could not open that file.');
-    expect(ws().notice).toMatchObject({ text: 'Could not open that file.', tone: 'crit', action: null });
+    expect(ws().notice).toMatchObject({ text: 'Could not open that file.', tone: 'crit' });
     notify('Autosave stopped.', { type: 'warning' });
     expect(ws().notice).toMatchObject({ tone: 'warn' });
   });

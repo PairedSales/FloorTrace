@@ -79,15 +79,6 @@ const Notice = ({ top, left = 0 }) => {
         <p className="min-w-0 flex-1 py-px text-[16px] leading-snug text-fg [overflow-wrap:anywhere]">
           {notice.text}
         </p>
-        {notice.action && (
-          <button
-            type="button"
-            onClick={() => { notice.action.onClick(); dismissNotice(); }}
-            className="btn btn-secondary btn-sm shrink-0"
-          >
-            {notice.action.label}
-          </button>
-        )}
         <button
           type="button"
           onClick={dismissNotice}
