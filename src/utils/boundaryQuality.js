@@ -13,7 +13,7 @@
 // section and on the saved image.
 
 export const QUALITY_GOOD = 0.75;
-export const QUALITY_POOR = 0.5;
+const QUALITY_POOR = 0.5;
 
 /**
  * `edited` is a fifth level, not a confidence band. A hand edit invalidates the
@@ -34,7 +34,7 @@ export const qualityLevel = (confidence, edited = false) => {
   return 'poor';
 };
 
-export const detailText = (warning) => {
+const detailText = (warning) => {
   const d = warning.detail;
   if (!d) return warning.message;
   // In words, not pixels: an image-pixel width means nothing to the person

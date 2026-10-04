@@ -20,11 +20,9 @@ import {
 import { TRACE_TYPES, DEFAULT_TRACE_TYPE, traceTypeLabel, traceTypeColor } from '../traceTypes';
 import { scaleQualitySummary } from '../boundaryQuality';
 import { liveVoids, staleVoidCount } from '../traceIssues';
+// A leaf module, so the panel can state the same sentence without pulling this
+// file's lazy graph into the entry chunk.
 import { scaleProvenance } from '../scaleProvenance';
-
-// Re-exported: it moved to a leaf module so the panel can state the same
-// sentence without pulling this file's lazy graph into the entry chunk.
-export { scaleProvenance };
 
 export const EXHIBIT_DEFAULTS = {
   sideLengths: true,
@@ -132,7 +130,7 @@ const scaleLines = (state) => {
  * hand-painted outline and an automatic one looked identical, and a re-searched
  * one carried no sign that the first attempt had been rejected.
  */
-export const outlineProvenance = (trace) => {
+const outlineProvenance = (trace) => {
   const q = trace?.quality;
   // No record at all means nothing measured it: the user placed these corners.
   if (!q) return 'placed by hand';

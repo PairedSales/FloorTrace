@@ -181,7 +181,6 @@ const describeOutline = (trace, feetPerPixel, unit) => {
     typeLabel: traceTypeLabel(type),
     counted: !skipped,
     skipped,
-    vertexCount: vertices.length,
     ringPixels,
     holes,
     deductedPixels,

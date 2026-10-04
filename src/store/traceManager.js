@@ -64,12 +64,6 @@ const sameBuilding = (prev, floor) => {
  * translation is encapsulated inside the serialization layer.
  */
 
-// Minted in `ids.js`, which imports nothing: this module sits in a cycle with
-// appStore and undoManager, and appStore mints a default trace id at module
-// load — so whoever entered the cycle first decided whether the minter existed
-// yet. Re-exported here because this is where callers expect to find it.
-export { newTraceId } from './ids';
-
 // A trace's stored wall-face pair is read repeatedly — every flip of the
 // exterior/interior switch — so what lands on the trace is a copy. Sharing the
 // arrays would let a later vertex drag edit the face it came from, and the
@@ -108,7 +102,7 @@ export const MAX_TRACE_ATTEMPTS = 5;
  * is the one part of an attempt that is not trivially small — the cap is what
  * bounds it.
  */
-export const makeAttempt = (trace) => ({
+const makeAttempt = (trace) => ({
   at: Date.now(),
   source: trace?.quality?.source ?? 'manual',
   confidence: trace?.quality?.confidence ?? null,

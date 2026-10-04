@@ -10,12 +10,6 @@ import { getFileHandle, rememberFileHandle, forgetFileHandle } from './fileHandl
 // version silently dropped fields the app had come to depend on.
 export { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
-// The trace-type migration. Lives in traceTypes.js so `appStore` can run it on
-// the two entry points this file does not own without importing zod into the
-// entry chunk, and is re-exported here because this is the file that defines
-// what a saved trace may contain.
-export { normalizeTraces } from './traceTypes';
-
 // ── Zod Schema Definition ───────────────────────────────────────────────────
 
 const metadataSchema = z.object({

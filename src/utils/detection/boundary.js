@@ -724,7 +724,7 @@ const floorPlausibility = (floor, net, analysis, evidence, constraints, structur
  * mutates the candidate set it is handed, so sharing one memo entry across
  * passes would let a warm cache answer a base trace with an escalated search.
  */
-export const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) => {
+const assembleFloors = (analysis, options, nets, cache, searchScope, passKey) => {
   const { wallThickness } = analysis;
   const maxFloors = Math.max(1, Math.min(5, options.maxFloors ?? 5));
   const constraints = options.constraints ?? null;

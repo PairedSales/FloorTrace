@@ -1472,7 +1472,6 @@ function App() {
   // (things that happen once, rather than modes) are below them.
   const handleToolSelect = useCallback((id) => {
     switch (id) {
-      case 'select': return handleCancelTool();
       case 'draw': return handlePaintOutline();
       case 'vertex': return handleDrawExterior();
       case 'void': return handleVoidToolToggle();
@@ -1491,7 +1490,7 @@ function App() {
       case 'rotateLeft': return handleRotateCanvas('counterclockwise');
       default: return undefined;
     }
-  }, [handleCancelTool, handlePaintOutline, handleDrawExterior, handleVoidToolToggle,
+  }, [handlePaintOutline, handleDrawExterior, handleVoidToolToggle,
     handleScaleToolToggle, handleLineToolToggle, handleAngleToolToggle,
     handleDrawAreaToggle, handleCropToolToggle, handleEraserToolToggle,
     handleCornerEraserToggle, handleUseAlternative, handleTracePerimeter,

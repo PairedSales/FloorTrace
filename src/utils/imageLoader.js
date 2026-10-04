@@ -100,7 +100,7 @@ const prepareDataUrl = async (dataUrl, mimeType = 'image/png') => {
 };
 
 // Load image from file input
-export const loadImageFromFile = async (file) => {
+const loadImageFromFile = async (file) => {
   if (!file || !file.type.startsWith('image/')) {
     throw new Error('Invalid file type. Please select an image file.');
   }
