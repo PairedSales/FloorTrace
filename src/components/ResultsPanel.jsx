@@ -279,7 +279,6 @@ const ResultsPanel = ({
   // this table is what gets copied into a report.
   const propertyTotal = formatAreaValue(displayedBreakdownTotal(property.byType, unit), unit);
   const propertyGla = formatAreaValue(areaDisplayValue(property.gla, unit), unit);
-  const propertyLevels = property.counts?.[DEFAULT_TRACE_TYPE] ?? 0;
 
   const totalDisplay = displayedBreakdownTotal(areas.byType, unit);
   const totalFormatted = formatAreaValue(totalDisplay, unit);
@@ -525,13 +524,8 @@ const ResultsPanel = ({
           {measured && property.isMultiPlan && (
             <div className="mt-5 pt-4 border-t border-line">
               <div className="flex items-baseline justify-between gap-2">
-                <p className="label-sm">Whole property</p>
-                {propertyLevels > 0 && (
-                  <span className="text-[15px] text-fg-3">
-                    {propertyLevels} {propertyLevels === 1 ? 'level' : 'levels'} across{' '}
-                    {property.plans.length} plans
-                  </span>
-                )}
+                <p className="label-sm">All sketches</p>
+                <span className="text-[15px] text-fg-3">{property.plans.length} plans</span>
               </div>
 
               <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
