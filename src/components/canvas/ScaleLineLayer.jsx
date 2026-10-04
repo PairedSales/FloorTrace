@@ -1,15 +1,14 @@
 import React from 'react';
-import { Group, Line, Text, Circle } from 'react-konva';
+import { Group, Line, Circle } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { getMeasurementLineLayout } from './canvasUtils';
+import { PAPER, PENDING, SCALE, SCALE_INK } from './overlayStyle';
+import CanvasTab from './CanvasTab';
 
-// Scale lines get their own colour rather than a slot in LINE_COLORS: they are
-// not measurements of the drawing, they are the assertion the drawing is
-// measured by, and cycling them alongside measurement lines made the two
-// indistinguishable.
-const SCALE_COLOR = '#F1FA8C';
-const SCALE_COLOR_SELECTED = '#FFFFC2';
-const SCALE_COLOR_PENDING = '#6272A4';
+// Scale lines get their own colour rather than the ink of a measurement: they
+// are not measurements of the drawing, they are the assertion the drawing is
+// measured by. It is the green of the scale room, because the two say the same
+// thing — "the scale came from here".
 
 // The one thing this adds over the measurement renderer: before a scale exists
 // `feetPerPixel` still defaults to {x:1, y:1}, so a length in feet would read
@@ -19,6 +18,8 @@ const relabel = (layout, text) => {
   const approxTextWidth = Math.max(text.length * layout.fontSize * 0.58, layout.fontSize * 2.5);
   return { ...layout, textStr: text, approxTextWidth };
 };
+
+const endsOf = (line) => [line.start.x, line.start.y, line.end.x, line.end.y];
 
 const ScaleLineLayer = ({
   scaleLines,
@@ -50,10 +51,9 @@ const ScaleLineLayer = ({
             const base = getMeasurementLineLayout(line, scale, fpp, unit, { unitStyle });
             const layout = labelFor(line, base);
             const selected = selectedScaleLineIndex === index;
-            const strokeColor = selected
-              ? SCALE_COLOR_SELECTED
-              : line.feet > 0 ? SCALE_COLOR : SCALE_COLOR_PENDING;
-            const strokeW = (selected ? 3 : 2) / scale;
+            const color = selected
+              ? SCALE_INK
+              : line.feet > 0 ? SCALE : PENDING;
             return (
               <Group
                 key={line.id ?? `scale-${index}`}
@@ -62,47 +62,44 @@ const ScaleLineLayer = ({
               >
                 <Line
                   name="scale-line"
-                  points={layout.line1Points}
-                  stroke={strokeColor}
-                  strokeWidth={strokeW}
+                  points={endsOf(line)}
+                  stroke={PAPER}
+                  strokeWidth={7 / scale}
+                  lineCap="round"
                   hitStrokeWidth={16 / scale}
                   perfectDrawEnabled={false}
                 />
                 <Line
                   name="scale-line"
-                  points={layout.line2Points}
-                  stroke={strokeColor}
-                  strokeWidth={strokeW}
+                  points={endsOf(line)}
+                  stroke={color}
+                  strokeWidth={(selected ? 3.5 : 2.5) / scale}
                   hitStrokeWidth={16 / scale}
                   perfectDrawEnabled={false}
                 />
-                <Circle
+                {[line.start, line.end].map((end, i) => (
+                  <Circle
+                    key={i}
+                    name="scale-line"
+                    x={end.x}
+                    y={end.y}
+                    radius={4.5 / scale}
+                    fill={PAPER}
+                    stroke={color}
+                    strokeWidth={2 / scale}
+                    perfectDrawEnabled={false}
+                  />
+                ))}
+                <CanvasTab
                   name="scale-line"
-                  x={line.start.x}
-                  y={line.start.y}
-                  radius={3.5 / scale}
-                  fill={strokeColor}
-                  perfectDrawEnabled={false}
-                />
-                <Circle
-                  name="scale-line"
-                  x={line.end.x}
-                  y={line.end.y}
-                  radius={3.5 / scale}
-                  fill={strokeColor}
-                  perfectDrawEnabled={false}
-                />
-                <Text
-                  name="scale-line"
+                  listening
                   x={layout.labelX}
                   y={layout.labelY}
                   text={layout.textStr}
                   fontSize={layout.fontSize}
-                  fill={strokeColor}
-                  fontStyle="bold"
-                  offsetX={layout.approxTextWidth / 2}
-                  offsetY={layout.approxTextHeight / 2}
-                  rotation={-canvasRotation}
+                  scale={scale}
+                  rotation={canvasRotation}
+                  color={color}
                 />
               </Group>
             );
@@ -121,32 +118,30 @@ const ScaleLineLayer = ({
           ? (calibrated ? base : relabel(base, `${Math.round(lenPx)} px`))
           : null;
         return (
-          <Group>
+          <Group listening={false}>
             <Line
-              points={[
-                currentScaleLine.start.x,
-                currentScaleLine.start.y,
-                currentScaleLine.end.x,
-                currentScaleLine.end.y
-              ]}
-              stroke={SCALE_COLOR}
+              points={endsOf(currentScaleLine)}
+              stroke={PAPER}
+              strokeWidth={6 / scale}
+              lineCap="round"
+              perfectDrawEnabled={false}
+            />
+            <Line
+              points={endsOf(currentScaleLine)}
+              stroke={SCALE}
               strokeWidth={2 / scale}
-              dash={[6 / scale, 3 / scale]}
-              opacity={0.8}
+              dash={[6 / scale, 4 / scale]}
               perfectDrawEnabled={false}
             />
             {layout && (
-              <Text
+              <CanvasTab
                 x={layout.labelX}
                 y={layout.labelY}
                 text={layout.textStr}
                 fontSize={layout.fontSize}
-                fill={SCALE_COLOR}
-                fontStyle="bold"
-                offsetX={layout.approxTextWidth / 2}
-                offsetY={layout.approxTextHeight / 2}
-                opacity={0.9}
-                rotation={-canvasRotation}
+                scale={scale}
+                rotation={canvasRotation}
+                color={SCALE}
               />
             )}
           </Group>

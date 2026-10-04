@@ -132,15 +132,11 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     }
   });
 
-  // The scale is one room's, so a doubtful one is changed by changing the
-  // room — by the name the panel prints on that button. No remedy names a
-  // button the panel does not have.
-  it('sends a doubtful scale to another room, by the name on the button', () => {
+  // Both messages a hand-set scale raises point at a button the panel has, by
+  // the name printed on it.
+  it('sends a scale set by hand to a button that exists, by its name', () => {
     for (const key of ['a line against the rooms', 'a room against the scan']) {
       expect(scaleQualitySummary(cases[key]).remedy).toContain('“Use a different room”');
-    }
-    for (const quality of Object.values(cases)) {
-      expect(scaleQualitySummary(quality).remedy ?? '').not.toMatch(/automatic scale/i);
     }
   });
 

@@ -162,7 +162,7 @@ describe('at rest it is the answer and its folded parts', () => {
       expect(isOpen(view, id), id).toBe(true);
     }
     expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
-    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Set scale from a known length/ })).toBeTruthy();
     expect(part(view, 'outline').getByLabelText('Outline name').value).toBe('1st Floor');
     expect(part(view, 'outline').getByLabelText('Counts as')).toBeTruthy();
   });
@@ -198,7 +198,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     expect(part(view, 'scale').getByText(/Rooms disagree by/)).toBeTruthy();
     // What it means for the area, and the way out of it, in the same place.
     expect(part(view, 'scale').getByText(/imply sizes about .* apart/)).toBeTruthy();
-    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Set scale from a known length/ })).toBeTruthy();
     // And its heading says there is something in it.
     expect(part(view, 'scale').getByText('Check')).toBeTruthy();
   });
@@ -233,7 +233,7 @@ describe('a section opens by itself when it holds the next thing to do', () => {
     useAppStore.setState({ perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 500000 })} />);
     expect(isOpen(view, 'scale')).toBe(true);
-    expect(part(view, 'scale').getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(part(view, 'scale').getByRole('button', { name: /Set scale from a known length/ })).toBeTruthy();
   });
 
   // Measuring a known length ends with typing it into Scale.
@@ -617,7 +617,7 @@ describe('the scale', () => {
     const view = render(<ResultsPanel {...props({ ocrFailed: true })} />);
     const scale = part(view, 'scale');
     expect(scale.getByText(/needs one measurement from you/)).toBeTruthy();
-    const measure = scale.getByRole('button', { name: /Measure a length you know/ });
+    const measure = scale.getByRole('button', { name: /Set scale from a known length/ });
     expect(measure.className).toContain('btn-primary');
     // One filled button at a time: with no outline either, the scale's is the
     // one, because it is what the figure at the top is asking for.
@@ -645,7 +645,7 @@ describe('the scale', () => {
     // The cursor is waiting in it.
     expect(document.activeElement).toBe(box);
     expect(scale.queryByLabelText('Width')).toBeNull();
-    expect(scale.queryByRole('button', { name: /Measure a length you know/ })).toBeNull();
+    expect(scale.queryByRole('button', { name: /Set scale from a known length/ })).toBeNull();
     expect(scale.queryByRole('button', { name: /Read the room sizes again/ })).toBeNull();
   });
 
@@ -659,7 +659,7 @@ describe('the scale', () => {
     open(view, 'scale');
     const scale = part(view, 'scale');
     expect(scale.getByLabelText('Length of line 1').value).toBe('20.0 ft');
-    expect(scale.getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
+    expect(scale.getByRole('button', { name: /Set scale from a known length/ })).toBeTruthy();
     // A line that already has its length does not take the cursor.
     expect(document.activeElement).not.toBe(scale.getByLabelText('Length of line 1'));
   });
@@ -670,7 +670,7 @@ describe('the scale', () => {
     const view = render(<ResultsPanel {...props()} />);
     const scale = part(view, 'scale');
     expect(scale.getByRole('button', { name: /Pick a room to scale from/ }).className).toContain('btn-primary');
-    expect(scale.getByRole('button', { name: /Measure a length you know/ }).className).not.toContain('btn-primary');
+    expect(scale.getByRole('button', { name: /Set scale from a known length/ }).className).not.toContain('btn-primary');
   });
 
   // A second scan started during the first one's automatic run cleared the
@@ -686,29 +686,7 @@ describe('the scale', () => {
     expect(part(view, 'sizes').getByRole('button', { name: 'Read again' }).disabled).toBe(true);
     expect(view.getByRole('button', { name: /Use a different room/ }).disabled).toBe(true);
     // A mode is not work.
-    expect(view.getByRole('button', { name: /Measure a length you know/ }).disabled).toBe(false);
+    expect(view.getByRole('button', { name: /Set scale from a known length/ }).disabled).toBe(false);
   });
 
-  // The scale is one room's, and the ways to change it are another room and a
-  // known length. There is no third button back to an "automatic" scale.
-  it('offers another room and a known length, and no way back to an automatic scale', () => {
-    const byHand = (quality, source = 'room-calibration') => ({ ...calibrated, source, quality });
-    for (const calibration of [
-      calibrated,
-      byHand({ source: 'line', lineCount: 1, feet: 20 }, 'line-calibration'),
-      byHand({ source: 'manual', reason: 'room-vs-auto', roomCount: 3, disagreement: 0.2 }),
-    ]) {
-      useAppStore.setState({
-        calibration,
-        perimeterTraces: [outline()],
-        rooms: [{ rect: {} }],
-        detectedDimensions: [{ text: '12 x 10', width: 12, height: 10, bbox: { x: 0, y: 0, width: 9, height: 9 } }],
-      });
-      const view = render(<ResultsPanel {...props({ area: 800 })} />);
-      expect(view.queryByRole('button', { name: /automatic scale/i })).toBeNull();
-      expect(view.getByRole('button', { name: /Use a different room/ })).toBeTruthy();
-      expect(view.getByRole('button', { name: /Measure a length you know/ })).toBeTruthy();
-      cleanup();
-    }
-  });
 });

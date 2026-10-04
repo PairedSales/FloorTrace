@@ -13,7 +13,10 @@ import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
 import useAppStore, { selectPickingRoom } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
-import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, SpotlightLayer, getCanvasCoordinates } from './canvas/index.js';
+import { ACCENT, CRIT, INK, lineColor, withAlpha } from './canvas/overlayStyle';
+import { holeRings, isSubtracted } from '../utils/areaCalculator';
+import { DEFAULT_TRACE_TYPE, normalizeTraceType } from '../utils/traceTypes';
 import { anchorBounds } from '../utils/planAnchors';
 import { useCornerEraser } from '../hooks/useEraserTool';
 import { useImageEraser } from '../hooks/useImageEraser';
@@ -506,6 +509,45 @@ const CanvasStage = React.memo(({
     }, null);
   }, [errorAnchor, setViewportTransform]);
 
+  // What is lit and what is banded, for `SpotlightLayer`. The outline in hand
+  // is taken with the dragged corner where the mouse has it, so the lit area
+  // grows and shrinks under the drag instead of catching up on release.
+  //
+  // Off while the plan itself is being worked on — a room being chosen, the
+  // outline being painted or its corners placed, a crop, marks being erased.
+  // Those are all about the drawing, and a veil over part of it would be
+  // dimming the thing the user is reading.
+  const spotlightOn = !pickingRoom && !drawModeActive && !cropToolActive
+    && !eraserToolActive && traceInteractionMode !== 'drawing';
+  const dragIndex = perimeter.draggingVertex;
+  const dragCoords = perimeter.draggedVertexCoords;
+  const pickedIndex = perimeter.selectedVertexIndex;
+  const crossing = perimeter.isSelfIntersecting;
+  const spotOutlines = useMemo(() => {
+    if (!spotlightOn) return [];
+    return (perimeterTraces ?? []).flatMap((t) => {
+      if (!t.visible || !(t.vertices?.length >= 3)) return [];
+      const active = t.id === activeTraceId;
+      let vertices = t.vertices;
+      if (active && dragIndex !== null && dragCoords && vertices[dragIndex]) {
+        vertices = [...vertices];
+        vertices[dragIndex] = dragCoords;
+      }
+      const held = active ? (dragIndex ?? pickedIndex) : null;
+      const n = vertices.length;
+      return [{
+        vertices,
+        // Only the cut-outs that are taken off go back under the veil.
+        holes: holeRings((t.holes ?? []).filter(isSubtracted)).filter((ring) => ring?.length >= 3),
+        color: active && crossing ? CRIT : lineColor(t.color || ACCENT),
+        lit: !!t.closed && normalizeTraceType(t.type) === DEFAULT_TRACE_TYPE,
+        emphasis: held !== null && held !== undefined && vertices[held]
+          ? [[vertices[(held - 1 + n) % n], vertices[held]], [vertices[held], vertices[(held + 1) % n]]]
+          : null,
+      }];
+    });
+  }, [spotlightOn, perimeterTraces, activeTraceId, dragIndex, dragCoords, pickedIndex, crossing]);
+
   const contentTransform = useMemo(() => {
     const cx = camera.imageObj ? camera.imageObj.width / 2 : 0;
     const cy = camera.imageObj ? camera.imageObj.height / 2 : 0;
@@ -559,6 +601,12 @@ const CanvasStage = React.memo(({
                 x={0}
                 y={0}
               />
+              <SpotlightLayer
+                image={camera.imageObj}
+                outlines={spotOutlines}
+                veil={spotlightOn}
+                scale={overlayScale}
+              />
             </Layer>
           )}
 
@@ -571,11 +619,14 @@ const CanvasStage = React.memo(({
             />
 
             <PerimeterLayer
+              image={camera.imageObj}
               perimeterTraces={perimeterTraces}
               activeTraceId={activeTraceId}
               scale={overlayScale}
               showSideLengths={showSideLengths}
               feetPerPixel={activeFeetPerPixel}
+              calibrated={!!calibrated}
+              quiet={pickingRoom}
               detectedDimensions={detectedDimensions}
               unit={unit}
               draggingVertex={perimeter.draggingVertex}
@@ -597,6 +648,7 @@ const CanvasStage = React.memo(({
             <DimensionOverlay
               visible={pickingRoom}
               detectedDimensions={detectedDimensions}
+              roomOverlay={router.activeRoomOverlay}
               scale={overlayScale}
               unit={unit}
               stageRef={stageRef}
@@ -685,9 +737,9 @@ const CanvasStage = React.memo(({
                   x={router.currentMousePos.x}
                   y={router.currentMousePos.y}
                   radius={eraserBrushSize / 2}
-                  stroke="#FF5555"
+                  stroke={CRIT}
                   strokeWidth={2 / camera.scale}
-                  fill="rgba(255, 85, 85, 0.15)"
+                  fill={withAlpha(CRIT, 0.12)}
                   dash={[4 / camera.scale, 4 / camera.scale]}
                   listening={false}
                 />
@@ -698,9 +750,9 @@ const CanvasStage = React.memo(({
                   x={router.currentMousePos.x}
                   y={router.currentMousePos.y}
                   radius={drawBrushSize / 2}
-                  stroke="#8BE9FD"
+                  stroke={ACCENT}
                   strokeWidth={2 / camera.scale}
-                  fill="rgba(139, 233, 253, 0.18)"
+                  fill={withAlpha(ACCENT, 0.16)}
                   listening={false}
                 />
               )}
@@ -717,7 +769,7 @@ const CanvasStage = React.memo(({
                     y={sy}
                     width={sw}
                     height={sh}
-                    stroke="#8BE9FD"
+                    stroke={INK}
                     strokeWidth={2 / camera.scale}
                     dash={[6 / camera.scale, 4 / camera.scale]}
                     listening={false}
