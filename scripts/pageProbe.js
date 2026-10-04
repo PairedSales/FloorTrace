@@ -15,6 +15,7 @@
  *   probe.freezes(run);      // [{ at, ms, what, leaf }]
  *   probe.hotspots(run);     // { busyMs, self: [...], inclusive: [...] }
  *
+ * `pasteAndProfile(blob)` does the same for a snip pasted with Ctrl+V.
  * `photo(...)` and `pdf(...)` make the two inputs the fixtures do not cover: a
  * 12 MP phone photo and a one-page Letter PDF.
  *
@@ -123,26 +124,14 @@ export const pdf = async (name, width = 2550, height = 3300) => {
   return new Blob(parts, { type: 'application/pdf' });
 };
 
-/**
- * Drop a file on the app and sample the page thread until the area is on
- * screen (plus `settleMs`, for whatever lands just after).
- *
- * A drop onto an open plan opens another beside it and the app holds six, so
- * clear the workspace between runs.
- *
- * @returns {Promise<{trace: object, from: number, to: number, totalMs: number|null,
- *   report: string|null}>} `totalMs` is drop to area; `report` is the DEV build's
- *   own stage breakdown (`utils/perfMarks.js`), null in a production build.
- */
-export const dropAndProfile = async (blob, name, { waitMs = 30000, settleMs = 2500 } = {}) => {
+// Start a load with `begin` and sample the page thread until the area is on
+// screen (plus `settleMs`, for whatever lands just after).
+const profileLoad = async (begin, { waitMs = 30000, settleMs = 2500 } = {}) => {
   logs.length = 0;
   const profiler = new window.Profiler({ sampleInterval: 4, maxBufferSize: 400000 });
 
-  const transfer = new DataTransfer();
-  transfer.items.add(new File([blob], name, { type: blob.type }));
   const from = performance.now();
-  document.getElementById('app-container')
-    .dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }));
+  begin();
 
   let doneAt = null;
   let report = null;
@@ -172,6 +161,40 @@ export const dropAndProfile = async (blob, name, { waitMs = 30000, settleMs = 25
     totalMs: doneAt === null ? null : Math.round(doneAt - from),
     report,
   };
+};
+
+/**
+ * Drop a file on the app and profile the load.
+ *
+ * A drop onto an open plan opens another beside it and the app holds six, so
+ * clear the workspace between runs.
+ *
+ * @returns {Promise<{trace: object, from: number, to: number, totalMs: number|null,
+ *   report: string|null}>} `totalMs` is drop to area; `report` is the DEV build's
+ *   own stage breakdown (`utils/perfMarks.js`), null in a production build.
+ */
+export const dropAndProfile = (blob, name, options) => profileLoad(() => {
+  const transfer = new DataTransfer();
+  transfer.items.add(new File([blob], name, { type: blob.type }));
+  document.getElementById('app-container')
+    .dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }));
+}, options);
+
+/**
+ * Paste an image the way a snip arrives — Ctrl+V with a PNG on the clipboard —
+ * and profile the load. The clipboard is stood in for (a script cannot put an
+ * image on the real one, and reading it needs a permission prompt); the app's
+ * own paste handler runs from the keystroke on.
+ */
+export const pasteAndProfile = (blob, options) => {
+  const item = { types: [blob.type], getType: async () => blob };
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { read: async () => [item] },
+    configurable: true,
+  });
+  return profileLoad(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true }));
+  }, options);
 };
 
 // The sampler does not tick evenly — it bursts under load — so a sample is

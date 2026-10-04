@@ -78,6 +78,50 @@ was turning that string back into pixels**, three times over:
 A small saved plan was never the problem. A large one froze the page for about a second of its
 first second and a half, and again on each switch to a plan the cache had let go.
 
+### After the plan is open
+
+Measured in a second pass, on the 12 MP plan, once the first changes were live.
+
+| Action | page frozen | What it is |
+|---|---|---|
+| Open Save image | ~1.0 s | 533 ms `img.src = dataUrl`, 265–297 ms the decode on first draw, ~180 ms encoding the page for the share sheet |
+| Change an option in that dialog | ~0.18 s | the share-sheet encode again, on every render |
+| One eraser stroke | 0.58–0.62 s | `canvas.toDataURL` of the whole plan, per stroke (a crop is the same call) |
+| Grab a corner for the first time | ~0.7 s | the snapper's own `<img>` from the data URL, and its decode |
+| Undo | 46 ms | nothing: the bitmap is still in the cache |
+
+**The first visit over the network is not part of the problem here.** On the live site, on this
+connection, the engines a first scan needs — Tesseract's core (1.45 MB), its language data
+(2.87 MB) and OpenCV (3.90 MB) — came down in 0.13–0.22 s each. That is 8.2 MB, so about seven
+seconds on a 10 Mbit line; the scan waits at most 1.5 s for OpenCV and then reads without it.
+
+### The usual workflow: a pasted snip, and four plans at once
+
+The owner's inputs are snips pasted with Ctrl+V and images dropped on the page — fixture-sized
+plans, about 1000–1500 px. PDFs and photographs are secondary. These were measured after the
+changes in §2, so they are the state of things now, not a before.
+
+| What | time | page thread |
+|---|---|---|
+| A snip pasted (987×956) | 2.6 s to its area | 0.36 s busy, longest stall 62 ms |
+| A snip pasted (1440×1080) | 1.8 s | 0.16 s busy, longest stall 72 ms |
+| Four plans dropped together | 19.3 s for all four: 3.2, 2.4, 6.2, 6.5 s | 1.5 s busy over the 19, longest stall 188 ms |
+| The site closed and reopened, four plans saved | workspace back at 0.45 s, stage up at 0.8 s | 0.47 s busy, longest stall 140 ms |
+| Switching to a plan for the first time after reopening | panel at ~35 ms, drawn at ~0.2 s | 30–360 ms busy |
+| Switching back to one already open | drawn at ~0.13 s | under 0.13 s busy |
+
+(Dev build for the first three, so React's share is several times what ships; production for
+the rest.) Plans are read one after another when several arrive together, by design: the scan's
+budget is wall clock, and two at once would each read fewer sizes.
+
+Nothing is read or traced again on reopening: the four areas came back as saved (1,899, 1,313,
+2,199 and 1,991 ft²). Four plans are 2.8 MB on disk, 1.0 MB of it the second copy of each image
+in its undo history (§3.6).
+
+**Where the time goes now is the outline, on some plans.** Of those four, "Finding the outside
+walls" took 0.46 and 0.56 s on two and 2.8 and 2.9 s on the other two — nearly half their
+total. §3.3 has why.
+
 ---
 
 ## 2. What changed
@@ -98,6 +142,13 @@ without the worker, is decoded on the page as before.
 **The loader reads an image's size from its bytes** (`imageLoader.js`, `createImageBitmap(file)`)
 instead of handing the data URL to an `<img>` to read two numbers.
 
+**What still needs an `<img>` loads it from the image's bytes** (`loadImageElement` in
+`imageCache.js`). The decode worker hands back the bytes it fetched along with the bitmap; the
+saved image and the corner snapper load their `<img>` from a `blob:` URL of them instead of from
+the data URL, which the page then never parses again. Same `<img>`, same pixels — checked at four
+scales on three images, on both kinds of canvas — so nothing either of them produces changes.
+The dialog also asks whether there is a share sheet before encoding the page for it.
+
 | Opening a sketch | page busy, before → after | freezes after |
 |---|---|---|
 | `ExampleFloorplan.png`, cold | ≥1.3 s → **39 ms** | none |
@@ -110,6 +161,12 @@ instead of handing the data URL to an `<img>` to read two numbers.
 | One plan, 12 MP | 1.5–1.7 → **0.92 s** | 0.86 → **0.23 s** | 491 → 137 ms |
 | Four plans, the open one 12 MP | ~1.4 → **0.90 s** | 0.84 → **0.25 s** | 569 → 209 ms |
 | …switching to a plan not read back yet | 0.41 → 0.29 s | 0.51 → 0.22 s | 229 → 122 ms |
+
+| After the plan is open (12 MP) | page frozen, before → after |
+|---|---|
+| Open Save image | ~1.0 s → **0.27 s** (the decode on first draw is what is left) |
+| Change an option in that dialog | ~0.18 s → 0 where there is no share sheet; unchanged where there is |
+| Grab a corner for the first time | ~0.7 s → ~0.23 s (not driven; from the same two costs) |
 
 Drop-to-area is unchanged within run-to-run noise (3.8 → 3.5 s, 5.4 → 5.0 s, 8.4 → 8.9 s): the
 same work is done, by the same number of threads. What changed is that none of it holds the page.
@@ -136,6 +193,10 @@ still draw from an `<img>`, and their output is unchanged.
 
 `bench:detection` (91/91), `bench:scale` (27/27) and the suite pass; the pipelines' code was not
 touched.
+
+**On the live site**, after the deploy: the sample plan reads the same (9 room sizes, 1,899 ft²)
+in 2.8 s, the scan and the decode run in their workers, the on-page fallback is never fetched,
+and the page's longest stall across the whole run was 57 ms.
 
 ---
 
@@ -172,27 +233,74 @@ and the trace 2.4 s. The render and its PNG encode are also the one freeze left 
 ROI crops are taken from the full-resolution page, so the size is not free to cut: this needs
 `bench:ocr` on PDF inputs, which the fixtures do not include.
 
-### 3.3 The trace takes 2–3 s on plans where a label falls outside the outline
+### 3.3 The second-chance trace costs 1.2–2.1 s, on four fixtures in ten
 
-"Finding the outside walls" took 0.25–0.7 s on four of the plans measured and 2.3–3.1 s on three
-(`ExampleFloorplan5`, `ExampleFloorplan7`, and the photo of `ExampleFloorplan3`). On the one
-inspected, remediation had run an `escalate` pass and rejected it — a second, uncached search for
-an answer it did not use. This is worker time, so the page stays live; it is the largest part of
-the wait that is not Tesseract.
+This is the largest wait left in the usual workflow, and it is worker time: the page stays live.
 
-### 3.4 Two more places still turn a large plan's data URL into pixels on the page
+The first search is cheap, because the prewarm has already climbed its ladder: 0.2–0.33 s. When
+a label the scan located falls outside the outline it finds, remediation runs an `escalate` pass
+— the ladder to twice the radius, with every rescue forced — and that pass is a cold search of
+about 45 rungs. Reproduced in Node on the app's own path (the scan's labels, the rooms measured
+from them, then the trace, with the browser's `cacheKey` and prewarm):
 
-- **The first corner dragged.** `createImageSnapAnalyzer` (`imageSnapper.js`) loads the data URL
-  into its own `<img>` and draws it at 1500 px: for a 12 MP plan, ~0.7 s of frozen page the first
-  time a corner is grabbed after each image change.
-- **Save image.** `exhibit/index.js` has its own `loadImage`, a fresh `<img>` from the data URL,
-  every time the dialog renders the plan.
+| Fixture | first search | with the second pass | second pass | its result |
+|---|---|---|---|---|
+| `ExampleFloorplan3` | 324 ms | 2424 ms | 2.1 s | kept |
+| `ExampleFloorplan4` | 242 ms | 1400 ms | 1.2 s | thrown away |
+| `ExampleFloorplan5` | 198 ms | 2121 ms | 1.9 s | thrown away |
+| `ExampleFloorplan7` | 330 ms | 2339 ms | 2.0 s | kept |
 
-Both could take the cached bitmap and cost nothing. Neither does, because both draw the plan
-well under full size, where a bitmap and an `<img>` differ (§2): the snapper's corners and the
-saved image's line work would change. Someone has to choose the resampling on purpose.
+The other six trace in 33–456 ms and never run it.
 
-### 3.5 A plan's undo history stores a second copy of its image
+Three things about it:
+
+- **`bench:detection` cannot see it.** Its constrained pass prints "no retry needed" on every
+  fixture: the truth file's rooms never leave a label outside. The scan's labels do, on four of
+  the ten. So the gate that guards the tracer's time has never timed this pass, and the 60 s
+  ceiling the detection suites are held under says nothing about it either.
+- **It re-measures what the first search measured.** The pass regenerates every candidate from
+  nothing. Its welded ladder's first eight or nine rungs, and the structural ladder's, are the
+  same masks at the same radii the first search closed, flooded and labelled moments before —
+  17–19 of its ~45 rungs. `measureFootprint` is a pure function of the mask and the radius, so
+  handing the first search's rungs to the pass is exact, and worth an estimated 0.5–0.8 s.
+- **The memo cannot hold it.** `ExampleFloorplan3`, `4` and `5` all trip the 32 MB search budget
+  (34–36 MB charged); holding everything `ExampleFloorplan5` computes would take 101 MB. Each
+  kept rung is charged for a page-sized `Int32` label array where one bit per pixel would say
+  the same thing. Until that is smaller, neither a bigger budget nor running the pass ahead of
+  time during the scan is affordable — a budget of 128 MB was tried and changed nothing, because
+  the pass is not what the memo was holding.
+
+Any change here is a detection change: output-identical or not at all, and the proof has to come
+from a harness that runs the app's path, since the benchmark does not reach this code.
+
+### 3.4 Every eraser stroke and every crop re-encodes the whole plan on the page
+
+`handleEraserMouseUp` and the crop commit end in `canvas.toDataURL(imageMimeType)`: the full image,
+synchronously, once per stroke. 0.58–0.62 s for a 12 MP PNG; a clean PDF page is nearer 0.2 s.
+Whiting out a legend in five strokes is three seconds of frozen page.
+
+The encode cannot simply be moved: the data URL *is* the image the store holds, the eraser's next
+stroke compares against it (`work.out`), and undo snapshots it. Doing it off the page means the
+image the app holds is briefly not the one on screen, and every one of those has to be taught
+that. It is the strongest case for the last item on this list.
+
+**It is also lossy on a JPEG plan.** `imageMimeType` is the file's, so a JPEG is re-encoded as a
+JPEG. Measured on a 1600×1200 JPEG after one stroke in the far corner: the stored image was a
+JPEG again, and in an 800×600 region nowhere near the stroke a third of the pixels had changed
+(mean 0.38 levels, max 8). Small — but it is the second generation of ringing that
+`imageLoader.js` goes out of its way to avoid for an oversized image, and here it is applied to
+the whole plan on every edit session. Encoding edits as PNG ends it, at the price of the size and
+the time in §3.1.
+
+### 3.5 The decode on first draw is still on the page for the saved image and the snapper
+
+What is left of two rows above: ~0.27 s when Save image opens on a 12 MP plan, ~0.23 s on the
+first corner grabbed. Both draw the plan well under full size from an `<img>`, and an `<img>`
+decodes on first draw. A bitmap would not — but it is resampled differently at that size (§2), so
+the saved image's line work and the snapper's corners would change. Someone has to choose that
+on purpose.
+
+### 3.6 A plan's undo history stores a second copy of its image
 
 `hist:v1:<doc>` holds the undo stack's image pool, and for a plan whose image was never edited
 that pool is one entry: the image, again. Measured on disk: `doc-2::image` 21.73 MB and
@@ -200,13 +308,13 @@ that pool is one entry: the image, again. Measured on disk: `doc-2::image` 21.73
 deserialised a second time when the plan is opened, and the two copies are separate strings in
 memory. A pool entry equal to the plan's own image could be stored as a reference to it.
 
-### 3.6 The start screen shows for a third of a second before saved work replaces it
+### 3.7 The start screen shows for a third of a second before saved work replaces it
 
 In a new session the start screen is up at ~0.1 s and the restored plan takes its place at ~0.4 s.
 250 ms of the gap is the roll call (`CLAIM_WAIT_MS`), which cannot be shortened: it is how long a
 live tab is given to say the workspace is its own. The screen could wait for the restore to settle
 instead — a first visit has no workspace to ask about and would not be delayed — but it must not
-wait on storage that never answers (§3.8).
+wait on storage that never answers (§3.9).
 
 The roll call has a second edge. A tab whose page is frozen for longer than 250 ms cannot answer
 it, and a new tab opened in that moment adopts its workspace. Before this change a tab reading a
@@ -216,14 +324,15 @@ large plan was frozen for longer than that several times a load; now only the PN
 And one thing that is by design but reads as a hang: with the old tab still open, a new tab
 starts empty. The saved work belongs to the tab that is showing it.
 
-### 3.7 The search memo trips on every 4000 px page
+### 3.8 The search memo trips on ordinary plans, not only large ones
 
 `searchMemo` reported `overBudget` at 34.98 MB against the 32 MB budget on the PDF page (working
-raster 1082×1400, five entries held). §4.2 of `load-to-area-performance.md` stopped this from
-clearing the memo, and its change (3) — a `Uint16` label array, halving the charge — is what
-would keep such a page inside the budget. Still open.
+raster 1082×1400) — and at 34–36 MB on `ExampleFloorplan3`, `4` and `5` at their own size, none
+of them over 1.2 megapixels on a side that matters. §4.2 of `load-to-area-performance.md` stopped
+a trip from clearing the memo, which is why the first search is still warm on those plans. Its
+change (3), a smaller label array, is the same thing §3.3 ends on.
 
-### 3.8 A database that will not open costs ten seconds per call, not once
+### 3.9 A database that will not open costs ten seconds per call, not once
 
 `getDB` (`draftStorage.js`) bounds a hung `indexedDB.open` at 10 s and, rightly, does not memoise
 the failure. But a *hung* open is not retried into health: every `getDraft` and `setDraft` starts
@@ -235,10 +344,16 @@ whole plan, 29.7 MB for the phone photo.
 Nothing in the app deletes the database, so a user needs a browser fault to get here. Worth
 closing all the same: remember that an open is still pending and fail fast until it settles.
 
-### 3.9 Smaller
+### 3.10 Underneath, and not measured
 
-- The data URL is the image's identity and its transport: every worker request posts the whole
-  string, and each worker un-base64s it for itself. A 30 MB plan is decoded in three workers.
-  Holding the file's bytes as a `Blob` beside the string would make every one of those free.
+- **The data URL is the image's identity and its transport**, and most of what is left on this
+  list is that one fact: every worker request posts the whole string, each of three workers
+  un-base64s it for itself, an edit has to produce a new one synchronously (§3.4), and a draft
+  stores it twice (§3.6). Holding the image as its bytes — a `Blob`, with the data URL made only
+  for a `.floorplan` file — would take all of those away at once. It is a change to what `image`
+  is throughout the store, undo, drafts and the workers, not a patch.
+- Not measured: memory with several large plans open (a 12 MP plan is 48 MB decoded, held once on
+  the page and once in each worker that has it), a multi-page PDF from start to finish, a slower
+  machine than this one, Safari and Firefox, and a visible tab.
 - The render when the area lands is 80–230 ms (`fixedTrouble` in `labelLayout.js`, text
   measurement). The one stretch over 60 ms left on a fixture-sized plan.
