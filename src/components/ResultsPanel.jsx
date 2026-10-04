@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   Plus, Eye, EyeOff, Trash2, Copy, Download, Loader2, Brush, Waypoints,
-  ScanSearch, Ruler, MousePointerClick, RotateCcw,
+  ScanSearch, Ruler, MousePointerClick,
 } from 'lucide-react';
 import useAppStore, {
   selectActiveAreaByType, selectWorkspaceArea,
@@ -12,7 +12,6 @@ import { calculateArea, displayedBreakdownTotal } from '../utils/areaCalculator'
 import { scaleProvenance } from '../utils/scaleProvenance';
 import { DEFAULT_TRACE_TYPE, TRACE_TYPES, normalizeTraceType } from '../utils/traceTypes';
 import { MAX_TRACES } from '../utils/planStage';
-import { isUserAsserted } from '../utils/detection/validate';
 import { MEASURE_STEPS, STEP_TITLES, measureStepIndex } from '../utils/progressSteps';
 import { usePlanIssues } from '../hooks/usePlanIssues';
 import { useToolRows } from '../hooks/useToolRows';
@@ -212,7 +211,6 @@ const ResultsPanel = ({
   // none. Optional: a step with no handler simply does not offer the action.
   onScaleTool,
   onSelectRoom,
-  onRestoreAutoScale,
   onRescan,
   onFindOutline,
   onPaintOutline,
@@ -230,7 +228,6 @@ const ResultsPanel = ({
 }) => {
   const perimeterTraces = useAppStore((s) => s.perimeterTraces) || [];
   const activeTraceId = useAppStore((s) => s.activeTraceId);
-  const activeDocumentId = useAppStore((s) => s.activeDocumentId);
   const switchPerimeterTrace = useAppStore((s) => s.switchPerimeterTrace);
   const deletePerimeterTrace = useAppStore((s) => s.deletePerimeterTrace);
   const renamePerimeterTrace = useAppStore((s) => s.renamePerimeterTrace);
@@ -252,9 +249,6 @@ const ResultsPanel = ({
   // finish it instead of offering three other ways to start.
   const painting = useAppStore((s) => s.drawModeActive);
   const placingCorners = useAppStore((s) => s.perimeterVertices !== null);
-  // The rooms the detector confirmed — whether there are any is what decides
-  // if "go back to the automatic scale" has anything to go back to.
-  const rooms = useAppStore((s) => s.rooms);
   const flashStatus = useWorkspaceStore((s) => s.flashStatus);
   // What a picture cannot show, from the one place it is gathered, sorted into
   // the step each belongs to.
@@ -368,11 +362,6 @@ const ResultsPanel = ({
   // The room the scale is measured against, as a box on the plan. Not while a
   // drawn line is the scale: the box would then be evidence for nothing.
   const showRoomFields = !!roomOverlay && calibrationSource !== 'line-calibration';
-  // The way back from a scale set by hand — a drawn line, or a room the user
-  // picked or resized — to the one the rooms agreed on. Only where there are
-  // measured rooms to go back to.
-  const canRestore = !!onRestoreAutoScale && rooms?.length > 0
-    && isUserAsserted({ quality: scaleQuality });
   const roomFields = showRoomFields && (
     <div className="mt-3.5">
       <p className="mb-2 text-[15.5px] leading-snug text-fg-2">
@@ -397,19 +386,9 @@ const ResultsPanel = ({
   const canAddOutline = !!onAddOutline && traced.length > 0 && perimeterTraces.length < MAX_TRACES;
   const outlineSummary = traced.length === 0 ? null : outlinesInALine(perimeterTraces);
 
-  // ── which steps are open ──
-  // A step opens by itself when it holds the next thing to do, and stays
-  // however it was last set by hand.
-  // The scale is not one of them: it is always on show (see its step below).
-  const autoOpen = {
-    outline: traced.length === 0 || perimeterTraces.length > 1 || outlineNeedsLook,
-  };
-  const [byHand, setByHand] = useState({});
-  const isOpen = (key) => byHand[key] ?? autoOpen[key];
-  const toggle = (key) => setByHand((prev) => ({ ...prev, [key]: !(prev[key] ?? autoOpen[key]) }));
-
-  // A different plan is a different set of questions.
-  useEffect(() => { setByHand({}); }, [activeDocumentId]);
+  // Neither the scale nor the outline folds (the owner's decision, October
+  // 2026): what each came to and the ways to change it are always on show.
+  // Only the sum does, behind its own saved preference (`WorkSection`).
 
   // The room the scale came from is drawn on the plan while the scale step is
   // on show, which is where it is explained — and the step is always on show
@@ -705,7 +684,7 @@ const ResultsPanel = ({
                   <ChoiceButton icon={Ruler} onClick={onScaleTool}
                                 primary={!calibrated && !(hasLabels && onSelectRoom)}
                                 title="Click both ends of something whose length you know, then type the length">
-                    Measure a length you know
+                    Set scale from a known length
                   </ChoiceButton>
                   {!calibrated && (
                     <p className="text-[15.5px] leading-snug text-fg-3">
@@ -714,14 +693,6 @@ const ResultsPanel = ({
                     </p>
                   )}
                 </>
-              )}
-              {/* The way back, which two of the scale messages promise by name:
-                  `applyDecision` refuses to write over a user-asserted scale
-                  forever, so without it a hand-set scale is permanent. */}
-              {canRestore && (
-                <ChoiceButton icon={RotateCcw} onClick={onRestoreAutoScale}>
-                  Go back to the automatic scale
-                </ChoiceButton>
               )}
             </div>
 
@@ -738,8 +709,7 @@ const ResultsPanel = ({
             title={traced.length > 0 ? STEP_TITLES.outline.done : STEP_TITLES.outline.missing}
             summary={outlineSummary}
             badge={outlineNeedsLook ? <CheckChip /> : null}
-            open={isOpen('outline')}
-            onToggle={() => toggle('outline')}
+            open
           >
             {traced.length === 0 ? (
               painting || placingCorners ? (
@@ -794,29 +764,15 @@ const ResultsPanel = ({
               )
             ) : (
               <>
-                {/* The ways to change an outline that exists, as one menu that
-                    opens beside the panel, over the plan they act on. "Add
-                    another outline" is left out of it: it has its own line
-                    under the list, where what it is for can be said. */}
-                {onSelectTool && OUTLINE_GROUP && (
-                  <div className="mb-3.5">
-                    <TaskMenu
-                      group={OUTLINE_GROUP}
-                      menuGroup="panel"
-                      label="Change the outline"
-                      rowState={toolRowState}
-                      onSelect={onSelectTool}
-                      omit={['addOutline']}
-                      placement="side"
-                      triggerClassName="btn btn-secondary w-full justify-start"
-                    />
-                  </div>
-                )}
-
                 {overlapNotes.map((issue, i) => (
-                  <CheckNote key={`overlap-${i}`} issue={issue} className="mb-3.5" />
+                  <CheckNote key={`overlap-${i}`} issue={issue} className="mb-3" />
                 ))}
-                <div className="-ml-3 -mr-7 border-y border-line">
+
+                {/* The outlines as one card: a row each, and under the last of
+                    them the one setting they all share. A card rather than a
+                    list bled to the panel's edge, so everything in the step —
+                    the rows, the setting, the two buttons — has one width. */}
+                <div className="overflow-hidden rounded-xl border border-line bg-panel-2">
                   {perimeterTraces.map((trace) => {
                     const isActive = trace.id === activeTraceId;
                     const drawn = trace.vertices && trace.vertices.length >= 3;
@@ -829,7 +785,7 @@ const ResultsPanel = ({
                       <div
                         key={trace.id}
                         onClick={() => switchPerimeterTrace(trace.id)}
-                        className={`pl-3 pr-5 py-3 border-t border-line first:border-t-0 cursor-pointer transition-colors
+                        className={`pl-3.5 pr-2 py-3 border-t border-line first:border-t-0 cursor-pointer transition-colors
                           ${isActive && perimeterTraces.length > 1
                             ? 'bg-accent/10 shadow-[inset_3px_0_0_rgb(var(--accent))]'
                             : 'hover:bg-sunken/60'}`}
@@ -889,9 +845,10 @@ const ResultsPanel = ({
 
                         {/* What this outline *is*. How well it follows the walls
                             is on the plan, to be looked at, and is not said
-                            here. */}
-                        <div className="flex flex-wrap items-center gap-2 mt-2 pl-5 text-[15.5px] text-fg-2">
-                          <label htmlFor={`type-${trace.id}`}>Counts as</label>
+                            here. The choice runs the width of the row, so it
+                            lines up with the card's other controls. */}
+                        <div className="flex items-center gap-2.5 mt-2 pr-1.5 text-[15.5px] text-fg-2">
+                          <label htmlFor={`type-${trace.id}`} className="shrink-0">Counts as</label>
                           <select
                             id={`type-${trace.id}`}
                             value={normalizeTraceType(trace.type)}
@@ -903,7 +860,7 @@ const ResultsPanel = ({
                             title={trace.typeSource === 'detected' && trace.typeEvidence?.text
                               ? `Read from "${trace.typeEvidence.text.trim()}" on the plan`
                               : 'What this outline counts as in the total'}
-                            className="h-10 px-2 rounded-lg border border-line-strong bg-panel-2
+                            className="flex-1 min-w-0 h-10 px-2 rounded-lg border border-line-strong bg-panel-2
                                        text-[15.5px] text-fg cursor-pointer hover:border-accent
                                        focus:outline-none focus:ring-2 focus:ring-accent"
                           >
@@ -917,19 +874,19 @@ const ResultsPanel = ({
                             out of the living area — so where it read that from
                             is on the page, not in a tooltip. */}
                         {trace.typeSource === 'detected' && trace.typeEvidence?.text && (
-                          <p className="mt-1.5 pl-5 text-[15px] leading-snug text-fg-3">
+                          <p className="mt-1.5 pr-1.5 text-[15px] leading-snug text-fg-3">
                             Set from “{trace.typeEvidence.text.trim()}” on the plan.
                           </p>
                         )}
 
                         {!drawn && (
-                          <p className="mt-2 pl-5 text-[15.5px] leading-snug text-fg-3">
+                          <p className="mt-2 pr-1.5 text-[15.5px] leading-snug text-fg-3">
                             Not drawn yet — click its corners on the plan, or paint over its walls.
                           </p>
                         )}
 
                         {staleByTrace.has(trace.id) && (
-                          <p className="mt-2 pl-5 text-[15.5px] leading-snug text-warn">
+                          <p className="mt-2 pr-1.5 text-[15.5px] leading-snug text-warn">
                             <span className="font-semibold">{staleByTrace.get(trace.id).label}.</span>
                             {' '}{staleByTrace.get(trace.id).detail}
                           </p>
@@ -937,34 +894,20 @@ const ResultsPanel = ({
                       </div>
                     );
                   })}
-                </div>
 
-                {canAddOutline && (
-                  <div className="mt-3.5">
-                    <button type="button" onClick={() => onAddOutline()} className="link-btn">
-                      <Plus className="w-4 h-4" aria-hidden="true" />
-                      Add another outline
-                    </button>
-                    <p className="mt-1 text-[15.5px] leading-snug text-fg-3">
-                      For a garage, a porch or another level. Click its corners on the plan,
-                      then choose what it counts as.
-                    </p>
-                  </div>
-                )}
-
-                {/* One setting for every outline, not just the selected one —
-                    two outlines measured to different wall faces is an area
-                    nobody can reconcile. */}
-                {measured && canSwitchWallFace && (
-                  <div className="mt-4 pt-4 border-t border-line">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[15.5px] text-fg-2">Measure to the</span>
-                      <div className="seg" role="group" aria-label="Measure every outline to">
+                  {/* One setting for every outline, not just the selected one —
+                      two outlines measured to different wall faces is an area
+                      nobody can reconcile. So it is the card's last row, under
+                      all of them, as a two-way switch the width of the card. */}
+                  {measured && canSwitchWallFace && (
+                    <div className="px-3.5 py-3 border-t border-line bg-panel">
+                      <p className="text-[15.5px] text-fg-2">Measured to the</p>
+                      <div className="seg mt-1.5 flex w-full" role="group" aria-label="Measure every outline to">
                         <button
                           type="button"
                           onClick={() => onInteriorWallToggle(false)}
                           aria-pressed={!useInteriorWalls}
-                          className="seg-option"
+                          className="seg-option flex-[3] whitespace-nowrap"
                         >
                           Outside of walls
                         </button>
@@ -972,16 +915,53 @@ const ResultsPanel = ({
                           type="button"
                           onClick={() => onInteriorWallToggle(true)}
                           aria-pressed={!!useInteriorWalls}
-                          className="seg-option"
+                          className="seg-option flex-[2] whitespace-nowrap"
                         >
                           Inside
                         </button>
                       </div>
+                      <p className="mt-1.5 text-[15px] leading-snug text-fg-3">
+                        Living area is normally measured to the outside of the walls.
+                      </p>
                     </div>
-                    <p className="mt-2 text-[15.5px] leading-snug text-fg-3">
-                      Living area is normally measured to the outside of the walls.
-                    </p>
+                  )}
+                </div>
+
+                {/* What can be done about the outlines, last: two buttons of one
+                    size. "Change the outline" is the menu of ways to change one
+                    that exists, opening beside the panel over the plan they act
+                    on; "Add another outline" is left out of that menu because
+                    it is the button under it. */}
+                {((onSelectTool && OUTLINE_GROUP) || canAddOutline) && (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {onSelectTool && OUTLINE_GROUP && (
+                      <TaskMenu
+                        group={OUTLINE_GROUP}
+                        menuGroup="panel"
+                        label="Change the outline"
+                        rowState={toolRowState}
+                        onSelect={onSelectTool}
+                        omit={['addOutline']}
+                        placement="side"
+                        triggerClassName="btn btn-secondary w-full justify-start [&>span]:flex-1 [&>span]:text-left"
+                      />
+                    )}
+                    {canAddOutline && (
+                      <button
+                        type="button"
+                        onClick={() => onAddOutline()}
+                        className="btn btn-secondary w-full justify-start"
+                      >
+                        <Plus className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
+                        Add another outline
+                      </button>
+                    )}
                   </div>
+                )}
+                {canAddOutline && (
+                  <p className="mt-2 text-[15px] leading-snug text-fg-3">
+                    Add one for a garage, a porch or another level, then choose what it counts as.
+                  </p>
                 )}
               </>
             )}

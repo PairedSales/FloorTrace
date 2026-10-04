@@ -186,46 +186,5 @@ export function useAutoScale() {
     }));
   }, [applyDecision]);
 
-  /**
-   * Back to the scale the rooms agreed on.
-   *
-   * Two messages in `boundaryQuality` tell the user to choose "Go back to the
-   * automatic scale", and this is what that does. Nothing else can:
-   * `applyDecision` refuses to write over a user-asserted source forever, and
-   * clearing a line calibration resets to *uncalibrated* rather than
-   * re-resolving from the rooms still in the store.
-   *
-   * It bypasses `isUserAsserted` deliberately: the user is the one asking.
-   */
-  const restoreAutoScale = useCallback(() => {
-    const state = useAppStore.getState();
-    const rooms = state.rooms ?? [];
-    if (!rooms.length) return false;
-    const run = lastRunByDocRef.current.get(state.activeDocumentId);
-    const decision = selectProjectScale(rooms, {
-      nonGlaRegions: run?.nonGlaRegions
-        ?? (state.exteriorLabels ?? []).map((l) => l.bbox),
-    });
-    if (!(decision?.pixelsPerFoot > 0)) return false;
-    useAppStore.getState().applyRoomCalibration(
-      { x: decision.feetPerPixel, y: decision.feetPerPixel },
-      null,
-      'room-calibration',
-      {
-        level: decision.level,
-        reason: decision.reason,
-        disagreement: decision.spread,
-        adopted: true,
-        roomCount: decision.roomCount,
-        source: 'auto',
-        areaRatio: decision.areaRatio ?? null,
-        rejected: decision.rejected.map((r) => ({
-          name: r.name, reason: r.reason, pixelsPerFoot: r.pixelsPerFoot ?? null,
-        })),
-      },
-    );
-    return true;
-  }, []);
-
-  return { measureAndCalibrate, reviewAgainstFootprint, restoreAutoScale };
+  return { measureAndCalibrate, reviewAgainstFootprint };
 }
