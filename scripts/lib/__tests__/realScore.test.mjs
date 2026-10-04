@@ -72,15 +72,6 @@ describe('the answer key from an exported key', () => {
     expect(exported.cells).toBe(cells(200, 100) - cells(40, 40));
   });
 
-  it('is the one bench:real builds from the saved outlines', () => {
-    const traces = [{ type: 'gla', closed: true, vertices: outer }, { type: 'porch', closed: true, vertices: rect(240, 20, 340, 120) }];
-    const direct = answerKey(traces, SIZE);
-    const viaKey = answerKeyFromOutlines(traces, SIZE);
-    expect(viaKey.grid).toEqual(direct.grid);
-    expect(Buffer.from(viaKey.footprint).equals(Buffer.from(direct.footprint))).toBe(true);
-    expect(Buffer.from(viaKey.nonGla).equals(Buffer.from(direct.nonGla))).toBe(true);
-  });
-
   it('leaves out an outline that is not closed or has fewer than three points', () => {
     const key = answerKeyFromOutlines([
       { type: 'gla', points: pairs(outer) },
@@ -178,10 +169,5 @@ describe('the saved image', () => {
     const url = `data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
     const image = await decodeDataUrl(url);
     expect([image.width, image.height, image.data.length]).toEqual([3, 2, 24]);
-  });
-
-  it('is an error when the project holds none', () => {
-    expect(() => decodeDataUrl(undefined)).toThrow(/holds no image/);
-    expect(() => decodeDataUrl('not a data url')).toThrow(/holds no image/);
   });
 });

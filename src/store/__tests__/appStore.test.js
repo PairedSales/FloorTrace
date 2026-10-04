@@ -372,14 +372,6 @@ describe('errorAnchor', () => {
     expect(useAppStore.getState().getParkedState()).not.toHaveProperty('errorAnchor');
     expect(useAppStore.getState().createSnapshot(null)).not.toHaveProperty('errorAnchor');
   });
-
-  it('survives an undo rather than being reverted by one', () => {
-    useAppStore.getState().setErrorAnchor(anchor);
-    undoManager.save();
-    useAppStore.getState().setUnit('metric');
-    undoManager.undo();
-    expect(useAppStore.getState().errorAnchor).toEqual(anchor);
-  });
 });
 
 // `tracedBoundaries` is the detector result the interior/exterior toggle
@@ -559,6 +551,8 @@ describe('double-count detection', () => {
     const { doubleCounted } = selectActiveAreaByType(useAppStore.getState());
     expect(doubleCounted).toHaveLength(1);
     expect(doubleCounted[0]).toMatchObject({ innerId: 'garage', outerName: 'house' });
+    // Why, in words the panel can print.
+    expect(doubleCounted[0].detail).toBe('garage sits inside house, so its area is counted twice');
   });
 
   it('says nothing about a garage drawn beside the house', () => {
@@ -568,16 +562,6 @@ describe('double-count detection', () => {
     ]);
 
     expect(selectActiveAreaByType(useAppStore.getState()).doubleCounted).toEqual([]);
-  });
-
-  it('says why, in words the panel can print', () => {
-    seed([
-      trace('house', 'gla', box(0, 0, 100, 100)),
-      trace('garage', 'garage', box(10, 10, 40, 40)),
-    ]);
-
-    const { doubleCounted } = selectActiveAreaByType(useAppStore.getState());
-    expect(doubleCounted[0].detail).toBe('garage sits inside house, so its area is counted twice');
   });
 
   // Two storeys of a house are nested by construction and are not double counted.

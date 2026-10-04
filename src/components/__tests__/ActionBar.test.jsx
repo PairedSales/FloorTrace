@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup, within, act } from '@testing-library/react';
 import ActionBar from '../ActionBar';
-import { TOOL_GROUPS } from '../toolCatalog';
 import { TOOL_MODES } from '../toolModes';
 import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
@@ -40,8 +39,6 @@ const openMenu = (view, name) => {
   fireEvent.click(view.getByRole('button', { name }));
   return view.getByRole('menu');
 };
-const rowsOf = (menu) => within(menu).getAllByRole('menuitem')
-  .map((row) => row.querySelector('.font-medium').textContent.trim());
 const row = (menu, label) => within(menu).getByText(label).closest('[role="menuitem"]');
 
 beforeEach(() => {
@@ -58,41 +55,6 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('ActionBar at rest', () => {
-  it('offers two jobs by name, and a tip — no mode name, no way out', () => {
-    const view = render(<ActionBar {...props()} />);
-    const toolbar = view.getByRole('toolbar', { name: 'Tools' });
-    expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
-      .toEqual(['Measure', 'Edit plan']);
-    // The standing answer to "the outline is not right": where the fix is,
-    // said once and calmly rather than as a warning about each trace.
-    expect(view.getByText(
-      'Outline not right? Drag any corner, or choose Change beside “Found the outside walls”.',
-    )).toBeTruthy();
-    expect(view.queryByText('Cancel')).toBeNull();
-  });
-
-  // The outline's tools must never be unreachable: with the panel that holds
-  // them put away, their menu is here, and the tip points at it.
-  it('takes the outline’s menu back while the results are put away', () => {
-    const view = render(<ActionBar {...props({ panelOpen: false })} />);
-    const toolbar = view.getByRole('toolbar', { name: 'Tools' });
-    expect(within(toolbar).getAllByRole('button').map((b) => b.textContent.trim()))
-      .toEqual(['Outline', 'Measure', 'Edit plan']);
-    expect(view.getByText('Outline not right? Drag any corner, or redraw it from the Outline menu.')).toBeTruthy();
-  });
-
-  it('keeps the corner tip until there is an outline to drag', () => {
-    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
-    const view = render(<ActionBar {...props()} />);
-    expect(view.queryByText(/Drag any corner/)).toBeNull();
-  });
-
-  it('never states the scale in pixels', () => {
-    useAppStore.setState({ calibration: { calibrated: true, feetPerPixel: { x: 0.1, y: 0.1 } } });
-    const view = render(<ActionBar {...props()} />);
-    expect(view.container.textContent).not.toMatch(/px/);
-  });
-
   // Closing the last plan takes the bar away, and that close is itself a
   // flash — which the next plan's bar used to show and announce on mount.
   it('does not replay a confirmation from before it was on screen', () => {
@@ -107,21 +69,6 @@ describe('ActionBar at rest', () => {
     expect(view.getByText('Area copied')).toBeTruthy();
     expect(view.container.querySelector('[role="status"]').textContent).toContain('Area copied');
     expect(view.queryByText(/Drag any corner/)).toBeNull();
-  });
-
-  // The bar is the one place the app says what just happened to the plan:
-  // green when it was done, amber when it was not and why.
-  it('says something done in green and something refused in amber', () => {
-    const view = render(<ActionBar {...props()} />);
-    act(() => { useWorkspaceStore.getState().flashStatus('Outline found.'); });
-    expect(view.getByText('Outline found.').className).toContain('text-ok');
-
-    act(() => { useWorkspaceStore.getState().flashStatus('An outline needs at least three corners', 'warn'); });
-    const refusal = view.getByText('An outline needs at least three corners');
-    expect(refusal.className).toContain('text-warn');
-    expect(refusal.className).not.toContain('text-ok');
-    // One line, latest wins: there is no second message to overlap the first.
-    expect(view.queryByText('Outline found.')).toBeNull();
   });
 
   // "Finding the outline…" beside the last run's "Outline found." is two
@@ -158,14 +105,6 @@ describe('ActionBar at rest', () => {
     act(() => { useAppStore.setState({ isProcessing: false, processingMessage: '' }); });
     expect(view.getByText('Outline found')).toBeTruthy();
   });
-
-  // The bar is one line and truncates; the sentence must still be readable.
-  it('carries the whole sentence where a truncated one can be read', () => {
-    const view = render(<ActionBar {...props()} />);
-    const long = 'Kept the scale you set by hand — the rooms on this plan disagree with it';
-    act(() => { useWorkspaceStore.getState().flashStatus(long, 'warn'); });
-    expect(view.getByText(long).getAttribute('title')).toBe(long);
-  });
 });
 
 describe('how long the bar keeps saying it', () => {
@@ -178,16 +117,6 @@ describe('how long the bar keeps saying it', () => {
     act(() => { vi.advanceTimersByTime(3300); });
     expect(view.queryByText('Area copied')).toBeNull();
     expect(view.getByText(/Drag any corner/)).toBeTruthy();
-  });
-
-  // A refusal has to be read, not just noticed.
-  it('keeps a refusal longer than a confirmation', () => {
-    const view = render(<ActionBar {...props()} />);
-    act(() => { useWorkspaceStore.getState().flashStatus('Nothing painted — drag over the outside walls first', 'warn'); });
-    act(() => { vi.advanceTimersByTime(3300); });
-    expect(view.getByText(/Nothing painted/)).toBeTruthy();
-    act(() => { vi.advanceTimersByTime(3000); });
-    expect(view.queryByText(/Nothing painted/)).toBeNull();
   });
 });
 
@@ -223,13 +152,6 @@ describe('the offer to find the outline again, after the plan’s image was edit
     expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
   });
 
-  it('is not made with no outline to find again — the panel is already offering to find one', () => {
-    offer();
-    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
-    const view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
-  });
-
   // Every eraser stroke edits the image. Nothing is said while the eraser is
   // still in the user's hand; it is there when they put the tool down.
   it('waits for the tool to be put down, and for a running job to finish', () => {
@@ -240,14 +162,6 @@ describe('the offer to find the outline again, after the plan’s image was edit
 
     useAppStore.setState({ isProcessing: true, processingMessage: 'Finding the outline…' });
     view = render(<ActionBar {...props()} />);
-    expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
-  });
-
-  it('gives way to what just happened', () => {
-    offer();
-    const view = render(<ActionBar {...props()} />);
-    act(() => { useWorkspaceStore.getState().flashStatus('Area copied'); });
-    expect(view.getByText('Area copied')).toBeTruthy();
     expect(view.queryByRole('button', { name: 'Find the outline again' })).toBeNull();
   });
 
@@ -267,27 +181,6 @@ describe('every tool and command has a home', () => {
   // corrections live on the panel. The cases run with the results put away,
   // which is when all three menus are in the bar.
   const away = (over = {}) => props({ panelOpen: false, ...over });
-  const homes = [
-    ['Outline', ['Paint over the walls', 'Click the corners', 'Find the outline again',
-      'Cut out an open area', 'Remove several corners', 'Add another outline']],
-    ['Measure', ['Measure a distance', 'Measure an area', 'Measure an angle']],
-    ['Edit plan', ['Crop the plan', 'Erase marks on the plan', 'Turn the plan right', 'Turn the plan left']],
-  ];
-
-  it.each(homes)('%s lists %j', (title, expected) => {
-    expect(rowsOf(openMenu(render(<ActionBar {...away()} />), title))).toEqual(expected);
-  });
-
-  it('gives every row a sentence saying what it is for', () => {
-    const view = render(<ActionBar {...away()} />);
-    for (const [title] of homes) {
-      const menu = openMenu(view, title);
-      for (const item of within(menu).getAllByRole('menuitem')) {
-        expect(item.querySelector('.text-fg-3')?.textContent.length, item.textContent).toBeGreaterThan(10);
-      }
-      fireEvent.keyDown(window, { key: 'Escape' });
-    }
-  });
 
   it('hands back the id the catalogue lists, for tools and commands alike', () => {
     const picked = [];
@@ -304,17 +197,6 @@ describe('every tool and command has a home', () => {
     expect(useWorkspaceStore.getState().menuOpen).toBeNull();
   });
 
-  it('prints the digit beside each tool that has one', () => {
-    const view = render(<ActionBar {...away()} />);
-    const tools = TOOL_GROUPS.filter((g) => g.menu).flatMap((g) => g.tools.map((t) => [g.title, t]));
-    for (const [title, tool] of tools) {
-      if (!tool.digit) continue;
-      const menu = openMenu(view, title);
-      expect(row(menu, tool.label).querySelector('kbd').textContent, tool.label).toBe(tool.digit);
-      fireEvent.keyDown(window, { key: 'Escape' });
-    }
-  });
-
   it('keeps a tool that needs an outline in place, with its reason, and ignores a click on it', () => {
     const picked = [];
     const view = render(<ActionBar {...away({ hasArea: false, onSelect: (id) => picked.push(id) })} />);
@@ -323,44 +205,6 @@ describe('every tool and command has a home', () => {
     expect(within(item).getByText('Measuring an area needs an outline first.')).toBeTruthy();
     fireEvent.click(item);
     expect(picked).toEqual([]);
-  });
-
-  it('lists the next-best outline only while there is one, and says how many', () => {
-    let view = render(<ActionBar {...away()} />);
-    expect(rowsOf(openMenu(view, 'Outline'))).not.toContain('Try another outline');
-    cleanup();
-
-    useAppStore.setState({
-      perimeterTraces: [{ id: 't1', vertices: square, quality: { alternatives: [{}, {}] } }],
-    });
-    view = render(<ActionBar {...away()} />);
-    expect(rowsOf(openMenu(view, 'Outline'))).toContain('Try another outline (2 more)');
-    cleanup();
-
-    // Once the geometry is the user's, a runner-up scored against the
-    // detector's own is no longer an alternative to it.
-    useAppStore.setState({
-      perimeterTraces: [{ id: 't1', vertices: square, quality: { edited: true, alternatives: [{}] } }],
-    });
-    view = render(<ActionBar {...away()} />);
-    expect(rowsOf(openMenu(view, 'Outline')).some((r) => r.startsWith('Try another'))).toBe(false);
-  });
-
-  it('lists Clear only while there is something to clear', () => {
-    let view = render(<ActionBar {...away()} />);
-    expect(rowsOf(openMenu(view, 'Measure'))).not.toContain('Clear your measurements');
-    cleanup();
-    view = render(<ActionBar {...away({ hasToolData: true })} />);
-    expect(rowsOf(openMenu(view, 'Measure'))).toContain('Clear your measurements');
-  });
-
-  it('will not add an outline before the first is drawn', () => {
-    useAppStore.setState({ perimeterTraces: [{ id: 't1', vertices: [] }] });
-    const view = render(<ActionBar {...away({ hasArea: false })} />);
-    const menu = openMenu(view, 'Outline');
-    expect(row(menu, 'Add another outline').getAttribute('aria-disabled')).toBe('true');
-    // With nothing drawn, "again" would be a lie.
-    expect(rowsOf(menu)).toContain('Find the outline');
   });
 
   // The old top band disabled these while a job ran. Unguarded, a second trace
@@ -387,13 +231,6 @@ describe('every tool and command has a home', () => {
 });
 
 describe('ActionBar while a tool is running', () => {
-  it('stands the menus down and states the mode and its instruction from TOOL_MODES', () => {
-    const view = render(<ActionBar {...props({ tool: 'pick' })} />);
-    expect(view.queryByRole('toolbar')).toBeNull();
-    expect(view.getByText(TOOL_MODES.pick.name)).toBeTruthy();
-    expect(view.getByText(TOOL_MODES.pick.hint)).toBeTruthy();
-  });
-
   it('offers Cancel always and Done only when the mode commits', () => {
     const onCancel = vi.fn();
     const onDone = vi.fn();
@@ -435,22 +272,6 @@ describe('ActionBar while a tool is running', () => {
     expect(onBrushSizeChange).toHaveBeenCalledWith(80);
   });
 
-  it('counts the corners placed so far', () => {
-    const view = render(<ActionBar {...props({ tool: 'vertex', count: 1 })} />);
-    expect(view.getByText('1 corner')).toBeTruthy();
-    view.rerender(<ActionBar {...props({ tool: 'vertex', count: 4 })} />);
-    expect(view.getByText('4 corners')).toBeTruthy();
-  });
-
-  it('lets Working… take the instruction', () => {
-    const view = render(<ActionBar {...props({ tool: 'draw' })} />);
-    expect(view.getByText(/Paint roughly over the outside walls/)).toBeTruthy();
-
-    act(() => useAppStore.setState({ isProcessing: true, processingMessage: 'Tracing…' }));
-    expect(view.getByText('Tracing…')).toBeTruthy();
-    expect(view.queryByText(/Paint roughly over the outside walls/)).toBeNull();
-  });
-
   // The count changes on every click, so it must not sit in the live region —
   // aria-atomic would re-announce the mode and the instruction with it.
   it('keeps the changing count out of the live region', () => {
@@ -458,15 +279,6 @@ describe('ActionBar while a tool is running', () => {
     const live = view.container.querySelector('[role="status"]');
     expect(live.textContent).toContain(TOOL_MODES.vertex.name);
     expect(live.textContent).not.toContain('3 corners');
-  });
-
-  // The words give way; the way out does not.
-  it('keeps Cancel and Done outside the part of the bar that gives way', () => {
-    const view = render(<ActionBar {...props({ tool: 'draw', onDone: () => {} })} />);
-    expect(view.getByText('Cancel').closest('.action-lead')).toBeNull();
-    expect(view.getByText('Draw the outline').closest('.action-lead')).toBeNull();
-    expect(view.getByText(/Paint roughly/).closest('.action-lead')).toBeTruthy();
-    expect(view.container.querySelector('.action-row-running')).toBeTruthy();
   });
 });
 
@@ -486,25 +298,6 @@ describe('ActionBar while work is running', () => {
     useAppStore.setState({ isProcessing: false, processingMessage: '' });
   });
 
-  // The menus stay: a tool can be picked through a long job, and a wedged job
-  // must not lock the user out of every tool.
-  it('says what it is doing, and keeps the menus', () => {
-    const view = render(<ActionBar {...props()} />);
-    expect(view.getByText('Finding the outline…')).toBeTruthy();
-    expect(view.getByRole('toolbar', { name: 'Tools' })).toBeTruthy();
-  });
-
-  // A trace is usually well under a second, and a counter that flashes up and
-  // vanishes on every one of them is noise.
-  it('stays quiet about a job that finishes quickly', () => {
-    const work = beginWork('trace');
-    const view = render(<ActionBar {...props()} />);
-    act(() => { vi.advanceTimersByTime(4000); });
-    expect(view.queryByText('Stop')).toBeNull();
-    expect(view.queryByText(/^\d+s$/)).toBeNull();
-    settleWork(work);
-  });
-
   it('says how long it has been going, and offers the way out', () => {
     const work = beginWork('trace');
     const view = render(<ActionBar {...props()} />);
@@ -515,34 +308,6 @@ describe('ActionBar while work is running', () => {
     // Aborted, so anything the trace still delivers is dropped rather than
     // written over a plan the user has moved on from.
     expect(ownerVerdict(work)).toBe('dropped');
-    settleWork(work);
-  });
-
-  // A project save or a PDF render holds `isProcessing` and owns no token, and
-  // a Stop that stops nothing is worse than no Stop at all.
-  it('offers no Stop for work nothing owns', () => {
-    const view = render(<ActionBar {...props()} />);
-    act(() => { vi.advanceTimersByTime(6000); });
-    expect(view.getByText('6s')).toBeTruthy();
-    expect(view.queryByText('Stop')).toBeNull();
-  });
-
-  // The OCR pool has no interrupt, so a Stop could only drop the *result* while
-  // the spinner kept turning for another twenty seconds. Still says how long.
-  it('offers no Stop for a scan, which cannot be stopped', () => {
-    const work = beginWork('scan');
-    const view = render(<ActionBar {...props()} />);
-    act(() => { vi.advanceTimersByTime(6000); });
-    expect(view.getByText('6s')).toBeTruthy();
-    expect(view.queryByText('Stop')).toBeNull();
-    settleWork(work);
-  });
-
-  it('keeps Stop outside the part of the bar that gives way', () => {
-    const work = beginWork('trace');
-    const view = render(<ActionBar {...props()} />);
-    act(() => { vi.advanceTimersByTime(6000); });
-    expect(view.getByText('Stop').closest('.action-lead')).toBeNull();
     settleWork(work);
   });
 

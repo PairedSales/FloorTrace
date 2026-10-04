@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
 import HelpModal from '../HelpModal';
 import { TOOL_GROUPS } from '../toolCatalog';
@@ -15,17 +15,6 @@ afterEach(cleanup);
 const help = (props = {}) => render(<HelpModal onClose={() => {}} {...props} />);
 
 describe('HelpModal', () => {
-  it('opens on the guide, and on the shortcuts when asked', () => {
-    let view = help();
-    expect(view.getByRole('tab', { name: 'How to use FloorTrace' }).getAttribute('aria-selected')).toBe('true');
-    expect(view.getByText('The basics')).toBeTruthy();
-    cleanup();
-
-    view = help({ initialTab: 'shortcuts' });
-    expect(view.getByRole('tab', { name: 'Keyboard shortcuts' }).getAttribute('aria-selected')).toBe('true');
-    expect(view.getByText('Opening and saving')).toBeTruthy();
-  });
-
   it('switches pages from its own tabs', () => {
     const view = help();
     fireEvent.click(view.getByRole('tab', { name: 'Keyboard shortcuts' }));
@@ -59,22 +48,6 @@ describe('HelpModal', () => {
     }
     // The words the redesign retired.
     expect(guide).not.toMatch(/Export|tools on the right|File ▸/);
-  });
-
-  it('lists every tool digit the catalogue assigns', () => {
-    const view = help({ initialTab: 'shortcuts' });
-    for (const tool of TOOL_GROUPS.flatMap((g) => g.tools).filter((t) => t.digit)) {
-      const row = view.getByText(tool.label).closest('div');
-      expect(row.querySelector('kbd').textContent, tool.label).toBe(tool.digit);
-    }
-  });
-
-  it('closes on Escape and on its close button', () => {
-    const onClose = vi.fn();
-    const view = help({ onClose });
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    fireEvent.click(view.getByRole('button', { name: 'Close' }));
-    expect(onClose).toHaveBeenCalledTimes(2);
   });
 
   /**

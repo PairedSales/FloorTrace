@@ -220,13 +220,8 @@ describe('reordering plans', () => {
 
     expect(app().moveDocument(docC, 2)).toBe(true);
     expect(app().documentOrder).toEqual([docA, docB, docC]);
-  });
-
-  // Order is workspace state; which plan you are looking at is not part of it.
-  it('does not change which plan is active', () => {
-    const docB = app().openDocument();
-    app().moveDocument(docB, 0);
-    expect(app().activeDocumentId).toBe(docB);
+    // Order is workspace state; which plan you are looking at is not part of it.
+    expect(app().activeDocumentId).toBe(docC);
   });
 
   it('clamps a target beyond either end rather than losing the plan', () => {

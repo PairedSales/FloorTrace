@@ -235,6 +235,40 @@ const autoScaleSummary = (quality) => {
       remedy: `To set the scale from a plainly rectangular room instead, ${PICK_A_ROOM}.`,
     };
   }
+  // Metres read as feet: the rooms agree perfectly and the area is ~10.8x too
+  // small. Another room cannot help — every label is in the same unit — so the
+  // way out is a length the user types into a box that names its unit.
+  if (quality.reason === 'labels-look-metric') {
+    return {
+      level: 'check',
+      short: 'Room sizes look like meters',
+      detail: 'The room sizes printed on this plan are too small to be feet, so they are '
+        + 'probably meters. Read as feet, every area comes out about ten times too small.',
+      remedy: 'If the plan is in meters, choose “Set scale from a known length” below and '
+        + 'type a length you know, in the unit its box asks for.',
+    };
+  }
+  if (quality.reason === 'footprint-implausible') {
+    return {
+      level: 'check',
+      short: 'Areas look too large for these rooms',
+      detail: 'At this scale the traced building comes out several times larger than the '
+        + 'rooms its own labels describe, so either the scale is too low and every area '
+        + 'too large, or the outline takes in more than this building.',
+      remedy: `Check the green box against its room and the outline against the building, or ${PICK_A_ROOM}.`,
+    };
+  }
+  // A doubt this function has no words for yet is still a doubt: dropping it to
+  // the reassuring note below is how a wrong scale reaches the report unsaid.
+  if (quality.level === 'check') {
+    return {
+      level: 'check',
+      short: 'Check the scale',
+      detail: 'The rooms measured on this plan raised a doubt about the scale, so every '
+        + 'area may be off.',
+      remedy: `Check the green box against its room, or ${PICK_A_ROOM}.`,
+    };
+  }
   // Nothing wrong: worth stating, never worth worrying about.
   return {
     level: 'note',

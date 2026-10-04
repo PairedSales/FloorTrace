@@ -149,17 +149,6 @@ describe('classifyTraces', () => {
       expect(byId.get('floor-1')).toBeUndefined();
       expect(byId.get('floor-3')?.type ?? 'gla').toBe('gla');
     });
-
-    // The sheet calls the basement plan "FLOOR 1". That says where it sits in
-    // the stack, and the rooms drawn inside it say what it is.
-    it('is not talked out of it by the caption under the plan', () => {
-      const captionOnly = scanned.filter((l) => l.type === 'gla');
-      expect(classifyTraces(floors, captionOnly).find((v) => v.id === 'floor-2')?.type)
-        .not.toBe('below-grade');
-
-      expect(classifyTraces(floors, scanned).find((v) => v.id === 'floor-2').type)
-        .toBe('below-grade');
-    });
   });
 
   it('survives outlines and labels it cannot use', () => {

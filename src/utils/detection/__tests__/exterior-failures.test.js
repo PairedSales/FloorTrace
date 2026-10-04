@@ -76,6 +76,8 @@ describe('enclosed voids', () => {
   it('subtracts a labelled courtyard instead of counting it as floor area', () => {
     const { img, truth, hole, label } = courtyardHouse();
     const traced = traceFloorplanBoundaryCore(img, { excludeRegions: [label] });
+    // One floor with a hole in it, not two floors for the ring.
+    expect(traced.floors.length).toBe(1);
     const floor = traced.floors[0];
     expect(floor.holes.length).toBe(1);
     const holeArea = polygonArea(floor.holes[0]);
@@ -83,11 +85,6 @@ describe('enclosed voids', () => {
     const net = polygonArea(floor.outer.polygon) - holeArea;
     const truthNet = polygonArea(truth) - polygonArea(hole);
     expect(Math.abs(net - truthNet) / truthNet).toBeLessThan(0.03);
-  });
-
-  it('reports one floor, not two, for the courtyard ring', () => {
-    const { img, label } = courtyardHouse();
-    expect(traceFloorplanBoundaryCore(img, { excludeRegions: [label] }).floors.length).toBe(1);
   });
 });
 

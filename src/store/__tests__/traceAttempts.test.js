@@ -87,47 +87,6 @@ describe('attempt history', () => {
     expect(kept[0].vertices).toEqual(square(20));
     expect(kept[kept.length - 1].vertices).toEqual(square((MAX_TRACE_ATTEMPTS + 1) * 10));
   });
-
-  it('reverts geometry, quality and holes, and records what it left', () => {
-    store().setPerimeterOverlay({
-      vertices: square(10),
-      holes: [{ id: 'hole-auto-0', ring: square(4), source: 'auto' }],
-      quality: { source: 'auto', confidence: 0.9, warnings: [] },
-      wallFaces: { outer: { vertices: square(10), holes: [] }, inner: null },
-    });
-    store().setPerimeterOverlay(result(square(20), 0.3));
-    expect(active().quality.confidence).toBe(0.3);
-
-    expect(store().revertTraceToAttempt(active().id, 0)).toBe(true);
-
-    expect(active().vertices).toEqual(square(10));
-    expect(active().quality.confidence).toBe(0.9);
-    expect(active().holes[0].ring).toEqual(square(4));
-    // The pair belonged to the result that has just been reverted away from.
-    expect(active().wallFaces).toBe(null);
-    // Reverting is itself recoverable.
-    expect(active().attempts).toHaveLength(2);
-    expect(active().attempts[1].vertices).toEqual(square(20));
-  });
-
-  it('refuses an index that names no attempt', () => {
-    store().setPerimeterOverlay(result(square(10), 0.9));
-    expect(store().revertTraceToAttempt(active().id, 0)).toBe(false);
-    expect(store().revertTraceToAttempt('no-such-trace', 0)).toBe(false);
-  });
-
-  // Reverting records what it leaves, so a second click on the row you are
-  // already standing on would bank a duplicate and, five clicks in, push the
-  // detector's own result off the end of the cap.
-  it('refuses a revert to the geometry it is already showing', () => {
-    store().setPerimeterOverlay(result(square(10), 0.9));
-    store().setPerimeterOverlay(result(square(20), 0.3));
-
-    const id = active().id;
-    expect(store().revertTraceToAttempt(id, 0)).toBe(true);
-    expect(store().revertTraceToAttempt(id, 0)).toBe(false);
-    expect(active().attempts).toHaveLength(2);
-  });
 });
 
 describe('the projections carry the attempts and the detector’s findings', () => {

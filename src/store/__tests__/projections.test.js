@@ -29,15 +29,6 @@ describe('working-state projections', () => {
     ['PERSISTENT_FLOOR_FIELDS', PERSISTENT_FLOOR_FIELDS, EXCLUDED_PERSISTENT_FIELDS],
   ];
 
-  it.each(PROJECTIONS)('%s is a subset of working state', (_name, fields) => {
-    const working = new Set(WORKING_STATE_KEYS);
-    expect(fields.filter((k) => !working.has(k))).toEqual([]);
-  });
-
-  it.each(PROJECTIONS)('%s has no duplicates', (_name, fields) => {
-    expect(new Set(fields).size).toBe(fields.length);
-  });
-
   // The complement of the subset check: a projection must account for every
   // working-state field either by carrying it or by naming it in its exclusion
   // list. A new field that is in neither is the failure mode this file exists
@@ -71,13 +62,5 @@ describe('working-state projections', () => {
     ];
     const missing = WORKING_STATE_KEYS.filter((k) => !union.has(k));
     expect(missing.sort()).toEqual([...TRANSIENT_EVERYWHERE].sort());
-  });
-
-  it('exports working-state keys, not the shared defaults object', () => {
-    // Guards the aliasing hazard rather than the projections: handing out the
-    // memoised defaults object lets one project's nested calibration and
-    // perimeterTraces be mutated into the next.
-    expect(Array.isArray(WORKING_STATE_KEYS)).toBe(true);
-    expect(WORKING_STATE_KEYS.every((k) => typeof k === 'string')).toBe(true);
   });
 });

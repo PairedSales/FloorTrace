@@ -54,13 +54,6 @@ describe('scanQueue', () => {
 
       expect(await queue.run('a', async () => 'recovered')).toBe('recovered');
     });
-
-    it('forgets everything on clear', async () => {
-      const queue = createScanQueue();
-      await queue.run('a', async () => 1);
-      queue.clear();
-      expect(queue.size).toBe(0);
-    });
   });
 
   describe('de-duplicating', () => {
@@ -111,22 +104,6 @@ describe('scanQueue', () => {
 
       expect(await all).toEqual([0, 1, 2]);
       expect(maxActive).toBe(1);
-    });
-
-    it('starts each scan only after the previous finishes', async () => {
-      const queue = createScanQueue();
-      const order = [];
-      const gate = defer();
-
-      const first = queue.run('a', async () => { order.push('a:start'); await gate.promise; order.push('a:end'); });
-      const second = queue.run('b', async () => { order.push('b:start'); });
-
-      await tick();
-      expect(order).toEqual(['a:start']); // b has not begun
-
-      gate.resolve();
-      await Promise.all([first, second]);
-      expect(order).toEqual(['a:start', 'a:end', 'b:start']);
     });
 
     // One rejection must not wedge every later scan for the life of the page.

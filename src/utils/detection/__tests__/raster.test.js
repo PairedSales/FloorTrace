@@ -2,6 +2,7 @@
 // depends on — `closeRect` calls them on every rung of every closing ladder —
 // so the run-based rewrite is asserted bit-identical against the per-pixel
 // distance sweeps it replaced, kept here verbatim as the reference.
+import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 import { dilateRows, dilateCols, dilateRect, erodeRect, closeRect, openRect } from '../raster.js';
 
@@ -141,24 +142,31 @@ const CASES = [
   ['1x1 ink', () => new Uint8Array([1]), 1, 1],
 ];
 
-describe('dilateRows matches the distance-sweep form', () => {
-  for (const [name, make, width, height] of CASES) {
-    it.each(RADII)(`${name} at r=%i`, (r) => {
-      const mask = make();
-      expect(dilateRows(mask, width, height, r))
-        .toEqual(dilateRowsSweep(mask, width, height, r));
-    });
+// `toEqual` walks a typed array element by element through the matcher, which
+// is most of a second per megapixel; the claim here is byte equality, so it is
+// asked as that, and the first differing pixel is named when it fails.
+const firstDifference = (actual, expected) => {
+  if (actual.length !== expected.length) return `length ${actual.length} vs ${expected.length}`;
+  if (Buffer.compare(actual, expected) === 0) return null;
+  for (let i = 0; i < actual.length; i += 1) {
+    if (actual[i] !== expected[i]) return `index ${i}: ${actual[i]} vs ${expected[i]}`;
   }
-});
+  return null;
+};
 
-describe('dilateCols matches the distance-sweep form', () => {
-  for (const [name, make, width, height] of CASES) {
-    it.each(RADII)(`${name} at r=%i`, (r) => {
+// One test per mask rather than per mask and radius: a failure names the radius
+// in its message, and 240 generated cases said nothing 24 do not.
+describe.each([
+  ['dilateRows', dilateRows, dilateRowsSweep],
+  ['dilateCols', dilateCols, dilateColsSweep],
+])('%s matches the distance-sweep form', (_name, fn, sweep) => {
+  it.each(CASES)('%s at every radius', (_case, make, width, height) => {
+    for (const r of RADII) {
       const mask = make();
-      expect(dilateCols(mask, width, height, r))
-        .toEqual(dilateColsSweep(mask, width, height, r));
-    });
-  }
+      expect(firstDifference(fn(mask, width, height, r), sweep(mask, width, height, r)), `r=${r}`)
+        .toBeNull();
+    }
+  });
 });
 
 describe('the operators built on them are unchanged', () => {
@@ -224,12 +232,15 @@ describe('the operators built on them are unchanged', () => {
     openRect: (m, w, h, r) => dilateRectRef(erodeRectRef(m, w, h, r), w, h, r),
   };
 
-  for (const [name, fn] of composed) {
-    it.each([2, 7, 17, 39])(`${name} at r=%i over linework and a checkerboard`, (r) => {
-      for (const [, make, width, height] of CASES) {
+  it.each(composed)('%s over every mask', (name, fn) => {
+    for (const r of [2, 7, 17, 39]) {
+      for (const [label, make, width, height] of CASES) {
         const mask = make();
-        expect(fn(mask, width, height, r)).toEqual(refs[name](mask, width, height, r));
+        expect(
+          firstDifference(fn(mask, width, height, r), refs[name](mask, width, height, r)),
+          `${label} at r=${r}`,
+        ).toBeNull();
       }
-    });
-  }
+    }
+  });
 });

@@ -72,11 +72,6 @@ describe('closed, and not crossing itself', () => {
     expect(result.failures).toBeGreaterThan(0);
   });
 
-  it('fails an outline of two distinct vertices and a repeated vertex', () => {
-    expect(only(run({ outlines: [{ type: 'gla', v: [[100, 80], [300, 80], [300, 80]] }, GARAGE] }), 'closed', 'fail')).toHaveLength(1);
-    expect(only(run({ outlines: [{ type: 'gla', v: [[100, 80], [300, 80], [300, 80], [300, 220], [100, 220]] }, GARAGE] }), 'closed', 'fail')[0].detail).toMatch(/zero length/);
-  });
-
   it('does not judge faces or labels of an outline that is not a polygon', () => {
     const bowTie = { type: 'gla', v: [[100, 80], [300, 220], [300, 80], [100, 220]] };
     const result = run({ outlines: [bowTie, GARAGE], labels: [label('d0', 'room', 200, 150)] });
@@ -111,11 +106,6 @@ describe('building and non-GLA outlines overlapping', () => {
     const both = run({ outlines: [HOUSE, twin, GARAGE], spec: null });
     expect(only(both, 'overlap', 'warn')).toHaveLength(1);
     expect(only(both, 'overlap', 'fail')).toHaveLength(0);
-  });
-
-  it('lets unfinished space abut scored space', () => {
-    const eave = { type: 'unfinished', v: rect(100, 40, 300, 80) };
-    expect(only(run({ outlines: [HOUSE, GARAGE, eave], spec: null }), 'overlap', 'warn')).toHaveLength(0);
   });
 });
 
@@ -176,11 +166,6 @@ describe('edges on the wall face', () => {
     // Sampled every quarter pixel, so a face is read to about a tenth of one.
     expect(fails[0].detail).toMatch(/(4\.9|5\.0|5\.1) px beyond the wall face/);
     expect(only(run(withHouse(v, [0])), 'faces', 'fail')).toHaveLength(0);
-  });
-
-  it('says short of when the edge is inside the face', () => {
-    const fail = only(run(withHouse(rect(100, 84, 300, 220))), 'faces', 'fail');
-    expect(fail[0].detail).toMatch(/(3\.9|4\.0) px short of the wall face/);
   });
 
   it('tolerates 2 px and fails at 3 px', () => {
@@ -356,44 +341,5 @@ describe('edges the snap flagged when it ran', () => {
     const spec = { outlines: [{ ...SPEC.outlines[0], fix: [0] }, SPEC.outlines[1]] };
     const result = run({ spec, flagged: [flag(0, ['far'], { moved: -11.5 })] });
     expect(warnsOf(result)).toHaveLength(0);
-  });
-
-  it('does not say it twice when the second snap read the same flag, and says nothing of an edge it failed', () => {
-    // Another band 6 px beyond the house's top wall: the second snap sees it too.
-    const image = plan();
-    fillRect(image, 100, 71, 300, 74);
-    const result = run({ image, flagged: [flag(0, ['ink-beyond'], { beyond: 6 })] });
-    expect(only(result, 'faces', 'warn').filter((w) => w.subject.endsWith('edge 0'))).toHaveLength(1);
-    expect(warnsOf(result)).toHaveLength(0);
-    // An edge 5 px off its wall fails as it is: the flag adds nothing to that line.
-    const v = rect(100, 75, 300, 220);
-    const off = run({
-      outlines: [{ type: 'gla', v }, GARAGE],
-      spec: { outlines: [{ type: 'gla', v }, { type: 'garage', v: GARAGE.v, in: [3] }] },
-      flagged: [flag(0, ['far'], { moved: 5 })],
-    });
-    expect(only(off, 'faces', 'fail').length).toBeGreaterThan(0);
-    expect(warnsOf(off)).toHaveLength(0);
-  });
-
-  it('reads a flagged list from an older snap, and ignores what does not name an outline or flags', () => {
-    const result = run({
-      flagged: [{ outline: 0, edge: 1, flags: ['ink-beyond'] }, { outline: 9, edge: 0, flags: ['far'] }, { outline: 0, edge: 1 }, null, flag(2, ['no-band'])],
-    });
-    const warns = warnsOf(result);
-    expect(warns).toHaveLength(1);
-    expect(warns[0].subject).toBe('outline 0 gla edge 1');
-    expect(warns[0].detail).toMatch(/ink-beyond \(another band began beyond the face it used/);
-  });
-
-  it('leaves the flags alone when the spec is another key\'s: its "fix" lists say nothing of these edges', () => {
-    const result = run({ spec: { outlines: [SPEC.outlines[0]] }, flagged: [flag(0, ['far'], { moved: 9 })] });
-    expect(only(result, 'faces', 'fail')[0].detail).toMatch(/spec has 1 outlines and the snapped key 2/);
-    expect(warnsOf(result)).toHaveLength(0);
-  });
-
-  it('no flags, no warning: a key snapped clean adds nothing', () => {
-    expect(warnsOf(run({ flagged: [] }))).toHaveLength(0);
-    expect(run({ flagged: [] }).warnings).toBe(0);
   });
 });

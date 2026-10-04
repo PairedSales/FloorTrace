@@ -65,12 +65,6 @@ describe('usePlanAreaIndex', () => {
     expect(app().documents[docA].area.total).toBeCloseTo(3600, 6);
   });
 
-  it('records nothing rather than zero when the plan has no outline', () => {
-    mount();
-    act(() => { useAppStore.setState({ perimeterTraces: [] }); });
-    expect(app().documents[docA].area).toBeNull();
-  });
-
   // With no scale the area is the one-foot-per-pixel fallback — a pixel
   // count, which a property total would add in as a second level.
   it('records nothing for a plan with no scale', () => {

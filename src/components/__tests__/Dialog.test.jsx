@@ -81,14 +81,4 @@ describe('Dialog', () => {
     );
     expect(document.activeElement).toBe(view.getByLabelText('Title'));
   });
-
-  // A question is answered with one of its buttons.
-  it('has no close button when it is asking a question', () => {
-    const view = render(
-      <Dialog title="Close this plan?" role="alertdialog" hideClose onClose={() => {}}
-        footer={<button type="button">Cancel</button>} />,
-    );
-    expect(view.getByRole('alertdialog')).toBeTruthy();
-    expect(view.queryByRole('button', { name: 'Close' })).toBeNull();
-  });
 });

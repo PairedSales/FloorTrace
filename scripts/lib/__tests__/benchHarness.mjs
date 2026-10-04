@@ -1,5 +1,5 @@
-// What the process-level `bench:real` suites (realBenchRun, realBenchRunEdges)
-// share: the script run as a child against a temp folder standing in for the
+// What the process-level `bench:real` suite (realBenchRunEdges) runs on: the
+// script run as a child against a temp folder standing in for the
 // datasets (FLOORTRACE_DATASETS), so nothing here touches the real set. Not a
 // test file: the suites import it.
 import { execFile } from 'child_process';

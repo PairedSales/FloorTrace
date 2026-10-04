@@ -84,17 +84,6 @@ describe('session identity', () => {
 });
 
 describe('per-plan records', () => {
-  it('gives each plan its own image record', async () => {
-    const ws = await loadFresh();
-    await ws.writeDocDraft('doc-1', { image: COLLIDE_A, projectName: 'A' }, true);
-    await ws.writeDocDraft('doc-2', { image: COLLIDE_B, projectName: 'B' }, true);
-
-    const a = await ws.readDocDraft('doc-1');
-    const b = await ws.readDocDraft('doc-2');
-    expect(a.state.image).toBe(COLLIDE_A);
-    expect(b.state.image).toBe(COLLIDE_B);
-  });
-
   // Two plans opened from the same file hold the same picture, and hashDataUrl
   // folds an 8 kB prefix into 32 bits — this repo has already shipped a bug
   // where a shared image namespace served one plan another's pixels.

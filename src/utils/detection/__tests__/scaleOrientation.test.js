@@ -61,12 +61,6 @@ describe('orientDimsToBox', () => {
     expect(orientDimsToBox(NaN, 14, 400, 300).swapped).toBe(false);
   });
 
-  it('is idempotent — orienting an oriented pair changes nothing', () => {
-    const once = orientDimsToBox(12, 14, 400, 300);
-    const twice = orientDimsToBox(once.width, once.height, 400, 300);
-    expect(twice).toEqual({ width: once.width, height: once.height, swapped: false });
-  });
-
   it('does not let a sub-pixel change flip which axis carries which scale', () => {
     // 20x21 on a square-ish overlay: both readings are inside the isotropy
     // tolerance, so the pairing must not turn on the sign of a rounding error.

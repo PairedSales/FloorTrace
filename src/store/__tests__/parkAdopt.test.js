@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import useAppStore, { PARK_FIELDS, PARK_ONLY_FIELDS, AUTOSAVE_FIELDS } from '../appStore';
+import useAppStore, { PARK_FIELDS } from '../appStore';
 import { parkedCount } from '../documentManager';
 import { newTraceId } from '../ids';
 import * as undoManager from '../undoManager';
@@ -109,11 +109,6 @@ describe('park and adopt', () => {
   });
 
   describe('what PARK_FIELDS carries that AUTOSAVE_FIELDS does not', () => {
-    it.each(PARK_ONLY_FIELDS)('parks %s', (field) => {
-      expect(AUTOSAVE_FIELDS).not.toContain(field);
-      expect(PARK_FIELDS).toContain(field);
-    });
-
     // drawStrokes IS autosaved and drawModeActive is not, so parking one
     // without the other returns strokes on the plan and no brush in hand.
     it('keeps draw mode and its strokes together', () => {

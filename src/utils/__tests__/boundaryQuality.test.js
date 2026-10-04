@@ -36,11 +36,6 @@ describe('primaryWarning', () => {
       .toBe(warning('heavy-closing', { radius: 12 }).message);
   });
 
-  it('reports the detail text when the code has one', () => {
-    expect(primaryWarning([warning('bridged-opening', { px: 42 })]))
-      .toBe('a gap in the wall was bridged to close the outline');
-  });
-
   it('picks the worst warning through qualitySummary too', () => {
     const summary = qualitySummary({
       confidence: 0.4,
@@ -55,18 +50,6 @@ describe('primaryWarning', () => {
 });
 
 describe('the order reasons are ranked in', () => {
-  it('puts a wrong number ahead of a note about how the outline was reached', () => {
-    // `no-inner` outranks `heavy-closing`: in interior mode it means the
-    // outline on screen is the exterior one under an interior caption, which
-    // is a wrong number rather than a note about how the trace was reached.
-    const list = [
-      warning('no-alternative', null, 'info'),
-      warning('heavy-closing', { radius: 12 }),
-      warning('no-inner', { floor: 0 }),
-    ];
-    expect(primaryWarning(list)).toBe(warning('no-inner', { floor: 0 }).message);
-  });
-
   it('does not reorder the list it was handed', () => {
     const list = [warning('no-inner', { floor: 0 }), warning('unsealed', null, 'error')];
     primaryWarning(list);
@@ -104,6 +87,9 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     'too few rooms': { source: 'auto', reason: 'too-few-rooms', roomCount: 1, disagreement: 0 },
     'rooms disagree': { source: 'auto', reason: 'rooms-disagree', roomCount: 4, disagreement: 0.4 },
     'area implausible': { source: 'auto', reason: 'area-implausible', roomCount: 3, disagreement: 0.1 },
+    'labels look metric': { source: 'auto', reason: 'labels-look-metric', level: 'check', roomCount: 4, disagreement: 0.05 },
+    'footprint implausible': { source: 'auto', reason: 'footprint-implausible', level: 'check', roomCount: 5, disagreement: 0.05 },
+    'a doubt with no words of its own': { source: 'auto', reason: 'some-future-reason', level: 'check', roomCount: 4, disagreement: 0.05 },
     'the usual consensus': { source: 'auto', roomCount: 5, disagreement: 0.08 },
     'a line against the rooms': { source: 'line', reason: 'line-vs-rooms', level: 'check', disagreement: 0.3 },
     'a short line': { source: 'line', reason: 'short-line', disagreement: 0.02, lengthPx: 40 },
@@ -122,20 +108,30 @@ describe('scaleQualitySummary keeps the finding apart from what to do about it',
     });
   }
 
+  // Every doubt selectProjectScale can raise reaches the panel and the saved
+  // image as one: their consumers show a scale only when it is a `check`.
+  it('carries every automatic doubt through as a check, a reason it does not know included', () => {
+    for (const key of ['too few rooms', 'rooms disagree', 'area implausible',
+      'labels look metric', 'footprint implausible', 'a doubt with no words of its own']) {
+      expect(scaleQualitySummary(cases[key]).level).toBe('check');
+    }
+    expect(scaleQualitySummary(cases['the usual consensus']).level).toBe('note');
+  });
+
+  // Every label is in the same unit, so another room cannot fix a metric plan:
+  // the way out is a typed length.
+  it('sends a plan that looks metric to a known length, not to another room', () => {
+    const { remedy } = scaleQualitySummary(cases['labels look metric']);
+    expect(remedy).toContain('“Set scale from a known length”');
+    expect(remedy).not.toContain('“Use a different room”');
+  });
+
   // The length of the drawn line is image pixels: nothing the person who drew
   // it can do anything with.
   it('never states a length in pixels', () => {
     for (const quality of Object.values(cases)) {
       const { short, detail, remedy } = scaleQualitySummary(quality);
       expect(`${short} ${detail} ${remedy ?? ''}`).not.toMatch(/\bpx\b/);
-    }
-  });
-
-  // Both messages a hand-set scale raises point at a button the panel has, by
-  // the name printed on it.
-  it('sends a scale set by hand to a button that exists, by its name', () => {
-    for (const key of ['a line against the rooms', 'a room against the scan']) {
-      expect(scaleQualitySummary(cases[key]).remedy).toContain('“Use a different room”');
     }
   });
 

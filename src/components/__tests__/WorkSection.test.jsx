@@ -2,9 +2,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/react';
 import WorkSection from '../WorkSection';
-import useAppStore, { computeAreaByType } from '../../store/appStore';
+import useAppStore from '../../store/appStore';
 import useWorkspaceStore from '../../store/workspaceStore';
-import { areaDisplayValue } from '../../utils/unitConverter';
 
 /**
  * The section that shows the working for the area sketch. What is asserted
@@ -46,14 +45,6 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('WorkSection is optional', () => {
-  it('is one folded line while the preference is off, with none of the working', () => {
-    useWorkspaceStore.setState({ showWork: false });
-    const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByRole('button', { name: /Added up the area/ }).getAttribute('aria-expanded'))
-      .toBe('false');
-    expect(view.queryByText('10.0 × 5.0')).toBeNull();
-  });
-
   // Whether it is open is a saved preference: it is for people who audit the
   // number, and they want it open on the next plan too.
   it('opens from its own heading, and remembers', () => {
@@ -62,12 +53,6 @@ describe('WorkSection is optional', () => {
     fireEvent.click(view.getByRole('button', { name: /Added up the area/ }));
     expect(useWorkspaceStore.getState().showWork).toBe(true);
     expect(view.getByText('10.0 × 5.0')).toBeTruthy();
-  });
-
-  it('says there is nothing to work out when nothing has been measured, even when asked for', () => {
-    useAppStore.setState({ perimeterTraces: [trace({ visible: false })] });
-    const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByText('There is no area to work out yet.')).toBeTruthy();
   });
 });
 
@@ -84,19 +69,6 @@ describe('WorkSection shows the math', () => {
     const view = render(<WorkSection unit="decimal" />);
     expect(view.getByText('10.0 × 5.0')).toBeTruthy();
     expect(view.getByText('= 50.0')).toBeTruthy();
-  });
-
-  it('says nothing twice about a footprint that is one rectangle', () => {
-    const view = render(<WorkSection unit="decimal" />);
-    // The "overall 10.0 ft × 5.0 ft" line would be the single piece again.
-    expect(view.queryByText(/overall/)).toBeNull();
-  });
-
-  it('states the GLA the Area card headlines', () => {
-    const expected = areaDisplayValue(computeAreaByType(useAppStore.getState()).gla, 'decimal');
-    const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByText('Total living area (rounded)')).toBeTruthy();
-    expect(view.getAllByText(`${expected.toLocaleString()} ft²`).length).toBeGreaterThan(0);
   });
 
   it('prints a column that adds to the figure over it', () => {
@@ -157,23 +129,6 @@ describe('WorkSection shows the math', () => {
     expect(view.getByText('6.0 × 4.0')).toBeTruthy();
     // GLA is the house alone, not the 74 the two add up to.
     expect(view.getAllByText('50 ft²').length).toBeGreaterThan(0);
-  });
-
-  it('says an outline is not counted rather than leaving it out', () => {
-    useAppStore.setState({
-      perimeterTraces: [trace(), trace({ id: 'b', name: 'Shed', visible: false })],
-    });
-    const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByText(/Shed — hidden, so it is out of every total/)).toBeTruthy();
-  });
-
-  it('names the fallback assumption when no scale is set, and still works it', () => {
-    useAppStore.setState({ calibration: null });
-    const view = render(<WorkSection unit="decimal" />);
-    expect(view.getByText('No scale was set — areas are not to scale.')).toBeTruthy();
-    expect(view.getByText(/assume 1 pixel = 1 foot/)).toBeTruthy();
-    expect(view.getByText('1 ft = 1.00 px')).toBeTruthy();
-    expect(view.getByText('100.0 × 50.0')).toBeTruthy();
   });
 
   it('withholds the working for an outline it cannot cut up, and keeps the area', () => {

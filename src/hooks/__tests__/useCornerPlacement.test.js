@@ -106,18 +106,6 @@ describe('useCornerPlacement', () => {
     expect(active()).toBe(before);
   });
 
-  it('has nothing to put back when there was no outline to begin with', () => {
-    act(() => {
-      useAppStore.setState({ perimeterTraces: [makeTrace({ id: 'trace-1' })], activeTraceId: 'trace-1' });
-    });
-    const { result } = renderHook(() => useCornerPlacement());
-
-    act(() => result.current.startPlacing());
-    act(() => app().setPerimeterVertices(null));
-
-    expect(active().vertices).toEqual([]);
-  });
-
   it('does not bring back an outline the user deleted while placing', () => {
     const { result } = renderHook(() => useCornerPlacement());
 

@@ -39,16 +39,17 @@ describe('search memo: the key covers what the search computes', () => {
     expect(narrowAfterWide).toEqual(narrowAlone);
   });
 
+  // Without this the cases above would pass on a tracer that ignored the radius.
+  // One plan that differs is the whole claim, so stop at the first.
   it('the two radii do change the answer somewhere in the fixture set', () => {
-    let anyDiffer = false;
-    for (const name of FIXTURES) {
+    const differs = FIXTURES.some((name) => {
       const image = images.get(name);
       clearDetectionCache();
       const wide = geometryOf(traceFloorplanBoundaryCore(image, { boundary: { maxCloseRadius: 48 } }));
       clearDetectionCache();
       const narrow = geometryOf(traceFloorplanBoundaryCore(image, { boundary: { maxCloseRadius: 8 } }));
-      if (JSON.stringify(wide) !== JSON.stringify(narrow)) anyDiffer = true;
-    }
-    expect(anyDiffer).toBe(true);
+      return JSON.stringify(wide) !== JSON.stringify(narrow);
+    });
+    expect(differs).toBe(true);
   });
 });

@@ -11,28 +11,39 @@ import { getFileHandle, rememberFileHandle, forgetFileHandle } from './fileHandl
 export { PERSISTENT_FLOOR_FIELDS } from '../store/appStore';
 
 // ── Zod Schema Definition ───────────────────────────────────────────────────
+//
+// What `parse` returns is what a project opens with, so the schema has two jobs
+// and only two. It checks the shape of every field it declares, and it keeps
+// everything else: every object is `looseObject`, because a plain `z.object`
+// strips keys it was not told about, and the producers of this data (the OCR,
+// the detector, the remediation passes) add keys without editing this file.
+// `detectedDimensions[].ocrText` was the case in hand when the parsed output
+// first became the loaded one. Which state keys reach the store is not the
+// schema's call: `deserializeSketch` admits only `PERSISTENT_FLOOR_FIELDS`.
+//
+// The comments below that say a field is "declared" mean its shape is checked,
+// and that the round-trip tests name it, so a future tightening cannot drop it.
 
-const metadataSchema = z.object({
+const metadataSchema = z.looseObject({
   projectId: z.string(),
   projectName: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
-const globalSettingsSchema = z.object({
+const globalSettingsSchema = z.looseObject({
   canvasRotation: z.number().default(0),
 });
 
-const vertexSchema = z.object({
+const vertexSchema = z.looseObject({
   x: z.number(),
   y: z.number(),
 });
 
-// How much the saved scale can be trusted. Declared, not left to zod's
-// key-stripping: a reopened project would otherwise keep the doubtful scale
-// and lose the reason it was doubtful, which is the one direction this file
-// must never fail in.
-const scaleQualitySchema = z.object({
+// How much the saved scale can be trusted. Declared: a reopened project that
+// kept the doubtful scale and lost the reason it was doubtful would fail in the
+// one direction this file must never fail in.
+const scaleQualitySchema = z.looseObject({
   level: z.string(),
   reason: z.string().nullable().optional(),
   disagreement: z.number().optional(),
@@ -49,18 +60,18 @@ const scaleQualitySchema = z.object({
   lengthPx: z.number().optional(),
   feet: z.number().nullable().optional(),
   axes: z.array(z.string()).optional(),
-  rejected: z.array(z.object({
+  rejected: z.array(z.looseObject({
     name: z.string().nullable().optional(),
     reason: z.string(),
     pixelsPerFoot: z.number().nullable().optional(),
   })).optional(),
 }).nullable().optional();
 
-const calibrationSchema = z.object({
+const calibrationSchema = z.looseObject({
   calibrated: z.boolean(),
   feetPerPixel: z.union([
     z.number(),
-    z.object({ x: z.number(), y: z.number() })
+    z.looseObject({ x: z.number(), y: z.number() })
   ]),
   source: z.string().nullable().optional(),
   calibratedRoomId: z.string().nullable().optional(),
@@ -68,12 +79,12 @@ const calibrationSchema = z.object({
   quality: scaleQualitySchema,
 }).optional();
 
-const roomDimensionsSchema = z.object({
+const roomDimensionsSchema = z.looseObject({
   width: z.string(),
   height: z.string(),
 }).optional();
 
-const roomOverlaySchema = z.object({
+const roomOverlaySchema = z.looseObject({
   x1: z.number(),
   y1: z.number(),
   x2: z.number(),
@@ -82,30 +93,29 @@ const roomOverlaySchema = z.object({
   confidence: z.number().nullable().optional(),
 }).nullable().optional();
 
-const traceQualitySchema = z.object({
+const traceQualitySchema = z.looseObject({
   source: z.string().optional(),
   confidence: z.number().nullable().optional(),
-  warnings: z.array(z.object({
+  warnings: z.array(z.looseObject({
     code: z.string(),
     severity: z.string().optional(),
     message: z.string().optional(),
     detail: z.any().optional(),
-    // Declared, not left to inference: `z.object` strips unknown keys, so both
-    // of these would survive autosave and die on a `.floorplan` round trip —
-    // the asymmetry that already cost this repo `exteriorLabels`. `anchor` is
-    // in original image px and is what makes a warning clickable on reopen.
+    // Declared: a schema that stripped either would let it survive autosave
+    // and die on a `.floorplan` round trip — the asymmetry that already cost
+    // this repo `exteriorLabels`. `anchor` is in original image px and is what
+    // makes a warning clickable on reopen.
     scope: z.string().optional(),
-    anchor: z.object({ kind: z.enum(['ring', 'rect', 'point', 'segment']) })
-      .catchall(z.any()).nullable().optional(),
+    anchor: z.looseObject({ kind: z.enum(['ring', 'rect', 'point', 'segment']) }).nullable().optional(),
     // That a person checked this against the plan and accepted it. Declared
-    // for exactly the reason the two above are, and it matters more here: an
-    // undeclared key would drop on reopen, so every flag an appraiser had
-    // already cleared would come back, and the count would be monotonic across
+    // for exactly the reason the two above are, and it matters more here: were
+    // it dropped on reopen, every flag an appraiser had already cleared would
+    // come back, and the count would be monotonic across
     // sessions as well as within one.
-    acknowledged: z.object({
+    acknowledged: z.looseObject({
       at: z.number().optional(),
       note: z.string().optional(),
-    }).catchall(z.any()).nullable().optional(),
+    }).nullable().optional(),
   })).optional(),
   // A hand edit demotes the detector's score rather than deleting it, and this
   // is the flag that says so. Without it a reopened project cannot tell an
@@ -113,16 +123,16 @@ const traceQualitySchema = z.object({
   edited: z.boolean().optional(),
   // Why this outline is not the one the first search produced: which passes
   // ran, which was kept, and how many known-inside rooms each attempt held.
-  // Declared for the same reason `scope` and `anchor` above are — an undeclared
-  // key survives autosave and dies on a `.floorplan` round trip, so a reopened
-  // project would quietly claim the trace had never been re-searched.
-  remediation: z.object({
+  // Declared for the same reason `scope` and `anchor` above are: dropped on a
+  // `.floorplan` round trip, a reopened project would quietly claim the trace
+  // had never been re-searched.
+  remediation: z.looseObject({
     ran: z.boolean().optional(),
     accepted: z.string().nullable().optional(),
-    passes: z.array(z.object({}).catchall(z.any())).optional(),
-    before: z.object({}).catchall(z.any()).optional(),
-    after: z.object({}).catchall(z.any()).optional(),
-  }).catchall(z.any()).nullable().optional(),
+    passes: z.array(z.looseObject({})).optional(),
+    before: z.looseObject({}).optional(),
+    after: z.looseObject({}).optional(),
+  }).nullable().optional(),
 }).nullable().optional();
 
 // A hole is a bare ring or a tagged ring. Both shapes parse so a v1 file
@@ -130,29 +140,29 @@ const traceQualitySchema = z.object({
 // which is what keeps a hand-punched void alive across a re-trace.
 const holeSchema = z.union([
   z.array(vertexSchema),
-  z.object({
+  z.looseObject({
     id: z.string().optional(),
     ring: z.array(vertexSchema),
     source: z.string().optional(),
     // Set when a re-trace moved the outline out from under this void. Declared
-    // rather than left to the catchall because area depends on it: a stale void
+    // rather than merely carried because area depends on it: a stale void
     // is drawn but not subtracted, and losing the flag on reopen would silently
     // start subtracting a hole that is not inside the building.
     stale: z.boolean().optional(),
     staleReason: z.string().nullable().optional(),
-  }).catchall(z.any()),
+  }),
 ]);
 
-// The detector's two readings of one outline. Declared rather than left to the
-// catchall for the reason stated on `anchor` above: this is what the
+// The detector's two readings of one outline. Declared rather than merely
+// carried, for the reason stated on `anchor` above: this is what the
 // exterior/interior switch switches between, and a reopened project that
 // dropped it would have a switch that moves nothing and says nothing.
-const wallFaceSchema = z.object({
+const wallFaceSchema = z.looseObject({
   vertices: z.array(vertexSchema),
   holes: z.array(holeSchema).optional(),
 }).nullable().optional();
 
-const perimeterTraceSchema = z.object({
+const perimeterTraceSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
   vertices: z.array(vertexSchema),
@@ -162,11 +172,11 @@ const perimeterTraceSchema = z.object({
   quality: traceQualitySchema,
   // What this outline was before a re-trace, a draw-mode result or its first
   // hand edit replaced it — oldest first, capped at MAX_TRACE_ATTEMPTS.
-  // Declared for the reason `scope` and `anchor` on a warning are: the
-  // `.catchall` below carries it today, and a later tightening that dropped it
-  // would turn every recovery back into a re-scan with nothing saying so.
+  // Declared for the reason `scope` and `anchor` on a warning are: a later
+  // tightening that dropped it would turn every recovery back into a re-scan
+  // with nothing saying so.
   // `wallFaces` is deliberately not part of an attempt — see `makeAttempt`.
-  attempts: z.array(z.object({
+  attempts: z.array(z.looseObject({
     at: z.number().optional(),
     source: z.string().optional(),
     confidence: z.number().nullable().optional(),
@@ -175,9 +185,9 @@ const perimeterTraceSchema = z.object({
     vertices: z.array(vertexSchema),
     holes: z.array(holeSchema).optional(),
     quality: traceQualitySchema,
-    remediation: z.object({}).catchall(z.any()).nullable().optional(),
-  }).catchall(z.any())).optional(),
-  wallFaces: z.object({
+    remediation: z.looseObject({}).nullable().optional(),
+  })).optional(),
+  wallFaces: z.looseObject({
     outer: wallFaceSchema,
     inner: wallFaceSchema,
   }).nullable().optional(),
@@ -199,39 +209,39 @@ const perimeterTraceSchema = z.object({
   typeSource: z.string().optional(),
   // The label 'detected' was read from, so "why is this a basement" stays
   // answerable: the outline's row in the panel quotes it.
-  typeEvidence: z.object({
+  typeEvidence: z.looseObject({
     keyword: z.string().optional(),
     text: z.string().optional(),
     from: z.string().optional(),
   }).nullable().optional(),
-}).catchall(z.any());
+});
 
-const roomSchema = z.object({
+const roomSchema = z.looseObject({
   labelId: z.string().nullable().optional(),
   name: z.string().nullable().optional(),
-  rect: z.object({
+  rect: z.looseObject({
     left: z.number(), right: z.number(), top: z.number(), bottom: z.number(),
   }),
   confidence: z.number().optional(),
   sides: z.any().optional(),
-  feetPerPixel: z.object({ x: z.number(), y: z.number() }).nullable().optional(),
-}).catchall(z.any());
+  feetPerPixel: z.looseObject({ x: z.number(), y: z.number() }).nullable().optional(),
+});
 
-const measurementLineSchema = z.object({
+const measurementLineSchema = z.looseObject({
   start: vertexSchema,
   end: vertexSchema,
 });
 
 // A line the user drew and stated the true length of, in original image px.
 // `feet` is null between placing the line and typing its length.
-const scaleLineSchema = z.object({
+const scaleLineSchema = z.looseObject({
   id: z.string().optional(),
   start: vertexSchema,
   end: vertexSchema,
   feet: z.number().nullable().optional(),
 });
 
-const customShapeSchema = z.object({
+const customShapeSchema = z.looseObject({
   id: z.string().optional(),
   name: z.string().optional(),
   vertices: z.array(vertexSchema),
@@ -239,7 +249,7 @@ const customShapeSchema = z.object({
   color: z.string().optional(),
 });
 
-const angleToolStateSchema = z.object({
+const angleToolStateSchema = z.looseObject({
   center: vertexSchema,
   angle1: z.number(),
   angle2: z.number(),
@@ -250,14 +260,14 @@ const angleToolStateSchema = z.object({
   snapEnabled: z.boolean().optional(),
 }).nullable().optional();
 
-const bboxSchema = z.object({
+const bboxSchema = z.looseObject({
   x: z.number(),
   y: z.number(),
   width: z.number(),
   height: z.number(),
 });
 
-const detectedDimensionSchema = z.object({
+const detectedDimensionSchema = z.looseObject({
   width: z.number(),
   height: z.number(),
   text: z.string(),
@@ -266,7 +276,7 @@ const detectedDimensionSchema = z.object({
   confidence: z.number().optional(),
 });
 
-const floorStateSchema = z.object({
+const floorStateSchema = z.looseObject({
   imageRef: z.string().nullable().optional(),
   roomOverlay: roomOverlaySchema,
   perimeterTraces: z.array(perimeterTraceSchema).optional(),
@@ -290,24 +300,25 @@ const floorStateSchema = z.object({
   // the same reason `scaleLines` is: on a plan the detector could not read,
   // this is the evidence the measurement rests on.
   drawStrokes: z.array(z.any()).optional(),
-  // What the last trace did, including when it did nothing. `.catchall` below
-  // would carry it either way; declared so it cannot be stripped by a future
-  // tightening, which is how `exteriorLabels` was lost once already.
-  lastTraceOutcome: z.object({
+  // What the last trace did, including when it did nothing. Declared so a
+  // future tightening cannot strip it, which is how `exteriorLabels` was lost
+  // once already.
+  lastTraceOutcome: z.looseObject({
     at: z.number().optional(),
     level: z.string().optional(),
     reason: z.string().nullable().optional(),
     verdict: z.string().optional(),
-  }).catchall(z.any()).nullable().optional(),
+  }).nullable().optional(),
   customShapes: z.array(customShapeSchema).optional(),
   tracedBoundaries: z.any().optional(),
   zoomScale: z.number().nullable().optional(),
   stageX: z.number().optional(),
   stageY: z.number().optional(),
   angleToolState: angleToolStateSchema,
-}).catchall(z.any());
+  projectName: z.string().optional(),
+});
 
-const floorSchema = z.object({
+const floorSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
   state: floorStateSchema,
@@ -318,12 +329,12 @@ const historyStateSchema = floorStateSchema.extend({
   image: z.string().nullable().optional(),
 });
 
-const historySchema = z.object({
+const historySchema = z.looseObject({
   undoStack: z.array(historyStateSchema).default([]),
   redoStack: z.array(historyStateSchema).default([]),
 });
 
-const projectSchema = z.object({
+const projectSchema = z.looseObject({
   fileType: z.literal('floorplan'),
   version: z.number(),
   metadata: metadataSchema,
@@ -390,9 +401,11 @@ export function validateProjectVersion(project) {
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
+// Returns the parsed project, which is what `importProject` opens: a check
+// whose result is thrown away validates one object and loads another.
 export function validateProjectSchema(project) {
   try {
-    projectSchema.parse(project);
+    return projectSchema.parse(project);
   } catch (err) {
     if (err instanceof z.ZodError) {
       const details = err.issues.map(e => `${e.path.join('.')}: ${e.message}`).join('\n');
@@ -497,14 +510,17 @@ export function serializeSketch(storeState, historyState = null) {
 export function deserializeSketch(project) {
   const images = project.images || {};
   const floor = project.floors[0];
-  const state = { ...floor.state };
-
-  if (state.imageRef && images[state.imageRef]) {
-    state.image = images[state.imageRef];
-  } else {
-    state.image = null;
+  // Only the fields a save writes. `loadProject` spreads this patch onto the
+  // store, so anything else in the file — a field the app has since removed,
+  // like `manualEntryMode`, or a key nobody wrote — would otherwise become
+  // live state. A field the file lacks stays absent, for the defaults to fill.
+  const state = {};
+  for (const key of PERSISTENT_FLOOR_FIELDS) {
+    if (Object.hasOwn(floor.state, key)) state[key] = floor.state[key];
   }
-  delete state.imageRef;
+  const { imageRef } = floor.state;
+
+  state.image = (imageRef && images[imageRef]) || null;
 
   // Migrate legacy numeric scale to X/Y scale object format at deserialization boundary
   if (state.calibration) {
@@ -660,8 +676,6 @@ export function importProject(projectJsonText) {
   }
   
   validateProjectVersion(rawProject);
-  validateProjectSchema(rawProject);
-  const sanitized = sanitizeData(rawProject);
-  
-  return deserializeSketch(sanitized);
+  const project = validateProjectSchema(rawProject);
+  return deserializeSketch(sanitizeData(project));
 }

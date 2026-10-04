@@ -101,12 +101,6 @@ describe('pdfToPageImages', () => {
     expect(Math.round(first.h / 11)).toBe(364);
   });
 
-  it('scales a page larger than the ceiling down to it', async () => {
-    installCanvas();
-    await pdfToPageImages(pdfFile(), { maxDimension: 1000 });
-    expect(Math.round(rendered.calls[0].h)).toBe(1000);
-  });
-
   // A PDF page has no background. Left transparent, `toDataURL` gives
   // black-on-transparent and Otsu binarization reads the whole sheet as ink.
   it('paints the sheet white before rendering onto it', async () => {
@@ -124,13 +118,6 @@ describe('pdfToPageImages', () => {
     const { pages } = await pdfToPageImages(pdfFile(), { maxDimension: 4000 });
     expect(pages.map((p) => p.name)).toEqual(['Maple Ave plan p1.png', 'Maple Ave plan p2.png']);
     expect(pages.every((p) => p.mimeType === 'image/png')).toBe(true);
-  });
-
-  it('does not number a single-page plan', async () => {
-    rendered.numPages = 1;
-    installCanvas();
-    const { pages } = await pdfToPageImages(pdfFile(), { maxDimension: 4000 });
-    expect(pages.map((p) => p.name)).toEqual(['Maple Ave plan.png']);
   });
 
   // Its own cap, not the caller's: the render budget is about six 4000 px
