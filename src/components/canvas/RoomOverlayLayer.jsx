@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Rect, Line, Circle, Group, Text } from 'react-konva';
+import { Rect, Line, Group, Text } from 'react-konva';
 import useAppStore from '../../store/appStore';
 import { useIsTouch } from '../../hooks/useViewport';
-import { circleHit, measureSideLenWidth, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE } from './canvasUtils';
+import { measureSideLenWidth, SIDE_LEN_FONT_FAMILY, SIDE_LEN_FONT_STYLE } from './canvasUtils';
 import { PAPER, SCALE, withAlpha } from './overlayStyle';
 
 // Same rule as the perimeter vertex handles: what is drawn stays small enough
@@ -17,10 +17,9 @@ const LABEL = 'Scale room';
  * The room the scale was taken from — "the green box" the panel's scale step
  * talks about — with its name on it, so the box explains itself on the plan.
  *
- * At rest it is a line and a label. Its four handles show once the pointer is
- * on it: the plan under a finished trace is busy enough without four dots that
- * are only wanted when the scale is being corrected. On touch there is no
- * pointer to be over anything, so they are always drawn.
+ * It is a tinted box with a label and a solid square on each corner, always
+ * drawn: the corners are how the scale is corrected, and the squares keep them
+ * apart from the outline's ring-shaped corners.
  */
 const RoomOverlayLayer = ({
   roomOverlay,
@@ -79,9 +78,10 @@ const RoomOverlayLayer = ({
         height={height}
         stroke={SCALE}
         strokeWidth={(shown ? 2.25 : 1.75) / scale}
-        // Never empty: the whole room is the handle for moving it, and a shape
-        // with no fill is only its stroke to a press.
-        fill={withAlpha(SCALE, over ? 0.07 : 0.001)}
+        // Always tinted, so the room reads as the scale's at a glance — and never
+        // empty: the whole room is the handle for moving it, and a shape with no
+        // fill is only its stroke to a press.
+        fill={withAlpha(SCALE, 0.07)}
         onMouseDown={onRoomMouseDown}
         onTouchStart={onRoomMouseDown}
         onMouseEnter={enter}
@@ -110,30 +110,42 @@ const RoomOverlayLayer = ({
         />
       </Group>
 
-      {/* Room Corner Handles. Always there to be grabbed; drawn once the
-          pointer is on the room. */}
+      {/* Room Corner Handles: solid green squares, always drawn. Squares, not
+          the outline's rings, so a scale corner is never mistaken for an
+          outline corner. */}
       {[
         { x: roomOverlay.x1, y: roomOverlay.y1, corner: 'tl' },
         { x: roomOverlay.x2, y: roomOverlay.y1, corner: 'tr' },
         { x: roomOverlay.x1, y: roomOverlay.y2, corner: 'bl' },
         { x: roomOverlay.x2, y: roomOverlay.y2, corner: 'br' }
-      ].map((handle, i) => (
-        <Circle
-          key={i}
-          x={handle.x}
-          y={handle.y}
-          radius={(isTouch ? 8 : 5.5) / scale}
-          fill={PAPER}
-          stroke={SCALE}
-          strokeWidth={2 / scale}
-          opacity={shown ? 1 : 0}
-          hitFunc={isTouch ? circleHit(TOUCH_HIT_RADIUS / scale) : undefined}
-          onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
-          onTouchStart={(e) => onRoomCornerMouseDown(handle.corner, e)}
-          onMouseEnter={enter}
-          onMouseLeave={leave}
-        />
-      ))}
+      ].map((handle, i) => {
+        const side = ((isTouch ? 15 : 10) + (over ? 2 : 0)) / scale;
+        const reach = (TOUCH_HIT_RADIUS / scale);
+        return (
+          <Rect
+            key={i}
+            x={handle.x - side / 2}
+            y={handle.y - side / 2}
+            width={side}
+            height={side}
+            fill={SCALE}
+            stroke={PAPER}
+            strokeWidth={1.5 / scale}
+            // Touch grabs from a fingertip away; the drawn square stays small.
+            hitFunc={isTouch ? (ctx, shape) => {
+              ctx.beginPath();
+              ctx.rect(side / 2 - reach, side / 2 - reach, reach * 2, reach * 2);
+              ctx.closePath();
+              ctx.fillStrokeShape(shape);
+            } : undefined}
+            onMouseDown={(e) => onRoomCornerMouseDown(handle.corner, e)}
+            onTouchStart={(e) => onRoomCornerMouseDown(handle.corner, e)}
+            onMouseEnter={enter}
+            onMouseLeave={leave}
+            perfectDrawEnabled={false}
+          />
+        );
+      })}
     </>
   );
 };
