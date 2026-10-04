@@ -157,7 +157,14 @@ const ExportDialog = ({ onClose, onSaveProject }) => {
     let cancelled = false;
     (async () => {
       try {
-        const { exhibitFile, exhibitFilename, canShareExhibit } = await import('../utils/exhibit');
+        const { exhibitFile, exhibitFilename, canShareExhibit, hasShareSheet } = await import('../utils/exhibit');
+        // Asked first: where there is no share sheet the encode below is a
+        // fifth of a second of frozen page, on every change to the dialog, for
+        // a file nothing will ever be handed.
+        if (!hasShareSheet()) {
+          if (!cancelled) setShareFile(null);
+          return;
+        }
         const file = await exhibitFile(result.canvas, exhibitFilename(result.model));
         if (cancelled) return;
         setShareFile(canShareExhibit(file) ? file : null);

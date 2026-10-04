@@ -33,9 +33,26 @@ const decoded = new Map();
 /** A decode already in progress, so two callers wait on one. */
 const pending = new Map();
 
+/**
+ * data URL → a `blob:` URL for the same bytes, for as long as the image is
+ * held. An <img> given this loads off the page; given the data URL it parses
+ * the whole string on it. Kept stable, not minted per use, so the browser sees
+ * one resource and decodes it once however many <img>s ask.
+ *
+ * @type {Map<string, string>}
+ */
+const sources = new Map();
+
+const release = (url) => {
+  decoded.delete(url);
+  const source = sources.get(url);
+  if (source) URL.revokeObjectURL(source);
+  sources.delete(url);
+};
+
 const remember = (url, img) => {
   decoded.set(url, img);
-  while (decoded.size > MAX_DECODED) decoded.delete(decoded.keys().next().value);
+  while (decoded.size > MAX_DECODED) release(decoded.keys().next().value);
 };
 
 // ── the decode worker ───────────────────────────────────────────────────────
@@ -62,7 +79,7 @@ const startDecoder = () => {
     const request = requests.get(id);
     if (!request) return;
     requests.delete(id);
-    if (bitmap) request.resolve(bitmap);
+    if (bitmap) request.resolve({ bitmap, blob: event.data.blob ?? null });
     else request.reject(new Error(error || 'The image could not be decoded'));
   };
   // A script that 404s after a deploy, or a crash: nothing arrives on the
@@ -135,6 +152,10 @@ export function loadImage(url) {
   // without it, or an image only an <img> can read (an SVG). An image neither
   // can read rejects, as it always did.
   const task = decodeOffPage(url)
+    .then(({ bitmap, blob }) => {
+      if (blob && !sources.has(url)) sources.set(url, URL.createObjectURL(blob));
+      return bitmap;
+    })
     .catch(() => decodeOnPage(url))
     .then((img) => {
       remember(url, img);
@@ -149,6 +170,23 @@ export function loadImage(url) {
 }
 
 /**
+ * The plan's image as an `<img>`, for the callers whose pixels are measured or
+ * saved and so must keep an <img>'s resampling: the saved image and the corner
+ * snapper, both of which draw the plan well under full size, where a bitmap
+ * comes out different.
+ *
+ * Loaded from the bytes the decode left behind when there are any, so the page
+ * does not parse the data URL a second time; from the data URL itself where
+ * the worker could not run. The pixels are the same either way.
+ */
+export async function loadImageElement(url) {
+  if (!url) return null;
+  // Its failure is not this caller's: the <img> below decides for itself.
+  await loadImage(url).catch(() => {});
+  return decodeOnPage(sources.get(url) ?? url);
+}
+
+/**
  * Forget one image, or all of them. For a plan being closed, and for tests.
  *
  * The bitmap is dropped, never `close()`d: two plans opened from one file hold
@@ -156,8 +194,8 @@ export function loadImage(url) {
  */
 export function forgetImage(url) {
   if (url === undefined) {
-    decoded.clear();
+    for (const known of [...decoded.keys()]) release(known);
     return;
   }
-  decoded.delete(url);
+  release(url);
 }
