@@ -46,19 +46,19 @@ import fs from 'fs';
 import path from 'path';
 import { DATASETS_DIR } from './cubicasa.mjs';
 
-export const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 1;
 export const SPLITS = ['dev', 'test'];
 export const ERAS = ['vintage', '2020-2022'];
 
-export const REAL_DIR = path.join(DATASETS_DIR, 'real');
+const REAL_DIR = path.join(DATASETS_DIR, 'real');
 export const MANIFEST_FILE = path.join(REAL_DIR, 'orchestration', 'manifest.json');
-export const WATCH_FILE = path.join(REAL_DIR, 'orchestration', 'watch.json');
+const WATCH_FILE = path.join(REAL_DIR, 'orchestration', 'watch.json');
 
 // The manifest of a set folder, and the watch lists that sit beside a manifest.
 export const manifestFileFor = (dir) => path.join(dir, 'orchestration', 'manifest.json');
 export const watchFileFor = (manifestFile) => path.join(path.dirname(manifestFile), 'watch.json');
 
-export const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
 // The fingerprint of an answer key as `realKeys.keyOf` returns it (null, a
 // plan still holding the app's own trace, has none).

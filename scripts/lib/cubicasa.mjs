@@ -138,7 +138,7 @@ const FEET_INCHES = /(\d+)'\s*(\d+)"\s*x\s*(\d+)'\s*(\d+)"/;
 
 // Rooms (`Space …`) and walls, each with the outline polygon that is the
 // group's own child, plus each room's label anchor, name and printed size.
-export const parseModelSvg = (svg) => {
+const parseModelSvg = (svg) => {
   const spaces = [];
   const walls = [];
   let floorCount = 0;

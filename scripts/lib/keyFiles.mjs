@@ -120,7 +120,7 @@ const EXT_BY_MIME = {
 };
 export const mimeOfFile = (file) => MIME_BY_EXT[path.extname(file).slice(1).toLowerCase()] ?? null;
 export const extOfMime = (mime) => EXT_BY_MIME[mime] ?? 'img';
-export const IMAGE_EXTENSIONS = Object.keys(MIME_BY_EXT);
+const IMAGE_EXTENSIONS = Object.keys(MIME_BY_EXT);
 
 // The plan's image as its own bytes, and nothing else out of the file: this is
 // all `snap`, `view` and `blind` may take from a plan without `--keys`/`--trace`.

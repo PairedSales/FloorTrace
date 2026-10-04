@@ -29,15 +29,15 @@ import { checkUrl, acquireLock, realClock } from './sourceNet.mjs';
 import { parseWaybackUrl } from './sourceArchive.mjs';
 import { MAX_IMAGE_DIMENSION, MIN_TRACEABLE_DIMENSION } from '../../src/utils/imageLoader.js';
 
-export const ERAS = ['vintage', '2020-2022'];
+const ERAS = ['vintage', '2020-2022'];
 // At most 12 plans from one book, publisher or builder (the unit: a book, a
 // name stem, or the designer code an aggregator site's plans carry) and no
 // site above 60 in all.
-export const BOOK_CAP = 12;
-export const SITE_CAP = 60;
-export const VINTAGE_NAME = /^[a-z]+[0-9]{2}-n[0-9]+[ab]?$/;
-export const MODERN_NAME = /^[a-z]+[0-9]{2}-[a-z0-9._-]+$/;
-export const REJECT_REASONS = ['3d', 'elevation', 'site-plan', 'too-small', 'hand-lettered', 'not-us-home', 'duplicate-house', 'not-a-plan'];
+const BOOK_CAP = 12;
+const SITE_CAP = 60;
+const VINTAGE_NAME = /^[a-z]+[0-9]{2}-n[0-9]+[ab]?$/;
+const MODERN_NAME = /^[a-z]+[0-9]{2}-[a-z0-9._-]+$/;
+const REJECT_REASONS = ['3d', 'elevation', 'site-plan', 'too-small', 'hand-lettered', 'not-us-home', 'duplicate-house', 'not-a-plan'];
 // The words people use for the same rules.
 const REASON_ALIASES = {
   '3-d': '3d', perspective: '3d', elevations: 'elevation', 'site-plans': 'site-plan', site: 'site-plan',
@@ -57,10 +57,10 @@ const keyOf = (text) => str(text).toLowerCase().replace(/\s+/g, ' ');
 const UNIT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 
 /** The book part of a plan name: `pacific25` of `pacific25-n41`, `dongardner21` of `dongardner21-1234`. */
-export const nameStem = (name) => /^([a-z]+[0-9]{2})-/.exec(String(name ?? ''))?.[1] ?? null;
+const nameStem = (name) => /^([a-z]+[0-9]{2})-/.exec(String(name ?? ''))?.[1] ?? null;
 
 /** Whether a `--book` text could be the book a name stem stands for: it holds the stem's letters, or they are its initials. */
-export const bookAgreesWithStem = (book, stem) => {
+const bookAgreesWithStem = (book, stem) => {
   const letters = /^[a-z]+/.exec(stem ?? '')?.[0];
   if (!letters) return false;
   const words = str(book).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -73,7 +73,7 @@ export const bookAgreesWithStem = (book, stem) => {
  * metadata of its archive.org item (`cachedLeaves(id)`), else the latest `book`
  * entry of the log for that item or book. `{count, from}`, or null.
  */
-export const knownLeafCount = (events, { book, id, cachedLeaves }) => {
+const knownLeafCount = (events, { book, id, cachedLeaves }) => {
   let cached = null;
   if (id && cachedLeaves) {
     try {
@@ -107,7 +107,7 @@ export const normalizeReason = (raw) => {
 };
 
 /** `X,Y,W,H` (or an array) as four integers: x and y from 0, width and height above 0. */
-export const parseCrop = (value) => {
+const parseCrop = (value) => {
   const parts = Array.isArray(value) ? value : String(value).split(',').map((s) => (s.trim() === '' ? NaN : Number(s)));
   if (parts.length !== 4 || !parts.every(isInt) || parts[0] < 0 || parts[1] < 0 || parts[2] < 1 || parts[3] < 1) {
     throw new Error(`crop "${value}" must be X,Y,W,H: four whole numbers, x and y at least 0, width and height at least 1`);
@@ -115,14 +115,14 @@ export const parseCrop = (value) => {
   return parts;
 };
 
-export const parseSize = (value) => {
+const parseSize = (value) => {
   const parts = Array.isArray(value) ? value : String(value).split(/[,x]/).map((s) => (s.trim() === '' ? NaN : Number(s)));
   if (parts.length !== 2 || !parts.every((n) => isInt(n) && n > 0)) throw new Error(`size "${value}" must be W,H: two whole numbers above 0`);
   return parts;
 };
 
 /** The size a drafted crop comes out: the crop itself, scaled to fit when a side is over the app's cap (realDraft's fitImage). */
-export const sizeAfterFit = ([, , w, h]) => {
+const sizeAfterFit = ([, , w, h]) => {
   if (w <= MAX_IMAGE_DIMENSION && h <= MAX_IMAGE_DIMENSION) return [w, h];
   const scale = Math.min(MAX_IMAGE_DIMENSION / w, MAX_IMAGE_DIMENSION / h);
   return [Math.round(w * scale), Math.round(h * scale)];
@@ -131,7 +131,7 @@ export const sizeAfterFit = ([, , w, h]) => {
 // The line scripts/realDrafts.mjs prints for a plan.
 const BUILDER_LINE = /^(?<name>\S+): (?<labels>\d+) labels?(?: \((?<cut>\d+) regions? cut off\))?, (?<rooms>\d+) rooms? set the scale, (?<scale>.+?), (?<outlines>\d+) outline\(s\), trace (?<level>\S+)/;
 
-export const parseBuilderLine = (line) => {
+const parseBuilderLine = (line) => {
   const m = BUILDER_LINE.exec(str(line));
   if (!m) return null;
   return {
@@ -327,7 +327,7 @@ export const buildPlanEvent = (input, {
   return { event, warnings };
 };
 
-export const buildRejectEvent = (input, { clock = realClock } = {}) => {
+const buildRejectEvent = (input, { clock = realClock } = {}) => {
   const problems = [];
   const book = str(input.book);
   if (!book) problems.push('--book is needed');
@@ -353,7 +353,7 @@ export const buildRejectEvent = (input, { clock = realClock } = {}) => {
   };
 };
 
-export const buildBookEvent = (input, { clock = realClock } = {}) => {
+const buildBookEvent = (input, { clock = realClock } = {}) => {
   const problems = [];
   const book = str(input.book);
   if (!book) problems.push('--book is needed');
@@ -396,7 +396,7 @@ export const readLog = (file) => {
   return { raw, events };
 };
 
-export const isActivePlan = (e) => e?.event === 'plan' && !e.superseded;
+const isActivePlan = (e) => e?.event === 'plan' && !e.superseded;
 export const activePlanNames = (events) => new Set(events.filter(isActivePlan).map((e) => e.name));
 
 const BUSY = new Set(['EBUSY', 'EPERM', 'EACCES', 'EMFILE', 'ENFILE']);
@@ -442,7 +442,7 @@ const tally = (plans, keyFn, labelFn) => {
  * same plans as a book violation are reported once, as the book) and per site
  * (--site, else the book). `{kind, label, count, cap, names, spellings}`.
  */
-export const capViolations = (plans) => {
+const capViolations = (plans) => {
   const found = [];
   const add = (kind, cap, groups) => {
     for (const g of groups) {
@@ -461,7 +461,7 @@ export const capViolations = (plans) => {
   return found.filter((v) => v.kind !== 'unit' || !bookSets.has(setOf(v)));
 };
 
-export const violationText = (v) => {
+const violationText = (v) => {
   if (v.kind === 'book') return `${v.label} (${v.count})`;
   const spelled = v.spellings.length > 1 ? `; typed as ${v.spellings.map(([book, n]) => `"${book}" ${n}`).join(', ')}` : '';
   return `${v.label} (${v.count}${v.kind === 'site' ? `; cap ${v.cap}` : ''}${spelled})`;
@@ -472,7 +472,7 @@ export const violationText = (v) => {
  * and per era counts, the caps broken (`violations`: books, units, sites),
  * and the same as markdown. Superseded plans are set apart and counted nowhere.
  */
-export const summarize = (events) => {
+const summarize = (events) => {
   const plans = events.filter(isActivePlan);
   const rejects = events.filter((e) => e?.event === 'reject');
   const bookEvents = new Map();
@@ -509,7 +509,7 @@ export const summarize = (events) => {
   };
 };
 
-export const renderReport = (events, { at = new Date().toISOString() } = {}) => {
+const renderReport = (events, { at = new Date().toISOString() } = {}) => {
   const s = summarize(events);
   const out = [];
   out.push('# Sources', '');

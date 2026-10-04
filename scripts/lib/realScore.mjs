@@ -16,8 +16,8 @@ export const CELL = 2;
 // its type decides the total, not the tracer); garage and porch/patio are
 // non-GLA; unfinished is space the drawing does not decide, so it is not scored.
 export const BUILDING = new Set(['gla', 'below-grade']);
-export const NON_GLA = new Set(['garage', 'porch']);
-export const UNSCORED = new Set(['unfinished']);
+const NON_GLA = new Set(['garage', 'porch']);
+const UNSCORED = new Set(['unfinished']);
 
 // The saved image as `{width, height, data}`.
 export const decodeDataUrl = (dataUrl) => {

@@ -13,7 +13,7 @@ import {
 
 // Set by the orchestrator alone, for a milestone run.
 export const TEST_SPLIT_ENV = 'FLOORTRACE_TEST_SPLIT_OK';
-export const MAX_JOBS = 64;
+const MAX_JOBS = 64;
 
 // A mistake in what was asked for, printed as is and exiting 2.
 export class UsageError extends Error {}
@@ -55,7 +55,7 @@ export const parseArgs = (argv, defaults = {}) => {
 };
 
 // The order runs are reported in: the folder's file order, as it always was.
-export const fileOrder = (a, b) => {
+const fileOrder = (a, b) => {
   const x = `${a}.floorplan`;
   const y = `${b}.floorplan`;
   if (x < y) return -1;

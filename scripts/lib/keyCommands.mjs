@@ -35,7 +35,7 @@ export class UsageError extends Error {}
  * and `opts` (a value option once, a repeat option as an array, a flag as
  * true). An option the command does not have is an error, never a plan name.
  */
-export const parseArgs = (argv, { values = [], repeat = [], flags = [] }, command = 'command') => {
+const parseArgs = (argv, { values = [], repeat = [], flags = [] }, command = 'command') => {
   const opts = {};
   const positional = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -121,7 +121,7 @@ const POLY_STYLES = [
   { color: '#000000', dash: [14, 4, 3, 4], word: 'dash-dot black' },
 ];
 
-export const VIEW_SPEC = {
+const VIEW_SPEC = {
   values: ['crop', 'grid', 'tag'], repeat: ['poly'], flags: ['keys', 'trace', 'labels', 'bare', 'no-verts'],
 };
 
@@ -253,7 +253,7 @@ export const blind = async (argv, ctx) => {
 
 // ---- labels ----------------------------------------------------------------------
 
-export const labels = async (argv, ctx) => {
+const labels = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, { flags: ['json'] }, 'labels');
   const [name] = need(positional, 1, 'labels NAME [--json]');
   checkName(name);
@@ -440,7 +440,7 @@ export const snap = async (argv, ctx) => {
 const pct = (x) => `${(x * 100).toFixed(2)}%`;
 const typeList = (counts) => Object.entries(counts).map(([t, n]) => (n > 1 ? `${t} x${n}` : t)).join(', ') || 'none';
 
-export const compareLines = (result, labelA, labelB) => {
+const compareLines = (result, labelA, labelB) => {
   const lines = [];
   lines.push(`outline types: ${labelA} [${typeList(result.counts.a)}]  ${labelB} [${typeList(result.counts.b)}]`);
   const iou = [];
@@ -581,7 +581,7 @@ export const compare = async (argv, ctx) => {
 // ---- check -----------------------------------------------------------------------
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x) && x > 0;
-export const scaleOf = (state) => {
+const scaleOf = (state) => {
   const cal = state?.calibration;
   const f = cal?.feetPerPixel;
   if (!cal?.calibrated) return null;
@@ -593,7 +593,7 @@ export const scaleOf = (state) => {
 // One run of the checks on a plan's `role` key, shared by `check` and `apply`.
 // The labels are the blind packet's when the plan has one (what the annotators
 // saw: their ids, their kinds), else the plan's scan.
-export const runCheck = async (name, role, ctx, { feetPerPixel = null, tag = null } = {}) => {
+const runCheck = async (name, role, ctx, { feetPerPixel = null, tag = null } = {}) => {
   const snappedFile = wipFile(name, `.${role}.snapped.json`, ctx.dir);
   // Under --tag the message names no path of the set (see scratchTagOf).
   if (!exists(snappedFile)) {
@@ -631,7 +631,7 @@ const STATUS_TAG = {
   pass: 'PASS  ', warn: 'WARN  ', fail: 'FAIL  ', waived: 'WAIVED',
 };
 
-export const checkLines = (name, role, result) => {
+const checkLines = (name, role, result) => {
   const scaleText = result.scale
     ? `${result.scale.x.toPrecision(5)} x ${result.scale.y.toPrecision(5)} ft/px`
     : 'none (no calibration; use --feet-per-pixel)';
@@ -838,7 +838,7 @@ const wrap = (g, text, width) => {
   return lines;
 };
 
-export const sheet = async (argv, ctx) => {
+const sheet = async (argv, ctx) => {
   const { positional: names, opts } = parseArgs(argv, { values: ['out', 'per'] }, 'sheet');
   if (!opts.out || !names.length) throw new UsageError('usage: sheet NAME... --out FILE [--per N]');
   const per = opts.per === undefined ? 4 : Number(opts.per);

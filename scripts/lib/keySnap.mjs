@@ -39,16 +39,16 @@ const LOOK_BEYOND = 10;
 // A stroke this share of the edge's peak dark fraction is continuous: as long
 // along the edge as the wall itself, not a frame or sill covering part of it.
 const CONTINUOUS_SHARE = 0.6;
-export const DEFAULT_R = 14;
-export const DEFAULT_BRIDGE = 2.5;
+const DEFAULT_R = 14;
+const DEFAULT_BRIDGE = 2.5;
 // An edge that moved more than this is flagged 'far'.
-export const FAR_PX = 4;
+const FAR_PX = 4;
 // An edge whose face reads this far from where it was just put, when read again
 // from there, is flagged 'unstable': the answer depends on where it was drawn.
-export const UNSTABLE_PX = 1;
+const UNSTABLE_PX = 1;
 // A bridge across a gap that carried the face this far from the stroke nearest
 // the drawn line is flagged 'bridged'.
-export const BRIDGED_PX = 0.5;
+const BRIDGED_PX = 0.5;
 
 // The page's ink threshold: Otsu's split of a 256-bin luma histogram, taken as
 // the midpoint of the two classes' means. Otsu's own index is the last bin of

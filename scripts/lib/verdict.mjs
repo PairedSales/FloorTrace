@@ -19,7 +19,7 @@ export const FIX_MAX_SHARE = 0.2;
 // Error no thicker than twice this many truth cells is the outline sitting on
 // another face of a wall: no single edit fixes it, so it stays in the residual
 // instead of counting as a region.
-export const SLIVER_CELLS = 4;
+const SLIVER_CELLS = 4;
 // Regions under this share of the true area are noise, not something to fix.
 export const MIN_REGION_SHARE = 0.005;
 export const VERDICTS = ['perfect', 'near', 'wrong'];

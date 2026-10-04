@@ -30,7 +30,7 @@ export { UsageError };
  * `opts` (a value option once, a flag as true). An option the command does not
  * have is an error, never a positional argument.
  */
-export const parseArgs = (argv, { values = [], flags = [] }, command = 'command') => {
+const parseArgs = (argv, { values = [], flags = [] }, command = 'command') => {
   const opts = {};
   const positional = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -111,9 +111,9 @@ const pixelSize = async (file) => {
 
 // ---- search ------------------------------------------------------------------
 
-export const SEARCH_SPEC = { values: ['rows', 'year', 'page', 'sort'], flags: ['refresh', 'raw'] };
+const SEARCH_SPEC = { values: ['rows', 'year', 'page', 'sort'], flags: ['refresh', 'raw'] };
 
-export const search = async (argv, ctx) => {
+const search = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, SEARCH_SPEC, 'search');
   const [query] = need(positional, 1, 'search QUERY [--rows N] [--year FROM-TO] [--page N] [--sort "downloads desc"] [--raw]');
   const url = searchUrl(query, {
@@ -136,7 +136,7 @@ export const search = async (argv, ctx) => {
 
 // ---- meta --------------------------------------------------------------------
 
-export const META_SPEC = { values: [], flags: ['refresh'] };
+const META_SPEC = { values: [], flags: ['refresh'] };
 
 // An item's metadata, and its leaf count: the metadata's imagecount, else the
 // count its _scandata.xml states.
@@ -153,7 +153,7 @@ const itemInfo = async (id, ctx, { refresh = false } = {}) => {
   return { info, leavesFrom };
 };
 
-export const meta = async (argv, ctx) => {
+const meta = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, META_SPEC, 'meta');
   const [id] = need(positional, 1, 'meta ID');
   checkItemId(id);
@@ -190,9 +190,9 @@ export const meta = async (argv, ctx) => {
 
 // ---- leaf --------------------------------------------------------------------
 
-export const LEAF_SPEC = { values: ['ext'], flags: [] };
+const LEAF_SPEC = { values: ['ext'], flags: [] };
 
-export const leaf = async (argv, ctx) => {
+const leaf = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, LEAF_SPEC, 'leaf');
   const [id, n] = need(positional, 2, 'leaf ID N [--ext jpg]');
   const number = checkLeaf(n);
@@ -209,9 +209,9 @@ export const leaf = async (argv, ctx) => {
 
 // ---- contact -----------------------------------------------------------------
 
-export const CONTACT_SPEC = { values: ['step', 'cols', 'rows', 'tag'], flags: [] };
-export const SHEET_WIDTH = 1600;
-export const MAX_CONTACT_LEAVES = 96;
+const CONTACT_SPEC = { values: ['step', 'cols', 'rows', 'tag'], flags: [] };
+const SHEET_WIDTH = 1600;
+const MAX_CONTACT_LEAVES = 96;
 
 /** The leaves FROM..TO, every `step`-th. */
 export const leafRange = (from, to, step = 1) => {
@@ -227,7 +227,7 @@ export const leafRange = (from, to, step = 1) => {
  * `load(leaf)` gives `{file}` or `{error}`. Returns
  * `[{png, leaves, failed}]`, one per sheet.
  */
-export const drawContactSheets = async ({
+const drawContactSheets = async ({
   leaves, cols = 4, rows = 3, title = '', load,
 }) => {
   const cellW = Math.floor(SHEET_WIDTH / cols);
@@ -280,7 +280,7 @@ export const drawContactSheets = async ({
   return sheets;
 };
 
-export const contact = async (argv, ctx) => {
+const contact = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, CONTACT_SPEC, 'contact');
   const [id, fromText, toText] = need(positional, 3, 'contact ID FROM TO [--step S] [--cols C] [--rows R] [--tag T]');
   checkItemId(id);
@@ -337,7 +337,7 @@ export const contact = async (argv, ctx) => {
 
 // ---- grid --------------------------------------------------------------------
 
-export const GRID_SPEC = { values: ['crop', 'grid', 'tag'], flags: [] };
+const GRID_SPEC = { values: ['crop', 'grid', 'tag'], flags: [] };
 
 /** `ID:N` (leaf N of item ID) or an image file. */
 const resolveImage = async (target, ctx) => {
@@ -352,7 +352,7 @@ const resolveImage = async (target, ctx) => {
   return { file: got.file, label: `${m[1]}-n${m[2]}`, unknownCount: count === null ? m[1] : null };
 };
 
-export const grid = async (argv, ctx) => {
+const grid = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, GRID_SPEC, 'grid');
   const [target] = need(positional, 1, 'grid IMAGE|ID:LEAF [--crop X0,Y0,X1,Y1] [--grid STEP] [--tag T]');
   const tag = tagOf(opts);
@@ -381,13 +381,13 @@ export const grid = async (argv, ctx) => {
 
 // ---- screen ------------------------------------------------------------------
 
-export const SCREEN_SPEC = { values: ['samples', 'leaves'], flags: [] };
+const SCREEN_SPEC = { values: ['samples', 'leaves'], flags: [] };
 
-export const SCREEN_WARNING = 'WARNING: the label count may help find books that print room sizes in type. It must never be used to drop a page that qualifies '
+const SCREEN_WARNING = 'WARNING: the label count may help find books that print room sizes in type. It must never be used to drop a page that qualifies '
   + '(integrity rule 6): pages the app reads badly are the point.';
 
 /** `n` leaves spread through a book of `count` leaves, away from the covers and the back matter. */
-export const sampleLeaves = (count, samples) => {
+const sampleLeaves = (count, samples) => {
   const out = [];
   for (let i = 0; i < samples; i += 1) {
     const f = samples === 1 ? 0.45 : 0.12 + (i * 0.66) / (samples - 1);
@@ -397,13 +397,13 @@ export const sampleLeaves = (count, samples) => {
   return out;
 };
 
-export const parseLeafList = (text) => {
+const parseLeafList = (text) => {
   const leaves = String(text).split(',').map((s) => s.trim().replace(/^n/i, '')).filter(Boolean).map(checkLeaf);
   if (!leaves.length) throw new UsageError('--leaves needs leaf numbers, like 12,40,n77');
   return leaves;
 };
 
-export const screen = async (argv, ctx) => {
+const screen = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, SCREEN_SPEC, 'screen');
   const [id] = need(positional, 1, 'screen ID [--samples 5] [--leaves n1,n2,...]');
   checkItemId(id);
@@ -464,11 +464,11 @@ export const screen = async (argv, ctx) => {
 
 // ---- cdx ---------------------------------------------------------------------
 
-export const CDX_SPEC = {
+const CDX_SPEC = {
   values: ['from', 'to', 'mime', 'status', 'collapse', 'limit', 'match', 'min-length', 'pattern', 'scan'], flags: ['refresh'],
 };
 
-export const cdx = async (argv, ctx) => {
+const cdx = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, CDX_SPEC, 'cdx');
   const [prefix] = need(positional, 1, 'cdx URL_PREFIX [--from 2020] [--to 2022] [--mime image/] [--status 200] [--collapse urlkey] [--limit N] [--match prefix|exact|domain] [--min-length BYTES] [--pattern REGEX]');
   const limit = intOpt(opts, 'limit', 20, { min: 1, max: 10000 });
@@ -503,9 +503,9 @@ export const cdx = async (argv, ctx) => {
 
 // ---- fetch -------------------------------------------------------------------
 
-export const FETCH_SPEC = { values: ['name'], flags: [] };
+const FETCH_SPEC = { values: ['name'], flags: [] };
 
-export const fetchCommand = async (argv, ctx) => {
+const fetchCommand = async (argv, ctx) => {
   const { positional, opts } = parseArgs(argv, FETCH_SPEC, 'fetch');
   const [url] = need(positional, 1, 'fetch URL [--name N]');
   if (opts.name !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(opts.name)) throw new UsageError(`--name "${opts.name}" must be letters, digits, . _ - only`);
@@ -529,7 +529,7 @@ export const fetchCommand = async (argv, ctx) => {
 
 // ---- log and report ----------------------------------------------------------
 
-export const LOG_SPECS = {
+const LOG_SPECS = {
   plan: {
     values: ['name', 'book', 'publisher', 'era', 'year', 'decade', 'leaf', 'url', 'crop', 'size', 'line', 'tag', 'unit', 'site'], flags: ['replace', 'no-verify'],
   },
@@ -537,7 +537,7 @@ export const LOG_SPECS = {
   book: { values: ['book', 'id', 'publisher', 'year', 'leaves', 'note'], flags: [] },
 };
 
-export const logCommand = async (argv, ctx) => {
+const logCommand = async (argv, ctx) => {
   const [kind, ...rest] = argv;
   if (!LOG_SPECS[kind]) throw new UsageError('usage: log plan|reject|book [options] (--help lists them)');
   const { opts } = parseArgs(rest, LOG_SPECS[kind], `log ${kind}`);
@@ -556,7 +556,7 @@ export const logCommand = async (argv, ctx) => {
   return 0;
 };
 
-export const report = async (argv, ctx) => {
+const report = async (argv, ctx) => {
   parseArgs(argv, { values: [], flags: [] }, 'report');
   const { events, files } = await regenerate({ dir: ctx.dir, clock: clockOf(ctx) });
   for (const line of summaryLines(events)) ctx.out(line);

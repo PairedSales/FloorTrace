@@ -17,7 +17,7 @@
 // functions read (an identifier, a leaf, a year range, a CDX option).
 export class UsageError extends Error {}
 
-export const ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export const checkItemId = (id) => {
   if (!ITEM_ID.test(String(id ?? ''))) throw new UsageError(`"${id ?? ''}" is not an archive.org identifier (letters, digits, . _ - only)`);
@@ -122,7 +122,7 @@ export const metadataUrl = (id) => `https://archive.org/metadata/${checkItemId(i
 export const leafUrl = (id, n, ext) => `https://archive.org/download/${checkItemId(id)}/page/n${checkLeaf(n)}${ext ? `.${String(ext).replace(/^\./, '')}` : ''}`;
 
 // Collections that lend rather than serve: an item in one is borrow-only.
-export const LENDING_COLLECTIONS = ['inlibrary', 'lendinglibrary'];
+const LENDING_COLLECTIONS = ['inlibrary', 'lendinglibrary'];
 
 // The URL of a file of an item (its _scandata.xml, for one).
 export const itemFileUrl = (id, name) => `https://archive.org/download/${checkItemId(id)}/${String(name).split('/').map(encodeURIComponent).join('/')}`;
@@ -195,7 +195,7 @@ export const judgeViewable = ({ restricted, lending, test }) => {
 
 // ---- the Wayback Machine ---------------------------------------------------
 
-export const CDX_FIELDS = ['timestamp', 'original', 'mimetype', 'statuscode', 'digest', 'length'];
+const CDX_FIELDS = ['timestamp', 'original', 'mimetype', 'statuscode', 'digest', 'length'];
 
 const stamp = (value, what) => {
   if (!/^\d{4,14}$/.test(String(value))) throw new UsageError(`${what} "${value}" must be a year or a timestamp (2021, 20210315)`);
@@ -246,7 +246,7 @@ export const parseCdx = (json) => {
 };
 
 /** The URL that returns a capture's original bytes, no Wayback toolbar or rewriting. */
-export const waybackUrl = (timestamp, original) => {
+const waybackUrl = (timestamp, original) => {
   if (!/^\d{14}$/.test(String(timestamp))) throw new Error(`timestamp "${timestamp}" must be 14 digits`);
   return `https://web.archive.org/web/${timestamp}id_/${original}`;
 };
