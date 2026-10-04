@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { grayToPngBlob, crc32, adler32 } from '../DimensionsOCR';
-import { grayToImageDataLike } from '../dimensions/raster';
 
-// The encoder used to take an RGBA ImageData-like and read one byte in four.
-// These assert the gray fast path, the slice-by-8 CRC and the chunked adler
+// These assert the gray PNG header, the slice-by-8 CRC and the chunked adler
 // are byte-for-byte what they replaced — Tesseract must receive identical
 // bytes or the detection rate moves.
 
@@ -29,27 +27,6 @@ const adler32Slow = (bytes) => {
   return { a, b };
 };
 
-// The shipped encoder before the gray fast path: RGBA in, one byte in four out.
-const rgbaScanlines = (imageDataLike) => {
-  const { width, height, data } = imageDataLike;
-  const raw = new Uint8Array((width + 1) * height);
-  for (let y = 0; y < height; y += 1) {
-    const src = y * width * 4;
-    const dst = y * (width + 1);
-    for (let x = 0; x < width; x += 1) raw[dst + 1 + x] = data[src + x * 4];
-  }
-  return raw;
-};
-
-const grayScanlines = (gray) => {
-  const { width, height, data } = gray;
-  const raw = new Uint8Array((width + 1) * height);
-  for (let y = 0; y < height; y += 1) {
-    raw.set(data.subarray(y * width, y * width + width), y * (width + 1) + 1);
-  }
-  return raw;
-};
-
 const makeGray = (width, height, seed = 1) => {
   const data = new Uint8Array(width * height);
   let s = seed;
@@ -60,17 +37,7 @@ const makeGray = (width, height, seed = 1) => {
   return { data, width, height };
 };
 
-describe('gray PNG scanline path', () => {
-  // Real tile shapes: a wide page, a tall vertical ROI, an odd single row.
-  const shapes = [[2000, 137], [23, 400], [1, 1], [640, 480], [7, 3]];
-
-  it.each(shapes)('matches the RGBA-strided read at %ix%i', (width, height) => {
-    const gray = makeGray(width, height, width * 31 + height);
-    const viaRgba = rgbaScanlines(grayToImageDataLike(gray));
-    const viaGray = grayScanlines(gray);
-    expect(viaGray).toEqual(viaRgba);
-  });
-
+describe('gray PNG encoder', () => {
   it('produces a PNG with a grayscale IHDR and the right dimensions', async () => {
     const gray = makeGray(64, 48, 9);
     const blob = grayToPngBlob(gray);

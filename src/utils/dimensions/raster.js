@@ -17,19 +17,6 @@ export const toGray = (imageData) => {
   return { data: gray, width, height };
 };
 
-/** Grayscale -> RGBA ImageData-like (for OCR engines / canvases) */
-export const grayToImageDataLike = (gray) => {
-  const { data, width, height } = gray;
-  const out = new Uint8ClampedArray(width * height * 4);
-  for (let i = 0, j = 0; i < data.length; i++, j += 4) {
-    out[j] = data[i];
-    out[j + 1] = data[i];
-    out[j + 2] = data[i];
-    out[j + 3] = 255;
-  }
-  return { data: out, width, height };
-};
-
 /**
  * Contrast Limited Adaptive Histogram Equalization (pure-JS fallback for
  * cv.CLAHE). Normalises uneven scan lighting so faint labels survive

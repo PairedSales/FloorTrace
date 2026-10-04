@@ -98,11 +98,10 @@ export function usePlanManager() {
    * Close one plan, asking first if it holds work that is not saved anywhere
    * but this browser.
    *
-   * `isDirty` is deliberately not the test. It is set by nearly every mutation
-   * and cleared in exactly one place — a successful `.floorplan` export, which
-   * the menu tells the user is optional — so it is true for essentially every
-   * plan that has ever been touched. What matters is whether closing loses
-   * anything: a plan with an image has work, and the draft is what holds it.
+   * The test is whether closing loses anything, not whether anything changed
+   * since a project file was last saved: saving one is optional, so that was
+   * true of essentially every plan ever touched. A plan with an image has work,
+   * and the draft is what holds it.
    */
   const closePlan = useCallback(async (docId, { confirmFirst = true } = {}) => {
     const state = useAppStore.getState();

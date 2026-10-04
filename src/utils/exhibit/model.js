@@ -204,16 +204,11 @@ const buildFlags = (state, areas, measured = true) => {
  * The whole exhibit, as data. `state` is the app store's state; `now` is passed
  * in rather than read so the same state always produces the same page.
  */
-// `areas` is an option rather than something this file reaches for, so an
-// exhibit can be built from a state that is not the live store — and so it can
-// never be handed the numbers of whichever plan happened to read the memo last.
-// It defaults to computing them, which is why every existing caller is unchanged.
-export function buildExhibitModel(state, {
-  now = Date.now(),
-  options = {},
-  areas = computeAreaByType(state),
-} = {}) {
+export function buildExhibitModel(state, { now = Date.now(), options = {} } = {}) {
   const opts = { ...EXHIBIT_DEFAULTS, ...options };
+  // Computed from the state it was handed, never read off the live store's
+  // memo: that answers for whichever plan called last.
+  const areas = computeAreaByType(state);
   const unit = state.unit ?? 'decimal';
   const feetPerPixel = state.calibration?.feetPerPixel ?? { x: 1, y: 1 };
   const calibrated = !!state.calibration?.calibrated;

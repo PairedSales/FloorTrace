@@ -551,7 +551,6 @@ export function deserializeSketch(project) {
     perimeterVertices: null,
     canvasRotation: project.globalSettings?.canvasRotation ?? 0,
     projectId: project.metadata.projectId,
-    isDirty: false,
   };
 
   let historyPatch = null;

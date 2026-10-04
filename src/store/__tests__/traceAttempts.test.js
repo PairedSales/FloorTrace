@@ -142,7 +142,7 @@ describe('the projections carry the attempts and the detector’s findings', () 
     undoManager.save();
     store().setPerimeterOverlay(result(square(20), 0.4, TWO_WARNINGS));
 
-    const draft = store().getAutosaveState();
+    const draft = store().getParkedState();
     expect(draft.perimeterTraces[0].attempts).toHaveLength(1);
     // Nothing on screen lists them any more, and they are kept all the same.
     expect(draft.perimeterTraces[0].quality.warnings).toHaveLength(2);

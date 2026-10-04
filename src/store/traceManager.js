@@ -151,7 +151,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: newId,
         traceInteractionMode: 'drawing',
         perimeterVertices: [], // start drawing immediately
-        isDirty: true,
       });
     },
 
@@ -200,7 +199,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: nextActiveId,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
       });
     },
 
@@ -214,7 +212,7 @@ export function createTraceSlice(set, get) {
         // has typed one, changing the type must not take it back.
         t.id === traceId ? { ...t, name: newName, nameSource: 'user' } : t
       );
-      set({ perimeterTraces: updated, isDirty: true });
+      set({ perimeterTraces: updated });
     },
 
     /**
@@ -244,7 +242,6 @@ export function createTraceSlice(set, get) {
             }
             : t))
         ),
-        isDirty: true,
       });
     },
 
@@ -296,7 +293,7 @@ export function createTraceSlice(set, get) {
       }
 
       if (!changes.length) return [];
-      set({ perimeterTraces: assignTypeColors(next), isDirty: true });
+      set({ perimeterTraces: assignTypeColors(next) });
       return changes;
     },
 
@@ -312,7 +309,6 @@ export function createTraceSlice(set, get) {
       );
       set({
         perimeterTraces: updated,
-        isDirty: true,
       });
     },
 
@@ -379,7 +375,6 @@ export function createTraceSlice(set, get) {
         activeTraceId: activeStillExists ? state.activeTraceId : coloured[0].id,
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
       });
     },
 
@@ -425,7 +420,6 @@ export function createTraceSlice(set, get) {
           perimeterTraces: updated,
           traceInteractionMode: 'idle',
           perimeterVertices: null,
-          isDirty: true,
         });
       }
       return carried;
@@ -486,7 +480,6 @@ export function createTraceSlice(set, get) {
         } : t)),
         traceInteractionMode: 'idle',
         perimeterVertices: null,
-        isDirty: true,
       });
       return true;
     },

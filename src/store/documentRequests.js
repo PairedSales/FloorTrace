@@ -196,9 +196,6 @@ export function detachDocument(docId) {
   return count;
 }
 
-/** Abandon the active plan's work. */
-export const detachActiveDocument = () => detachDocument(activeDocumentId());
-
 // Which kinds a Stop can honestly claim to stop: the ones that run in the
 // detection worker, which can be terminated. An OCR scan cannot — the Tesseract
 // pool has no interrupt — and a dialog is already waiting on the user. Offering

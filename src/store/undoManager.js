@@ -122,9 +122,6 @@ export function save() {
   undoStack.push(internSnapshot(state.createSnapshot(lastSnapshotImage())));
   redoStack = [];
   emit();
-  
-  // Set project state as dirty
-  state.setIsDirty(true);
 }
 
 /**
@@ -175,7 +172,6 @@ export function undo() {
   redoStack.push(internSnapshot(useAppStore.getState().createSnapshot(lastSnapshotImage())));
   useAppStore.getState().applySnapshot(resolveSnapshot(undoStack.pop()));
   pruneImagePool();
-  useAppStore.getState().setIsDirty(true);
   emit();
   return true;
 }
@@ -193,7 +189,6 @@ export function redo() {
   undoStack.push(internSnapshot(useAppStore.getState().createSnapshot(lastSnapshotImage())));
   useAppStore.getState().applySnapshot(resolveSnapshot(redoStack.pop()));
   pruneImagePool();
-  useAppStore.getState().setIsDirty(true);
   emit();
   return true;
 }

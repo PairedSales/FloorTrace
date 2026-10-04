@@ -114,17 +114,6 @@ describe('park and adopt', () => {
       expect(PARK_FIELDS).toContain(field);
     });
 
-    // Parking through the autosave projection would launder away the fact that
-    // a plan has unsaved work — checkUnsavedChanges reads exactly this.
-    it('keeps a plan dirty across a park', () => {
-      useAppStore.setState({ image: IMAGE_A, isDirty: true });
-
-      app().parkActiveDocument();
-      app().adoptDocument(docA);
-
-      expect(app().isDirty).toBe(true);
-    });
-
     // drawStrokes IS autosaved and drawModeActive is not, so parking one
     // without the other returns strokes on the plan and no brush in hand.
     it('keeps draw mode and its strokes together', () => {

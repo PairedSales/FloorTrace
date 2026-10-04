@@ -70,29 +70,6 @@ export const calculateArea = (vertices, feetPerPixel, holes = null) => {
   return areaInSquareFeet;
 };
 
-// Calculate perimeter length
-// feetPerPixel: real-world feet represented by one image pixel { x, y }
-export const calculatePerimeter = (vertices, feetPerPixel) => {
-  if (!vertices || vertices.length < 2) {
-    return 0;
-  }
-  
-  const scaleX = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.x ?? 1.0);
-  const scaleY = typeof feetPerPixel === 'number' ? feetPerPixel : (feetPerPixel?.y ?? 1.0);
-  
-  let perimeter = 0;
-  const n = vertices.length;
-  
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const dx = (vertices[j].x - vertices[i].x) * scaleX;
-    const dy = (vertices[j].y - vertices[i].y) * scaleY;
-    perimeter += Math.sqrt(dx * dx + dy * dy);
-  }
-  
-  return perimeter;
-};
-
 // Get centroid of polygon
 export const getCentroid = (vertices) => {
   if (!vertices || vertices.length === 0) {

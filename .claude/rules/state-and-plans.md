@@ -28,7 +28,7 @@ paths:
 
 - A **plan** (`newDocumentId()`) is one image and everything measured from it; an **outline** (`newTraceId()`) is a polygon within it. Never call the plan level "floor".
 - One plan lives on the store root; the rest are parked as inert records in `documentManager.js`'s module `Map` — never in the store, where a component could subscribe to a plan it isn't showing. Open-plan cap: `MAX_OPEN_DOCUMENTS` = 6, the user's number.
-- `PARK_FIELDS` ≠ `AUTOSAVE_FIELDS`: parking adds `isDirty`, `drawModeActive` and `traceInteractionMode`, which are live facts within a session and meaningless in a draft.
+- `PARK_FIELDS` ≠ `AUTOSAVE_FIELDS`: parking adds `drawModeActive` and `traceInteractionMode`, which are live facts within a session and meaningless in a draft.
 - `adoptParkedState` ≠ `loadProject`: adopting restores, so it neither spreads defaults nor runs `normalizeTraces` (a migration for data off disk that would rebuild every trace and break memo identity).
 - `<Canvas key={activeDocumentId}>` is what discards in-progress gesture state (a mid-drag crop, a half-dragged vertex) on a switch. The key is on `<Canvas>` only.
 
