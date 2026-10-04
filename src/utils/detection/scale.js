@@ -1,22 +1,25 @@
-// Which rooms the project scale is taken from, decided without the user.
+// Which room the project scale is taken from, decided without the user.
 //
-// The app used to calibrate from whichever single room the user clicked, and
-// the user's habit — pick the simplest, most rectangular room — was the whole
-// algorithm. Measured across the fixtures, the worst room a user could click
-// implies a scale 58-90% wrong; because area goes as scale squared, those are
-// 3-4x area errors. Every labelled room is measured instead, and the rooms
-// outvote each other.
+// The scale is one room's: its printed size against its own rectangle. That
+// room is the one the green box is drawn on, and the user changes the scale by
+// changing the room. For a while the scale in force was the median of every
+// measured room instead, which no room on the plan states — the box sat on
+// one room and the areas were worked out from another figure. The owner's
+// decision (October 2026): the room under the box, and nothing else.
+//
+// Every labelled room is still measured, because the worst room a user could
+// click implies a scale 58-90% wrong, and area goes as scale squared. The
+// rooms decide which one is chosen — the one nearest the middle of them — and
+// none of their numbers reaches the scale.
 //
 // Deliberately little machinery. Weighting the samples by isotropy, by pixel
 // length, or by which walls bounded them was tried and measured: none of it
-// moved any fixture by more than 0.8 percentage points, which is smaller than
-// the disagreement between a fixture's own truth numbers. Isotropy weighting is
+// moved any fixture by more than 0.8 percentage points. Isotropy weighting is
 // worse than nothing — ExampleFloorplan6's LIVING ROOM reads 12.9% high on both
-// axes and agrees with itself to 0.3%, so weighting by self-agreement promotes
-// the one honest sample that is wrong. Only the confidence gate earns its
+// axes and agrees with itself to 0.3%. Only the confidence gate earns its
 // place, and it earns it on one fixture (ExampleFloorplan2, 6.3% -> 0.6%).
 
-import { robustScale, ROBUST_KEEP_WINDOW } from './validate.js';
+import { robustScale, settleRoomAxes, ROBUST_KEEP_WINDOW } from './validate.js';
 import { roomIsNonGla } from '../dimensions/exteriorLabels.js';
 
 // Below this the detector is telling us it could not confirm the room's walls,
@@ -29,19 +32,18 @@ import { roomIsNonGla } from '../dimensions/exteriorLabels.js';
 // footprint cross-check below.
 const SCALE_CONFIDENCE_FLOOR = 0.5;
 
-// Two rooms are a second opinion; three are a majority that can outvote one
-// bad rectangle. Fewer than this still produces a scale — the app always
+// Two rooms are a second opinion; three are a majority that can show one bad
+// rectangle up. Fewer than this still produces a scale — the app always
 // answers — but says so.
 export const MIN_CONSENSUS_ROOMS = 3;
 
-// How far apart the rooms that set the scale may land before they are not
-// measuring the same drawing. Set from the fixtures rather than from taste:
-// the rooms that survive trimming span 6% on ExampleFloorplan, 8% on
-// ExampleFloorplan7, 30% on ExampleFloorplan6 and 37% on ExampleFloorplan2 —
-// and all four of those produce a scale within 6% of truth, so anything under
-// ~40% is the drawing being normal and warning about it would be crying wolf.
-// A genuinely contaminated set is far past this: ExampleFloorplan's rooms
-// before trimming span 129%.
+// How far apart the rooms that agree may land before they are not measuring
+// the same drawing. Set from the fixtures rather than from taste: the rooms
+// that survive trimming span 6% on ExampleFloorplan, 8% on ExampleFloorplan7,
+// 30% on ExampleFloorplan6 and 37% on ExampleFloorplan2, and on all four the
+// room chosen is within 1% of truth, so anything under ~40% is the drawing
+// being normal. A genuinely contaminated set is far past this:
+// ExampleFloorplan's rooms before trimming span 129%.
 export const CONSENSUS_SPREAD_LIMIT = 0.45;
 
 // A building cannot be smaller than the rooms it contains. A leaked rectangle
@@ -72,7 +74,7 @@ const MIN_COVERAGE_ROOMS = 4;
 // that small the plan is dimensioned in metres and being read as feet, which is
 // the one failure `areaRatio` is blind to by construction — a uniform unit
 // error cancels exactly in a ratio of two areas derived from it. What is left
-// is perfect room-to-room consensus, a green verdict, and a GLA 10.8x wrong.
+// is perfect room-to-room agreement, a green verdict, and a GLA 10.8x wrong.
 // Warned about, never corrected: the app does not know the plan's units, and
 // switching them on a suspicion would be the same wrong answer in reverse.
 //
@@ -91,12 +93,34 @@ const medianOf = (values) => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
+// Which of the rooms that agree the scale is taken from: both axes inside the
+// keep window first, then nearest the middle of them all. The first or the
+// largest instead would be a room the others had half-rejected —
+// ExampleFloorplan6's LIVING ROOM is the largest and most confident-looking
+// read on its page and is 13% wrong.
+const chooseRoom = (contributors, middle) => contributors
+  .map((c) => {
+    // Only the axes inside the window: a room kept on one axis is measuring
+    // the drawing on that axis alone.
+    const implied = Math.exp(
+      c.axes.reduce((sum, axis) => sum + Math.log(c.pixelsPerFoot[axis]), 0) / c.axes.length,
+    );
+    return { room: c, distance: Math.abs(Math.log(implied / middle)) };
+  })
+  .sort((a, b) => (
+    b.room.axes.length - a.room.axes.length
+    || a.distance - b.distance
+    || (b.room.confidence ?? 0) - (a.room.confidence ?? 0)
+  ))[0].room;
+
 /**
  * @param {Array} candidates rooms from detectRoomsFromLabels, each
  *   { labelId, rect, sides, confidence, pixelsPerFoot: {x, y}, labelDims }
  * @param {object} context { footprintAreaPx, nonGlaRegions: [{x,y,width,height}] }
- * @returns {object|null} null when nothing usable was measured — the caller
- *   then leaves the scale alone, which is the flow the user already has.
+ * @returns {object} `room` is the one the scale comes from — the caller draws
+ *   the box on it — and `feetPerPixel` is that room's own `{x, y}`. Both are
+ *   null when nothing usable was measured; the caller then leaves the scale
+ *   alone, which is the flow the user already has.
  */
 export const selectProjectScale = (candidates = [], context = {}) => {
   const nonGla = context.nonGlaRegions ?? [];
@@ -131,14 +155,15 @@ export const selectProjectScale = (candidates = [], context = {}) => {
   }
 
   // Per axis, not per room: one room states two lengths and each is an
-  // independent read of the same drawing, which is the convention
-  // roomScaleSamples already uses.
+  // independent read of the same drawing. Their middle is what the rooms are
+  // ranked against, and is never applied.
   const samples = accepted.flatMap((room) => [room.pixelsPerFoot.x, room.pixelsPerFoot.y]);
   const robust = robustScale(samples);
   if (!robust) {
     return {
       pixelsPerFoot: null,
       feetPerPixel: null,
+      room: null,
       level: 'check',
       reason: 'no-rooms',
       roomCount: 0,
@@ -150,18 +175,25 @@ export const selectProjectScale = (candidates = [], context = {}) => {
     };
   }
 
-  // Which rooms actually set the scale. robustScale trims to a window around
-  // the median and re-medians inside it, so a room outside that window
-  // contributed nothing — reporting it as a contributor would overstate the
-  // agreement and, worse, let one blowout that cleared the confidence gate
-  // (ExampleFloorplan's KITCHEN reads +107% at 0.70) inflate the spread the
-  // user is shown from 6% to 129%.
+  // Which rooms agree. A room outside the window around the middle is not one
+  // of them — reporting it as one would overstate the agreement and, worse,
+  // let one blowout that cleared the confidence gate (ExampleFloorplan's
+  // KITCHEN reads +107% at 0.70) inflate the spread from 6% to 129%.
   const inWindow = (v) => Math.abs(Math.log(v / robust.median)) <= ROBUST_KEEP_WINDOW;
   const contributors = [];
   for (const room of accepted) {
     const axes = ['x', 'y'].filter((axis) => inWindow(room.pixelsPerFoot[axis]));
-    if (axes.length) contributors.push({ room, axes });
-    else {
+    if (axes.length) {
+      contributors.push({
+        name: room.labelId ?? room.name ?? null,
+        rect: room.rect,
+        sides: room.sides,
+        labelDims: room.labelDims ?? null,
+        pixelsPerFoot: room.pixelsPerFoot,
+        confidence: room.confidence ?? null,
+        axes,
+      });
+    } else {
       rejected.push({
         name: room.labelId ?? room.name ?? null,
         reason: 'outlier',
@@ -174,33 +206,35 @@ export const selectProjectScale = (candidates = [], context = {}) => {
   const kept = samples.filter(inWindow).sort((a, b) => a - b);
   const spread = kept.length > 1 ? Math.log(kept[kept.length - 1] / kept[0]) : 0;
 
+  // The room, and the scale: its own two axes, through the rule a room picked
+  // by hand goes through, so it comes out exactly as it would had the user
+  // chosen it.
+  const room = chooseRoom(contributors, robust.value);
+  const own = settleRoomAxes(1 / room.pixelsPerFoot.x, 1 / room.pixelsPerFoot.y);
+
   // The one check that survives a majority of bad rooms. A 2x scale error moves
   // the footprint's area 4x, so comparing it against what the labels themselves
   // add up to sees the error the confidence gate cannot.
   //
-  // Over every label, not just the ones that set the scale: the point is to
-  // have a measure of the building that the selection had no hand in. Summing
-  // only the contributors makes the check agree with whatever it just chose —
-  // three leaked rooms then vouch for the shrunken footprint they caused.
-  const labelSqFt = candidates.reduce((sum, room) => (
-    room?.labelDims?.width > 0 && room.labelDims?.height > 0 && !roomIsNonGla(room, nonGla)
-      ? sum + room.labelDims.width * room.labelDims.height
+  // Over every label, not just the ones that agree: the point is to have a
+  // measure of the building that the choice had no hand in.
+  const labelSqFt = candidates.reduce((sum, r) => (
+    r?.labelDims?.width > 0 && r.labelDims?.height > 0 && !roomIsNonGla(r, nonGla)
+      ? sum + r.labelDims.width * r.labelDims.height
       : sum
   ), 0);
   const footprintSqFt = context.footprintAreaPx > 0
-    ? context.footprintAreaPx / (robust.value * robust.value)
+    ? context.footprintAreaPx * own.x * own.y
     : 0;
   const areaRatio = footprintSqFt > 0 && labelSqFt > 0 ? footprintSqFt / labelSqFt : null;
 
   // Every side the accepted labels state, as a population: one long room proves
   // nothing, a page of them is the unit. Counted per *room*, because a room can
-  // be accepted on its measured px/ft while stating no dimensions at all — three
-  // such rooms with one dimensioned between them is one room's two sides, which
-  // is the population the gate below is written to refuse.
+  // be accepted on its measured px/ft while stating no dimensions at all.
   const sides = [];
   let dimensionedRooms = 0;
-  for (const room of accepted) {
-    const dims = room.labelDims;
+  for (const r of accepted) {
+    const dims = r.labelDims;
     if (!(dims?.width > 0) || !(dims.height > 0)) continue;
     sides.push(dims.width, dims.height);
     dimensionedRooms += 1;
@@ -209,7 +243,7 @@ export const selectProjectScale = (candidates = [], context = {}) => {
   const widestSideFt = sides.length ? Math.max(...sides) : null;
 
   let level = 'ok';
-  let reason = 'auto-consensus';
+  let reason = 'auto-room';
   if (
     dimensionedRooms >= MIN_UNIT_CHECK_ROOMS
     && medianSideFt < MIN_PLAUSIBLE_LABEL_SIDE_FT
@@ -237,67 +271,23 @@ export const selectProjectScale = (candidates = [], context = {}) => {
   }
 
   return {
-    pixelsPerFoot: robust.value,
-    feetPerPixel: 1 / robust.value,
+    pixelsPerFoot: 1 / Math.sqrt(own.x * own.y),
+    feetPerPixel: { x: own.x, y: own.y },
+    room,
     level,
     reason,
+    // The rooms that agree, the chosen one among them.
     roomCount: contributors.length,
     spread,
     // The area cross-check, reported rather than only tested: it is the one
-    // number in the app that can see a footprint too big, and a panel that says
-    // "the building measures 3.1x what its labelled rooms add up to" is a
-    // reviewable claim where a bare confidence is not.
+    // number in the app that can see a footprint too big.
     areaRatio,
     acceptedCount: accepted.length,
     labelSqFt: labelSqFt > 0 ? labelSqFt : null,
     footprintSqFt: footprintSqFt > 0 ? footprintSqFt : null,
     medianSideFt,
     widestSideFt,
-    contributors: contributors.map(({ room, axes }) => ({
-      name: room.labelId ?? room.name ?? null,
-      rect: room.rect,
-      sides: room.sides,
-      labelDims: room.labelDims ?? null,
-      pixelsPerFoot: room.pixelsPerFoot,
-      confidence: room.confidence ?? null,
-      axes,
-    })),
+    contributors,
     rejected,
   };
-};
-
-/**
- * Which measured room to show as the placed overlay once the scale is set.
- *
- * The scale is a median over several rooms, so no single rectangle *is* it. The
- * one put on screen is the room that agrees with the answer best: both axes
- * inside the keep window first, then closest to the adopted scale. Taking the
- * first or the largest contributor instead would draw the box on a room the
- * median had half-rejected, and the overlay is what the user drags to overrule
- * the consensus — it has to be the app's best rectangle, not an arbitrary one.
- *
- * @param {object} decision the return of selectProjectScale
- * @returns {object|null} one entry of decision.contributors
- */
-export const representativeRoom = (decision) => {
-  const scale = decision?.pixelsPerFoot;
-  if (!(scale > 0)) return null;
-  const ranked = (decision.contributors ?? [])
-    .filter((c) => c?.rect && c.pixelsPerFoot?.x > 0 && c.pixelsPerFoot?.y > 0)
-    .map((c) => {
-      // Only the axes that voted: a room kept on one axis is measuring the
-      // drawing on that axis alone, and folding in the axis the window threw
-      // away would rank it by the number that disqualified it.
-      const axes = c.axes?.length ? c.axes : ['x', 'y'];
-      const implied = Math.exp(
-        axes.reduce((sum, axis) => sum + Math.log(c.pixelsPerFoot[axis]), 0) / axes.length,
-      );
-      return { room: c, axes: axes.length, distance: Math.abs(Math.log(implied / scale)) };
-    })
-    .sort((a, b) => (
-      b.axes - a.axes
-      || a.distance - b.distance
-      || (b.room.confidence ?? 0) - (a.room.confidence ?? 0)
-    ));
-  return ranked[0]?.room ?? null;
 };

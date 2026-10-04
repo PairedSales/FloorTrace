@@ -724,8 +724,8 @@ const useAppStore = create(subscribeWithSelector((set, get) => ({
   },
 })));
 
-// Feet per pixel of every room measured so far: the sample set a robust
-// multi-room scale is taken from. Takes `rooms` rather than the store so a
+// Feet per pixel of every room measured so far: what the room the scale comes
+// from is compared with, never what a scale is made from. Takes `rooms` rather than the store so a
 // component can derive it from its own subscription without a new array
 // identity on every unrelated store change.
 export const roomScaleSamples = (rooms = []) =>

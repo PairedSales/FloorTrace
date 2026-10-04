@@ -1,24 +1,26 @@
 // The interactive scale path: what one room's label and overlay do to the
 // project scale. `npm run bench:scale` only exercises the automatic scan, so
-// nothing here is covered by it — and the failure this pins was invisible from
-// inside App.jsx because it needed two consecutive gestures to show up.
+// nothing here is covered by it.
+//
+// The rule: the scale is the room under the box, always. The other rooms are
+// what it is compared with and can never take its place.
 import { describe, expect, it } from 'vitest';
 import { resolveScaleUpdate } from '../validate.js';
 import { scaleQualitySummary } from '../../boundaryQuality.js';
 
-// Three rooms already measured at ~16 px/ft: enough samples, and tight enough,
-// for decideProjectScale to treat them as authoritative.
+// Three other rooms already measured at ~16 px/ft.
 const OTHERS = [1 / 16, 1 / 16, 1 / 16.4, 1 / 15.6, 1 / 16.2, 1 / 15.8];
 
-// A room whose overlay implies 12 px/ft — 33% from the pool, well past the 22%
-// plan-spread tolerance, so unpinned it is outvoted.
+// A room whose overlay implies 12 px/ft — 33% from the others, well past the
+// 22% two rooms on one plan may differ by. The others used to outvote it.
 const DIMS = { width: '10', height: '12' };
 const OVERLAY = { x1: 0, y1: 0, x2: 120, y2: 144 };
 
+// What the automatic scan leaves behind: the scale of the room it chose.
 const AUTO_CALIBRATION = {
   calibrated: true,
   feetPerPixel: { x: 1 / 16, y: 1 / 16 },
-  quality: { level: 'ok', reason: null, source: 'auto', adopted: true, roomCount: 3 },
+  quality: { level: 'ok', reason: 'auto-room', source: 'auto', adopted: true, roomCount: 4 },
 };
 
 // What App.jsx does between two gestures: the resolved scale and quality become
@@ -29,106 +31,98 @@ const commit = (resolved) => ({
   quality: resolved.quality,
 });
 
-const drag = (calibration, pinned = true) => resolveScaleUpdate({
-  dimensions: DIMS, overlay: OVERLAY, otherSamples: OTHERS, calibration, pinned,
+const drag = (calibration, otherSamples = OTHERS) => resolveScaleUpdate({
+  dimensions: DIMS, overlay: OVERLAY, otherSamples, calibration,
 });
 
 describe('resolveScaleUpdate', () => {
-  it('answers the same on the second drag as on the first', () => {
+  it('sets the scale from the room under the box, whatever the other rooms say', () => {
+    const resolved = drag(AUTO_CALIBRATION);
+    expect(resolved.scale.x).toBeCloseTo(1 / 12, 12);
+    expect(resolved.scale.y).toBeCloseTo(1 / 12, 12);
+    expect(resolved.quality.adopted).toBe(true);
+    expect(resolved.quality.source).toBe('manual');
+    expect(resolved.changed).toBe(true);
+  });
+
+  // However many rooms disagree and however tightly they agree with each
+  // other: none of their numbers reaches the scale.
+  it('never puts the other rooms’ number in force', () => {
+    const many = Array.from({ length: 40 }, () => 1 / 16);
+    for (const others of [[], [1 / 16, 1 / 16], OTHERS, many]) {
+      expect(drag(AUTO_CALIBRATION, others).scale).toEqual({ x: 1 / 12, y: 1 / 12 });
+      expect(drag(null, others).scale).toEqual({ x: 1 / 12, y: 1 / 12 });
+    }
+  });
+
+  it('uses the room’s own average when its two sides disagree, not the other rooms’', () => {
+    // 10 x 12 on a square box: the room implies 1/12 across and 1/10 down.
+    const resolved = resolveScaleUpdate({
+      dimensions: DIMS, overlay: { x1: 0, y1: 0, x2: 120, y2: 120 },
+      otherSamples: OTHERS, calibration: AUTO_CALIBRATION,
+    });
+    const own = Math.sqrt((10 / 120) * (12 / 120));
+    expect(resolved.scale.x).toBeCloseTo(own, 12);
+    expect(resolved.scale.y).toBeCloseTo(own, 12);
+  });
+
+  it('answers the same on the second gesture as on the first', () => {
     const first = drag(AUTO_CALIBRATION);
     const second = drag(commit(first));
 
-    expect(first.scale).toEqual(second.scale);
-    expect(first.quality.adopted).toBe(second.quality.adopted);
-    expect(first.quality.reason).toBe(second.quality.reason);
-    expect(first.quality.level).toBe(second.quality.level);
-    expect(first.quality.source).toBe(second.quality.source);
-    // And the drag is honoured, not discarded in favour of the rooms that
-    // produced the overlay the user is correcting.
-    expect(first.quality.adopted).toBe(true);
-    expect(first.scale.x).toBeCloseTo(1 / 12, 9);
-  });
-
-  // The same symmetry on the path that is still unpinned (typing a dimension
-  // into the panel): the write that ends the first update must not change what
-  // the second one decides.
-  it('answers the same twice unpinned, where the project outvotes the room', () => {
-    const first = drag(AUTO_CALIBRATION, false);
-    const second = drag(commit(first), false);
-
-    expect(first.quality.adopted).toBe(false);
-    expect(first.scale.x).toBeCloseTo(1 / 16, 9);
     expect(second.scale).toEqual(first.scale);
-    expect(second.quality.adopted).toBe(first.quality.adopted);
-    expect(second.quality.source).toBe(first.quality.source);
+    expect(second.quality).toEqual(first.quality);
+    expect(second.changed).toBe(false);
   });
 
-  it('does not call an outvoted room the manual scale', () => {
-    const outvoted = drag(AUTO_CALIBRATION, false);
+  it('states the area change when the room disagrees with the others', () => {
+    const resolved = drag(AUTO_CALIBRATION);
 
-    expect(outvoted.quality.adopted).toBe(false);
-    expect(outvoted.quality.reason).toBe('room-vs-project');
-    // 'manual' here is what pinned the next update to a room the app had just
-    // declined to use, and what silenced reviewAgainstFootprint for good.
-    expect(outvoted.quality.source).toBe('auto');
-  });
-
-  it('records the source as manual only when the room actually set the scale', () => {
-    const adopted = drag(AUTO_CALIBRATION);
-    expect(adopted.quality.adopted).toBe(true);
-    expect(adopted.quality.source).toBe('manual');
-  });
-
-  it('counts a source change as a change worth writing', () => {
-    const outvoted = drag(AUTO_CALIBRATION, false);
-    // Same scale as the calibration already in force; only the verdict moved.
-    expect(outvoted.scale.x).toBeCloseTo(AUTO_CALIBRATION.feetPerPixel.x, 9);
-    expect(outvoted.changed).toBe(true);
-
-    const again = drag(commit(outvoted), false);
-    expect(again.changed).toBe(false);
-  });
-
-  it('states the area change when a pinned room disagrees with the others', () => {
-    const pinned = drag(AUTO_CALIBRATION);
-
-    expect(pinned.quality.reason).toBe('room-vs-auto');
-    expect(pinned.quality.level).toBe('check');
-    expect(pinned.quality.roomCount).toBe(3);
+    expect(resolved.quality.reason).toBe('room-vs-auto');
+    expect(resolved.quality.level).toBe('check');
+    expect(resolved.quality.roomCount).toBe(3);
 
     // Scale is 33% out, so the area moves ~78% — the number the user acts on.
-    const summary = scaleQualitySummary(pinned.quality);
+    const summary = scaleQualitySummary(resolved.quality);
     expect(summary.level).toBe('check');
     expect(summary.short).toMatch(/areas ~78% different/);
-    expect(summary.detail).toMatch(/about 33% from the 3 rooms/);
+    expect(summary.detail).toMatch(/about 33% from the other 3 rooms/);
     expect(summary.detail).toMatch(/roughly 78%/);
+    expect(summary.detail).toMatch(/The scale comes from this room/);
   });
 
-  it('keeps the outvoted-room wording once that verdict is sourced auto', () => {
-    const outvoted = drag(AUTO_CALIBRATION, false);
-    const summary = scaleQualitySummary(outvoted.quality);
-
-    // Not the auto-consensus note: what happened is that this room was refused.
-    expect(summary.short).toBe('Kept the scale from earlier rooms');
-    expect(summary.detail).toMatch(/was not used/);
-  });
-
-  it('says nothing about a pinned room that agrees with the others', () => {
+  it('says nothing about a room that agrees with itself and with the others', () => {
     const agreeing = resolveScaleUpdate({
       dimensions: { width: '10', height: '12' },
-      overlay: { x1: 0, y1: 0, x2: 160, y2: 192 },
+      overlay: { x1: 0, y1: 0, x2: 162, y2: 194 },
       otherSamples: OTHERS,
       calibration: AUTO_CALIBRATION,
-      pinned: true,
     });
 
-    expect(agreeing.quality.adopted).toBe(true);
+    expect(agreeing.quality.source).toBe('manual');
     expect(agreeing.quality.reason).toBe(null);
     expect(scaleQualitySummary(agreeing.quality)).toBe(null);
   });
 
+  // The room the app chose is already what its box and its size fields say.
+  // Clicking into a field and out again re-runs this with the same numbers,
+  // and that must not turn the app's choice into a scale set by hand — a
+  // re-read would then never choose again.
+  it('leaves an automatic scale automatic when the gesture moved nothing', () => {
+    const untouched = resolveScaleUpdate({
+      dimensions: { width: '10', height: '12' },
+      overlay: { x1: 0, y1: 0, x2: 160, y2: 192 },
+      otherSamples: OTHERS,
+      calibration: AUTO_CALIBRATION,
+    });
+
+    expect(untouched.changed).toBe(false);
+    expect(untouched.quality).toBe(AUTO_CALIBRATION.quality);
+    expect(untouched.scale).toEqual(AUTO_CALIBRATION.feetPerPixel);
+  });
+
   it('returns null rather than a scale for unusable input', () => {
-    const base = { otherSamples: [], calibration: null, pinned: true };
+    const base = { otherSamples: [], calibration: null };
     expect(resolveScaleUpdate({ ...base, dimensions: DIMS, overlay: null })).toBe(null);
     expect(resolveScaleUpdate({
       ...base, dimensions: { width: '', height: '12' }, overlay: OVERLAY,

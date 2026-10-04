@@ -392,44 +392,45 @@ describe('buildAreaDerivation — the scale', () => {
     expect(d.scale.sqFtPerSqPx).toBeCloseTo(0.0125, 12);
   });
 
-  it('counts the rooms the calibration claims, not every room in the store', () => {
-    // A scale pinned to one hand-picked room, with six rooms still on hand
-    // from the scan that preceded it.
+  it('says one room, however many are in the store or were compared with it', () => {
+    // A scale from one hand-picked room, with six rooms still on hand from
+    // the scan that preceded it. `roomCount` is how many it was compared with.
     const d = buildAreaDerivation(state({
       rooms: Array.from({ length: 6 }, (_, i) => ({ labelId: `R${i}` })),
-      // The pair `resolveScaleUpdate` actually writes: pinning a room sets
-      // `adopted`, which makes the source 'manual'. The old fixture used
-      // 'auto', a state the app cannot produce, so the test passed over a
-      // branch that never ran.
       calibration: {
         ...calibrated,
         quality: { source: 'manual', reason: 'room-vs-auto', level: 'note', roomCount: 6, adopted: true },
       },
     }));
-    expect(d.scale.provenance)
-      .toBe('Taken from one room chosen by hand, overriding the measured average.');
+    expect(d.scale.provenance).toBe('Measured from one room on this plan, chosen by hand.');
   });
 });
 
 describe('scaleProvenance', () => {
   // Driven through the function that actually writes the quality record, not a
-  // hand-built one. The hand-picked-room branch used to require source 'auto'
-  // with this reason, a pair `resolveScaleUpdate` cannot produce — so it never
-  // ran, and every surface reported the pooled count the user had just
-  // overruled. A fixture written by hand passed over that for as long as it
-  // existed; this cannot.
+  // hand-built one. A fixture written by hand once passed over a pair of
+  // fields the app could not produce, for as long as it existed; this cannot.
   it('names a hand-picked room, through the real calibration path', () => {
     const update = resolveScaleUpdate({
       dimensions: { width: '12', height: '14' },
       overlay: { x1: 0, y1: 0, x2: 240, y2: 280 },
-      pinned: true,
       otherSamples: [16, 16.2, 15.8, 16.1, 15.9, 16.05],
       calibration: { calibrated: true, feetPerPixel: { x: 1 / 16, y: 1 / 16 } },
     });
     expect(update.quality).toMatchObject({ reason: 'room-vs-auto', source: 'manual' });
     expect(scaleProvenance({
       calibration: { calibrated: true, source: 'room-calibration', quality: update.quality },
-    })).toBe('Taken from one room chosen by hand, overriding the measured average.');
+    })).toBe('Measured from one room on this plan, chosen by hand.');
+  });
+
+  it('names the room the app chose as one room, not as the rooms it was compared with', () => {
+    expect(scaleProvenance({
+      calibration: {
+        calibrated: true,
+        source: 'room-calibration',
+        quality: { source: 'auto', roomCount: 5 },
+      },
+    })).toBe('Measured from one room on this plan, chosen by FloorTrace.');
   });
 
   it('names a two-line calibration as such', () => {
@@ -442,9 +443,9 @@ describe('scaleProvenance', () => {
     })).toBe('Set by hand from two lines of known length.');
   });
 
-  it('falls back to the typed room size when nothing was measured', () => {
+  it('calls a room sized by typing a room chosen by hand', () => {
     expect(scaleProvenance({
       calibration: { calibrated: true, source: 'room-calibration', quality: null },
-    })).toBe('Measured from the room size entered by hand.');
+    })).toBe('Measured from one room on this plan, chosen by hand.');
   });
 });

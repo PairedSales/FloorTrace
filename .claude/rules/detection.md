@@ -44,7 +44,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - `nonGla.js` (+ `garage.js`) — garage/porch/patio candidates from four detectors, merged, removed in one pass under a cumulative bound.
 - `remediate.js` — second-chance trace (`join`, `escalate`) below `REMEDIATION_CONFIDENCE` or when a known-inside constraint is excluded. Never in draw mode.
 - `validate.js` — post-hoc checks, `scaleIsotropy`/`robustScale`, `orientDimsToBox`, `resolveRoomScale`, `constraintFactor`.
-- `room.js` — rectangle growth from a label. `brush.js` — draw mode. `scale.js` — project scale. `cache.js` — per-image memo. `labelFrame.js`, `polygon.js`.
+- `room.js` — rectangle growth from a label. `brush.js` — draw mode. `scale.js` — which room the project scale comes from. `cache.js` — per-image memo. `labelFrame.js`, `polygon.js`.
 
 ## Invariants
 
@@ -68,7 +68,7 @@ The cores (`detectRoomFromClickCore`, `traceFloorplanBoundaryCore` in `pipeline.
 - **A label's two numbers carry no axis.** Orient them to the box (`orientDimsToBox`) for scale, but never inside the open-plan rescue, which exists because the box is wrong on one axis.
 - **`cache.js` keys on the data URL, not its hash** (`hashDataUrl` can alias two images). The `cacheKey` is minted once per decode; `MAX_DECODED` is 2 so two open plans don't evict each other; `dropCacheKey` drops one image; past the 32 MB budget the memo stops storing but never clears.
 - **Labels stay in crop space** with their `frame` (`labelFrame.js`); re-expanding them to page size blew the memo budget.
-- **Scale selection (`scale.js`)**: rooms outvote each other and only the confidence gate earns its place. Weighting by isotropy or length measured no better or worse; never show a spread derived from the samples as error; a centreline-vs-face offset model was tested and falsified.
+- **Scale selection (`scale.js`)**: the scale is one room's own (`settleRoomAxes`, the same rule a room picked by hand goes through), and that room is the one the box is drawn on. Every labelled room is measured only to choose it — the one nearest the middle of the rooms that agree — and to judge it; the middle (`robustScale`) is a yardstick and is never applied. Only the confidence gate earns its place. Weighting by isotropy or length measured no better or worse; never show a spread derived from the samples as error; a centreline-vs-face offset model was tested and falsified.
 - `%TypedArray%.from(x, fn)` is lint-banned here: ~92 ns/px against ~4 ns/px for a preallocated loop, which is the whole per-pixel budget.
 
 Background papers: `Reference Data for Wall Detection System/`.

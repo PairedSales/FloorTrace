@@ -161,7 +161,7 @@ describe('at rest it is the answer and its folded parts', () => {
       expect(header(view, id), id).toBeNull();
       expect(isOpen(view, id), id).toBe(true);
     }
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
     expect(part(view, 'scale').getByRole('button', { name: /Set scale from a known length/ })).toBeTruthy();
     expect(part(view, 'outline').getByLabelText('Outline name').value).toBe('1st Floor');
     expect(part(view, 'outline').getByLabelText('Counts as')).toBeTruthy();
@@ -606,7 +606,7 @@ describe('the scale', () => {
     useAppStore.setState({ calibration: calibrated, perimeterTraces: [outline()] });
     const view = render(<ResultsPanel {...props({ area: 800 })} />);
     open(view, 'scale');
-    expect(part(view, 'scale').getByText('Measured from 3 rooms on this plan.')).toBeTruthy();
+    expect(part(view, 'scale').getByText('Measured from one room on this plan, chosen by FloorTrace.')).toBeTruthy();
     expect(view.container.querySelector('#panel-scale').textContent).not.toMatch(/px/);
   });
 

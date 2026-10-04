@@ -1,9 +1,9 @@
-// The project scale chosen without the user. Every fixture case below is the
-// real per-room output of detectRoomFromClickCore on that plan (see
-// `npm run bench:scale`), hard-coded so the selector's arithmetic is pinned
-// without decoding a PNG.
+// The room the project scale is taken from, chosen without the user. Every
+// fixture case below is the real per-room output of detectRoomFromClickCore on
+// that plan (see `npm run bench:scale`), hard-coded so the selector's
+// arithmetic is pinned without decoding a PNG.
 import { describe, expect, it } from 'vitest';
-import { selectProjectScale, representativeRoom, MIN_CONSENSUS_ROOMS } from '../scale.js';
+import { selectProjectScale, MIN_CONSENSUS_ROOMS } from '../scale.js';
 
 let nextRect = 0;
 // Rooms only need a rect here so the non-GLA test has somewhere to put them;
@@ -23,17 +23,48 @@ const room = (name, x, y, confidence, labelDims = null, rect = null) => {
   };
 };
 
+// ExampleFloorplan6: LIVING ROOM is 12.9% high on both axes, agrees with
+// itself to 0.3% and is rated 0.84, so nothing inside that room can see the
+// error. Four bedrooms show it up.
+const PLAN_6 = () => [
+  room('BEDROOM 1 (left)', 14.44, 14.25, 0.95),
+  room('BEDROOM 2 (left)', 14.16, 14.40, 0.98),
+  room('BEDROOM 1 (right)', 13.97, 14.50, 0.98),
+  room('BEDROOM 2 (right)', 14.72, 12.60, 0.73),
+  room('LIVING ROOM (left)', 16.36, 16.32, 0.84),
+];
+
+describe('selectProjectScale: the scale is one room’s, and no other number', () => {
+  // The rule the rest of this file follows from. The rooms' middle is 14.44
+  // here — one axis of one room — and it used to be the scale in force, so the
+  // box sat on BEDROOM 1 while the areas were worked out from a figure that
+  // room does not state.
+  it('applies the chosen room’s own two axes, not the middle of the rooms', () => {
+    const decision = selectProjectScale(PLAN_6());
+    expect(decision.room.name).toBe('BEDROOM 1 (left)');
+    expect(decision.feetPerPixel.x).toBeCloseTo(1 / 14.44, 12);
+    expect(decision.feetPerPixel.y).toBeCloseTo(1 / 14.25, 12);
+    expect(decision.pixelsPerFoot).toBeCloseTo(Math.sqrt(14.44 * 14.25), 9);
+  });
+
+  it('settles a chosen room whose sides disagree on one scalar: its own', () => {
+    // 15.0 across and 16.2 down are 8% apart — more than one room's two sides
+    // may differ by and still be read as two scales.
+    const decision = selectProjectScale([room('ONLY', 15.0, 16.2, 0.95)]);
+    const own = 1 / Math.sqrt(15.0 * 16.2);
+    expect(decision.feetPerPixel.x).toBeCloseTo(own, 12);
+    expect(decision.feetPerPixel.y).toBeCloseTo(own, 12);
+  });
+
+});
+
 describe('selectProjectScale on real fixture rooms', () => {
   // ExampleFloorplan: six well-drawn rooms at ~15.5-16.5 px/ft plus an
   // open-plan KITCHEN that ran into the dining area and reads +107%.
   //
-  // GARAGE is dropped on its own label text, so five rooms vote and the answer
-  // is 16.05 rather than the 15.97 the garage used to pull it to. That is 0.5pp
-  // further from this fixture's 15.5 truth, and it is not the garage having
-  // been a good ruler: every rect on this plan reads ~3% high together, and the
-  // garage's happened to be one of the lower reads. The truth's own provenance
-  // median is 15.492 with the garage and 15.492 without it.
-  it('settles on the scale the well-drawn rooms agree about', () => {
+  // GARAGE is dropped on its own label text, so five rooms are compared and
+  // the one nearest the middle of them is BEDROOM (top-left), at 16.05.
+  it('chooses a room the well-drawn rooms agree with', () => {
     const result = selectProjectScale([
       room('BEDROOM (top-left)', 16.13, 15.97, 0.98),
       room('PRIMARY BEDROOM', 15.82, 15.62, 0.95),
@@ -43,9 +74,10 @@ describe('selectProjectScale on real fixture rooms', () => {
       room('FAMILY ROOM', 16.52, 16.05, 0.98),
       room('KITCHEN (open-plan)', 32.04, 35.62, 0.70),
     ]);
+    expect(result.room.name).toBe('BEDROOM (top-left)');
     expect(result.pixelsPerFoot).toBeCloseTo(16.05, 2);
     expect(result.level).toBe('ok');
-    expect(result.reason).toBe('auto-consensus');
+    expect(result.reason).toBe('auto-room');
     expect(result.roomCount).toBe(5);
     // No exterior label boxes were supplied: the room's own text is enough.
     expect(result.rejected).toContainEqual(
@@ -54,10 +86,10 @@ describe('selectProjectScale on real fixture rooms', () => {
   });
 
   // The same KITCHEN clears the confidence gate at 0.70, so the gate alone is
-  // not what saves this plan — the median is. It must still be reported as an
-  // outlier rather than as one of the rooms that set the scale, or the spread
-  // the user is shown reads 129% instead of 6%.
-  it('does not count a room the median threw away as one that set the scale', () => {
+  // not what saves this plan — being ranked against the middle is. It must be
+  // reported as an outlier rather than as one of the rooms that agree, or the
+  // spread reads 129% instead of 6%.
+  it('does not count a room far from the others as one that agrees', () => {
     const result = selectProjectScale([
       room('BEDROOM (top-left)', 16.13, 15.97, 0.98),
       room('PRIMARY BEDROOM', 15.82, 15.62, 0.95),
@@ -75,8 +107,8 @@ describe('selectProjectScale on real fixture rooms', () => {
   });
 
   // ExampleFloorplan2: four of its seven labels are open-plan or thin-divider
-  // rooms the detector rated 0.17-0.30. Without the gate the answer is 19.01
-  // px/ft against a drawing at 17.86; with it, 17.97.
+  // rooms the detector rated 0.17-0.30. Without the gate the middle is 19.01
+  // px/ft against a drawing at 17.86; with it, the room chosen is BASEMENT-L.
   it('drops the rooms the detector could not confirm', () => {
     const result = selectProjectScale([
       room('FAMILY ROOM (L-shaped)', 14.98, 17.96, 0.67),
@@ -87,50 +119,73 @@ describe('selectProjectScale on real fixture rooms', () => {
       room('KITCHEN (open-plan)', 44.66, 20.57, 0.29),
       room('FOYER (open-plan)', 36.54, 53.16, 0.30),
     ]);
-    expect(result.pixelsPerFoot).toBeCloseTo(17.97, 2);
+    expect(result.room.name).toBe('BASEMENT-L');
+    expect(result.pixelsPerFoot).toBeCloseTo(17.99, 2);
     expect(result.rejected.filter((r) => r.reason === 'low-confidence')).toHaveLength(4);
   });
 
-  // ExampleFloorplan6's LIVING ROOM is the case the whole design exists for:
-  // 12.9% high on both axes, agreeing with itself to 0.3% and rated 0.84, so
-  // nothing inside that room can see the error. Four bedrooms outvote it.
-  it('outvotes a room that is wrong but agrees with itself perfectly', () => {
-    const rooms = [
-      room('BEDROOM 1 (left)', 14.44, 14.25, 0.95),
-      room('BEDROOM 2 (left)', 14.16, 14.40, 0.98),
-      room('BEDROOM 1 (right)', 13.97, 14.50, 0.98),
-      room('BEDROOM 2 (right)', 14.72, 12.60, 0.73),
-      room('LIVING ROOM (left)', 16.36, 16.32, 0.84),
-    ];
-    const result = selectProjectScale(rooms);
-    expect(result.pixelsPerFoot).toBeCloseTo(14.44, 2);
+  // The case measuring every room exists for. Choosing LIVING ROOM — the
+  // largest and most confident-looking read on the page, and the one a user
+  // would click — is 13% out, 27% on the area.
+  it('does not choose a room that is wrong but agrees with itself perfectly', () => {
+    const result = selectProjectScale(PLAN_6());
+    expect(result.room.name).toBe('BEDROOM 1 (left)');
     expect(result.level).toBe('ok');
-    // Calibrating from that one room instead, which is what a click on its
-    // dimension pill used to do, is 13% out — 27% on the area.
     expect(Math.abs(Math.log(16.36 / 14.5))).toBeGreaterThan(0.12);
+  });
+
+  it('prefers a room that agrees on both sides over a nearer one that agrees on one', () => {
+    // A's x sits exactly on the middle and its y is 67% out — a rectangle that
+    // leaked on one axis. Ranking by distance alone would hand it the scale.
+    const decision = selectProjectScale([
+      room('A (one axis leaked)', 15.0, 25.0, 0.9),
+      room('B', 15.2, 15.1, 0.9),
+      room('C', 14.9, 15.05, 0.9),
+    ]);
+    expect(decision.contributors.find((c) => c.name.startsWith('A')).axes).toEqual(['x']);
+    expect(decision.room.name).toBe('C');
+  });
+
+  // The overlay is built from these two fields alone, so the projection
+  // dropping either would silently stop placing it.
+  it('hands back the rectangle and the label the overlay is drawn from', () => {
+    const decision = selectProjectScale([
+      room('BEDROOM', 15.5, 15.4, 0.95, { width: 12, height: 11 },
+        { left: 10, right: 196, top: 20, bottom: 189 }),
+      room('KITCHEN', 15.6, 15.45, 0.95, { width: 10, height: 9 }),
+      room('DEN', 15.45, 15.5, 0.95, { width: 9, height: 9 }),
+    ]);
+    const chosen = decision.room;
+    expect(chosen.rect).toEqual({ left: expect.any(Number), right: expect.any(Number),
+      top: expect.any(Number), bottom: expect.any(Number) });
+    expect(chosen.labelDims.width).toBeGreaterThan(0);
+    expect(chosen.labelDims.height).toBeGreaterThan(0);
+    // And it is one of the rooms recorded as agreeing, not a copy apart.
+    expect(decision.contributors.map((c) => c.name)).toContain(chosen.name);
   });
 });
 
 describe('selectProjectScale when it cannot be sure', () => {
-  it('still answers from two rooms, and says two is not a majority', () => {
+  it('still answers from two rooms, and says two is too few to check', () => {
     // ExampleFloorplan7 as the truth sidecar lists it.
     const result = selectProjectScale([
       room("OWNER'S SUITE", 18.16, 18.41, 0.89),
       room('BEDROOM 2', 18.42, 19.61, 0.98),
     ]);
-    expect(result.pixelsPerFoot).toBeCloseTo(18.42, 2);
+    expect(result.room.name).toBe("OWNER'S SUITE");
+    expect(result.pixelsPerFoot).toBeCloseTo(Math.sqrt(18.16 * 18.41), 9);
     expect(result.level).toBe('check');
     expect(result.reason).toBe('too-few-rooms');
     expect(result.roomCount).toBeLessThan(MIN_CONSENSUS_ROOMS);
   });
 
   // The case no confidence gate survives: most of the rooms are wrong, so the
-  // median is wrong too. ExampleFloorplan's open-plan KITCHEN reads 32 px/ft
-  // against a drawing at 15.5 and still scores 0.70, so a page where OCR found
-  // three labels and two of them read like that is a 2x error with a majority
-  // behind it. The footprint is 235437 px^2 and the three labels state 370
-  // sq ft between them; at 32 px/ft the building comes out at 230 sq ft, which
-  // is smaller than the rooms it is supposed to contain.
+  // room nearest the middle is wrong too. ExampleFloorplan's open-plan KITCHEN
+  // reads 32 px/ft against a drawing at 15.5 and still scores 0.70, so a page
+  // where OCR found three labels and two of them read like that is a 2x error
+  // with a majority behind it. The footprint is 235437 px^2 and the three
+  // labels state 370 sq ft between them; at 32 px/ft the building comes out at
+  // 230 sq ft, which is smaller than the rooms it is supposed to contain.
   it('catches a scale that leaves the building too small to hold its rooms', () => {
     const result = selectProjectScale([
       room('KITCHEN', 32.04, 32.0, 0.70, { width: 10.08, height: 10.33 }),
@@ -155,7 +210,7 @@ describe('selectProjectScale when it cannot be sure', () => {
   // A garage is inside the drawing but is not the building the area serves,
   // and it is the rectangle most likely to be carved out from under the
   // footprint the scale is applied to.
-  it('leaves garages and porches out of the vote', () => {
+  it('never chooses a garage or a porch', () => {
     const result = selectProjectScale([
       room('BEDROOM', 15.5, 15.5, 0.95, null, { left: 10, right: 20, top: 10, bottom: 20 }),
       room('GARAGE', 15.8, 15.6, 0.93, null, { left: 100, right: 140, top: 100, bottom: 140 }),
@@ -164,6 +219,7 @@ describe('selectProjectScale when it cannot be sure', () => {
       expect.objectContaining({ name: 'GARAGE', reason: 'non-gla' }),
     );
     expect(result.roomCount).toBe(1);
+    expect(result.room.name).toBe('BEDROOM');
   });
 
   it('sets no scale at all when nothing measurable came back', () => {
@@ -171,64 +227,15 @@ describe('selectProjectScale when it cannot be sure', () => {
       { labelId: 'A', rect: { left: 0, right: 5, top: 0, bottom: 5 }, confidence: 0.9, pixelsPerFoot: null },
     ]);
     expect(result.pixelsPerFoot).toBeNull();
+    expect(result.feetPerPixel).toBeNull();
+    expect(result.room).toBeNull();
     expect(result.reason).toBe('no-rooms');
   });
 
   it('has nothing to say about an empty page', () => {
     const result = selectProjectScale([]);
     expect(result.pixelsPerFoot).toBeNull();
+    expect(result.room).toBeNull();
     expect(result.roomCount).toBe(0);
-  });
-});
-
-// Which room gets the overlay the automatic path leaves on screen. It is the
-// one the user drags to overrule the consensus, so it has to be the app's best
-// rectangle rather than whichever room OCR happened to return first.
-describe('representativeRoom', () => {
-  it('picks the room that agrees with the adopted scale, not the loudest one', () => {
-    // ExampleFloorplan6 again: LIVING ROOM is the largest and most confident-
-    // looking read on the page and is 13% wrong. Drawing the overlay on it
-    // would put the box on the room the median exists to outvote.
-    const decision = selectProjectScale([
-      room('BEDROOM 1 (left)', 14.44, 14.25, 0.95),
-      room('BEDROOM 2 (left)', 14.16, 14.40, 0.98),
-      room('BEDROOM 1 (right)', 13.97, 14.50, 0.98),
-      room('BEDROOM 2 (right)', 14.72, 12.60, 0.73),
-      room('LIVING ROOM (left)', 16.36, 16.32, 0.84),
-    ]);
-    expect(representativeRoom(decision).name).toBe('BEDROOM 1 (left)');
-  });
-
-  it('prefers a room kept on both axes over a nearer one kept on one', () => {
-    // A's x sits exactly on the answer and its y is 67% out — a rectangle that
-    // leaked on one axis. Ranking by distance alone would hand it the overlay.
-    const decision = selectProjectScale([
-      room('A (one axis leaked)', 15.0, 25.0, 0.9),
-      room('B', 15.2, 15.1, 0.9),
-      room('C', 14.9, 15.05, 0.9),
-    ]);
-    expect(decision.contributors.find((c) => c.name.startsWith('A')).axes).toEqual(['x']);
-    expect(representativeRoom(decision).name).toBe('C');
-  });
-
-  // The overlay is built from these two fields alone, so the contributor
-  // projection dropping either would silently stop placing it.
-  it('hands back the rectangle and the label the overlay is drawn from', () => {
-    const decision = selectProjectScale([
-      room('BEDROOM', 15.5, 15.4, 0.95, { width: 12, height: 11 },
-        { left: 10, right: 196, top: 20, bottom: 189 }),
-      room('KITCHEN', 15.6, 15.45, 0.95, { width: 10, height: 9 }),
-      room('DEN', 15.45, 15.5, 0.95, { width: 9, height: 9 }),
-    ]);
-    const chosen = representativeRoom(decision);
-    expect(chosen.rect).toEqual({ left: expect.any(Number), right: expect.any(Number),
-      top: expect.any(Number), bottom: expect.any(Number) });
-    expect(chosen.labelDims.width).toBeGreaterThan(0);
-    expect(chosen.labelDims.height).toBeGreaterThan(0);
-  });
-
-  it('has no room to show when no scale was set', () => {
-    expect(representativeRoom(selectProjectScale([]))).toBeNull();
-    expect(representativeRoom(null)).toBeNull();
   });
 });

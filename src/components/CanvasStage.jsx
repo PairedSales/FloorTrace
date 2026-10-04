@@ -11,7 +11,7 @@
 // eager shell would fire once against a null stage and never again.
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Circle } from 'react-konva';
-import useAppStore, { roomScaleSamples, selectPickingRoom } from '../store/appStore';
+import useAppStore, { selectPickingRoom } from '../store/appStore';
 import useWorkspaceStore from '../store/workspaceStore';
 import { RoomOverlayLayer, PerimeterLayer, MeasurementLayer, ScaleLineLayer, ShapeLayer, DimensionOverlay, PerimeterPlacementLayer, DrawModeLayer, AngleOverlay, RefusalHighlightLayer, SpotlightLayer, getCanvasCoordinates } from './canvas/index.js';
 import { ACCENT, CRIT, INK, lineColor, withAlpha } from './canvas/overlayStyle';
@@ -99,7 +99,6 @@ const CanvasStage = React.memo(({
   const stageY = useAppStore((s) => s.stageY);
   const canvasRotation = useAppStore((s) => s.canvasRotation);
   const roomDimensions = useAppStore((s) => s.roomDimensions);
-  const rooms = useAppStore((s) => s.rooms);
   // Read here rather than threaded through App -> Canvas: the scale tool has
   // no callbacks App owns, so a prop chain would be three files of pass-through.
   const scaleToolActive = useAppStore((s) => s.scaleToolActive);
@@ -449,9 +448,7 @@ const CanvasStage = React.memo(({
         // The whole committed rule, not just the pairing half: these are the
         // numbers the drag applies on release, so a wall must not read one
         // length under the mouse and another the moment it is let go.
-        const { x, y } = resolveRoomScale(
-          dimWidth, dimHeight, overlayWidth, overlayHeight, roomScaleSamples(rooms),
-        );
+        const { x, y } = resolveRoomScale(dimWidth, dimHeight, overlayWidth, overlayHeight);
         return { x, y };
       }
     }
@@ -459,7 +456,7 @@ const CanvasStage = React.memo(({
       return { x: feetPerPixel, y: feetPerPixel };
     }
     return feetPerPixel;
-  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel, rooms]);
+  }, [router.draggingRoomCorner, router.localRoomOverlay, roomDimensions, feetPerPixel]);
 
   // `errorAnchor` is where the edit the user just tried was refused — the two
   // edges that would have crossed. Highlight always; move the camera only when

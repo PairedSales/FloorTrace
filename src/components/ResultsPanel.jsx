@@ -28,7 +28,7 @@ import WorkSection from './WorkSection';
  *   the area
  *   How it was measured
  *   ✓ Read the room sizes          7 room sizes on this plan        Read again
- *   ✓ Worked out the scale         Measured from 3 rooms…               Change
+ *   ✓ Worked out the scale         Measured from one room…              Change
  *   ✓ Found the outside walls      1st Floor                            Change
  *   ✓ Added up the area            The sum behind 1,372 ft²       Show the sum
  *   [ Save image… ]                the end of the job, always in reach
